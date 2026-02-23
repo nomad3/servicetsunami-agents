@@ -261,6 +261,169 @@ class SkillRouter:
             "ws_ok": ws_ok,
         }
 
+    # ── Generic Gateway RPC ─────────────────────────────────────────
+
+    def call_gateway_method(
+        self,
+        method: str,
+        params: Dict[str, Any] = None,
+        timeout_seconds: int = 30,
+    ) -> Dict[str, Any]:
+        """
+        Send an RPC request to the tenant's OpenClaw gateway.
+
+        Handles WS connect, Ed25519 auth, request/response.
+        Returns {"status": "completed", "data": payload} or {"status": "error", "error": "..."}.
+        """
+        import asyncio
+        import json as _json
+
+        from app.core.config import settings
+
+        instance = self._resolve_instance()
+        if not instance:
+            return {"status": "error", "error": "No running OpenClaw instance for tenant"}
+
+        cb_error = self._check_circuit_breaker(str(instance.id))
+        if cb_error:
+            return cb_error
+
+        ws_url = instance.internal_url.replace("http://", "ws://").replace("https://", "wss://")
+        token = settings.OPENCLAW_GATEWAY_TOKEN
+        device_id = settings.OPENCLAW_DEVICE_ID
+        private_key = settings.OPENCLAW_DEVICE_PRIVATE_KEY
+        public_key = settings.OPENCLAW_DEVICE_PUBLIC_KEY
+
+        if not token:
+            return {"status": "error", "error": "OPENCLAW_GATEWAY_TOKEN not configured"}
+        if not device_id or not private_key or not public_key:
+            return {"status": "error", "error": "OPENCLAW_DEVICE_ID/PRIVATE_KEY/PUBLIC_KEY not configured"}
+
+        async def _execute():
+            import websockets
+
+            step = "ws_connect"
+            try:
+                async with websockets.connect(ws_url, open_timeout=10) as ws:
+                    # Receive challenge
+                    step = "recv_challenge"
+                    raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                    challenge = _json.loads(raw)
+                    if challenge.get("event") != "connect.challenge":
+                        return {"status": "error", "error": f"Unexpected frame: {challenge.get('event')}"}
+
+                    nonce = challenge["payload"]["nonce"]
+
+                    # Authenticate with Ed25519
+                    step = "authenticate"
+                    role = "operator"
+                    scopes = ["operator.admin", "operator.approvals", "operator.pairing"]
+                    signed_at_ms = int(time.time() * 1000)
+
+                    signature = self._sign_device_payload(
+                        private_key_pem=private_key,
+                        device_id=device_id,
+                        client_id="gateway-client",
+                        client_mode="backend",
+                        role=role,
+                        scopes=scopes,
+                        signed_at_ms=signed_at_ms,
+                        token=token,
+                        nonce=nonce,
+                    )
+
+                    connect_req = {
+                        "type": "req",
+                        "id": f"connect-{uuid.uuid4().hex[:8]}",
+                        "method": "connect",
+                        "params": {
+                            "minProtocol": 3,
+                            "maxProtocol": 3,
+                            "client": {
+                                "id": "gateway-client",
+                                "version": "1.0.0",
+                                "platform": "linux",
+                                "mode": "backend",
+                            },
+                            "role": role,
+                            "scopes": scopes,
+                            "auth": {"token": token},
+                            "device": {
+                                "id": device_id,
+                                "publicKey": public_key,
+                                "signature": signature,
+                                "signedAt": signed_at_ms,
+                                "nonce": nonce,
+                            },
+                        },
+                    }
+                    await ws.send(_json.dumps(connect_req))
+                    step = "recv_auth_response"
+                    hello_raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                    hello = _json.loads(hello_raw)
+                    if not hello.get("ok"):
+                        err = hello.get("error", hello)
+                        return {"status": "error", "error": f"Auth failed: {err}"}
+
+                    # Send RPC request
+                    step = "send_rpc"
+                    req_id = f"rpc-{uuid.uuid4().hex[:8]}"
+                    rpc_req = {
+                        "type": "req",
+                        "id": req_id,
+                        "method": method,
+                        "params": params or {},
+                    }
+                    await ws.send(_json.dumps(rpc_req))
+
+                    # Collect response
+                    step = "collect_response"
+                    deadline = asyncio.get_event_loop().time() + timeout_seconds
+                    while asyncio.get_event_loop().time() < deadline:
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=5)
+                            frame = _json.loads(raw)
+                            if frame.get("type") == "res" and frame.get("id") == req_id:
+                                if frame.get("ok"):
+                                    return {"status": "completed", "data": frame.get("payload", {})}
+                                else:
+                                    return {"status": "error", "error": str(frame.get("error", "Unknown"))}
+                        except asyncio.TimeoutError:
+                            continue
+
+                    return {"status": "error", "error": f"No response for '{method}' within {timeout_seconds}s"}
+
+            except Exception as inner_e:
+                error_msg = f"[step={step}] {type(inner_e).__name__}: {inner_e}"
+                logger.error("Gateway RPC error (%s): %s", method, error_msg)
+                return {"status": "error", "error": error_msg}
+
+        try:
+            loop = None
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+
+            if loop and loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = pool.submit(asyncio.run, _execute()).result(timeout=timeout_seconds + 30)
+            else:
+                result = asyncio.run(_execute())
+
+            if result.get("status") == "error":
+                self._record_failure(str(instance.id))
+            else:
+                self._record_success(str(instance.id))
+
+            return result
+
+        except Exception as e:
+            error_msg = f"[outer] {type(e).__name__}: {e}"
+            logger.error("Gateway RPC outer error (%s): %s", method, error_msg)
+            return {"status": "error", "error": error_msg}
+
     # ── Internal Helpers ─────────────────────────────────────────────
 
     def _resolve_llm(self, skill_config: SkillConfig) -> Dict[str, Any]:
