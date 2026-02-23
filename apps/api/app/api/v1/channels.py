@@ -85,7 +85,6 @@ def enable_whatsapp(
     patch = {
         "channels": {
             "whatsapp": {
-                "enabled": True,
                 "dmPolicy": request.dm_policy,
                 "allowFrom": request.allow_from,
                 "accounts": {
@@ -104,7 +103,15 @@ def disable_whatsapp(
     current_user: User = Depends(deps.get_current_active_user),
 ):
     """Disable the WhatsApp channel."""
-    patch = {"channels": {"whatsapp": {"enabled": False}}}
+    patch = {
+        "channels": {
+            "whatsapp": {
+                "accounts": {
+                    "default": {"enabled": False},
+                },
+            },
+        },
+    }
     data = _config_patch(db, current_user, patch)
     return {"status": "disabled", "data": data}
 
