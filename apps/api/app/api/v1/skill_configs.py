@@ -46,12 +46,10 @@ SKILL_CREDENTIAL_SCHEMAS = {
     },
     "whatsapp": {
         "display_name": "WhatsApp",
-        "description": "Send and receive WhatsApp messages",
+        "description": "Send and receive WhatsApp messages via QR-linked phone",
         "icon": "FaWhatsapp",
-        "credentials": [
-            {"key": "api_key", "label": "API Key", "type": "password", "required": True},
-            {"key": "phone_number_id", "label": "Phone Number ID", "type": "text", "required": True},
-        ],
+        "credentials": [],
+        "channel_type": "baileys",
     },
     "notion": {
         "display_name": "Notion",
@@ -126,6 +124,7 @@ def get_skill_registry(
                 description=schema["description"],
                 icon=schema["icon"],
                 credentials=schema["credentials"],
+                channel_type=schema.get("channel_type"),
             )
         )
     return entries

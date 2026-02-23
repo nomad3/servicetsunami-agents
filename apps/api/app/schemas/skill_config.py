@@ -60,3 +60,4 @@ class SkillRegistryEntry(BaseModel):
     description: str
     icon: str
     credentials: list  # list of {key, label, type, required}
+    channel_type: Optional[str] = None  # "baileys" for WhatsApp channel
