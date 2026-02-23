@@ -149,7 +149,7 @@ def start_pairing(
     data = _gateway(
         db, current_user, "web.login.start",
         {"accountId": request.account_id, "force": request.force},
-        timeout=30,
+        timeout=60,
     )
     return {
         "qr_data_url": data.get("qrDataUrl"),
