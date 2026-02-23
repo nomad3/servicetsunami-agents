@@ -357,7 +357,7 @@ class SkillRouter:
         """
         Call OpenClaw Gateway via WebSocket.
 
-        Protocol: connect → challenge-response (Ed25519) → sessions_send → collect reply.
+        Protocol: connect → challenge-response (Ed25519) → agent method → collect reply.
         """
         import asyncio
         import json as _json
@@ -441,7 +441,16 @@ class SkillRouter:
                         err = hello.get("error", hello)
                         return {"status": "error", "error": f"Auth failed: {err}"}
 
-                    # Step 3: Send skill execution message
+                    # Log available methods from hello-ok for diagnostics
+                    features = hello.get("payload", {}).get("features", {})
+                    available_methods = features.get("methods", [])
+                    logger.info(
+                        "OpenClaw hello-ok: methods=%s events=%s",
+                        available_methods,
+                        features.get("events", []),
+                    )
+
+                    # Step 3: Send skill execution via "agent" method
                     step = "send_skill"
                     exec_id = f"exec-{uuid.uuid4().hex[:8]}"
                     prompt = _json.dumps({
@@ -453,9 +462,11 @@ class SkillRouter:
                     exec_req = {
                         "type": "req",
                         "id": exec_id,
-                        "method": "sessions_send",
+                        "method": "agent",
                         "params": {
                             "message": f"Execute skill '{skill_name}' with payload: {prompt}",
+                            "idempotencyKey": exec_id,
+                            "sessionKey": "main",
                         },
                     }
                     await ws.send(_json.dumps(exec_req))

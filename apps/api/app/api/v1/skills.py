@@ -60,9 +60,11 @@ def skill_diagnose(
     import asyncio
     import json as _json
     import logging
+    import time as _time
 
     from app.core.config import settings
     from app.models.tenant_instance import TenantInstance
+    from app.services.orchestration.skill_router import SkillRouter
 
     logger = logging.getLogger(__name__)
     tenant_id = current_user.tenant_id
@@ -87,18 +89,23 @@ def skill_diagnose(
         "internal_url": instance.internal_url,
     }
 
-    # Step 2: Check token
+    # Step 2: Check config
     token = settings.OPENCLAW_GATEWAY_TOKEN
-    steps["token_check"] = {
-        "ok": bool(token),
+    device_id = settings.OPENCLAW_DEVICE_ID
+    private_key = settings.OPENCLAW_DEVICE_PRIVATE_KEY
+    public_key = settings.OPENCLAW_DEVICE_PUBLIC_KEY
+    steps["config_check"] = {
+        "ok": bool(token and device_id and private_key and public_key),
         "token_length": len(token) if token else 0,
-        "token_prefix": token[:8] + "..." if token and len(token) > 8 else "(empty)",
+        "device_id_prefix": device_id[:12] + "..." if device_id and len(device_id) > 12 else "(empty)",
+        "has_private_key": bool(private_key),
+        "has_public_key": bool(public_key),
     }
 
     ws_url = instance.internal_url.replace("http://", "ws://").replace("https://", "wss://")
     steps["ws_url"] = ws_url
 
-    # Step 3: WebSocket connect + challenge
+    # Step 3: WebSocket connect + challenge + Ed25519 auth
     async def _diagnose_ws():
         import websockets
 
@@ -122,8 +129,24 @@ def skill_diagnose(
                     diag["challenge"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
                     return diag
 
-                # Auth
+                # Auth with Ed25519 device signature
                 try:
+                    role = "operator"
+                    scopes = ["operator.admin", "operator.approvals", "operator.pairing"]
+                    signed_at_ms = int(_time.time() * 1000)
+
+                    signature = SkillRouter._sign_device_payload(
+                        private_key_pem=private_key,
+                        device_id=device_id,
+                        client_id="gateway-client",
+                        client_mode="backend",
+                        role=role,
+                        scopes=scopes,
+                        signed_at_ms=signed_at_ms,
+                        token=token,
+                        nonce=nonce,
+                    )
+
                     connect_req = {
                         "type": "req",
                         "id": f"diag-{uuid.uuid4().hex[:8]}",
@@ -132,16 +155,19 @@ def skill_diagnose(
                             "minProtocol": 3,
                             "maxProtocol": 3,
                             "client": {
-                                "id": "servicetsunami-api",
+                                "id": "gateway-client",
                                 "version": "1.0.0",
                                 "platform": "linux",
-                                "mode": "operator",
+                                "mode": "backend",
                             },
-                            "role": "operator",
-                            "scopes": ["operator.read", "operator.write"],
+                            "role": role,
+                            "scopes": scopes,
                             "auth": {"token": token},
                             "device": {
-                                "id": f"st-diag-{tenant_id}",
+                                "id": device_id,
+                                "publicKey": public_key,
+                                "signature": signature,
+                                "signedAt": signed_at_ms,
                                 "nonce": nonce,
                             },
                         },
@@ -149,11 +175,14 @@ def skill_diagnose(
                     await ws.send(_json.dumps(connect_req))
                     hello_raw = await asyncio.wait_for(ws.recv(), timeout=10)
                     hello = _json.loads(hello_raw)
+
+                    features = hello.get("payload", {}).get("features", {})
                     diag["auth"] = {
                         "ok": hello.get("ok", False),
                         "response_type": hello.get("type"),
                         "error": hello.get("error") if not hello.get("ok") else None,
-                        "raw_keys": list(hello.keys()),
+                        "available_methods": features.get("methods", []),
+                        "available_events": features.get("events", []),
                     }
                 except Exception as e:
                     diag["auth"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
