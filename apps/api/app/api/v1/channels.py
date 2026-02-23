@@ -146,6 +146,13 @@ def start_pairing(
     current_user: User = Depends(deps.get_current_active_user),
 ):
     """Start WhatsApp QR pairing. Returns a QR data URL for scanning."""
+    if request.force:
+        # Clear stale session to avoid 30s+ QR generation delays
+        try:
+            _gateway(db, current_user, "channels.logout",
+                     {"channel": "whatsapp", "accountId": request.account_id})
+        except HTTPException:
+            pass  # Logout failure is non-fatal
     data = _gateway(
         db, current_user, "web.login.start",
         {"accountId": request.account_id, "force": request.force},
