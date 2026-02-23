@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import List
 
 from app.api import deps
 from app.models.user import User
@@ -41,12 +41,35 @@ class WhatsAppLogoutRequest(BaseModel):
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+def _make_router(db: Session, user: User) -> SkillRouter:
+    return SkillRouter(db=db, tenant_id=user.tenant_id)
+
+
 def _gateway(db: Session, user: User, method: str, params: dict = None, timeout: int = 30):
     """Call gateway RPC and raise HTTPException on error."""
-    router_svc = SkillRouter(db=db, tenant_id=user.tenant_id)
+    router_svc = _make_router(db, user)
     result = router_svc.call_gateway_method(method, params or {}, timeout_seconds=timeout)
     if result.get("status") == "error":
         raise HTTPException(status_code=502, detail=result.get("error", "Gateway error"))
+    return result.get("data", {})
+
+
+def _config_patch(db: Session, user: User, patch: dict):
+    """Fetch current config hash, then apply a config.patch with baseHash."""
+    router_svc = _make_router(db, user)
+    # Get current config to obtain baseHash
+    get_result = router_svc.call_gateway_method("config.get", {})
+    if get_result.get("status") == "error":
+        raise HTTPException(status_code=502, detail=get_result.get("error", "Failed to get config"))
+    base_hash = get_result.get("data", {}).get("hash", "")
+
+    # Apply patch with baseHash
+    result = router_svc.call_gateway_method("config.patch", {
+        "raw": json.dumps(patch),
+        "baseHash": base_hash,
+    })
+    if result.get("status") == "error":
+        raise HTTPException(status_code=502, detail=result.get("error", "Failed to patch config"))
     return result.get("data", {})
 
 
@@ -59,7 +82,7 @@ def enable_whatsapp(
     current_user: User = Depends(deps.get_current_active_user),
 ):
     """Enable the WhatsApp channel on the tenant's OpenClaw instance."""
-    config_patch = {
+    patch = {
         "channels": {
             "whatsapp": {
                 "enabled": True,
@@ -71,7 +94,7 @@ def enable_whatsapp(
             },
         },
     }
-    data = _gateway(db, current_user, "config.patch", {"raw": json.dumps(config_patch)})
+    data = _config_patch(db, current_user, patch)
     return {"status": "enabled", "data": data}
 
 
@@ -81,8 +104,8 @@ def disable_whatsapp(
     current_user: User = Depends(deps.get_current_active_user),
 ):
     """Disable the WhatsApp channel."""
-    config_patch = {"channels": {"whatsapp": {"enabled": False}}}
-    data = _gateway(db, current_user, "config.patch", {"raw": json.dumps(config_patch)})
+    patch = {"channels": {"whatsapp": {"enabled": False}}}
+    data = _config_patch(db, current_user, patch)
     return {"status": "disabled", "data": data}
 
 
