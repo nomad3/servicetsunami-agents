@@ -46,7 +46,9 @@ class WhatsAppService:
 
     def _client_name(self, tenant_id: str, account_id: str = "default") -> str:
         import os
-        session_dir = os.environ.get("NEONIZE_SESSION_DIR", "/tmp/neonize_sessions")
+        # Use persistent storage so sessions survive pod restarts
+        base = settings.DATA_STORAGE_PATH or "/app/storage"
+        session_dir = os.environ.get("NEONIZE_SESSION_DIR", f"{base}/neonize_sessions")
         os.makedirs(session_dir, exist_ok=True)
         short = tenant_id[:8]
         return f"{session_dir}/wa_{short}_{account_id}.db"
