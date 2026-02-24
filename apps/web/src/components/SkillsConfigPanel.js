@@ -464,7 +464,7 @@ const SkillsConfigPanel = () => {
                       size="sm"
                       onClick={() => handleTestSkill(skill)}
                       disabled={testingSkill === skill.skill_name || saving === skill.skill_name}
-                      title="Test skill execution via OpenClaw"
+                      title="Test skill execution"
                     >
                       {testingSkill === skill.skill_name ? (
                         <Spinner

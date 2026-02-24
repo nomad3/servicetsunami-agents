@@ -8,12 +8,11 @@ from app.db.base import Base
 
 
 class SkillConfig(Base):
-    """Per-tenant skill configuration for OpenClaw skills."""
+    """Per-tenant skill configuration."""
     __tablename__ = "skill_configs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
-    instance_id = Column(UUID(as_uuid=True), ForeignKey("tenant_instances.id"), nullable=True)
     skill_name = Column(String, nullable=False)  # e.g., "slack", "gmail", "github"
     enabled = Column(Boolean, default=True)
     requires_approval = Column(Boolean, default=False)
@@ -24,7 +23,6 @@ class SkillConfig(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     tenant = relationship("Tenant", foreign_keys=[tenant_id])
-    instance = relationship("TenantInstance", foreign_keys=[instance_id])
     llm_config = relationship("LLMConfig", foreign_keys=[llm_config_id])
 
     def __repr__(self):

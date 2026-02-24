@@ -15,14 +15,6 @@ from app.workflows.activities.task_execution import (
     persist_entities,
     evaluate_task,
 )
-from app.workflows.openclaw_provision import OpenClawProvisionWorkflow
-from app.workflows.activities.openclaw_provision import (
-    generate_openclaw_values,
-    helm_install_openclaw,
-    wait_pod_ready,
-    health_check_openclaw,
-    register_instance,
-)
 from app.workflows.channel_health import ChannelHealthMonitorWorkflow
 from app.workflows.activities.channel_health import (
     check_channel_health,
@@ -42,7 +34,7 @@ async def run_orchestration_worker():
 
     This worker processes:
     - TaskExecutionWorkflow (dispatch, recall, execute, persist_entities, evaluate)
-    - OpenClawProvisionWorkflow (generate values, helm install, wait pod, health check, register)
+    - ChannelHealthMonitorWorkflow (WhatsApp connection health monitoring)
 
     Task queue: servicetsunami-orchestration
     """
@@ -59,7 +51,6 @@ async def run_orchestration_worker():
         task_queue=TASK_QUEUE,
         workflows=[
             TaskExecutionWorkflow,
-            OpenClawProvisionWorkflow,
             ChannelHealthMonitorWorkflow,
         ],
         activities=[
@@ -68,11 +59,6 @@ async def run_orchestration_worker():
             execute_task,
             persist_entities,
             evaluate_task,
-            generate_openclaw_values,
-            helm_install_openclaw,
-            wait_pod_ready,
-            health_check_openclaw,
-            register_instance,
             check_channel_health,
             reconnect_channel,
             update_channel_health_status,

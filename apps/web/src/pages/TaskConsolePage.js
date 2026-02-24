@@ -76,7 +76,6 @@ const TYPE_ICONS = {
   generate: FaRobot,
   decide: FaRobot,
   execute: FaRobot,
-  OpenClawProvisionWorkflow: FaServer,
   DatasetSyncWorkflow: FaDatabase,
   DataSourceSyncWorkflow: FaSyncAlt,
   ScheduledSyncWorkflow: FaSyncAlt,
@@ -88,7 +87,6 @@ const TYPE_ICONS = {
 const TYPE_COLORS = {
   agent_task: '#60a5fa',
   chat: '#38bdf8',
-  OpenClawProvisionWorkflow: '#a78bfa',
   DatasetSyncWorkflow: '#34d399',
   DataSourceSyncWorkflow: '#fbbf24',
   TaskExecutionWorkflow: '#f472b6',
