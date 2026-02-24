@@ -18,6 +18,7 @@ from neonize.aioze.events import (
     LoggedOutEv,
     MessageEv,
     PairStatusEv,
+    StreamReplacedEv,
 )
 from neonize.utils import build_jid
 from sqlalchemy.orm import Session
@@ -169,9 +170,26 @@ class WhatsAppService:
             except Exception:
                 logger.exception(f"QR generation failed for {key}")
 
+        # Pair status (fires on successful QR scan / phone linking)
+        @client.event(PairStatusEv)
+        async def on_pair_status(c: NewAClient, event: PairStatusEv):
+            logger.info(f"Pair status event for {key}: {event}")
+            self._statuses[key] = "connected"
+            self._qr_codes.pop(key, None)
+            phone = None
+            try:
+                me = c.get_me()
+                if me:
+                    phone = me.User
+            except Exception:
+                pass
+            self._update_account_status(tenant_id, account_id, "connected", phone=phone)
+            self._log_event(tenant_id, account_id, "paired")
+
         # Connected
         @client.event(ConnectedEv)
         async def on_connected(c: NewAClient, event: ConnectedEv):
+            logger.info(f"ConnectedEv fired for {key}")
             self._statuses[key] = "connected"
             self._qr_codes.pop(key, None)
             phone = None
@@ -183,24 +201,32 @@ class WhatsAppService:
                 pass
             self._update_account_status(tenant_id, account_id, "connected", phone=phone)
             self._log_event(tenant_id, account_id, "connection_opened")
-            logger.info(f"WhatsApp connected for {key}")
 
         # Disconnected
         @client.event(DisconnectedEv)
         async def on_disconnected(c: NewAClient, event: DisconnectedEv):
+            logger.warning(f"DisconnectedEv for {key}")
             self._statuses[key] = "disconnected"
             self._update_account_status(tenant_id, account_id, "disconnected")
             self._log_event(tenant_id, account_id, "connection_closed")
-            logger.warning(f"WhatsApp disconnected for {key}")
+
+        # Stream replaced (another device took over)
+        @client.event(StreamReplacedEv)
+        async def on_stream_replaced(c: NewAClient, event: StreamReplacedEv):
+            logger.warning(f"StreamReplacedEv for {key} — device was unlinked or replaced")
+            self._statuses[key] = "disconnected"
+            self._clients.pop(key, None)
+            self._qr_codes.pop(key, None)
+            self._update_account_status(tenant_id, account_id, "disconnected", error="Stream replaced")
 
         # Logged out
         @client.event(LoggedOutEv)
         async def on_logged_out(c: NewAClient, event: LoggedOutEv):
+            logger.info(f"LoggedOutEv for {key}")
             self._statuses[key] = "logged_out"
             self._qr_codes.pop(key, None)
             self._update_account_status(tenant_id, account_id, "logged_out")
             self._log_event(tenant_id, account_id, "logged_out")
-            logger.info(f"WhatsApp logged out for {key}")
 
         # Inbound messages
         @client.event(MessageEv)
@@ -401,17 +427,26 @@ class WhatsAppService:
     ) -> dict:
         key = self._key(tenant_id, account_id)
 
-        # If force, disconnect existing client first
-        if force and key in self._clients:
-            try:
-                self._clients[key].disconnect()
-            except Exception:
-                pass
-            self._clients.pop(key, None)
+        # If force, disconnect existing client and delete session file
+        if force:
+            if key in self._clients:
+                try:
+                    self._clients[key].disconnect()
+                except Exception:
+                    pass
+                self._clients.pop(key, None)
             task = self._tasks.pop(key, None)
             if task and not task.done():
                 task.cancel()
             self._qr_codes.pop(key, None)
+            # Delete session DB so neonize requests a fresh QR instead of reusing stale auth
+            import os
+            session_path = self._client_name(tenant_id, account_id)
+            for suffix in ("", "-wal", "-shm"):
+                try:
+                    os.remove(session_path + suffix)
+                except FileNotFoundError:
+                    pass
 
         # Create client and start connection (QR will be emitted via callback)
         client = self._create_client(tenant_id, account_id)
