@@ -401,8 +401,10 @@ class WhatsAppService:
 
         # Create client and start connection (QR will be emitted via callback)
         client = self._create_client(tenant_id, account_id)
-        task = asyncio.create_task(client.connect())
-        self._tasks[key] = task
+        self._clients[key] = client
+        # connect() returns a Task — await to get the actual running connection task
+        connect_task = await client.connect()
+        self._tasks[key] = connect_task
 
         # Wait briefly for QR to be generated
         for _ in range(20):
@@ -523,8 +525,9 @@ class WhatsAppService:
 
         # Reconnect (will restore session from DB if auth state exists)
         client = self._create_client(tenant_id, account_id)
-        new_task = asyncio.create_task(client.connect())
-        self._tasks[key] = new_task
+        self._clients[key] = client
+        connect_task = await client.connect()
+        self._tasks[key] = connect_task
         self._update_account_status(tenant_id, account_id, "connecting")
         return {"status": "reconnecting"}
 
