@@ -144,14 +144,19 @@ class WhatsAppService:
         # PostgreSQL URLs with special chars in password break Go's URL parser.
         client = NewAClient(name)
 
-        # Fix event loop: neonize creates its own loop at import time,
-        # but we need callbacks on the current running loop (uvicorn's)
+        # Fix event loop: neonize creates its own loop at import time
+        # (asyncio.new_event_loop() that is never started), but we need
+        # callbacks on the current running loop (uvicorn's). The execute()
+        # method in neonize.aioze.events uses its own module-level
+        # event_global_loop, so we must patch BOTH modules.
         try:
             loop = asyncio.get_running_loop()
             client.loop = loop
-            # Also patch the module-level event loop so callbacks dispatch correctly
-            import neonize.aioze.client as _neonize_mod
-            _neonize_mod.event_global_loop = loop
+            import neonize.aioze.client as _neonize_client_mod
+            import neonize.aioze.events as _neonize_events_mod
+            _neonize_client_mod.event_global_loop = loop
+            _neonize_events_mod.event_global_loop = loop
+            logger.info(f"Patched neonize event loops to uvicorn loop for {key}")
         except RuntimeError:
             pass
 
