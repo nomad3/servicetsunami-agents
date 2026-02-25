@@ -34,11 +34,16 @@ logger = logging.getLogger(__name__)
 class WhatsAppService:
     """Manages neonize WhatsApp clients per tenant:account."""
 
+    MAX_RECONNECT_ATTEMPTS = 5
+    RECONNECT_BASE_DELAY = 2  # seconds, doubles each attempt
+
     def __init__(self, db_url: str):
         self._clients: Dict[str, NewAClient] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
+        self._watchdog_tasks: Dict[str, asyncio.Task] = {}
         self._qr_codes: Dict[str, str] = {}
         self._statuses: Dict[str, str] = {}
+        self._reconnect_counts: Dict[str, int] = {}
         self._db_url = db_url
 
     def _key(self, tenant_id: str, account_id: str = "default") -> str:
@@ -195,6 +200,7 @@ class WhatsAppService:
         async def on_connected(c: NewAClient, event: ConnectedEv):
             logger.info(f"ConnectedEv fired for {key}")
             self._statuses[key] = "connected"
+            self._reconnect_counts[key] = 0  # Reset on successful connection
             self._qr_codes.pop(key, None)
             phone = None
             try:
@@ -206,13 +212,15 @@ class WhatsAppService:
             self._update_account_status(tenant_id, account_id, "connected", phone=phone)
             self._log_event(tenant_id, account_id, "connection_opened")
 
-        # Disconnected
+        # Disconnected — trigger auto-reconnect
         @client.event(DisconnectedEv)
         async def on_disconnected(c: NewAClient, event: DisconnectedEv):
             logger.warning(f"DisconnectedEv for {key}")
             self._statuses[key] = "disconnected"
             self._update_account_status(tenant_id, account_id, "disconnected")
             self._log_event(tenant_id, account_id, "connection_closed")
+            # Schedule auto-reconnect
+            asyncio.ensure_future(self._auto_reconnect(tenant_id, account_id))
 
         # NOTE: StreamReplacedEv is NOT registered — it crashes the neonize Go binary
         # with "panic: index out of range [0] with length 0" in CallbackFunction.
@@ -238,6 +246,60 @@ class WhatsAppService:
         self._clients[key] = client
         self._statuses[key] = "connecting"
         return client
+
+    async def _auto_reconnect(self, tenant_id: str, account_id: str):
+        """Auto-reconnect after disconnect with exponential backoff."""
+        key = self._key(tenant_id, account_id)
+        attempt = self._reconnect_counts.get(key, 0) + 1
+        self._reconnect_counts[key] = attempt
+
+        if attempt > self.MAX_RECONNECT_ATTEMPTS:
+            logger.error(f"Max reconnect attempts ({self.MAX_RECONNECT_ATTEMPTS}) reached for {key}")
+            self._update_account_status(tenant_id, account_id, "disconnected",
+                                        error=f"Max reconnect attempts reached after {attempt - 1} tries")
+            return
+
+        delay = self.RECONNECT_BASE_DELAY * (2 ** (attempt - 1))
+        logger.info(f"Auto-reconnect attempt {attempt}/{self.MAX_RECONNECT_ATTEMPTS} for {key} in {delay}s")
+        await asyncio.sleep(delay)
+
+        # Check if status was manually changed (e.g., disabled, logged out)
+        current_status = self._statuses.get(key)
+        if current_status in ("logged_out", None):
+            logger.info(f"Skipping auto-reconnect for {key} — status is {current_status}")
+            return
+
+        try:
+            await self.reconnect(tenant_id, account_id)
+            logger.info(f"Auto-reconnect initiated for {key}")
+        except Exception:
+            logger.exception(f"Auto-reconnect failed for {key}")
+
+    async def _connection_watchdog(self, key: str, tenant_id: str, account_id: str):
+        """Monitor the connection task; reconnect if it dies unexpectedly."""
+        try:
+            task = self._tasks.get(key)
+            if not task:
+                return
+            # Wait for the connection task to finish (it shouldn't under normal operation)
+            await task
+        except asyncio.CancelledError:
+            return  # Normal shutdown
+        except Exception as e:
+            logger.warning(f"Connection task for {key} ended with error: {e}")
+
+        # Connection task ended — check if we should reconnect
+        status = self._statuses.get(key)
+        if status in ("logged_out", None):
+            return
+        # If DisconnectedEv already triggered reconnect, skip
+        if status == "connecting":
+            return
+
+        logger.warning(f"Connection task died for {key} (status={status}), triggering auto-reconnect")
+        self._statuses[key] = "disconnected"
+        self._update_account_status(tenant_id, account_id, "disconnected")
+        await self._auto_reconnect(tenant_id, account_id)
 
     async def _handle_inbound(
         self, key: str, tenant_id: str, account_id: str,
@@ -392,6 +454,12 @@ class WhatsAppService:
 
     async def disable(self, tenant_id: str, account_id: str = "default") -> dict:
         key = self._key(tenant_id, account_id)
+        # Prevent auto-reconnect
+        self._statuses[key] = "logged_out"
+        # Cancel watchdog
+        watchdog = self._watchdog_tasks.pop(key, None)
+        if watchdog and not watchdog.done():
+            watchdog.cancel()
         # Disconnect if active
         if key in self._clients:
             try:
@@ -445,9 +513,18 @@ class WhatsAppService:
         # Create client and start connection (QR will be emitted via callback)
         client = self._create_client(tenant_id, account_id)
         self._clients[key] = client
+        # Reset reconnect counter on fresh pairing
+        self._reconnect_counts[key] = 0
         # connect() returns a Task — await to get the actual running connection task
         connect_task = await client.connect()
         self._tasks[key] = connect_task
+        # Start watchdog to detect unexpected disconnects (StreamReplaced, EOF, etc.)
+        old_watchdog = self._watchdog_tasks.pop(key, None)
+        if old_watchdog and not old_watchdog.done():
+            old_watchdog.cancel()
+        self._watchdog_tasks[key] = asyncio.ensure_future(
+            self._connection_watchdog(key, tenant_id, account_id)
+        )
 
         # Wait briefly for QR to be generated or existing session to restore
         for i in range(20):
@@ -585,6 +662,12 @@ class WhatsAppService:
 
     async def logout(self, tenant_id: str, account_id: str = "default") -> dict:
         key = self._key(tenant_id, account_id)
+        # Prevent auto-reconnect
+        self._statuses[key] = "logged_out"
+        # Cancel watchdog
+        watchdog = self._watchdog_tasks.pop(key, None)
+        if watchdog and not watchdog.done():
+            watchdog.cancel()
         client = self._clients.get(key)
         if client:
             try:
@@ -608,6 +691,10 @@ class WhatsAppService:
 
     async def reconnect(self, tenant_id: str, account_id: str = "default") -> dict:
         key = self._key(tenant_id, account_id)
+        # Cancel existing watchdog
+        old_watchdog = self._watchdog_tasks.pop(key, None)
+        if old_watchdog and not old_watchdog.done():
+            old_watchdog.cancel()
         # Disconnect existing
         if key in self._clients:
             try:
@@ -624,13 +711,22 @@ class WhatsAppService:
         self._clients[key] = client
         connect_task = await client.connect()
         self._tasks[key] = connect_task
+        # Start watchdog for this new connection
+        self._watchdog_tasks[key] = asyncio.ensure_future(
+            self._connection_watchdog(key, tenant_id, account_id)
+        )
         self._update_account_status(tenant_id, account_id, "connecting")
         return {"status": "reconnecting"}
 
     async def shutdown(self):
         """Gracefully disconnect all clients."""
+        for key, task in list(self._watchdog_tasks.items()):
+            if not task.done():
+                task.cancel()
+        self._watchdog_tasks.clear()
         for key, client in list(self._clients.items()):
             try:
+                self._statuses[key] = "logged_out"  # Prevent auto-reconnect
                 await client.disconnect()
             except Exception:
                 pass
@@ -641,6 +737,7 @@ class WhatsAppService:
         self._tasks.clear()
         self._qr_codes.clear()
         self._statuses.clear()
+        self._reconnect_counts.clear()
         logger.info("WhatsApp service shut down")
 
     async def restore_connections(self):
