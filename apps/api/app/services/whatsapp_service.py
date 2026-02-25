@@ -351,39 +351,59 @@ class WhatsAppService:
         if is_group:
             return
 
+        # Resolve LID → phone number if needed (WhatsApp now uses LIDs for DMs)
+        sender_phone = sender_jid  # default: assume JID is the phone
+        try:
+            # neonize client method to resolve LID to phone number
+            pn_result = await asyncio.wait_for(client.get_pn_from_lid(sender_jid_obj), timeout=5)
+            if pn_result:
+                resolved = pn_result.User if hasattr(pn_result, 'User') else str(pn_result)
+                logger.info(f"Resolved LID {sender_jid} → phone {resolved}")
+                sender_phone = resolved
+        except Exception as e:
+            logger.debug(f"LID→phone resolution failed for {sender_jid}: {e}")
+
         # DM policy enforcement
         db = self._get_db()
         try:
             acct = self._get_or_create_account(db, tenant_id, account_id)
             if acct.dm_policy == "allowlist":
                 allowed = acct.allow_from or []
-                if "*" not in allowed and sender_jid not in allowed and f"+{sender_jid}" not in allowed:
-                    logger.info(f"Blocked message from {sender_jid} (not in allowlist)")
-                    return
+                if "*" not in allowed:
+                    # Check both the raw JID and resolved phone against allowlist
+                    matches = (
+                        sender_jid in allowed
+                        or f"+{sender_jid}" in allowed
+                        or sender_phone in allowed
+                        or f"+{sender_phone}" in allowed
+                    )
+                    if not matches:
+                        logger.info(f"Blocked message from {sender_jid} (phone={sender_phone}, not in allowlist {allowed})")
+                        return
         finally:
             db.close()
 
-        logger.info(f"Inbound DM from {sender_jid} in {key}: {text[:100]}")
+        logger.info(f"Inbound DM from {sender_phone} (jid={sender_jid}) in {key}: {text[:100]}")
         self._log_event(
             tenant_id, account_id, "message_inbound",
-            direction="inbound", remote_id=sender_jid,
+            direction="inbound", remote_id=sender_phone,
             message_content=text,
             extra_data={"chat_jid": chat_jid, "is_group": is_group},
         )
 
-        # Process through agent and send response
-        response_text = await self._process_through_agent(tenant_id, sender_jid, text)
+        # Process through agent — use phone number (not LID) as session key
+        response_text = await self._process_through_agent(tenant_id, sender_phone, text)
         if response_text:
             try:
                 # Use the original sender JID object to reply — preserves LID vs phone format
                 await client.send_message(sender_jid_obj, response_text)
                 self._log_event(
                     tenant_id, account_id, "message_outbound",
-                    direction="outbound", remote_id=sender_jid,
+                    direction="outbound", remote_id=sender_phone,
                     message_content=response_text,
                 )
             except Exception:
-                logger.exception(f"Failed to send reply to {sender_jid}")
+                logger.exception(f"Failed to send reply to {sender_phone} (jid={sender_jid})")
 
     async def _process_through_agent(
         self, tenant_id: str, sender_id: str, message: str,
