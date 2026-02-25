@@ -177,7 +177,7 @@ class WhatsAppService:
             self._qr_codes.pop(key, None)
             phone = None
             try:
-                me = c.get_me()
+                me = await c.get_me()
                 if me:
                     phone = me.User
             except Exception:
@@ -193,7 +193,7 @@ class WhatsAppService:
             self._qr_codes.pop(key, None)
             phone = None
             try:
-                me = c.get_me()
+                me = await c.get_me()
                 if me:
                     phone = me.User
             except Exception:
@@ -449,8 +449,8 @@ class WhatsAppService:
         connect_task = await client.connect()
         self._tasks[key] = connect_task
 
-        # Wait briefly for QR to be generated
-        for _ in range(20):
+        # Wait briefly for QR to be generated or existing session to restore
+        for i in range(20):
             await asyncio.sleep(0.5)
             if key in self._qr_codes:
                 return {
@@ -463,6 +463,25 @@ class WhatsAppService:
                     "message": "Already connected (existing session restored)",
                     "connected": True,
                 }
+            # After 3 seconds, also check active connection (session may auto-restore
+            # without events firing)
+            if i >= 6:
+                try:
+                    connected = await client.is_connected()
+                    if connected:
+                        me = await client.get_me()
+                        phone = me.User if me else None
+                        logger.info(f"start_pairing: active detection found {key} connected as {phone}")
+                        self._statuses[key] = "connected"
+                        self._qr_codes.pop(key, None)
+                        self._update_account_status(tenant_id, account_id, "connected", phone=phone)
+                        return {
+                            "qr_data_url": None,
+                            "message": "Already connected (existing session restored)",
+                            "connected": True,
+                        }
+                except Exception:
+                    pass
 
         return {
             "qr_data_url": None,
@@ -476,9 +495,12 @@ class WhatsAppService:
         # Active detection: if status isn't "connected" yet, check if the
         # client is actually authenticated (event callbacks may not fire).
         if status != "connected" and key in self._clients:
+            client = self._clients[key]
+            logger.info(f"Active detection probe for {key}: current status={status}")
             try:
-                client = self._clients[key]
+                # Try is_connected first
                 connected = await client.is_connected()
+                logger.info(f"Active detection: is_connected()={connected} for {key}")
                 if connected:
                     me = await client.get_me()
                     phone = me.User if me else None
@@ -487,13 +509,22 @@ class WhatsAppService:
                     self._statuses[key] = "connected"
                     self._qr_codes.pop(key, None)
                     self._update_account_status(tenant_id, account_id, "connected", phone=phone)
+                else:
+                    # Fallback: check if is_logged_in (has stored session)
+                    try:
+                        logged_in = await client.is_logged_in()
+                        logger.info(f"Active detection: is_logged_in()={logged_in} for {key}")
+                    except Exception as e2:
+                        logger.info(f"Active detection: is_logged_in() error: {e2}")
             except Exception as e:
-                logger.debug(f"Active detection check failed for {key}: {e}")
+                logger.warning(f"Active detection check failed for {key}: {type(e).__name__}: {e}")
 
         result = {
             "connected": status == "connected",
             "status": status,
         }
+        if status == "connecting":
+            result["message"] = "Waiting for QR scan"
         # Include fresh QR if still pairing
         if key in self._qr_codes:
             result["qr_data_url"] = self._qr_codes[key]
