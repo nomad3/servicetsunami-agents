@@ -26,7 +26,7 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.channel_account import ChannelAccount
 from app.models.channel_event import ChannelEvent
-from app.models.chat import ChatSession, ChatMessage
+from app.models.chat import ChatSession
 
 logger = logging.getLogger(__name__)
 
@@ -293,12 +293,36 @@ class WhatsAppService:
     async def _process_through_agent(
         self, tenant_id: str, sender_id: str, message: str,
     ) -> Optional[str]:
-        """Route inbound message through the chat/agent pipeline. Returns response text."""
+        """Route inbound message through the same ADK agent pipeline as the chat UI.
+
+        This ensures WhatsApp conversations share the same supervisor, agent kits,
+        LLM provider, conversation history, and Temporal workflow audit trail.
+        """
         db = self._get_db()
         try:
+            from app.services import chat as chat_service
+            from app.models.agent_kit import AgentKit
+            from app.models.user import User
+
             tid = uuid.UUID(tenant_id)
 
-            # Find or create a channel chat session keyed by sender
+            # Find the tenant's admin user (needed for ADK session context)
+            user = db.query(User).filter(User.tenant_id == tid).first()
+            if not user:
+                logger.error(f"No user found for tenant {tenant_id}")
+                return None
+
+            # Find the tenant's first agent kit (or a WhatsApp-specific one)
+            agent_kit = (
+                db.query(AgentKit)
+                .filter(AgentKit.tenant_id == tid)
+                .first()
+            )
+            if not agent_kit:
+                logger.warning(f"No agent kit found for tenant {tenant_id}")
+                return None
+
+            # Find or create a WhatsApp chat session keyed by sender
             session_key = f"whatsapp:{sender_id}"
             session = (
                 db.query(ChatSession)
@@ -313,63 +337,29 @@ class WhatsAppService:
                 session = ChatSession(
                     title=f"WhatsApp: {sender_id}",
                     tenant_id=tid,
+                    agent_kit_id=agent_kit.id,
                     source="whatsapp",
                     external_id=session_key,
                 )
                 db.add(session)
                 db.commit()
                 db.refresh(session)
+            elif not session.agent_kit_id:
+                # Backfill agent_kit on existing sessions
+                session.agent_kit_id = agent_kit.id
+                db.commit()
+                db.refresh(session)
 
-            # Append user message
-            user_msg = ChatMessage(
-                session_id=session.id,
-                role="user",
+            # Route through the same chat service as the web UI
+            # This calls ADK supervisor → agent selection → LLM → tools → audit
+            _user_msg, assistant_msg = chat_service.post_user_message(
+                db,
+                session=session,
+                user_id=user.id,
                 content=message,
             )
-            db.add(user_msg)
-            db.commit()
 
-            # Generate agent response via Anthropic API directly
-            # (LLMService requires tenant LLM config which may not exist)
-            import anthropic
-
-            # Build conversation history from recent messages
-            recent_msgs = (
-                db.query(ChatMessage)
-                .filter(ChatMessage.session_id == session.id)
-                .order_by(ChatMessage.created_at.desc())
-                .limit(20)
-                .all()
-            )
-            recent_msgs.reverse()
-
-            api_messages = []
-            for m in recent_msgs:
-                if m.role in ("user", "assistant"):
-                    api_messages.append({"role": m.role, "content": m.content})
-
-            client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=1024,
-                system=(
-                    "You are a helpful assistant responding via WhatsApp. "
-                    "Keep responses concise and conversational. Use short paragraphs."
-                ),
-                messages=api_messages,
-            )
-
-            assistant_text = response.content[0].text if response.content else None
-            if assistant_text:
-                assistant_msg = ChatMessage(
-                    session_id=session.id,
-                    role="assistant",
-                    content=assistant_text,
-                )
-                db.add(assistant_msg)
-                db.commit()
-
-            return assistant_text
+            return assistant_msg.content if assistant_msg else None
         except Exception:
             logger.exception("Failed to process through agent pipeline")
             db.rollback()
