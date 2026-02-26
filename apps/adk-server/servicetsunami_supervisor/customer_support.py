@@ -66,7 +66,7 @@ Respond in Spanish when the user communicates in Spanish.
 ```sql
 SELECT id, name, active_ingredient, dosage, form, lab, requires_prescription
 FROM medications
-WHERE name ILIKE '%{query}%' OR active_ingredient ILIKE '%{query}%'
+WHERE name ILIKE '%<query>%' OR active_ingredient ILIKE '%<query>%'
 LIMIT 10
 ```
 
@@ -76,7 +76,7 @@ SELECT m.name, m.dosage, p.price, p.in_stock, ph.chain, ph.name as pharmacy, ph.
 FROM prices p
 JOIN medications m ON m.id = p.medication_id
 JOIN pharmacies ph ON ph.id = p.pharmacy_id
-WHERE m.name ILIKE '%{medication}%' AND p.in_stock = true
+WHERE m.name ILIKE '%<medication>%' AND p.in_stock = true
 ORDER BY p.price ASC
 LIMIT 15
 ```
@@ -89,7 +89,7 @@ FROM orders o
 JOIN order_items oi ON oi.order_id = o.id
 JOIN medications m ON m.id = oi.medication_id
 JOIN users u ON u.id = o.user_id
-WHERE u.phone_number = '{phone}'
+WHERE u.phone_number = '<phone>'
 ORDER BY o.created_at DESC
 LIMIT 5
 ```
@@ -98,7 +98,7 @@ LIMIT 5
 ```sql
 SELECT chain, name, address, comuna, phone, hours
 FROM pharmacies
-WHERE comuna ILIKE '%{location}%' AND is_retail = true
+WHERE comuna ILIKE '%<location>%' AND is_retail = true
 ORDER BY name
 LIMIT 10
 ```

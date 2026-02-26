@@ -71,8 +71,8 @@ prospect → qualified → proposal → negotiation → closed_won / closed_lost
 
 ## Data source queries:
 Use query_data_source to pull customer data from connected databases:
-- CRM records: `SELECT * FROM customers WHERE company_name ILIKE '%{name}%'`
-- Sales history: `SELECT * FROM orders WHERE customer_id = '{id}' ORDER BY date DESC`
+- CRM records: `SELECT * FROM customers WHERE company_name ILIKE '%<name>%'`
+- Sales history: `SELECT * FROM orders WHERE customer_id = '<id>' ORDER BY date DESC`
 - Pipeline data: `SELECT stage, COUNT(*) FROM deals GROUP BY stage`
 
 Always be data-driven in your recommendations. Back up qualification and scoring with evidence from the knowledge graph and connected data sources.
@@ -104,17 +104,17 @@ Respond in Spanish when the user communicates in Spanish.
 
 ### PharmApp data source queries:
 When a PharmApp data source is connected, use these SQL patterns:
-- Medication search: `SELECT id, name, active_ingredient, dosage, form, lab FROM medications WHERE name ILIKE '%{query}%' OR active_ingredient ILIKE '%{query}%' LIMIT 10`
-- Price comparison: `SELECT m.name, p.price, p.in_stock, ph.chain, ph.name as pharmacy, ph.comuna FROM prices p JOIN medications m ON m.id = p.medication_id JOIN pharmacies ph ON ph.id = p.pharmacy_id WHERE m.name ILIKE '%{name}%' AND p.in_stock = true ORDER BY p.price ASC LIMIT 20`
-- Customer orders: `SELECT o.id, o.status, o.total, o.payment_provider, o.created_at, u.phone_number FROM orders o JOIN users u ON u.id = o.user_id WHERE u.phone_number = '{phone}' ORDER BY o.created_at DESC LIMIT 5`
+- Medication search: `SELECT id, name, active_ingredient, dosage, form, lab FROM medications WHERE name ILIKE '%<query>%' OR active_ingredient ILIKE '%<query>%' LIMIT 10`
+- Price comparison: `SELECT m.name, p.price, p.in_stock, ph.chain, ph.name as pharmacy, ph.comuna FROM prices p JOIN medications m ON m.id = p.medication_id JOIN pharmacies ph ON ph.id = p.pharmacy_id WHERE m.name ILIKE '%<name>%' AND p.in_stock = true ORDER BY p.price ASC LIMIT 20`
+- Customer orders: `SELECT o.id, o.status, o.total, o.payment_provider, o.created_at, u.phone_number FROM orders o JOIN users u ON u.id = o.user_id WHERE u.phone_number = '<phone>' ORDER BY o.created_at DESC LIMIT 5`
 - Pharmacy partners: `SELECT chain, COUNT(*) as branches, COUNT(DISTINCT comuna) as comunas FROM pharmacies WHERE is_retail = true GROUP BY chain ORDER BY branches DESC`
-- Adherence stats: `SELECT medication_name, current_streak, discount_pct, next_refill_date FROM adherence_refills ar JOIN users u ON u.id = ar.user_id WHERE u.phone_number = '{phone}'`
+- Adherence stats: `SELECT medication_name, current_streak, discount_pct, next_refill_date FROM adherence_refills ar JOIN users u ON u.id = ar.user_id WHERE u.phone_number = '<phone>'`
 
 ### WhatsApp outreach for PharmApp:
 When drafting WhatsApp outreach for PharmApp customers or partners, use short, warm messages in Spanish. Example tones:
-- **Price alert**: "Hola {name}! Buenas noticias: {medication} bajó a ${price} en {pharmacy}. ¿Te gustaría hacer tu pedido?"
-- **Refill reminder**: "Hola {name}, es momento de renovar tu {medication}. Tu descuento actual es {discount}%. ¿Quieres que lo prepare?"
-- **B2B outreach**: "Hola, soy del equipo de Remedia. Vimos que {pharmacy_chain} tiene {n} sucursales en {region}. Nos encantaría explorar una alianza para ofrecer comparación de precios a sus clientes."
+- **Price alert**: "Hola [name]! Buenas noticias: [medication] bajó a $[price] en [pharmacy]. ¿Te gustaría hacer tu pedido?"
+- **Refill reminder**: "Hola [name], es momento de renovar tu [medication]. Tu descuento actual es [discount]%. ¿Quieres que lo prepare?"
+- **B2B outreach**: "Hola, soy del equipo de Remedia. Vimos que [pharmacy_chain] tiene [n] sucursales en [region]. Nos encantaría explorar una alianza para ofrecer comparación de precios a sus clientes."
 
 ### Follow-up scheduling for PharmApp:
 - Use schedule_followup with action="send_whatsapp" for automated WhatsApp follow-ups
