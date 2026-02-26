@@ -11,7 +11,7 @@ replicaCount: 1
 
 container:
   port: 8080
-  command: ["python", "server.py"]
+  command: ["/bin/bash", "/app/entrypoint.sh"]
 
 # Service account with Workload Identity for GCP services
 serviceAccount:
@@ -94,6 +94,8 @@ configMap:
     VERTEX_PROJECT: "ai-agency-479516"
     VERTEX_LOCATION: "us-central1"
     EMBEDDING_MODEL: "text-embedding-005"
+    GIT_AUTHOR_NAME: "ServiceTsunami Agent"
+    GIT_AUTHOR_EMAIL: "agent@servicetsunami.com"
 
 # External Secrets - pulls from GCP Secret Manager
 externalSecret:
@@ -116,6 +118,9 @@ externalSecret:
     - secretKey: MCP_API_KEY
       remoteRef:
         key: servicetsunami-mcp-api-key
+    - secretKey: GITHUB_TOKEN
+      remoteRef:
+        key: servicetsunami-github-token
 
 # Cloud SQL Proxy sidecar for secure database connection
 extraContainers:
