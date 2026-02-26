@@ -97,6 +97,13 @@ async def query_data_source(
                 sources = [s for s in sources if s.get("type") == connector_type]
             if not sources:
                 return {"error": f"No data sources found (type={connector_type})"}
+
+            # Smart selection: prefer queryable types (api, rest_api, postgres)
+            # over non-queryable (warehouse, stream) unless explicitly requested
+            if not connector_type and len(sources) > 1:
+                preferred = [s for s in sources if s.get("type") in ("api", "rest_api", "postgres", "mysql")]
+                if preferred:
+                    sources = preferred
             connector_id = sources[0]["id"]
 
         # Execute query via the internal query endpoint
