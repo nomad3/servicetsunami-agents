@@ -50,29 +50,32 @@ async def query_data_source(
         On error, returns {error: str}.
     """
     client = _get_http_client()
+    internal_headers = {"X-Internal-Key": settings.mcp_api_key}
     try:
-        # If no connector_id, discover one
+        # If no connector_id, discover one via internal endpoint
         if not connector_id:
+            params = {}
+            if tenant_id:
+                params["tenant_id"] = tenant_id
             resp = await client.get(
-                "/api/v1/connectors",
-                headers={"X-Internal-Key": settings.mcp_api_key},
-                params={"tenant_id": tenant_id},
+                "/api/v1/data_sources/internal/list",
+                headers=internal_headers,
+                params=params,
             )
             resp.raise_for_status()
-            connectors = resp.json()
+            sources = resp.json()
 
-            # Filter active connectors
-            active = [c for c in connectors if c.get("status") == "active"]
+            # Filter by type if requested
             if connector_type:
-                active = [c for c in active if c.get("type") == connector_type]
-            if not active:
-                return {"error": f"No active connectors found for tenant (type={connector_type})"}
-            connector_id = active[0]["id"]
+                sources = [s for s in sources if s.get("type") == connector_type]
+            if not sources:
+                return {"error": f"No data sources found (type={connector_type})"}
+            connector_id = sources[0]["id"]
 
-        # Execute query via the data source query endpoint
+        # Execute query via the internal query endpoint
         resp = await client.post(
-            f"/api/v1/data-sources/{connector_id}/query",
-            headers={"X-Internal-Key": settings.mcp_api_key},
+            f"/api/v1/data_sources/{connector_id}/internal-query",
+            headers=internal_headers,
             json={"query": query, "tenant_id": tenant_id},
         )
         resp.raise_for_status()
@@ -86,7 +89,7 @@ async def query_data_source(
         }
     except httpx.HTTPStatusError as e:
         logger.error("query_data_source failed: %s %s", e.response.status_code, e.response.text[:300])
-        return {"error": f"Query failed with status {e.response.status_code}"}
+        return {"error": f"Query failed with status {e.response.status_code}: {e.response.text[:200]}"}
     except Exception as e:
-        logger.error("query_data_source error: %s", e)
+        logger.error("query_data_source error: %s", e, exc_info=True)
         return {"error": f"Query failed: {str(e)}"}

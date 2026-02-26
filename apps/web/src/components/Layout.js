@@ -7,7 +7,6 @@ import {
   FaComments as ChatDotsFill,
   FaMicrochip as CpuFill,
   FaDatabase as DatabaseFill,
-  FaFileAlt as FileTextFill,
   FaCog as GearFill,
   FaHome as HouseDoorFill,
   FaMoon as MoonFill,
@@ -71,9 +70,7 @@ const Layout = ({ children }) => {
     {
       title: 'DATA',
       items: [
-        { path: '/integrations', icon: PlugFill, label: 'System Integrations', description: 'ERP connectors & data syncs' },
-        { path: '/datasets', icon: FileTextFill, label: 'Business Data', description: 'Manage datasets & files' },
-        { path: '/data-sources', icon: DatabaseFill, label: 'ERP & Systems', description: 'Connect ERPs, banks & systems' },
+        { path: '/integrations', icon: PlugFill, label: 'Integrations', description: 'Skills, connectors, data sources & datasets' },
       ]
     },
     {

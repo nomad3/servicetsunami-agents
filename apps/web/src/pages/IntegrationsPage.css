@@ -22,6 +22,31 @@
   margin-bottom: 0;
 }
 
+/* Tab Navigation */
+.integrations-tabs .nav-link {
+  display: flex;
+  align-items: center;
+  color: var(--color-muted);
+  border-color: transparent;
+  font-weight: 500;
+  padding: 0.75rem 1.25rem;
+}
+
+.integrations-tabs .nav-link:hover {
+  color: var(--color-foreground);
+  border-color: var(--color-border) var(--color-border) transparent;
+}
+
+.integrations-tabs .nav-link.active {
+  color: var(--color-foreground);
+  background: var(--surface-elevated);
+  border-color: var(--color-border) var(--color-border) var(--surface-elevated);
+}
+
+.tab-content-inner {
+  min-height: 300px;
+}
+
 /* Stats Cards */
 .stat-card {
   border: 1px solid var(--color-border);
@@ -181,6 +206,35 @@
 .sync-info small {
   display: block;
   margin-top: 0.125rem;
+}
+
+/* Data Sources Cards */
+.datasource-card {
+  border: 1px solid var(--color-border);
+  background: var(--surface-elevated);
+  box-shadow: 0 2px 4px rgba(100, 130, 170, 0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.datasource-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(100, 130, 170, 0.12);
+  border-color: var(--color-border-strong);
+}
+
+.datasource-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--surface-contrast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.config-section {
+  border: 1px solid var(--color-border);
+  background: var(--surface-contrast);
 }
 
 /* Button styles */

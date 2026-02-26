@@ -86,7 +86,6 @@ def delete_data_source(
     if not data_source or str(data_source.tenant_id) != str(current_user.tenant_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data source not found")
     data_source_service.delete_data_source(db=db, data_source_id=data_source_id)
-    data_source_service.delete_data_source(db=db, data_source_id=data_source_id)
     return {"message": "Data source deleted successfully"}
 
 
@@ -110,7 +109,48 @@ def execute_data_source_query(
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(e))
 
 
-# ==================== Internal Endpoints (MCP Server) ====================
+# ==================== Internal Endpoints (ADK / MCP Server) ====================
+
+@router.get("/internal/list")
+def list_data_sources_internal(
+    tenant_id: Optional[str] = None,
+    db: Session = Depends(deps.get_db),
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+):
+    """
+    List data sources (internal, no JWT required).
+    Used by ADK agents to discover queryable data sources.
+    """
+    if x_internal_key not in (settings.API_INTERNAL_KEY, settings.MCP_API_KEY):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal key")
+    if tenant_id:
+        return data_source_service.get_data_sources_by_tenant(db, tenant_id=uuid.UUID(tenant_id))
+    return data_source_service.get_all_data_sources(db)
+
+
+@router.post("/{data_source_id}/internal-query")
+def execute_data_source_query_internal(
+    *,
+    db: Session = Depends(deps.get_db),
+    data_source_id: uuid.UUID,
+    query: str = Body(..., embed=True),
+    tenant_id: Optional[str] = Body(None, embed=True),
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+):
+    """
+    Execute a query on a data source (internal, no JWT required).
+    Used by ADK agents to query tenant data.
+    """
+    if x_internal_key not in (settings.API_INTERNAL_KEY, settings.MCP_API_KEY):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal key")
+    try:
+        results = data_source_service.execute_query(db, data_source_id=data_source_id, query=query)
+        return results
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except NotImplementedError as e:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(e))
+
 
 @router.get("/{data_source_id}/with-credentials", response_model=schemas.data_source.DataSourceWithCredentials)
 def get_data_source_with_credentials(

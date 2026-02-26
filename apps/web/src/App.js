@@ -1,5 +1,5 @@
 import { createContext, useContext, useState } from 'react';
-import { Route, BrowserRouter as Router, Routes, useNavigate } from 'react-router-dom';
+import { Navigate, Route, BrowserRouter as Router, Routes, useNavigate } from 'react-router-dom';
 import { ToastProvider } from './components/common';
 import { ThemeProvider } from './context/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -10,8 +10,7 @@ import AgentWizardPage from './pages/AgentWizardPage';
 import BrandingPage from './pages/BrandingPage';
 import ChatPage from './pages/ChatPage';
 import DashboardPage from './pages/DashboardPage';
-import DatasetsPage from './pages/DatasetsPage';
-import DataSourcesPage from './pages/DataSourcesPage';
+// DatasetsPage and DataSourcesPage merged into IntegrationsPage
 import DeploymentsPage from './pages/DeploymentsPage';
 import HomePage from './pages/HomePage';
 import IntegrationsPage from './pages/IntegrationsPage';
@@ -71,12 +70,12 @@ function App() {
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/home" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-            <Route path="/data-sources" element={<ProtectedRoute><DataSourcesPage /></ProtectedRoute>} />
+            <Route path="/data-sources" element={<Navigate to="/integrations?tab=data-sources" replace />} />
             <Route path="/integrations" element={<ProtectedRoute><IntegrationsPage /></ProtectedRoute>} />
             <Route path="/notebooks" element={<ProtectedRoute><NotebooksPage /></ProtectedRoute>} />
             <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
             <Route path="/agents/wizard" element={<ProtectedRoute><AgentWizardPage /></ProtectedRoute>} />
-            <Route path="/datasets" element={<ProtectedRoute><DatasetsPage /></ProtectedRoute>} />
+            <Route path="/datasets" element={<Navigate to="/integrations?tab=datasets" replace />} />
             <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
             <Route path="/tools" element={<ProtectedRoute><ToolsPage /></ProtectedRoute>} />
             <Route path="/deployments" element={<ProtectedRoute><DeploymentsPage /></ProtectedRoute>} />

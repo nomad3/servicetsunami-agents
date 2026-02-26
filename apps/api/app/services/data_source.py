@@ -10,6 +10,9 @@ from app.schemas.data_source import DataSourceCreate, DataSourceBase
 def get_data_source(db: Session, data_source_id: uuid.UUID) -> DataSource | None:
     return db.query(DataSource).filter(DataSource.id == data_source_id).first()
 
+def get_all_data_sources(db: Session, skip: int = 0, limit: int = 100) -> List[DataSource]:
+    return db.query(DataSource).offset(skip).limit(limit).all()
+
 def get_data_sources_by_tenant(db: Session, tenant_id: uuid.UUID, skip: int = 0, limit: int = 100) -> List[DataSource]:
     return db.query(DataSource).filter(DataSource.tenant_id == tenant_id).offset(skip).limit(limit).all()
 
@@ -101,6 +104,50 @@ def execute_query(db: Session, data_source_id: uuid.UUID, query: str) -> List[di
                     return []
         except Exception as e:
             raise ValueError(f"Databricks query execution failed: {str(e)}")
+
+    elif data_source.type in ('rest_api', 'api'):
+        import httpx
+
+        config = data_source.config
+        base_url = config.get('internal_url') or config.get('base_url')
+        if not base_url:
+            raise ValueError("REST API data source missing base_url")
+
+        auth_type = config.get('auth_type')
+        headers = {}
+
+        # JWT authentication
+        if auth_type == 'jwt':
+            auth_endpoint = config.get('auth_endpoint', '/auth/login')
+            creds = config.get('auth_credentials', {})
+            with httpx.Client(timeout=30) as client:
+                auth_resp = client.post(
+                    f"{base_url}{auth_endpoint}",
+                    data={"username": creds.get("username"), "password": creds.get("password")},
+                )
+                auth_resp.raise_for_status()
+                token = auth_resp.json().get("access_token")
+                headers["Authorization"] = f"Bearer {token}"
+
+        # Use query as search term against configured endpoints
+        endpoints = config.get('endpoints', {})
+        search_endpoint = endpoints.get('search') or endpoints.get('medications', '/medications')
+
+        with httpx.Client(timeout=30) as client:
+            resp = client.get(
+                f"{base_url}{search_endpoint}",
+                headers=headers,
+                params={"q": query, "limit": 20},
+            )
+            resp.raise_for_status()
+            result = resp.json()
+
+        if isinstance(result, list):
+            return result[:100]
+        elif isinstance(result, dict):
+            items = result.get('items') or result.get('results') or result.get('data') or [result]
+            return items[:100] if isinstance(items, list) else [items]
+        return [result]
 
     else:
         raise ValueError(f"Unsupported data source type: {data_source.type}")
