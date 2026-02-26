@@ -1,3 +1,4 @@
+import re
 from typing import List
 
 from sqlalchemy.orm import Session
@@ -133,11 +134,20 @@ def execute_query(db: Session, data_source_id: uuid.UUID, query: str) -> List[di
         endpoints = config.get('endpoints', {})
         search_endpoint = endpoints.get('search') or endpoints.get('medications', '/medications')
 
+        # If the LLM sent a SQL query, extract the search term from ILIKE/LIKE patterns
+        search_term = query
+        if search_term.strip().upper().startswith('SELECT'):
+            ilike_match = re.search(r"ILIKE\s+'%([^%]+)%'", search_term, re.IGNORECASE)
+            if not ilike_match:
+                ilike_match = re.search(r"LIKE\s+'%([^%]+)%'", search_term, re.IGNORECASE)
+            if ilike_match:
+                search_term = ilike_match.group(1)
+
         with httpx.Client(timeout=30) as client:
             resp = client.get(
                 f"{base_url}{search_endpoint}",
                 headers=headers,
-                params={"q": query, "limit": 20},
+                params={"q": search_term, "limit": 20},
             )
             resp.raise_for_status()
             result = resp.json()
