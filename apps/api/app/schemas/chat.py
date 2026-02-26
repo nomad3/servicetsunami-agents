@@ -14,7 +14,7 @@ class ChatSessionBase(BaseModel):
 class ChatSessionCreate(ChatSessionBase):
     dataset_id: Optional[uuid.UUID] = None
     dataset_group_id: Optional[uuid.UUID] = None
-    agent_kit_id: uuid.UUID
+    agent_kit_id: Optional[uuid.UUID] = None
 
 
 class ChatSession(ChatSessionBase):

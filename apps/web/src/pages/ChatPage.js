@@ -141,28 +141,18 @@ const ChatPage = () => {
   const handleCreateSession = async (event) => {
     event.preventDefault();
 
-    if (sessionForm.sourceType === 'dataset' && !sessionForm.datasetId) {
-      setFormErrors('Please select a dataset.');
-      return;
-    }
-    if (sessionForm.sourceType === 'group' && !sessionForm.datasetGroupId) {
-      setFormErrors('Please select a dataset group.');
-      return;
-    }
-    if (!sessionForm.agentKitId) {
-      setFormErrors('Please select an agent kit.');
-      return;
-    }
-
     try {
       const payload = {
-        agent_kit_id: sessionForm.agentKitId,
         title: sessionForm.title ? sessionForm.title.trim() : undefined,
       };
 
-      if (sessionForm.sourceType === 'dataset') {
+      if (sessionForm.agentKitId) {
+        payload.agent_kit_id = sessionForm.agentKitId;
+      }
+
+      if (sessionForm.sourceType === 'dataset' && sessionForm.datasetId) {
         payload.dataset_id = sessionForm.datasetId;
-      } else {
+      } else if (sessionForm.sourceType === 'group' && sessionForm.datasetGroupId) {
         payload.dataset_group_id = sessionForm.datasetGroupId;
       }
 
@@ -457,7 +447,7 @@ const ChatPage = () => {
 
             <Form.Group className="mb-3">
               <Form.Label>Agent Kit</Form.Label>
-              <Form.Select name="agentKitId" value={sessionForm.agentKitId} onChange={handleCreateSessionChange} required>
+              <Form.Select name="agentKitId" value={sessionForm.agentKitId} onChange={handleCreateSessionChange}>
                 <option value="">Select agent kit…</option>
                 {agentKits.map((kit) => (
                   <option key={kit.id} value={kit.id}>

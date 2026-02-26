@@ -4,6 +4,7 @@ Bridges ADK agents to tenant-connected databases and APIs via the
 FastAPI backend's existing connector infrastructure.
 """
 import logging
+import re
 from typing import Optional
 
 import httpx
@@ -11,6 +12,31 @@ import httpx
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+_UUID_PATTERN = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+_cached_default_tenant_id = None
+
+
+def _resolve_tenant_id(tenant_id: str) -> str:
+    """Resolve tenant_id to a valid UUID string.
+    If the LLM passes a non-UUID value (like 'default_tenant' or 'auto'),
+    look up the first tenant from the database."""
+    global _cached_default_tenant_id
+    if _UUID_PATTERN.match(tenant_id):
+        return tenant_id
+    if _cached_default_tenant_id:
+        return _cached_default_tenant_id
+    try:
+        from sqlalchemy import create_engine, text
+        engine = create_engine(settings.database_url)
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT id FROM tenants LIMIT 1")).fetchone()
+            if result:
+                _cached_default_tenant_id = str(result[0])
+                return _cached_default_tenant_id
+    except Exception:
+        pass
+    return tenant_id
 
 _http_client: Optional[httpx.AsyncClient] = None
 
@@ -51,6 +77,7 @@ async def query_data_source(
     """
     client = _get_http_client()
     internal_headers = {"X-Internal-Key": settings.mcp_api_key}
+    tenant_id = _resolve_tenant_id(tenant_id)
     try:
         # If no connector_id, discover one via internal endpoint
         if not connector_id:

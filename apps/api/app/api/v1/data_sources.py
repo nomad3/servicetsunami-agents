@@ -124,7 +124,11 @@ def list_data_sources_internal(
     if x_internal_key not in (settings.API_INTERNAL_KEY, settings.MCP_API_KEY):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal key")
     if tenant_id:
-        return data_source_service.get_data_sources_by_tenant(db, tenant_id=uuid.UUID(tenant_id))
+        try:
+            tid = uuid.UUID(tenant_id)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid tenant_id: {tenant_id}")
+        return data_source_service.get_data_sources_by_tenant(db, tenant_id=tid)
     return data_source_service.get_all_data_sources(db)
 
 

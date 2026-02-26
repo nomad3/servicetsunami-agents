@@ -67,16 +67,14 @@ def create_session(
     *,
     tenant_id: uuid.UUID,
     user_id: uuid.UUID,
-    agent_kit_id: uuid.UUID,
+    agent_kit_id: uuid.UUID | None = None,
     dataset_id: uuid.UUID | None = None,
     dataset_group_id: uuid.UUID | None = None,
     title: str | None = None,
 ) -> ChatSessionModel:
-    if not dataset_id and not dataset_group_id:
-        raise ValueError("Either dataset_id or dataset_group_id must be provided")
-
     dataset = None
     dataset_group = None
+    agent_kit = None
 
     if dataset_id:
         dataset = dataset_service.get_dataset(db, dataset_id=dataset_id, tenant_id=tenant_id)
@@ -90,16 +88,21 @@ def create_session(
         if not dataset_group or dataset_group.tenant_id != tenant_id:
             raise ValueError("Dataset group not found for tenant")
 
-    agent_kit = agent_kit_service.get_agent_kit(db, agent_kit_id=agent_kit_id)
-    if not agent_kit or str(agent_kit.tenant_id) != str(tenant_id):
-        raise ValueError("Agent kit not found for tenant")
+    if agent_kit_id:
+        agent_kit = agent_kit_service.get_agent_kit(db, agent_kit_id=agent_kit_id)
+        if not agent_kit or str(agent_kit.tenant_id) != str(tenant_id):
+            raise ValueError("Agent kit not found for tenant")
 
     session_title = title
     if not session_title:
+        parts = []
+        if agent_kit:
+            parts.append(agent_kit.name)
         if dataset:
-            session_title = f"{agent_kit.name} on {dataset.name}"
+            parts.append(f"on {dataset.name}")
         elif dataset_group:
-            session_title = f"{agent_kit.name} on {dataset_group.name} (Group)"
+            parts.append(f"on {dataset_group.name} (Group)")
+        session_title = " ".join(parts) if parts else "New Session"
 
     adk_session_id = None
     if settings.ADK_BASE_URL:
@@ -123,7 +126,7 @@ def create_session(
         title=session_title,
         dataset_id=dataset.id if dataset else None,
         dataset_group_id=dataset_group.id if dataset_group else None,
-        agent_kit_id=agent_kit.id,
+        agent_kit_id=agent_kit.id if agent_kit else None,
         tenant_id=tenant_id,
         source="adk" if adk_session_id else "native",
         external_id=adk_session_id,
