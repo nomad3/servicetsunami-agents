@@ -17,8 +17,8 @@ from tools.knowledge_tools import (
     get_entity,
     create_relation,
     record_observation,
-    score_entity,
 )
+from .knowledge_manager import score_entity
 from tools.connector_tools import query_data_source
 from tools.sales_tools import (
     qualify_lead,
