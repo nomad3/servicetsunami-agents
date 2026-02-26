@@ -27,6 +27,24 @@ ADK_UNCONFIGURED_MESSAGE = (
 )
 ADK_FAILURE_MESSAGE = "The ADK service is temporarily unavailable. Please retry in a moment."
 
+# Rough per-token pricing (USD per token) for cost estimation.
+# Gemini 2.5 Flash: ~$0.15/1M input, ~$0.60/1M output
+_COST_PER_INPUT_TOKEN = 0.15 / 1_000_000
+_COST_PER_OUTPUT_TOKEN = 0.60 / 1_000_000
+
+
+def _estimate_cost(total_tokens: int, context: Dict[str, Any] | None = None) -> float:
+    """Estimate USD cost from token counts in the ADK response context."""
+    if not total_tokens:
+        return 0.0
+    ctx = context or {}
+    prompt = ctx.get("prompt_tokens", 0)
+    completion = ctx.get("completion_tokens", 0)
+    if prompt or completion:
+        return round(prompt * _COST_PER_INPUT_TOKEN + completion * _COST_PER_OUTPUT_TOKEN, 6)
+    # Fallback: use blended rate
+    return round(total_tokens * _COST_PER_INPUT_TOKEN, 6)
+
 
 def list_sessions(db: Session, *, tenant_id: uuid.UUID) -> List[ChatSessionModel]:
     return (
@@ -124,11 +142,13 @@ def _append_message(
     content: str,
     context: Dict[str, Any] | None = None,
 ) -> ChatMessage:
+    tokens_used = (context or {}).get("tokens_used") if role == "assistant" else None
     message = ChatMessage(
         session_id=session.id,
         role=role,
         content=content,
         context=context,
+        tokens_used=tokens_used,
     )
     db.add(message)
     db.commit()
@@ -250,11 +270,14 @@ def _generate_agentic_response(
         _run_entity_extraction(db, session, context)
 
         # --- Bridge: mark task completed ---
+        _tokens = context.get("tokens_used", 0) if context else 0
+        _cost = _estimate_cost(_tokens, context)
         if bridge_task_id:
             duration_ms = int((time.time() - bridge_start) * 1000)
             _bridge_complete_task(
                 db, task_id=bridge_task_id, tenant_id=session.tenant_id,
                 agent_id=bridge_agent_id, success=True, duration_ms=duration_ms,
+                tokens_used=_tokens, cost=_cost,
                 details={
                     "response_preview": response_text[:300] if response_text else "",
                     "events_count": len(events),
@@ -300,11 +323,14 @@ def _generate_agentic_response(
                 _run_entity_extraction(db, session, context)
 
                 # --- Bridge: mark task completed after retry ---
+                _tokens = context.get("tokens_used", 0) if context else 0
+                _cost = _estimate_cost(_tokens, context)
                 if bridge_task_id:
                     duration_ms = int((time.time() - bridge_start) * 1000)
                     _bridge_complete_task(
                         db, task_id=bridge_task_id, tenant_id=session.tenant_id,
                         agent_id=bridge_agent_id, success=True, duration_ms=duration_ms,
+                        tokens_used=_tokens, cost=_cost,
                         details={
                             "response_preview": response_text[:300] if response_text else "",
                             "events_count": len(events),
@@ -487,6 +513,8 @@ def _bridge_complete_task(
     duration_ms: int,
     details: dict | None = None,
     error: str | None = None,
+    tokens_used: int = 0,
+    cost: float = 0.0,
 ) -> None:
     """Update the bridged task and create final ExecutionTrace records."""
     try:
@@ -496,6 +524,8 @@ def _bridge_complete_task(
 
         now = datetime.utcnow()
         task.completed_at = now
+        task.tokens_used = tokens_used
+        task.cost = cost
 
         if success:
             task.status = "completed"
@@ -592,6 +622,16 @@ def _build_adk_state(
 
 def _extract_adk_response(events: List[Dict[str, Any]]) -> Tuple[str, Dict[str, Any]]:
     assistant_text = ""
+    total_tokens = 0
+    prompt_tokens = 0
+    completion_tokens = 0
+
+    for event in events:
+        usage = event.get("usageMetadata") or {}
+        total_tokens += usage.get("totalTokenCount", 0)
+        prompt_tokens += usage.get("promptTokenCount", 0)
+        completion_tokens += usage.get("candidatesTokenCount", 0)
+
     for event in reversed(events):
         author = event.get("author")
         if author and author.lower() != "user":
@@ -608,5 +648,10 @@ def _extract_adk_response(events: List[Dict[str, Any]]) -> Tuple[str, Dict[str, 
     if not assistant_text:
         assistant_text = "Agent run completed without a response."
 
-    context = {"adk_events": events}
+    context = {
+        "adk_events": events,
+        "tokens_used": total_tokens,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+    }
     return assistant_text, context
