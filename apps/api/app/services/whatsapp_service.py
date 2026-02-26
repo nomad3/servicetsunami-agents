@@ -327,7 +327,11 @@ class WhatsAppService:
         if is_group:
             return
 
-        # Allow self-messages (user messaging themselves) but skip bot echo replies
+        # Skip messages the user sends to other contacts — only process self-chat or inbound DMs
+        if is_from_me and chat_jid != sender_jid:
+            return
+
+        # Skip bot echo replies in self-chat
         if is_from_me:
             sent_ids = self._sent_message_ids.get(key, set())
             if msg_id and msg_id in sent_ids:
