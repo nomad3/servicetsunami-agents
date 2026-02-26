@@ -11,6 +11,8 @@ fi
 
 # Configure git remote with token for push access
 if [ -n "$GITHUB_TOKEN" ]; then
+    # Strip trailing newlines/whitespace from token (k8s secrets often include them)
+    GITHUB_TOKEN="$(echo -n "$GITHUB_TOKEN" | tr -d '[:space:]')"
     git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
     git config --global --add safe.directory /app
 fi
