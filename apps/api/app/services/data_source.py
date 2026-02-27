@@ -139,7 +139,14 @@ def execute_query(db: Session, data_source_id: uuid.UUID, query: str,
                     resp = client.post(url, headers=headers, json=params or {})
                 else:
                     resp = client.get(url, headers=headers, params=params or {})
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    # Return error as data so the agent can see and self-correct
+                    try:
+                        detail = resp.json()
+                    except Exception:
+                        detail = resp.text[:500]
+                    return [{"error": f"API returned {resp.status_code}", "detail": detail,
+                             "endpoint": endpoint, "params": params}]
                 result = resp.json()
         else:
             # Fallback: use query as search term against configured endpoints
