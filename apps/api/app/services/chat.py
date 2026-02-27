@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Tuple
 import uuid
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import settings
 from app.models.agent import Agent
@@ -244,7 +245,8 @@ def _generate_agentic_response(
             if session.source in ("whatsapp",):
                 # Store ADK session ID in memory_context, keep external_id for channel lookup
                 _mem["adk_session_id"] = adk_session_id
-                session.memory_context = _mem
+                session.memory_context = dict(_mem)  # new dict so SQLAlchemy detects change
+                flag_modified(session, "memory_context")
             else:
                 session.external_id = adk_session_id
                 session.source = "adk"
@@ -314,9 +316,10 @@ def _generate_agentic_response(
                 new_adk_session = client.create_session(user_id=user_id, state=adk_state)
                 adk_session_id = new_adk_session.get("id")
                 if session.source in ("whatsapp",):
-                    _mem = session.memory_context or {}
+                    _mem = dict(session.memory_context or {})
                     _mem["adk_session_id"] = adk_session_id
                     session.memory_context = _mem
+                    flag_modified(session, "memory_context")
                 else:
                     session.external_id = adk_session_id
                 db.commit()
