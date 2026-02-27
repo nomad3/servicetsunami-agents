@@ -461,7 +461,10 @@ class WhatsAppService:
 
             # Route through the same chat service as the web UI
             # This calls ADK supervisor → agent selection → LLM → tools → audit
-            _user_msg, assistant_msg = chat_service.post_user_message(
+            # Run in thread pool to avoid blocking the async event loop
+            # (the synchronous httpx ADK call can take 30-60s for LLM processing)
+            _user_msg, assistant_msg = await asyncio.to_thread(
+                chat_service.post_user_message,
                 db,
                 session=session,
                 user_id=user.id,
