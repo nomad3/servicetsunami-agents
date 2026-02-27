@@ -7,7 +7,7 @@ It orchestrates extraction, staging, and loading activities.
 
 from temporalio import workflow
 from datetime import timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 
 @workflow.defn(sandboxed=False)

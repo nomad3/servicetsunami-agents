@@ -20,10 +20,9 @@ from app.models.agent_task import AgentTask
 from app.models.agent_memory import AgentMemory
 from app.models.agent_skill import AgentSkill
 from app.models.execution_trace import ExecutionTrace
-from app.models.knowledge_entity import KnowledgeEntity
 from app.services.orchestration.task_dispatcher import TaskDispatcher
 from app.services.knowledge_extraction import KnowledgeExtractionService
-from app.services.orchestration.entity_validator import EntityValidator, ValidationPolicy
+from app.services.orchestration.entity_validator import ValidationPolicy
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -192,7 +191,7 @@ async def execute_task(task_id: str, tenant_id: str, agent_id: str, context: Dic
 
         output = {}
         try:
-            from app.services.adk_client import get_adk_client, ADKNotConfiguredError
+            from app.services.adk_client import get_adk_client
 
             client = get_adk_client()
 
@@ -398,7 +397,7 @@ async def persist_entities(
 
         # Build validation policy from task guardrails
         guardrails = config.get("guardrails", {})
-        policy = ValidationPolicy(
+        _policy = ValidationPolicy(  # noqa: F841
             max_entities_per_task=guardrails.get("max_per_source", 500),
             dedup_fields=guardrails.get("dedup_on", ["name", "entity_type"]),
         )

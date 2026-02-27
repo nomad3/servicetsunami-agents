@@ -66,7 +66,6 @@ async def execute_pipeline(db: Session, data_pipeline_id: uuid.UUID) -> Dict[str
     pipeline_type = config.get("type")
 
     # Create PipelineRun record
-    from app.models.pipeline_run import PipelineRun
     from datetime import datetime
 
     run_id = uuid.uuid4()

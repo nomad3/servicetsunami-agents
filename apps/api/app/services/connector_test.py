@@ -1,9 +1,7 @@
 """
 Service for testing connector configurations and establishing connections.
 """
-from typing import Dict, Any, Optional
-from datetime import datetime
-import asyncio
+from typing import Dict, Any
 
 
 async def test_snowflake_connection(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -25,7 +23,7 @@ async def test_snowflake_connection(config: Dict[str, Any]) -> Dict[str, Any]:
         conn.close()
         return {
             "success": True,
-            "message": f"Connected to Snowflake successfully",
+            "message": "Connected to Snowflake successfully",
             "metadata": {"version": version}
         }
     except Exception as e:
