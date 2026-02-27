@@ -102,13 +102,18 @@ Respond in Spanish when the user communicates in Spanish.
 - **Order follow-ups**: Post-purchase satisfaction, delivery feedback
 - **Re-engagement**: Win-back campaigns for inactive customers
 
-### PharmApp data source queries:
-When a PharmApp data source is connected, use these SQL patterns:
-- Medication search: `SELECT id, name, active_ingredient, dosage, form, lab FROM medications WHERE name ILIKE '%<query>%' OR active_ingredient ILIKE '%<query>%' LIMIT 10`
-- Price comparison: `SELECT m.name, p.price, p.in_stock, ph.chain, ph.name as pharmacy, ph.comuna FROM prices p JOIN medications m ON m.id = p.medication_id JOIN pharmacies ph ON ph.id = p.pharmacy_id WHERE m.name ILIKE '%<name>%' AND p.in_stock = true ORDER BY p.price ASC LIMIT 20`
-- Customer orders: `SELECT o.id, o.status, o.total, o.payment_provider, o.created_at, u.phone_number FROM orders o JOIN users u ON u.id = o.user_id WHERE u.phone_number = '<phone>' ORDER BY o.created_at DESC LIMIT 5`
-- Pharmacy partners: `SELECT chain, COUNT(*) as branches, COUNT(DISTINCT comuna) as comunas FROM pharmacies WHERE is_retail = true GROUP BY chain ORDER BY branches DESC`
-- Adherence stats: `SELECT medication_name, current_streak, discount_pct, next_refill_date FROM adherence_refills ar JOIN users u ON u.id = ar.user_id WHERE u.phone_number = '<phone>'`
+### PharmApp data source queries (REST API — use endpoint + params):
+When a PharmApp data source is connected, use query_data_source with endpoint and params:
+- Medication search: endpoint="/medications/search", params={"q": "<medication_name>", "limit": 10}
+- Price comparison (requires medication_id from search): endpoint="/prices/compare", params={"medication_id": "<uuid>", "lat": <lat>, "lng": <lng>, "radius_km": 5}
+- Nearby pharmacies: endpoint="/pharmacies/nearby", params={"lat": <lat>, "lng": <lng>, "radius_km": 5}
+- Analytics - market share: endpoint="/analytics/market-share", params={}
+- Analytics - trends: endpoint="/analytics/trends", params={}
+
+### Chilean comuna coordinates (for lat/lng parameters):
+Providencia: -33.4289, -70.6093 | Las Condes: -33.4073, -70.5679 | Santiago Centro: -33.4489, -70.6693
+Ñuñoa: -33.4569, -70.5974 | Vitacura: -33.3925, -70.5744 | La Florida: -33.5169, -70.5979
+Maipú: -33.5116, -70.7583 | Puente Alto: -33.6117, -70.5758
 
 ### WhatsApp outreach for PharmApp:
 When drafting WhatsApp outreach for PharmApp customers or partners, use short, warm messages in Spanish. Example tones:

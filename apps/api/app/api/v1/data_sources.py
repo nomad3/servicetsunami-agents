@@ -137,18 +137,28 @@ def execute_data_source_query_internal(
     *,
     db: Session = Depends(deps.get_db),
     data_source_id: uuid.UUID,
-    query: str = Body(..., embed=True),
+    query: str = Body("", embed=True),
     tenant_id: Optional[str] = Body(None, embed=True),
+    endpoint: Optional[str] = Body(None, embed=True),
+    params: Optional[dict] = Body(None, embed=True),
+    method: Optional[str] = Body("GET", embed=True),
     x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
 ):
     """
     Execute a query on a data source (internal, no JWT required).
     Used by ADK agents to query tenant data.
+
+    For REST API sources, pass endpoint + params for structured calls:
+      {"endpoint": "/prices/compare", "params": {"medication_id": "...", "lat": -33.43}}
+    For databases, pass query with SQL.
     """
     if x_internal_key not in (settings.API_INTERNAL_KEY, settings.MCP_API_KEY):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal key")
     try:
-        results = data_source_service.execute_query(db, data_source_id=data_source_id, query=query)
+        results = data_source_service.execute_query(
+            db, data_source_id=data_source_id, query=query,
+            endpoint=endpoint, params=params, method=method or "GET",
+        )
         return results
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

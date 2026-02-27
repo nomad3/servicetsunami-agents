@@ -3,6 +3,7 @@
 Bridges ADK agents to tenant-connected databases and APIs via the
 FastAPI backend's existing connector infrastructure.
 """
+import json
 import logging
 import re
 from typing import Optional
@@ -15,6 +16,17 @@ logger = logging.getLogger(__name__)
 
 _UUID_PATTERN = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
 _cached_default_tenant_id = None
+
+
+def _parse_json(val, default=None):
+    if val is None:
+        return default
+    if isinstance(val, (dict, list)):
+        return val
+    try:
+        return json.loads(val)
+    except (json.JSONDecodeError, TypeError):
+        return default
 
 
 def _resolve_tenant_id(tenant_id: str) -> str:
@@ -56,20 +68,28 @@ async def query_data_source(
     query: str,
     connector_id: Optional[str] = None,
     connector_type: Optional[str] = None,
+    endpoint: Optional[str] = None,
+    params: Optional[str] = None,
+    method: str = "GET",
 ) -> dict:
     """Query a tenant's connected data source (database, API, or warehouse).
 
-    Executes a read-only SQL query or API call against a tenant's configured
-    connector. Use this to look up customer records, order status, inventory,
-    product catalog, or any data the tenant has connected.
+    For REST API data sources, you can call specific API endpoints directly
+    by providing endpoint and params. For databases, use SQL queries.
 
     Args:
         tenant_id: Tenant context for isolation.
         query: SQL SELECT query for databases, or search term for REST APIs.
+            Ignored when endpoint is provided.
         connector_id: Specific connector UUID to query. If omitted, uses the
             first active connector matching connector_type (or any active one).
         connector_type: Filter by type: postgres, mysql, snowflake, databricks, api.
             Ignored if connector_id is provided.
+        endpoint: REST API endpoint path to call, e.g. "/prices/compare" or
+            "/pharmacies/nearby". Only for REST API data sources.
+        params: Query parameters as JSON string for the API endpoint,
+            e.g. '{"medication_id": "uuid", "lat": -33.43, "lng": -70.61}'.
+        method: HTTP method for API calls: "GET" or "POST". Default "GET".
 
     Returns:
         Dict with columns, rows, row_count, and connector metadata.
@@ -78,16 +98,17 @@ async def query_data_source(
     client = _get_http_client()
     internal_headers = {"X-Internal-Key": settings.mcp_api_key}
     tenant_id = _resolve_tenant_id(tenant_id)
+    parsed_params = _parse_json(params, {})
     try:
         # If no connector_id, discover one via internal endpoint
         if not connector_id:
-            params = {}
+            disc_params = {}
             if tenant_id:
-                params["tenant_id"] = tenant_id
+                disc_params["tenant_id"] = tenant_id
             resp = await client.get(
                 "/api/v1/data_sources/internal/list",
                 headers=internal_headers,
-                params=params,
+                params=disc_params,
             )
             resp.raise_for_status()
             sources = resp.json()
@@ -106,11 +127,18 @@ async def query_data_source(
                     sources = preferred
             connector_id = sources[0]["id"]
 
+        # Build request body
+        body = {"query": query, "tenant_id": tenant_id}
+        if endpoint:
+            body["endpoint"] = endpoint
+            body["params"] = parsed_params
+            body["method"] = method
+
         # Execute query via the internal query endpoint
         resp = await client.post(
             f"/api/v1/data_sources/{connector_id}/internal-query",
             headers=internal_headers,
-            json={"query": query, "tenant_id": tenant_id},
+            json=body,
         )
         resp.raise_for_status()
         result = resp.json()

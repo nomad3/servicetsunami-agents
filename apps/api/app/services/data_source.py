@@ -46,7 +46,8 @@ def delete_data_source(db: Session, *, data_source_id: uuid.UUID) -> DataSource 
         db.commit()
     return data_source
 
-def execute_query(db: Session, data_source_id: uuid.UUID, query: str) -> List[dict]:
+def execute_query(db: Session, data_source_id: uuid.UUID, query: str,
+                   endpoint: str = None, params: dict = None, method: str = "GET") -> List[dict]:
     data_source = get_data_source(db, data_source_id)
     if not data_source:
         raise ValueError("Data source not found")
@@ -130,27 +131,38 @@ def execute_query(db: Session, data_source_id: uuid.UUID, query: str) -> List[di
                 token = auth_resp.json().get("access_token")
                 headers["Authorization"] = f"Bearer {token}"
 
-        # Use query as search term against configured endpoints
-        endpoints = config.get('endpoints', {})
-        search_endpoint = endpoints.get('search') or endpoints.get('medications', '/medications')
+        # Structured API call: agent specifies endpoint + params directly
+        if endpoint:
+            with httpx.Client(timeout=30) as client:
+                url = f"{base_url}{endpoint}"
+                if method.upper() == "POST":
+                    resp = client.post(url, headers=headers, json=params or {})
+                else:
+                    resp = client.get(url, headers=headers, params=params or {})
+                resp.raise_for_status()
+                result = resp.json()
+        else:
+            # Fallback: use query as search term against configured endpoints
+            endpoints_cfg = config.get('endpoints', {})
+            search_endpoint = endpoints_cfg.get('search') or endpoints_cfg.get('medications', '/medications')
 
-        # If the LLM sent a SQL query, extract the search term from ILIKE/LIKE patterns
-        search_term = query
-        if search_term.strip().upper().startswith('SELECT'):
-            ilike_match = re.search(r"ILIKE\s+'%([^%]+)%'", search_term, re.IGNORECASE)
-            if not ilike_match:
-                ilike_match = re.search(r"LIKE\s+'%([^%]+)%'", search_term, re.IGNORECASE)
-            if ilike_match:
-                search_term = ilike_match.group(1)
+            # If the LLM sent a SQL query, extract the search term
+            search_term = query
+            if search_term.strip().upper().startswith('SELECT'):
+                ilike_match = re.search(r"ILIKE\s+'%([^%]+)%'", search_term, re.IGNORECASE)
+                if not ilike_match:
+                    ilike_match = re.search(r"LIKE\s+'%([^%]+)%'", search_term, re.IGNORECASE)
+                if ilike_match:
+                    search_term = ilike_match.group(1)
 
-        with httpx.Client(timeout=30) as client:
-            resp = client.get(
-                f"{base_url}{search_endpoint}",
-                headers=headers,
-                params={"q": search_term, "limit": 20},
-            )
-            resp.raise_for_status()
-            result = resp.json()
+            with httpx.Client(timeout=30) as client:
+                resp = client.get(
+                    f"{base_url}{search_endpoint}",
+                    headers=headers,
+                    params={"q": search_term, "limit": 20},
+                )
+                resp.raise_for_status()
+                result = resp.json()
 
         if isinstance(result, list):
             return result[:100]
