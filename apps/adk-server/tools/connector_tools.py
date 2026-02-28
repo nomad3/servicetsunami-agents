@@ -72,28 +72,28 @@ async def query_data_source(
     params: Optional[str] = None,
     method: str = "GET",
 ) -> dict:
-    """Query a tenant's connected data source (database, API, or warehouse).
+    """Query a tenant's connected data source using REST API endpoints or SQL.
 
-    For REST API data sources, you can call specific API endpoints directly
-    by providing endpoint and params. For databases, use SQL queries.
+    IMPORTANT: For REST API data sources (like PharmApp/Remedia), you MUST use
+    the endpoint and params parameters. SQL queries will NOT work and will
+    return 500 errors. Only use SQL for database-type data sources.
 
     Args:
-        tenant_id: Tenant context for isolation.
-        query: SQL SELECT query for databases, or search term for REST APIs.
-            Ignored when endpoint is provided.
-        connector_id: Specific connector UUID to query. If omitted, uses the
-            first active connector matching connector_type (or any active one).
+        tenant_id: Tenant context for isolation. Use "auto" if unknown.
+        query: SQL query for database sources only. For REST API sources,
+            this is ignored — use endpoint and params instead.
+        connector_id: Specific connector UUID to query. If omitted, auto-discovers
+            the first active connector matching connector_type.
         connector_type: Filter by type: postgres, mysql, snowflake, databricks, api.
-            Ignored if connector_id is provided.
-        endpoint: REST API endpoint path to call, e.g. "/prices/compare" or
-            "/pharmacies/nearby". Only for REST API data sources.
-        params: Query parameters as JSON string for the API endpoint,
-            e.g. '{"medication_id": "uuid", "lat": -33.43, "lng": -70.61}'.
-        method: HTTP method for API calls: "GET" or "POST". Default "GET".
+        endpoint: REST API endpoint path, e.g. "/medications/search",
+            "/prices/compare", "/pharmacies/nearby". Required for API sources.
+        params: JSON string of query parameters for the endpoint,
+            e.g. '{"q": "paracetamol", "limit": 10}' or
+            '{"medication_id": "uuid", "lat": -33.43, "lng": -70.61}'.
+        method: HTTP method: "GET" or "POST". Default "GET".
 
     Returns:
-        Dict with columns, rows, row_count, and connector metadata.
-        On error, returns {error: str}.
+        Dict with columns, rows, row_count on success. {error: str} on failure.
     """
     client = _get_http_client()
     internal_headers = {"X-Internal-Key": settings.mcp_api_key}
