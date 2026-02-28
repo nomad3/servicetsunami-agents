@@ -139,6 +139,56 @@ class WhatsAppService:
         finally:
             db.close()
 
+    # ── Session blob persistence ────────────────────────────────────
+
+    def _save_session_to_db(self, tenant_id: str, account_id: str):
+        """Compress the neonize SQLite file and store in channel_accounts.session_blob."""
+        import gzip
+        import os
+        path = self._client_name(tenant_id, account_id)
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+            compressed = gzip.compress(raw)
+            db = self._get_db()
+            try:
+                acct = self._get_or_create_account(db, tenant_id, account_id)
+                acct.session_blob = compressed
+                db.commit()
+                logger.info(f"Saved neonize session to DB for {tenant_id[:8]}:{account_id} ({len(raw)}→{len(compressed)} bytes)")
+            except Exception:
+                logger.exception("Failed to save session blob")
+                db.rollback()
+            finally:
+                db.close()
+        except Exception:
+            logger.exception(f"Failed to read neonize session file {path}")
+
+    def _restore_session_from_db(self, tenant_id: str, account_id: str) -> bool:
+        """Decompress session_blob and write neonize SQLite file to disk. Returns True if restored."""
+        import gzip
+        import os
+        db = self._get_db()
+        try:
+            acct = self._get_or_create_account(db, tenant_id, account_id)
+            if not acct.session_blob:
+                logger.info(f"No session blob for {tenant_id[:8]}:{account_id}")
+                return False
+            raw = gzip.decompress(acct.session_blob)
+            path = self._client_name(tenant_id, account_id)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(raw)
+            logger.info(f"Restored neonize session from DB for {tenant_id[:8]}:{account_id} ({len(raw)} bytes)")
+            return True
+        except Exception:
+            logger.exception(f"Failed to restore session blob for {tenant_id[:8]}:{account_id}")
+            return False
+        finally:
+            db.close()
+
     # ── Client lifecycle ─────────────────────────────────────────────
 
     def _create_client(self, tenant_id: str, account_id: str) -> NewAClient:
@@ -195,6 +245,7 @@ class WhatsAppService:
                 pass
             self._update_account_status(tenant_id, account_id, "connected", phone=phone)
             self._log_event(tenant_id, account_id, "paired")
+            self._save_session_to_db(tenant_id, account_id)
 
         # Connected
         @client.event(ConnectedEv)
@@ -212,11 +263,13 @@ class WhatsAppService:
                 pass
             self._update_account_status(tenant_id, account_id, "connected", phone=phone)
             self._log_event(tenant_id, account_id, "connection_opened")
+            self._save_session_to_db(tenant_id, account_id)
 
-        # Disconnected — trigger auto-reconnect
+        # Disconnected — save session (keys may have rotated), then auto-reconnect
         @client.event(DisconnectedEv)
         async def on_disconnected(c: NewAClient, event: DisconnectedEv):
             logger.warning(f"DisconnectedEv for {key}")
+            self._save_session_to_db(tenant_id, account_id)
             self._statuses[key] = "disconnected"
             self._update_account_status(tenant_id, account_id, "disconnected")
             self._log_event(tenant_id, account_id, "connection_closed")
@@ -609,6 +662,7 @@ class WhatsAppService:
                         self._statuses[key] = "connected"
                         self._qr_codes.pop(key, None)
                         self._update_account_status(tenant_id, account_id, "connected", phone=phone)
+                        self._save_session_to_db(tenant_id, account_id)
                         return {
                             "qr_data_url": None,
                             "message": "Already connected (existing session restored)",
@@ -654,6 +708,7 @@ class WhatsAppService:
                     self._statuses[key] = "connected"
                     self._qr_codes.pop(key, None)
                     self._update_account_status(tenant_id, account_id, "connected", phone=phone)
+                    self._save_session_to_db(tenant_id, account_id)
             except Exception as e:
                 logger.warning(f"Active detection check failed for {key}: {type(e).__name__}: {e}")
 
@@ -826,6 +881,8 @@ class WhatsAppService:
                 account_id = acct.account_id
                 logger.info(f"Restoring WhatsApp connection for {tenant_id}:{account_id} (status={acct.status}, phone={acct.phone_number})")
                 try:
+                    # Restore neonize SQLite session from PostgreSQL before reconnecting
+                    self._restore_session_from_db(tenant_id, account_id)
                     await self.reconnect(tenant_id, account_id)
                 except Exception:
                     logger.exception(f"Failed to restore {tenant_id}:{account_id}")

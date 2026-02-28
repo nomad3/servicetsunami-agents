@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, JSON, DateTime
+from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, JSON, DateTime, LargeBinary
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -25,6 +25,7 @@ class ChannelAccount(Base):
     reconnect_attempts = Column(Integer, default=0)
     phone_number = Column(String, nullable=True)
     display_name = Column(String, nullable=True)
+    session_blob = Column(LargeBinary, nullable=True)  # gzip-compressed neonize SQLite DB
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
