@@ -23,6 +23,13 @@ from app.workflows.activities.channel_health import (
 )
 from app.workflows.follow_up import FollowUpWorkflow
 from app.workflows.activities.follow_up import execute_followup_action
+from app.workflows.monthly_billing import MonthlyBillingWorkflow
+from app.workflows.activities.monthly_billing import (
+    aggregate_billing_visits,
+    generate_billing_invoices,
+    send_billing_invoices,
+    schedule_billing_followups,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -56,6 +63,7 @@ async def run_orchestration_worker():
             TaskExecutionWorkflow,
             ChannelHealthMonitorWorkflow,
             FollowUpWorkflow,
+            MonthlyBillingWorkflow,
         ],
         activities=[
             dispatch_task,
@@ -67,6 +75,10 @@ async def run_orchestration_worker():
             reconnect_channel,
             update_channel_health_status,
             execute_followup_action,
+            aggregate_billing_visits,
+            generate_billing_invoices,
+            send_billing_invoices,
+            schedule_billing_followups,
         ],
     )
 

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # Credential Vault encryption (Fernet key — generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
     ENCRYPTION_KEY: str | None = None
 
+    # HealthPets API
+    HEALTHPETS_API_URL: str = "http://localhost:8000"
+
     class Config:
         env_file = ".env"
 

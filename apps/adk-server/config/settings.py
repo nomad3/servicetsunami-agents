@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # FastAPI backend (for ADK -> API callbacks like lead scoring)
     api_base_url: str = "http://servicetsunami-api"
 
+    # Anthropic (for Claude vision in cardiac_analyst)
+    anthropic_api_key: str = ""
+
+    # Health-Pets API (for billing callbacks)
+    healthpets_api_url: str = "http://localhost:8000"
+
     # Vertex AI Vector Search
     vertex_project: str = "ai-agency-479516"
     vertex_location: str = "us-central1"

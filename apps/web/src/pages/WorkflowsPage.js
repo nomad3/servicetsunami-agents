@@ -24,6 +24,7 @@ import {
   FaDatabase,
   FaDollarSign,
   FaDraftingCompass,
+  FaFileInvoiceDollar,
   FaExclamationTriangle,
   FaHeartbeat,
   FaLayerGroup,
@@ -151,6 +152,20 @@ const WORKFLOW_DEFINITIONS = [
     steps: [
       { name: 'sleep(delay_hours)', type: 'timer', description: 'Durable timer — waits configured hours' },
       { name: 'execute_followup_action', timeout: '5m', retry: '3x / 30s', type: 'branch', description: 'Routes to: send_whatsapp | update_stage | remind' },
+    ],
+  },
+  {
+    id: 'monthly-billing',
+    name: 'MonthlyBillingWorkflow',
+    description: 'Monthly veterinary billing settlement: aggregate visits, generate invoices, send to clinics, schedule payment follow-ups',
+    queue: 'orchestration',
+    icon: FaFileInvoiceDollar,
+    color: '#34d399',
+    steps: [
+      { name: 'aggregate_visits', timeout: '5m', retry: '3x / 30s', type: 'start', description: 'Query completed visits per clinic for the billing period' },
+      { name: 'generate_invoices', timeout: '10m', retry: '3x / 30s', description: 'Calculate totals from fee schedules and create invoices' },
+      { name: 'send_invoices', timeout: '5m', retry: '3x / 30s', description: 'Deliver invoice PDFs via email and WhatsApp' },
+      { name: 'schedule_followups', timeout: '1m', retry: '3x / 30s', type: 'end', description: 'Create 7-day reminder workflows for unpaid invoices' },
     ],
   },
 ];

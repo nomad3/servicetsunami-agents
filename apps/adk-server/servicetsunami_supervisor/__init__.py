@@ -12,12 +12,16 @@ from .tester import tester
 from .dev_ops import dev_ops
 from .user_agent import user_agent
 from .personal_assistant import personal_assistant
+from .cardiac_analyst import cardiac_analyst
+from .billing_agent import billing_agent
+from .vet_report_generator import vet_report_generator
 
 # Team supervisors
 from .dev_team import dev_team
 from .data_team import data_team
 from .sales_team import sales_team
 from .marketing_team import marketing_team
+from .vet_supervisor import vet_supervisor
 
 # Root supervisor (must be imported LAST since it imports team supervisors)
 from .agent import root_agent
@@ -29,6 +33,7 @@ __all__ = [
     "data_team",
     "sales_team",
     "marketing_team",
+    "vet_supervisor",
     # Personal assistant
     "personal_assistant",
     # Leaf agents
@@ -43,4 +48,6 @@ __all__ = [
     "tester",
     "dev_ops",
     "user_agent",
+    "cardiac_analyst",
+    "billing_agent",
 ]
