@@ -1,9 +1,8 @@
 """
-Skill Router Service - Stub after OpenClaw removal.
+Skill Router Service — Stub.
 
-OpenClaw integration has been removed. This module retains the SkillRouter
-class signature so that existing imports don't break, but all methods return
-'not available' until a replacement skill execution backend is wired in.
+Skill execution backend has not been wired yet. This module retains the
+SkillRouter class signature so that existing imports don't break.
 """
 
 import uuid
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class SkillRouter:
-    """Stub skill router — OpenClaw backend has been removed."""
+    """Stub skill router — no execution backend configured."""
 
     def __init__(self, db: Session, tenant_id: uuid.UUID):
         self.db = db
@@ -29,7 +28,7 @@ class SkillRouter:
         task_id: Optional[uuid.UUID] = None,
         agent_id: Optional[uuid.UUID] = None,
     ) -> Dict[str, Any]:
-        return {"status": "error", "error": "Skill execution backend not available (OpenClaw removed)"}
+        return {"status": "error", "error": "Skill execution backend not available"}
 
     def health_check(self) -> Dict[str, Any]:
         return {"status": "not_available", "healthy": False}
@@ -40,4 +39,4 @@ class SkillRouter:
         params: Dict[str, Any] = None,
         timeout_seconds: int = 30,
     ) -> Dict[str, Any]:
-        return {"status": "error", "error": "Gateway not available (OpenClaw removed)"}
+        return {"status": "error", "error": "Gateway not available"}

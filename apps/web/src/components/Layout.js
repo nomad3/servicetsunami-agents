@@ -15,7 +15,7 @@ import {
   FaPlug as PlugFill,
   FaRobot as Robot,
   FaSun as SunFill,
-  FaTerminal as TerminalFill
+  FaProjectDiagram as ProjectDiagramFill
 } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -63,7 +63,7 @@ const Layout = ({ children }) => {
       items: [
         { path: '/chat', icon: ChatDotsFill, label: 'AI Command', description: 'Command your AI agent fleet' },
         { path: '/agents', icon: Robot, label: 'Agent Fleet', description: 'Manage your AI agent fleet' },
-        { path: '/task-console', icon: TerminalFill, label: 'Workflow Audit', description: 'Monitor workflows, tasks, and execution traces' },
+        { path: '/workflows', icon: ProjectDiagramFill, label: 'Workflows', description: 'Workflow designs and execution audit' },
         { path: '/memory', icon: DatabaseFill, label: 'Memory', description: 'Entities, signals, and relations' },
       ]
     },

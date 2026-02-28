@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ServiceTsunami is an enterprise-grade agentic orchestration platform built as a monorepo. It provides multi-tenant control plane capabilities for managing AI agents, data pipelines, skill execution, and deployments. The platform integrates managed OpenClaw instances per tenant for 50+ skill integrations (Slack, Gmail, GitHub, etc.) with enterprise-grade credential management, traceability, and LLM-agnostic execution. Deploys exclusively via Kubernetes (GKE) using Helm charts and GitHub Actions.
+ServiceTsunami is an enterprise-grade agentic orchestration platform built as a monorepo. It provides multi-tenant control plane capabilities for managing AI agents, data pipelines, skill execution, and deployments. Features enterprise-grade credential management, traceability, and LLM-agnostic execution. Deploys exclusively via Kubernetes (GKE) using Helm charts and GitHub Actions.
 
 ## Architecture
 
@@ -61,28 +61,23 @@ This is a **Turborepo monorepo** managed with `pnpm` workspaces:
 
 **Multi-Agent Orchestration**: Agent groups (`agent_group.py`) organize agents into teams. Agents have relationships (`agent_relationship.py`: supervises, delegates_to, collaborates_with), assigned tasks (`agent_task.py`), inter-agent messaging (`agent_message.py`), learnable skills (`agent_skill.py`), and semantic memory (`agent_memory.py`). Task execution is orchestrated through `TaskExecutionWorkflow` (Temporal) with 5 activities: dispatch → recall memory → execute via ADK → persist entities → evaluate results. All steps are recorded in `ExecutionTrace` for full in-platform traceability.
 
-**Managed OpenClaw Instances**: Each tenant gets an isolated OpenClaw pod deployed via Helm (`OpenClawProvisionWorkflow`). Models: `tenant_instance.py` tracks pod lifecycle (provisioning/running/stopped/error). OpenClaw provides 50+ skill integrations (Slack, Gmail, GitHub, WhatsApp, Notion, Jira, etc.). Instance lifecycle endpoints (`instances.py`) use kubectl for stop/start/restart and Temporal workflows for create/upgrade. A live health probe verifies actual pod connectivity via HTTP + WebSocket.
-
-**OpenClaw Gateway Protocol**: OpenClaw uses a WebSocket-only protocol on port 18789 (HTTP POST returns 405). Connection flow: connect → receive challenge (nonce) → authenticate with token → send `sessions_send` for skill execution → collect response. Auth token stored in k8s secret `openclaw-secrets` as `OPENCLAW_GATEWAY_TOKEN`.
-
-**Skills Gateway**: The `SkillRouter` (`apps/api/app/services/orchestration/skill_router.py`) orchestrates skill execution via WebSocket: resolves tenant's OpenClaw instance → circuit breaker check (3 failures / 5min window) → validates SkillConfig → decrypts credentials → resolves LLM model → calls OpenClaw gateway (WebSocket challenge-response) → logs trace. Per-skill LLM selection via `llm_config_id`. API: `POST /api/v1/skills/execute` and `GET /api/v1/skills/health`.
-
-**Credential Vault**: `CredentialVault` (`apps/api/app/services/orchestration/credential_vault.py`) provides Fernet encryption for skill API keys/tokens. Credentials are stored encrypted in `SkillCredential`, decrypted at runtime, injected per-request, never stored in OpenClaw pods.
+**Credential Vault**: `CredentialVault` (`apps/api/app/services/orchestration/credential_vault.py`) provides Fernet encryption for skill API keys/tokens. Credentials are stored encrypted in `SkillCredential`, decrypted at runtime, injected per-request.
 
 **Knowledge Graph**: Entities (`knowledge_entity.py`) and relations (`knowledge_relation.py`) form a knowledge graph. Supporting tables: `knowledge_observations` (raw facts from conversations), `knowledge_entity_history` (entity version tracking). Knowledge is extracted from chat and content via `knowledge_extraction.py`. The ADK knowledge_manager agent provides semantic search, entity CRUD, and graph traversal. Note: pgvector is not installed on Cloud SQL; the ADK knowledge_graph service falls back to text-based ILIKE search.
 
 **Temporal workflows**: Durable workflow execution across two task queues. Workers in `apps/api/app/workers/`:
-- `orchestration_worker.py`: Task execution and OpenClaw provisioning workflows (queue: `servicetsunami-orchestration`)
+- `orchestration_worker.py`: Task execution, channel health, and follow-up workflows (queue: `servicetsunami-orchestration`)
 - `databricks_worker.py`: Dataset sync, knowledge extraction, agent kit, data source sync (queue: `servicetsunami-databricks`)
 - `scheduler_worker.py`: Pipeline scheduling (cron/interval-based, polls every 60s)
 
 Workflows in `apps/api/app/workflows/`:
 - `task_execution.py`: `TaskExecutionWorkflow` — dispatch, recall memory, execute, persist entities, evaluate (5 steps)
-- `openclaw_provision.py`: `OpenClawProvisionWorkflow` — generate values, helm install, wait pod, health check, register instance (5 steps)
 - `dataset_sync.py`: `DatasetSyncWorkflow` — sync to bronze, transform to silver, update metadata
 - `data_source_sync.py`: `DataSourceSyncWorkflow` + `ScheduledSyncWorkflow` — connector extraction with incremental sync
 - `knowledge_extraction.py`: `KnowledgeExtractionWorkflow` — LLM entity extraction from chat sessions
 - `agent_kit_execution.py`: `AgentKitExecutionWorkflow` — agent kit task bundle execution
+- `channel_health.py`: `ChannelHealthMonitorWorkflow` — long-running channel health checks with continue_as_new
+- `follow_up.py`: `FollowUpWorkflow` — durable timer + follow-up action (WhatsApp, stage update, reminder)
 
 **Pipeline Run Tracking**: `pipeline_run.py` model tracks pipeline execution history with status, duration, and error details. The scheduler worker handles automated pipeline execution.
 
@@ -180,7 +175,6 @@ Core domain models (all inherit from SQLAlchemy Base, include `tenant_id` Foreig
 - `knowledge_entity.py`, `knowledge_relation.py`: Knowledge graph
 - `llm_provider.py`, `llm_model.py`, `llm_config.py`: Multi-LLM provider configuration
 - `execution_trace.py`: Step-by-step audit trail for task execution
-- `tenant_instance.py`: Managed OpenClaw instance lifecycle per tenant
 - `skill_config.py`: Per-tenant skill enablement, approval gates, rate limits, LLM override
 - `skill_credential.py`: Encrypted API keys/tokens for skill integrations
 
@@ -195,9 +189,9 @@ Business logic layer (one service per model):
 - `adk_client.py`, `mcp_client.py`: Google ADK and MCP server clients
 - `knowledge.py`, `knowledge_extraction.py`: Knowledge graph operations and extraction
 - `branding.py`, `features.py`, `tenant_analytics.py`: Tenant customization services
-- `tenant_instances.py`, `skill_configs.py`: Instance and skill CRUD services
+- `skill_configs.py`: Skill configuration CRUD service
 - `orchestration/`: Orchestration services package
-  - `skill_router.py`: Routes skill execution through tenant's OpenClaw instance with LLM selection
+  - `skill_router.py`: Skill execution router (stub — backend not yet wired)
   - `credential_vault.py`: Fernet-encrypted credential storage with CRUD helpers
   - `task_dispatcher.py`: Agent selection and task dispatch
 - Pattern: `{resource}s.py` (e.g., `agents.py`, `datasets.py`, `agent_groups.py`, `vector_stores.py`)
@@ -205,7 +199,7 @@ Business logic layer (one service per model):
 ### Workers (`apps/api/app/workers/`)
 
 Temporal workers for async processing:
-- `orchestration_worker.py`: TaskExecutionWorkflow + OpenClawProvisionWorkflow (queue: `servicetsunami-orchestration`)
+- `orchestration_worker.py`: TaskExecutionWorkflow + ChannelHealthMonitorWorkflow + FollowUpWorkflow (queue: `servicetsunami-orchestration`)
 - `databricks_worker.py`: DatasetSync, KnowledgeExtraction, AgentKitExecution, DataSourceSync workflows (queue: `servicetsunami-databricks`)
 - `scheduler_worker.py`: Automated pipeline execution (cron/interval scheduling, polls every 60s)
 
@@ -219,8 +213,8 @@ FastAPI routers mounted at `/api/v1`. All routes use dependency injection via `d
 
 Organized in 3-section navigation:
 - **INSIGHTS**: `DashboardPage.js`, `DatasetsPage.js`
-- **AI OPERATIONS**: `ChatPage.js`, `AgentsPage.js`, `AgentKitsPage.js`, `TeamsPage.js`, `MemoryPage.js`, `TaskConsolePage.js`
-- **WORKSPACE**: `DataSourcesPage.js`, `DataPipelinesPage.js`, `NotebooksPage.js`, `VectorStoresPage.js`, `ConnectorsPage.js`, `IntegrationsPage.js`, `ToolsPage.js`
+- **AI OPERATIONS**: `ChatPage.js`, `AgentsPage.js`, `WorkflowsPage.js`, `MemoryPage.js`
+- **WORKSPACE**: `IntegrationsPage.js`, `NotebooksPage.js`, `VectorStoresPage.js`, `ToolsPage.js`
 - **SETTINGS**: `SettingsPage.js`, `LLMSettingsPage.js`, `BrandingPage.js`
 - **AUTH**: `RegisterPage.js`, `AgentWizardPage.js`
 
@@ -229,7 +223,6 @@ Organized in 3-section navigation:
 - `Layout.js`: Authenticated layout with glassmorphic dark theme sidebar
 - `wizard/`: Agent creation wizard (5-step flow with localStorage draft persistence). 8 templates including Research Agent, Lead Generation, and Knowledge Manager. 5 tools: sql_query, calculator, data_summary, entity_extraction, knowledge_search
 - `TaskTimeline.js`: Execution trace timeline with step icons and duration badges
-- `OpenClawInstanceCard.js`: Per-tenant OpenClaw instance lifecycle card (deploy/stop/start/restart/destroy) with live health probe (green "Live" / red "Unreachable" badge)
 - `SkillsConfigPanel.js`: Skill enablement grid with dynamic credential forms from registry and test execution button
 
 ## Environment Configuration
@@ -264,10 +257,6 @@ DATABRICKS_SYNC_ENABLED=true
 # ADK
 ADK_BASE_URL=http://adk-server:8080
 ADK_APP_NAME=servicetsunami_supervisor
-
-# OpenClaw
-OPENCLAW_CHART_PATH=/opt/openclaw-k8s/helm/openclaw  # Helm chart for per-tenant instances
-OPENCLAW_GATEWAY_TOKEN=<from-k8s-secret>  # WebSocket auth token (stored in openclaw-secrets k8s secret)
 
 # Credential Vault
 ENCRYPTION_KEY=<fernet-key>  # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -358,7 +347,6 @@ When making manual changes, always replicate them to Helm, Git, and Terraform to
 
 - `docs/KUBERNETES_DEPLOYMENT.md`: Full Kubernetes deployment runbook
 - `docs/plans/`: Implementation plans and design documents
-  - `2026-02-21-temporal-openclaw-architecture-design.md`: Complete Temporal workflows + OpenClaw WebSocket integration architecture
   - `2025-02-13-enterprise-orchestration-engine-design.md`: Orchestration engine design document
   - `2025-02-13-enterprise-orchestration-engine-plan.md`: 18-task implementation plan
   - `2026-02-20-whatsapp-agent-integration-platform-design.md`: WhatsApp agent + external app integration
