@@ -37,6 +37,15 @@ from app.workflows.activities.remedia import (
     monitor_remedia_payment,
     track_remedia_delivery,
 )
+from app.workflows.deal_pipeline import DealPipelineWorkflow
+from app.workflows.activities.hca_activities import (
+    hca_discover_prospects,
+    hca_score_prospects,
+    hca_generate_research,
+    hca_generate_outreach,
+    hca_advance_pipeline,
+    hca_sync_knowledge_graph,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -72,6 +81,7 @@ async def run_orchestration_worker():
             FollowUpWorkflow,
             MonthlyBillingWorkflow,
             RemediaOrderWorkflow,
+            DealPipelineWorkflow,
         ],
         activities=[
             dispatch_task,
@@ -91,6 +101,12 @@ async def run_orchestration_worker():
             send_remedia_notification,
             monitor_remedia_payment,
             track_remedia_delivery,
+            hca_discover_prospects,
+            hca_score_prospects,
+            hca_generate_research,
+            hca_generate_outreach,
+            hca_advance_pipeline,
+            hca_sync_knowledge_graph,
         ],
     )
 
