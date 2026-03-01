@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timedelta
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
