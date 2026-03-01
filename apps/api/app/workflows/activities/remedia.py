@@ -169,8 +169,6 @@ async def monitor_remedia_payment(input: dict) -> dict:
 @activity.defn
 async def track_remedia_delivery(input: dict) -> dict:
     """Poll order status for delivery updates. Sends WhatsApp on status changes."""
-    from app.services.whatsapp_service import whatsapp_service
-
     order_id = input["order_id"]
     token = input["token"]
     phone = input["phone_number"]
