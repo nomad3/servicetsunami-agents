@@ -31,16 +31,39 @@ class StripPrefixMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def _build_session_db_url() -> str:
+    """Build async PostgreSQL URL for ADK session persistence.
+
+    Parses DATABASE_URL (postgresql://user:pass@host:port/db) and converts
+    to async format (postgresql+asyncpg://user:pass@host:port/db).
+    """
+    from config.settings import settings
+    db_url = settings.database_url
+    if db_url.startswith("postgresql://"):
+        return db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if db_url.startswith("postgresql+asyncpg://"):
+        return db_url
+    # Fallback: build from individual components
+    return (
+        f"postgresql+asyncpg://{settings.database_user}:{settings.database_password}"
+        f"@{settings.database_host}:{settings.database_port}/{settings.database_name}"
+    )
+
+
 def main():
     """Start ADK server with prefix-stripping middleware."""
     # Import ADK's FastAPI app factory
     from google.adk.cli.fast_api import get_fast_api_app
 
-    # Get the base ADK app
+    # Build async DB URL for session persistence
+    session_db_url = _build_session_db_url()
+
+    # Get the base ADK app with PostgreSQL session persistence
     app = get_fast_api_app(
         agents_dir=".",
         web=False,
         allow_origins=["*"],
+        session_service_uri=session_db_url,
     )
 
     # Add prefix-stripping middleware

@@ -139,12 +139,29 @@ Analyze the ECG image(s) and provide a structured interpretation. Return your fi
 Be precise. If you cannot measure an interval, set it to null. Flag any findings that warrant urgent attention."""
 
     # Build Claude API message with image content blocks
+    # Fetch images and send as base64 (supports internal cluster URLs and public URLs)
     content_blocks = []
-    for url in urls:
-        content_blocks.append({
-            "type": "image",
-            "source": {"type": "url", "url": url},
-        })
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as img_client:
+        for url in urls:
+            try:
+                img_resp = await img_client.get(url)
+                img_resp.raise_for_status()
+                import base64
+                import mimetypes
+                mime_type = img_resp.headers.get("content-type", "").split(";")[0].strip()
+                if not mime_type or not mime_type.startswith("image/"):
+                    mime_type = mimetypes.guess_type(url)[0] or "image/jpeg"
+                b64_data = base64.b64encode(img_resp.content).decode()
+                content_blocks.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mime_type,
+                        "data": b64_data,
+                    },
+                })
+            except Exception as e:
+                logger.warning("Failed to fetch image %s: %s", url, e)
     content_blocks.append({"type": "text", "text": prompt})
 
     try:
