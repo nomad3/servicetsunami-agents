@@ -103,14 +103,14 @@ const CONNECTOR_FIELDS = {
   ]
 };
 
-const TAB_KEYS = ['skills', 'connectors', 'data-sources', 'datasets'];
+const TAB_KEYS = ['connected-apps', 'connectors', 'data-sources', 'datasets'];
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 const IntegrationsPage = () => {
   const { t } = useTranslation('datasets');
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = TAB_KEYS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'skills';
+  const initialTab = TAB_KEYS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'connected-apps';
   const [activeTab, setActiveTab] = useState(initialTab);
 
   // ── Shared state ──
@@ -944,7 +944,7 @@ const IntegrationsPage = () => {
               Integrations
             </h1>
             <p className="page-subtitle text-muted">
-              Skills, connectors, data sources, and datasets in one place
+              Connected apps, connectors, data sources, and datasets in one place
             </p>
           </div>
         </div>
@@ -955,7 +955,7 @@ const IntegrationsPage = () => {
         {/* Tab Navigation */}
         <Nav variant="tabs" activeKey={activeTab} onSelect={handleTabChange} className="mb-4 integrations-tabs">
           <Nav.Item>
-            <Nav.Link eventKey="skills"><FaCogs className="me-2" />Skills</Nav.Link>
+            <Nav.Link eventKey="connected-apps"><FaPlug className="me-2" />Connected Apps</Nav.Link>
           </Nav.Item>
           <Nav.Item>
             <Nav.Link eventKey="connectors"><FaBolt className="me-2" />Connectors</Nav.Link>
@@ -969,7 +969,7 @@ const IntegrationsPage = () => {
         </Nav>
 
         {/* Tab Content */}
-        {activeTab === 'skills' && renderSkillsTab()}
+        {activeTab === 'connected-apps' && renderSkillsTab()}
         {activeTab === 'connectors' && renderConnectorsTab()}
         {activeTab === 'data-sources' && renderDataSourcesTab()}
         {activeTab === 'datasets' && renderDatasetsTab()}

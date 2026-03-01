@@ -100,6 +100,9 @@ configMap:
     HCA_SERVICE_KEY: "hca-st-integration-key-2026-prod"
     DATA_STORAGE_PATH: "/app/storage"
     ADK_BASE_URL: "http://servicetsunami-adk"
+    GOOGLE_REDIRECT_URI: "https://servicetsunami.com/api/v1/oauth/google/callback"
+    GITHUB_REDIRECT_URI: "https://servicetsunami.com/api/v1/oauth/github/callback"
+    LINKEDIN_REDIRECT_URI: "https://servicetsunami.com/api/v1/oauth/linkedin/callback"
 
 # External Secrets - pulls from GCP Secret Manager
 externalSecret:
@@ -130,6 +133,24 @@ externalSecret:
     - secretKey: ENCRYPTION_KEY
       remoteRef:
         key: servicetsunami-encryption-key
+    - secretKey: GOOGLE_CLIENT_ID
+      remoteRef:
+        key: servicetsunami-google-oauth-client-id
+    - secretKey: GOOGLE_CLIENT_SECRET
+      remoteRef:
+        key: servicetsunami-google-oauth-client-secret
+    - secretKey: GITHUB_CLIENT_ID
+      remoteRef:
+        key: servicetsunami-github-oauth-client-id
+    - secretKey: GITHUB_CLIENT_SECRET
+      remoteRef:
+        key: servicetsunami-github-oauth-client-secret
+    - secretKey: LINKEDIN_CLIENT_ID
+      remoteRef:
+        key: servicetsunami-linkedin-oauth-client-id
+    - secretKey: LINKEDIN_CLIENT_SECRET
+      remoteRef:
+        key: servicetsunami-linkedin-oauth-client-secret
 
 # Additional environment variables
 env:

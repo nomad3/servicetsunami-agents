@@ -61,3 +61,5 @@ class SkillRegistryEntry(BaseModel):
     icon: str
     credentials: list  # list of {key, label, type, required}
     channel_type: Optional[str] = None  # "baileys" for WhatsApp channel
+    auth_type: str = "manual"  # "manual" | "oauth"
+    oauth_provider: Optional[str] = None  # "google" | "github" | "linkedin"

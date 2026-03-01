@@ -32,6 +32,7 @@ from app.api.v1 import (
     workflows,
     remedia,
     webhooks,
+    oauth,
 )
 
 router = APIRouter()
@@ -72,3 +73,4 @@ router.include_router(skills.router, prefix="/skills", tags=["skills"])
 router.include_router(workflows.router, prefix="/workflows", tags=["workflows"])
 router.include_router(remedia.router, prefix="/remedia", tags=["remedia"])
 router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
+router.include_router(oauth.router, prefix="/oauth", tags=["oauth"])

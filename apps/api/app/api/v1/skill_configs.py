@@ -18,6 +18,38 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 SKILL_CREDENTIAL_SCHEMAS = {
+    "gmail": {
+        "display_name": "Gmail",
+        "description": "Send and read emails, manage labels",
+        "icon": "FaEnvelope",
+        "credentials": [],
+        "auth_type": "oauth",
+        "oauth_provider": "google",
+    },
+    "google_calendar": {
+        "display_name": "Google Calendar",
+        "description": "Manage calendar events and schedules",
+        "icon": "FaCalendar",
+        "credentials": [],
+        "auth_type": "oauth",
+        "oauth_provider": "google",
+    },
+    "github": {
+        "display_name": "GitHub",
+        "description": "Manage repositories, issues, pull requests",
+        "icon": "FaGithub",
+        "credentials": [],
+        "auth_type": "oauth",
+        "oauth_provider": "github",
+    },
+    "linkedin": {
+        "display_name": "LinkedIn",
+        "description": "Post updates, manage profile, and send messages",
+        "icon": "FaLinkedin",
+        "credentials": [],
+        "auth_type": "oauth",
+        "oauth_provider": "linkedin",
+    },
     "slack": {
         "display_name": "Slack",
         "description": "Send messages, manage channels, automate workflows",
@@ -25,23 +57,6 @@ SKILL_CREDENTIAL_SCHEMAS = {
         "credentials": [
             {"key": "bot_token", "label": "Bot Token", "type": "password", "required": True},
             {"key": "webhook_url", "label": "Webhook URL", "type": "text", "required": False},
-        ],
-    },
-    "gmail": {
-        "display_name": "Gmail",
-        "description": "Send and read emails, manage labels",
-        "icon": "FaEnvelope",
-        "credentials": [
-            {"key": "oauth_token", "label": "OAuth Token", "type": "password", "required": True},
-            {"key": "refresh_token", "label": "Refresh Token", "type": "password", "required": True},
-        ],
-    },
-    "github": {
-        "display_name": "GitHub",
-        "description": "Manage repositories, issues, pull requests",
-        "icon": "FaGithub",
-        "credentials": [
-            {"key": "personal_access_token", "label": "Personal Access Token", "type": "password", "required": True},
         ],
     },
     "whatsapp": {
@@ -69,35 +84,12 @@ SKILL_CREDENTIAL_SCHEMAS = {
             {"key": "domain", "label": "Jira Domain", "type": "text", "required": True},
         ],
     },
-    "google_calendar": {
-        "display_name": "Google Calendar",
-        "description": "Manage calendar events and schedules",
-        "icon": "FaCalendar",
-        "credentials": [
-            {"key": "oauth_token", "label": "OAuth Token", "type": "password", "required": True},
-            {"key": "refresh_token", "label": "Refresh Token", "type": "password", "required": True},
-        ],
-    },
     "linear": {
         "display_name": "Linear",
         "description": "Manage Linear issues and projects",
         "icon": "FaProjectDiagram",
         "credentials": [
             {"key": "api_key", "label": "API Key", "type": "password", "required": True},
-        ],
-    },
-    "peekaboo": {
-        "display_name": "Peekaboo (Browser Automation)",
-        "description": "macOS UI automation for web scraping, form filling, and browser interaction — no API keys needed",
-        "icon": "FaDesktop",
-        "credentials": [],
-    },
-    "linkedin": {
-        "display_name": "LinkedIn",
-        "description": "LinkedIn prospecting via browser automation — profile scraping, connection requests, messaging",
-        "icon": "FaLinkedin",
-        "credentials": [
-            {"key": "session_cookie", "label": "Session Cookie (li_at)", "type": "password", "required": False},
         ],
     },
 }
@@ -125,6 +117,8 @@ def get_skill_registry(
                 icon=schema["icon"],
                 credentials=schema["credentials"],
                 channel_type=schema.get("channel_type"),
+                auth_type=schema.get("auth_type", "manual"),
+                oauth_provider=schema.get("oauth_provider"),
             )
         )
     return entries

@@ -8,6 +8,10 @@ const skillConfigService = {
   remove: (id) => api.delete(`/skill-configs/${id}`),
   addCredential: (id, data) => api.post(`/skill-configs/${id}/credentials`, data),
   revokeCredential: (id, key) => api.delete(`/skill-configs/${id}/credentials/${key}`),
+  // OAuth
+  oauthAuthorize: (provider) => api.get(`/oauth/${provider}/authorize`),
+  oauthDisconnect: (provider) => api.post(`/oauth/${provider}/disconnect`),
+  oauthStatus: (provider) => api.get(`/oauth/${provider}/status`),
 };
 
 export default skillConfigService;

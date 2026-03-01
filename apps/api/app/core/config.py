@@ -38,6 +38,21 @@ class Settings(BaseSettings):
     # Credential Vault encryption (Fernet key — generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
     ENCRYPTION_KEY: str | None = None
 
+    # OAuth2 - Google (Gmail + Calendar)
+    GOOGLE_CLIENT_ID: str | None = None
+    GOOGLE_CLIENT_SECRET: str | None = None
+    GOOGLE_REDIRECT_URI: str = "https://servicetsunami.com/api/v1/oauth/google/callback"
+
+    # OAuth2 - GitHub
+    GITHUB_CLIENT_ID: str | None = None
+    GITHUB_CLIENT_SECRET: str | None = None
+    GITHUB_REDIRECT_URI: str = "https://servicetsunami.com/api/v1/oauth/github/callback"
+
+    # OAuth2 - LinkedIn
+    LINKEDIN_CLIENT_ID: str | None = None
+    LINKEDIN_CLIENT_SECRET: str | None = None
+    LINKEDIN_REDIRECT_URI: str = "https://servicetsunami.com/api/v1/oauth/linkedin/callback"
+
     # HCA (Deal Intelligence) API
     HCA_API_URL: str = "http://hca-api:3000"
     HCA_SERVICE_KEY: str = ""
