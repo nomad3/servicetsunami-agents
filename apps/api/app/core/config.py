@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # Credential Vault encryption (Fernet key — generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
     ENCRYPTION_KEY: str | None = None
 
+    # HCA (Deal Pipeline) API
+    HCA_API_URL: str = "http://localhost:3000"
+    HCA_SERVICE_KEY: str = ""
+
     # HealthPets API
     HEALTHPETS_API_URL: str = "http://localhost:8000"
 
