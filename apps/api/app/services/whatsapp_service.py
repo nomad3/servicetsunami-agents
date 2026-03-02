@@ -435,15 +435,24 @@ class WhatsAppService:
         response_text = await self._process_through_agent(tenant_id, sender_phone, text)
         if response_text:
             try:
-                # Use the original sender JID object to reply — preserves LID vs phone format
-                resp = await client.send_message(sender_jid_obj, response_text)
-                # Track sent message ID to avoid echo loop on self-messages
-                if resp and hasattr(resp, 'ID') and resp.ID:
-                    sent_ids = self._sent_message_ids.setdefault(key, set())
-                    sent_ids.add(resp.ID)
-                    # Cap the set size to prevent memory leak
-                    if len(sent_ids) > 100:
-                        sent_ids.pop()
+                # Build clean JID without device part — neonize requires user-only JID for sending
+                reply_jid = build_jid(sender_phone)
+
+                # Split long messages — WhatsApp limits to ~4096 chars
+                chunks = [response_text] if len(response_text) <= 4000 else [
+                    response_text[i:i + 4000] for i in range(0, len(response_text), 4000)
+                ]
+
+                for chunk in chunks:
+                    resp = await client.send_message(reply_jid, chunk)
+                    # Track sent message ID to avoid echo loop on self-messages
+                    if resp and hasattr(resp, 'ID') and resp.ID:
+                        sent_ids = self._sent_message_ids.setdefault(key, set())
+                        sent_ids.add(resp.ID)
+                        # Cap the set size to prevent memory leak
+                        if len(sent_ids) > 100:
+                            sent_ids.pop()
+
                 self._log_event(
                     tenant_id, account_id, "message_outbound",
                     direction="outbound", remote_id=sender_phone,
