@@ -105,7 +105,12 @@ async def search_emails(
             detail = await google.get(
                 f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg['id']}",
                 headers=auth,
-                params={"format": "metadata", "metadataHeaders": "Subject,From,Date"},
+                params=[
+                    ("format", "metadata"),
+                    ("metadataHeaders", "Subject"),
+                    ("metadataHeaders", "From"),
+                    ("metadataHeaders", "Date"),
+                ],
             )
             if detail.status_code != 200:
                 continue
