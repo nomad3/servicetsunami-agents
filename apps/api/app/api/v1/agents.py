@@ -71,7 +71,7 @@ def update_agent(
     item = agent_service.update_agent(db=db, db_obj=agent, obj_in=item_in)
     return item
 
-@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{agent_id}", status_code=status.HTTP_200_OK)
 def delete_agent(
     *,
     db: Session = Depends(deps.get_db),
@@ -85,4 +85,4 @@ def delete_agent(
     if not agent or str(agent.tenant_id) != str(current_user.tenant_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
     agent_service.delete_agent(db=db, agent_id=agent_id)
-    return {"message": "Agent deleted successfully"}
+    return {"deleted": True}

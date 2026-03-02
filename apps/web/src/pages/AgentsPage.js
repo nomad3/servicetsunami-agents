@@ -1,27 +1,16 @@
 import { useEffect, useState } from 'react';
 import {
-  Badge,
+  Alert,
   Button,
-  Card,
   Col,
   Form,
-  InputGroup,
   Modal,
   Row,
-  Table
+  Spinner
 } from 'react-bootstrap';
-import {
-  FaPen,
-  FaPlus,
-  FaRobot,
-  FaSearch,
-  FaTrash
-} from 'react-icons/fa';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
-import { ConfirmModal, EmptyState, LoadingSpinner } from '../components/common';
 import agentService from '../services/agent';
-import './AgentsPage.css';
 
 const AgentsPage = () => {
   const navigate = useNavigate();
@@ -29,10 +18,9 @@ const AgentsPage = () => {
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [selectedAgent, setSelectedAgent] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [editingAgent, setEditingAgent] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -43,22 +31,21 @@ const AgentsPage = () => {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   useEffect(() => {
     fetchAgents();
   }, []);
 
-  // Handle navigation state for wizard fallback and success message
   useEffect(() => {
     if (location.state?.showQuickForm) {
-      setShowCreateModal(true);
-      // Clear the state
+      openCreateModal();
       window.history.replaceState({}, document.title);
     }
     if (location.state?.success) {
-      // Show success message
-      alert(location.state.success);
+      setSuccess(location.state.success);
       window.history.replaceState({}, document.title);
+      setTimeout(() => setSuccess(''), 3000);
     }
   }, [location]);
 
@@ -70,61 +57,20 @@ const AgentsPage = () => {
       setError('');
     } catch (err) {
       console.error('Error fetching agents:', err);
-      setError('Failed to load agents. Please try again.');
+      setError('Failed to load agents.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateAgent = async (e) => {
-    e.preventDefault();
-    try {
-      setSubmitting(true);
-      await agentService.create(formData);
-      setShowCreateModal(false);
-      resetForm();
-      fetchAgents();
-    } catch (err) {
-      console.error('Error creating agent:', err);
-      setError('Failed to create agent. Please try again.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleUpdateAgent = async (e) => {
-    e.preventDefault();
-    try {
-      setSubmitting(true);
-      await agentService.update(selectedAgent.id, formData);
-      setShowEditModal(false);
-      resetForm();
-      fetchAgents();
-    } catch (err) {
-      console.error('Error updating agent:', err);
-      setError('Failed to update agent. Please try again.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleDeleteAgent = async () => {
-    try {
-      setSubmitting(true);
-      await agentService.delete(selectedAgent.id);
-      setShowDeleteModal(false);
-      setSelectedAgent(null);
-      fetchAgents();
-    } catch (err) {
-      console.error('Error deleting agent:', err);
-      setError('Failed to delete agent. Please try again.');
-    } finally {
-      setSubmitting(false);
-    }
+  const openCreateModal = () => {
+    setEditingAgent(null);
+    setFormData({ name: '', description: '', model: 'gpt-4', system_prompt: '', temperature: 0.7, max_tokens: 2000 });
+    setShowModal(true);
   };
 
   const openEditModal = (agent) => {
-    setSelectedAgent(agent);
+    setEditingAgent(agent);
     setFormData({
       name: agent.name,
       description: agent.description || '',
@@ -133,336 +79,373 @@ const AgentsPage = () => {
       temperature: agent.temperature || 0.7,
       max_tokens: agent.max_tokens || 2000,
     });
-    setShowEditModal(true);
+    setShowModal(true);
   };
 
-  const openDeleteModal = (agent) => {
-    setSelectedAgent(agent);
-    setShowDeleteModal(true);
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      setSubmitting(true);
+      if (editingAgent) {
+        await agentService.update(editingAgent.id, formData);
+        setSuccess('Agent updated');
+      } else {
+        await agentService.create(formData);
+        setSuccess('Agent created');
+      }
+      setShowModal(false);
+      fetchAgents();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      console.error('Error saving agent:', err);
+      setError('Failed to save agent.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const resetForm = () => {
-    setFormData({
-      name: '',
-      description: '',
-      model: 'gpt-4',
-      system_prompt: '',
-      temperature: 0.7,
-      max_tokens: 2000,
-    });
-    setSelectedAgent(null);
+  const handleDelete = async (agent) => {
+    try {
+      setSubmitting(true);
+      await agentService.delete(agent.id);
+      setDeleteConfirm(null);
+      setSuccess(`"${agent.name}" deleted`);
+      fetchAgents();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      console.error('Error deleting agent:', err);
+      setError('Failed to delete agent.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const filteredAgents = agents.filter(
-    (agent) =>
-      agent.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      agent.description?.toLowerCase().includes(searchTerm.toLowerCase())
+  const filtered = agents.filter(
+    (a) =>
+      a.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      a.description?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const getStatusBadge = (status) => {
-    const variants = {
-      active: 'success',
-      inactive: 'secondary',
-      error: 'danger',
-      deploying: 'warning',
-    };
-    return <Badge bg={variants[status] || 'secondary'}>{status || 'inactive'}</Badge>;
+  const statusDot = (status) => ({
+    width: 6,
+    height: 6,
+    borderRadius: '50%',
+    background: status === 'active' ? '#22c55e' : status === 'error' ? '#ef4444' : '#94a3b8',
+    display: 'inline-block',
+    marginRight: 6,
+    flexShrink: 0,
+  });
+
+  const cardStyle = {
+    background: 'var(--surface-elevated)',
+    border: '1px solid var(--color-border)',
+    borderRadius: 8,
+    padding: '20px 24px',
+  };
+
+  const sectionLabel = {
+    fontSize: '0.7rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+    color: 'var(--color-muted)',
+    marginBottom: 12,
   };
 
   return (
     <Layout>
-      <div className="page-header mb-4">
-        <div>
-          <h2 className="page-title">
-            <FaRobot className="me-2" size={32} />
-            AI Agents
-          </h2>
-          <p className="page-subtitle">
-            Create, configure, and manage your AI agents
-          </p>
+      <div style={{ maxWidth: 1100 }}>
+        {/* Header */}
+        <div className="d-flex justify-content-between align-items-start mb-4">
+          <div>
+            <h4 style={{ fontWeight: 600, marginBottom: 4, color: 'var(--color-foreground)' }}>
+              Agent Fleet
+            </h4>
+            <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', margin: 0 }}>
+              {agents.length} agent{agents.length !== 1 ? 's' : ''} configured
+            </p>
+          </div>
+          <div className="d-flex gap-2">
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              onClick={() => navigate('/agents/wizard')}
+              style={{ fontSize: '0.82rem' }}
+            >
+              + Agent Wizard
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={openCreateModal}
+              style={{ fontSize: '0.82rem' }}
+            >
+              + Quick Create
+            </Button>
+          </div>
         </div>
-        <Button
-          variant="primary"
-          size="lg"
-          onClick={() => navigate('/agents/wizard')}
-          className="d-flex align-items-center gap-2"
-        >
-          <FaPlus size={20} />
-          Create Agent
-        </Button>
-      </div>
 
-      {error && (
-        <div className="alert alert-danger alert-dismissible fade show" role="alert">
-          {error}
-          <button
-            type="button"
-            className="btn-close"
-            onClick={() => setError('')}
-          ></button>
+        {error && <Alert variant="danger" dismissible onClose={() => setError('')} style={{ fontSize: '0.82rem' }}>{error}</Alert>}
+        {success && <Alert variant="success" dismissible onClose={() => setSuccess('')} style={{ fontSize: '0.82rem' }}>{success}</Alert>}
+
+        {/* Search */}
+        <div style={{ marginBottom: 16 }}>
+          <Form.Control
+            type="text"
+            size="sm"
+            placeholder="Search agents..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{ maxWidth: 300, fontSize: '0.82rem' }}
+          />
         </div>
-      )}
 
-      <Card className="data-card mb-4">
-        <Card.Body>
-          <InputGroup>
-            <InputGroup.Text className="search-icon-wrapper">
-              <FaSearch />
-            </InputGroup.Text>
-            <Form.Control
-              type="text"
-              placeholder="Search agents by name or description..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="search-input"
-            />
-          </InputGroup>
-        </Card.Body>
-      </Card>
-
-      {loading ? (
-        <LoadingSpinner text="Loading agents..." />
-      ) : filteredAgents.length === 0 ? (
-        <EmptyState
-          icon={FaRobot}
-          title={searchTerm ? 'No agents found' : 'No agents yet'}
-          description={
-            searchTerm
-              ? 'Try adjusting your search terms'
-              : 'Get started by creating your first AI agent'
-          }
-          action={
-            !searchTerm && (
-              <Button
-                variant="primary"
-                onClick={() => navigate('/agents/wizard')}
-              >
-                <FaPlus className="me-2" />
-                Create Your First Agent
+        {/* Agent List */}
+        {loading ? (
+          <div className="text-center py-5">
+            <Spinner animation="border" size="sm" variant="primary" />
+            <p className="mt-2 text-muted" style={{ fontSize: '0.82rem' }}>Loading...</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ ...cardStyle, textAlign: 'center', padding: '48px 24px' }}>
+            <p style={{ fontSize: '0.88rem', color: 'var(--color-foreground)', fontWeight: 500, marginBottom: 4 }}>
+              {searchTerm ? 'No agents match your search' : 'No agents yet'}
+            </p>
+            <p style={{ fontSize: '0.78rem', color: 'var(--color-muted)', marginBottom: 16 }}>
+              {searchTerm ? 'Try different search terms' : 'Create your first agent to get started'}
+            </p>
+            {!searchTerm && (
+              <Button variant="primary" size="sm" onClick={openCreateModal}>
+                Create Agent
               </Button>
-            )
-          }
-        />
-      ) : (
-        <Card className="data-card">
-          <Table hover responsive className="agents-table mb-0">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Description</th>
-                <th>Model</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th className="text-end">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredAgents.map((agent) => (
-                <tr key={agent.id}>
-                  <td>
-                    <div className="d-flex align-items-center gap-2">
-                      <div className="agent-icon">
-                        <FaRobot size={20} />
-                      </div>
-                      <strong>{agent.name}</strong>
-                    </div>
-                  </td>
-                  <td className="text-muted">{agent.description || '—'}</td>
-                  <td>
-                    <Badge bg="info">{agent.model || 'gpt-4'}</Badge>
-                  </td>
-                  <td>{getStatusBadge(agent.status)}</td>
-                  <td className="text-muted">
-                    {agent.created_at
-                      ? new Date(agent.created_at).toLocaleDateString()
-                      : '—'}
-                  </td>
-                  <td>
-                    <div className="d-flex justify-content-end gap-2">
-                      <Button
-                        variant="outline-primary"
-                        size="sm"
-                        onClick={() => openEditModal(agent)}
-                      >
-                        <FaPen size={14} />
-                      </Button>
-                      <Button
-                        variant="outline-danger"
-                        size="sm"
-                        onClick={() => openDeleteModal(agent)}
-                      >
-                        <FaTrash size={14} />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
+            )}
+          </div>
+        ) : (
+          <div style={cardStyle}>
+            {/* Table header */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '2fr 3fr 100px 80px 120px',
+                padding: '0 0 10px 0',
+                borderBottom: '1px solid var(--color-border)',
+                gap: 12,
+              }}
+            >
+              {['Name', 'Description', 'Model', 'Status', ''].map((h) => (
+                <div key={h} style={{ ...sectionLabel, marginBottom: 0 }}>{h}</div>
               ))}
-            </tbody>
-          </Table>
-        </Card>
-      )}
+            </div>
+
+            {/* Rows */}
+            {filtered.map((agent, idx) => (
+              <div
+                key={agent.id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '2fr 3fr 100px 80px 120px',
+                  padding: '12px 0',
+                  borderBottom: idx < filtered.length - 1 ? '1px solid var(--color-border)' : 'none',
+                  alignItems: 'center',
+                  gap: 12,
+                }}
+              >
+                <div style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--color-foreground)' }}>
+                  {agent.name}
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--color-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {agent.description || '—'}
+                </div>
+                <div>
+                  <span style={{
+                    fontSize: '0.7rem',
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    background: 'var(--surface-contrast, #f0f0f0)',
+                    color: 'var(--color-muted)',
+                    fontWeight: 500,
+                  }}>
+                    {agent.model || 'gpt-4'}
+                  </span>
+                </div>
+                <div className="d-flex align-items-center">
+                  <span style={statusDot(agent.status)} />
+                  <span style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
+                    {agent.status || 'inactive'}
+                  </span>
+                </div>
+                <div className="d-flex justify-content-end gap-1">
+                  <button
+                    onClick={() => openEditModal(agent)}
+                    style={{
+                      background: 'none',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 4,
+                      padding: '4px 10px',
+                      fontSize: '0.72rem',
+                      color: 'var(--color-foreground)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => setDeleteConfirm(agent)}
+                    style={{
+                      background: 'none',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 4,
+                      padding: '4px 10px',
+                      fontSize: '0.72rem',
+                      color: '#ef4444',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Create/Edit Modal */}
       <Modal
-        show={showCreateModal || showEditModal}
-        onHide={() => {
-          setShowCreateModal(false);
-          setShowEditModal(false);
-          resetForm();
-        }}
+        show={showModal}
+        onHide={() => setShowModal(false)}
         size="lg"
         centered
-        className="agent-modal"
       >
         <Modal.Header closeButton>
-          <Modal.Title>
-            {showCreateModal ? 'Create New Agent' : 'Edit Agent'}
+          <Modal.Title style={{ fontSize: '1rem', fontWeight: 600 }}>
+            {editingAgent ? 'Edit Agent' : 'Create Agent'}
           </Modal.Title>
         </Modal.Header>
-        <Form onSubmit={showCreateModal ? handleCreateAgent : handleUpdateAgent}>
+        <Form onSubmit={handleSubmit}>
           <Modal.Body>
             <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Name *</Form.Label>
+                  <Form.Label className="small">Name *</Form.Label>
                   <Form.Control
+                    size="sm"
                     type="text"
                     placeholder="e.g., Customer Support Agent"
                     value={formData.name}
-                    onChange={(e) =>
-                      setFormData({ ...formData, name: e.target.value })
-                    }
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
                   />
                 </Form.Group>
               </Col>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Model *</Form.Label>
+                  <Form.Label className="small">Model *</Form.Label>
                   <Form.Select
+                    size="sm"
                     value={formData.model}
-                    onChange={(e) =>
-                      setFormData({ ...formData, model: e.target.value })
-                    }
+                    onChange={(e) => setFormData({ ...formData, model: e.target.value })}
                   >
                     <option value="gpt-4">GPT-4</option>
                     <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                    <option value="gpt-4o">GPT-4o</option>
                     <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
                     <option value="claude-3-opus">Claude 3 Opus</option>
                     <option value="claude-3-sonnet">Claude 3 Sonnet</option>
-                    <option value="claude-4-5-opus">Claude 4.5 Opus</option>
-                    <option value="claude-4-5-sonnet">Claude 4.5 Sonnet</option>
+                    <option value="claude-4-sonnet">Claude 4 Sonnet</option>
+                    <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
                   </Form.Select>
                 </Form.Group>
               </Col>
             </Row>
 
             <Form.Group className="mb-3">
-              <Form.Label>Description</Form.Label>
+              <Form.Label className="small">Description</Form.Label>
               <Form.Control
+                size="sm"
                 as="textarea"
                 rows={2}
-                placeholder="Describe what this agent does..."
+                placeholder="What does this agent do?"
                 value={formData.description}
-                onChange={(e) =>
-                  setFormData({ ...formData, description: e.target.value })
-                }
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               />
             </Form.Group>
 
             <Form.Group className="mb-3">
-              <Form.Label>System Prompt</Form.Label>
+              <Form.Label className="small">System Prompt</Form.Label>
               <Form.Control
+                size="sm"
                 as="textarea"
                 rows={4}
-                placeholder="Enter the system prompt that defines the agent's behavior..."
+                placeholder="Instructions that define the agent's behavior..."
                 value={formData.system_prompt}
-                onChange={(e) =>
-                  setFormData({ ...formData, system_prompt: e.target.value })
-                }
+                onChange={(e) => setFormData({ ...formData, system_prompt: e.target.value })}
               />
             </Form.Group>
 
             <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Temperature: {formData.temperature}</Form.Label>
+                  <Form.Label className="small">Temperature: {formData.temperature}</Form.Label>
                   <Form.Range
-                    min={0}
-                    max={1}
-                    step={0.1}
+                    min={0} max={1} step={0.1}
                     value={formData.temperature}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        temperature: parseFloat(e.target.value),
-                      })
-                    }
+                    onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
                   />
-                  <Form.Text className="text-muted">
-                    Controls randomness. Higher = more creative.
+                  <Form.Text className="text-muted" style={{ fontSize: '0.72rem' }}>
+                    Higher = more creative
                   </Form.Text>
                 </Form.Group>
               </Col>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Max Tokens</Form.Label>
+                  <Form.Label className="small">Max Tokens</Form.Label>
                   <Form.Control
+                    size="sm"
                     type="number"
-                    min={100}
-                    max={8000}
+                    min={100} max={8000}
                     value={formData.max_tokens}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        max_tokens: parseInt(e.target.value),
-                      })
-                    }
+                    onChange={(e) => setFormData({ ...formData, max_tokens: parseInt(e.target.value) })}
                   />
-                  <Form.Text className="text-muted">
-                    Maximum length of the response
-                  </Form.Text>
                 </Form.Group>
               </Col>
             </Row>
           </Modal.Body>
           <Modal.Footer>
-            <Button
-              variant="outline-secondary"
-              onClick={() => {
-                setShowCreateModal(false);
-                setShowEditModal(false);
-                resetForm();
-              }}
-            >
+            <Button variant="outline-secondary" size="sm" onClick={() => setShowModal(false)}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit" disabled={submitting}>
-              {submitting
-                ? 'Saving...'
-                : showCreateModal
-                  ? 'Create Agent'
-                  : 'Save Changes'}
+            <Button variant="primary" size="sm" type="submit" disabled={submitting}>
+              {submitting ? 'Saving...' : editingAgent ? 'Save Changes' : 'Create Agent'}
             </Button>
           </Modal.Footer>
         </Form>
       </Modal>
 
-      {/* Delete Confirmation Modal */}
-      <ConfirmModal
-        show={showDeleteModal}
-        onHide={() => {
-          setShowDeleteModal(false);
-          setSelectedAgent(null);
-        }}
-        onConfirm={handleDeleteAgent}
-        title="Delete Agent"
-        message={`Are you sure you want to delete "${selectedAgent?.name}"? This action cannot be undone.`}
-        confirmText="Delete"
-        cancelText="Cancel"
-        variant="danger"
-        confirmLoading={submitting}
-      />
+      {/* Delete Confirmation */}
+      <Modal show={!!deleteConfirm} onHide={() => setDeleteConfirm(null)} centered size="sm">
+        <Modal.Body className="text-center py-4">
+          <p style={{ fontSize: '0.88rem', fontWeight: 500, marginBottom: 8 }}>
+            Delete "{deleteConfirm?.name}"?
+          </p>
+          <p style={{ fontSize: '0.78rem', color: 'var(--color-muted)', marginBottom: 20 }}>
+            This action cannot be undone.
+          </p>
+          <div className="d-flex justify-content-center gap-2">
+            <Button variant="outline-secondary" size="sm" onClick={() => setDeleteConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => handleDelete(deleteConfirm)}
+              disabled={submitting}
+            >
+              {submitting ? 'Deleting...' : 'Delete'}
+            </Button>
+          </div>
+        </Modal.Body>
+      </Modal>
     </Layout>
   );
 };
