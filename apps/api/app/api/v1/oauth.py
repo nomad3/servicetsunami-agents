@@ -1,5 +1,7 @@
 """OAuth2 Authorization Code flow for Google, GitHub, and LinkedIn.
 
+Supports multiple connected accounts per provider per tenant.
+
 Endpoints:
   GET  /oauth/{provider}/authorize          — Returns auth URL (authenticated)
   GET  /oauth/{provider}/callback           — Provider redirect (unauthenticated)
@@ -43,23 +45,27 @@ OAUTH_PROVIDERS = {
     "google": {
         "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
         "token_url": "https://oauth2.googleapis.com/token",
+        "userinfo_url": "https://www.googleapis.com/oauth2/v2/userinfo",
         "scopes": [
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/gmail.send",
             "https://www.googleapis.com/auth/calendar.readonly",
             "https://www.googleapis.com/auth/calendar.events",
+            "https://www.googleapis.com/auth/userinfo.email",
         ],
         "skill_names": ["gmail", "google_calendar"],
     },
     "github": {
         "authorize_url": "https://github.com/login/oauth/authorize",
         "token_url": "https://github.com/login/oauth/access_token",
+        "userinfo_url": "https://api.github.com/user",
         "scopes": ["repo", "read:user", "read:org"],
         "skill_names": ["github"],
     },
     "linkedin": {
         "authorize_url": "https://www.linkedin.com/oauth/v2/authorization",
         "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
+        "userinfo_url": "https://api.linkedin.com/v2/userinfo",
         "scopes": ["openid", "profile", "email", "w_member_social"],
         "skill_names": ["linkedin"],
     },
@@ -83,6 +89,48 @@ def _validate_provider(provider: str):
     client_id, client_secret, _ = _get_provider_credentials(provider)
     if not client_id or not client_secret:
         raise HTTPException(status_code=501, detail=f"OAuth not configured for {provider}")
+
+
+def _fetch_account_email(provider: str, access_token: str) -> Optional[str]:
+    """Fetch the authenticated user's email from the provider's userinfo endpoint."""
+    config = OAUTH_PROVIDERS[provider]
+    userinfo_url = config.get("userinfo_url")
+    if not userinfo_url:
+        return None
+
+    try:
+        headers = {"Authorization": f"Bearer {access_token}"}
+        if provider == "github":
+            headers["Accept"] = "application/vnd.github+json"
+
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(userinfo_url, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+        if provider == "google":
+            return data.get("email")
+        elif provider == "github":
+            email = data.get("email")
+            if not email:
+                # GitHub may not return email in /user, try /user/emails
+                with httpx.Client(timeout=10.0) as client:
+                    resp = client.get(
+                        "https://api.github.com/user/emails",
+                        headers=headers,
+                    )
+                    if resp.status_code == 200:
+                        emails = resp.json()
+                        primary = next((e for e in emails if e.get("primary")), None)
+                        email = primary["email"] if primary else (emails[0]["email"] if emails else None)
+            return email or data.get("login")
+        elif provider == "linkedin":
+            return data.get("email")
+
+    except Exception as e:
+        logger.warning("Failed to fetch account email from %s: %s", provider, e)
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -120,10 +168,10 @@ def oauth_authorize(
         "state": state_token,
     }
 
-    # Google-specific: request refresh token
+    # Google-specific: request refresh token + always show account picker
     if provider == "google":
         params["access_type"] = "offline"
-        params["prompt"] = "consent"
+        params["prompt"] = "consent select_account"
 
     query = "&".join(f"{k}={httpx.QueryParams({k: v})[k]}" for k, v in params.items())
     auth_url = f"{config['authorize_url']}?{query}"
@@ -140,7 +188,7 @@ CALLBACK_HTML = """<!DOCTYPE html>
 <head><title>OAuth Complete</title></head>
 <body>
 <script>
-  window.opener && window.opener.postMessage({{ type: '{msg_type}', provider: '{provider}' }}, '*');
+  window.opener && window.opener.postMessage({{ type: '{msg_type}', provider: '{provider}', email: '{email}' }}, '*');
   setTimeout(function() {{ window.close(); }}, 1500);
 </script>
 <p>{message}</p>
@@ -159,20 +207,20 @@ def oauth_callback(
     """Handle OAuth callback from provider. Exchanges code for tokens."""
     if provider not in OAUTH_PROVIDERS:
         return HTMLResponse(CALLBACK_HTML.format(
-            msg_type="oauth-error", provider=provider,
+            msg_type="oauth-error", provider=provider, email="",
             message="Unknown provider",
         ))
 
     if error:
         logger.warning("OAuth error from %s: %s", provider, error)
         return HTMLResponse(CALLBACK_HTML.format(
-            msg_type="oauth-error", provider=provider,
+            msg_type="oauth-error", provider=provider, email="",
             message=f"Authorization denied: {error}",
         ))
 
     if not code or not state:
         return HTMLResponse(CALLBACK_HTML.format(
-            msg_type="oauth-error", provider=provider,
+            msg_type="oauth-error", provider=provider, email="",
             message="Missing code or state parameter",
         ))
 
@@ -186,7 +234,7 @@ def oauth_callback(
     except (JWTError, KeyError, ValueError) as e:
         logger.warning("Invalid OAuth state: %s", e)
         return HTMLResponse(CALLBACK_HTML.format(
-            msg_type="oauth-error", provider=provider,
+            msg_type="oauth-error", provider=provider, email="",
             message="Invalid or expired authorization state",
         ))
 
@@ -218,7 +266,7 @@ def oauth_callback(
     except Exception as e:
         logger.exception("Token exchange failed for %s: %s", provider, e)
         return HTMLResponse(CALLBACK_HTML.format(
-            msg_type="oauth-error", provider=provider,
+            msg_type="oauth-error", provider=provider, email="",
             message="Failed to exchange authorization code",
         ))
 
@@ -228,33 +276,67 @@ def oauth_callback(
     if not access_token:
         logger.error("No access_token in response from %s: %s", provider, tokens)
         return HTMLResponse(CALLBACK_HTML.format(
-            msg_type="oauth-error", provider=provider,
+            msg_type="oauth-error", provider=provider, email="",
             message="Provider did not return an access token",
         ))
 
+    # Fetch the authenticated user's email to identify the account
+    account_email = _fetch_account_email(provider, access_token)
+    logger.info("OAuth %s account email: %s", provider, account_email)
+
     # Store tokens for each skill associated with this provider
     for skill_name in config["skill_names"]:
-        # Ensure a SkillConfig exists and is enabled
-        skill_config = (
-            db.query(SkillConfig)
-            .filter(SkillConfig.tenant_id == tenant_id, SkillConfig.skill_name == skill_name)
-            .first()
-        )
-        if not skill_config:
-            skill_config = SkillConfig(
-                id=uuid.uuid4(),
-                tenant_id=tenant_id,
-                skill_name=skill_name,
-                enabled=True,
+        # Find existing SkillConfig for THIS specific account (by email)
+        # or fall back to any config without an email (legacy)
+        skill_config = None
+        if account_email:
+            skill_config = (
+                db.query(SkillConfig)
+                .filter(
+                    SkillConfig.tenant_id == tenant_id,
+                    SkillConfig.skill_name == skill_name,
+                    SkillConfig.account_email == account_email,
+                )
+                .first()
             )
-            db.add(skill_config)
-            db.commit()
-            db.refresh(skill_config)
+
+        if not skill_config:
+            # Check for a legacy config (no account_email) to upgrade
+            legacy_config = (
+                db.query(SkillConfig)
+                .filter(
+                    SkillConfig.tenant_id == tenant_id,
+                    SkillConfig.skill_name == skill_name,
+                    SkillConfig.account_email.is_(None),
+                )
+                .first()
+            )
+
+            if legacy_config:
+                # Upgrade legacy config with account email
+                legacy_config.account_email = account_email
+                legacy_config.enabled = True
+                db.commit()
+                db.refresh(legacy_config)
+                skill_config = legacy_config
+            else:
+                # Create new config for this account
+                skill_config = SkillConfig(
+                    id=uuid.uuid4(),
+                    tenant_id=tenant_id,
+                    skill_name=skill_name,
+                    account_email=account_email,
+                    enabled=True,
+                )
+                db.add(skill_config)
+                db.commit()
+                db.refresh(skill_config)
+
         elif not skill_config.enabled:
             skill_config.enabled = True
             db.commit()
 
-        # Revoke old credentials for this skill
+        # Revoke old credentials for THIS specific config only
         old_creds = (
             db.query(SkillCredential)
             .filter(
@@ -286,11 +368,16 @@ def oauth_callback(
                 credential_type="oauth_token",
             )
 
-    logger.info("OAuth %s connected for tenant=%s user=%s", provider, tenant_id, user_id)
+    logger.info(
+        "OAuth %s connected for tenant=%s user=%s email=%s",
+        provider, tenant_id, user_id, account_email,
+    )
+
+    safe_email = (account_email or "").replace("'", "\\'")
 
     return HTMLResponse(CALLBACK_HTML.format(
-        msg_type="oauth-success", provider=provider,
-        message=f"Connected to {provider.title()}! This window will close.",
+        msg_type="oauth-success", provider=provider, email=safe_email,
+        message=f"Connected {account_email or provider.title()}! This window will close.",
     ))
 
 
@@ -301,10 +388,15 @@ def oauth_callback(
 @router.post("/{provider}/disconnect")
 def oauth_disconnect(
     provider: str,
+    account_email: Optional[str] = Query(None, description="Disconnect a specific account by email"),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ):
-    """Revoke OAuth credentials and disable skill configs for a provider."""
+    """Revoke OAuth credentials and disable skill configs for a provider.
+
+    If account_email is provided, only disconnects that specific account.
+    Otherwise disconnects all accounts for the provider.
+    """
     if provider not in OAUTH_PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
@@ -312,34 +404,36 @@ def oauth_disconnect(
     revoked_count = 0
 
     for skill_name in config["skill_names"]:
-        skill_config = (
+        query = (
             db.query(SkillConfig)
             .filter(
                 SkillConfig.tenant_id == current_user.tenant_id,
                 SkillConfig.skill_name == skill_name,
             )
-            .first()
         )
-        if not skill_config:
-            continue
+        if account_email:
+            query = query.filter(SkillConfig.account_email == account_email)
 
-        # Revoke all active credentials
-        creds = (
-            db.query(SkillCredential)
-            .filter(
-                SkillCredential.skill_config_id == skill_config.id,
-                SkillCredential.tenant_id == current_user.tenant_id,
-                SkillCredential.status == "active",
+        skill_configs = query.all()
+
+        for skill_config in skill_configs:
+            # Revoke all active credentials
+            creds = (
+                db.query(SkillCredential)
+                .filter(
+                    SkillCredential.skill_config_id == skill_config.id,
+                    SkillCredential.tenant_id == current_user.tenant_id,
+                    SkillCredential.status == "active",
+                )
+                .all()
             )
-            .all()
-        )
-        for cred in creds:
-            revoke_credential(db, credential_id=cred.id, tenant_id=current_user.tenant_id)
-            revoked_count += 1
+            for cred in creds:
+                revoke_credential(db, credential_id=cred.id, tenant_id=current_user.tenant_id)
+                revoked_count += 1
 
-        # Disable the skill config
-        skill_config.enabled = False
-        db.commit()
+            # Disable the skill config
+            skill_config.enabled = False
+            db.commit()
 
     return {"disconnected": True, "provider": provider, "credentials_revoked": revoked_count}
 
@@ -354,30 +448,34 @@ def oauth_status(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ):
-    """Check if OAuth is connected for a provider."""
+    """Check OAuth connection status for a provider.
+
+    Returns overall connected status plus list of individual connected accounts.
+    """
     if provider not in OAUTH_PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
     config = OAUTH_PROVIDERS[provider]
-    connected = False
+    accounts = []
 
-    for skill_name in config["skill_names"]:
-        skill_config = (
-            db.query(SkillConfig)
-            .filter(
-                SkillConfig.tenant_id == current_user.tenant_id,
-                SkillConfig.skill_name == skill_name,
-                SkillConfig.enabled.is_(True),
-            )
-            .first()
+    # Use the first skill to check (e.g., "gmail" for google)
+    primary_skill = config["skill_names"][0]
+
+    skill_configs = (
+        db.query(SkillConfig)
+        .filter(
+            SkillConfig.tenant_id == current_user.tenant_id,
+            SkillConfig.skill_name == primary_skill,
+            SkillConfig.enabled.is_(True),
         )
-        if not skill_config:
-            continue
+        .all()
+    )
 
+    for sc in skill_configs:
         has_token = (
             db.query(SkillCredential)
             .filter(
-                SkillCredential.skill_config_id == skill_config.id,
+                SkillCredential.skill_config_id == sc.id,
                 SkillCredential.tenant_id == current_user.tenant_id,
                 SkillCredential.credential_key == "oauth_token",
                 SkillCredential.status == "active",
@@ -386,10 +484,17 @@ def oauth_status(
         ) is not None
 
         if has_token:
-            connected = True
-            break
+            accounts.append({
+                "email": sc.account_email,
+                "skill_config_id": str(sc.id),
+                "connected_at": sc.created_at.isoformat() if sc.created_at else None,
+            })
 
-    return {"connected": connected, "provider": provider}
+    return {
+        "connected": len(accounts) > 0,
+        "provider": provider,
+        "accounts": accounts,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -407,24 +512,32 @@ def _verify_internal_key(
 def get_skill_token(
     skill_name: str,
     tenant_id: str = Query(...),
+    account_email: Optional[str] = Query(None, description="Specific account email"),
     db: Session = Depends(deps.get_db),
     _auth: None = Depends(_verify_internal_key),
 ):
-    """Return decrypted OAuth credentials for a skill. Internal use only."""
+    """Return decrypted OAuth credentials for a skill. Internal use only.
+
+    If account_email is provided, returns credentials for that specific account.
+    Otherwise returns credentials for the first active account.
+    """
     try:
         tid = uuid.UUID(tenant_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid tenant_id")
 
-    skill_config = (
+    query = (
         db.query(SkillConfig)
         .filter(
             SkillConfig.tenant_id == tid,
             SkillConfig.skill_name == skill_name,
             SkillConfig.enabled.is_(True),
         )
-        .first()
     )
+    if account_email:
+        query = query.filter(SkillConfig.account_email == account_email)
+
+    skill_config = query.first()
     if not skill_config:
         raise HTTPException(status_code=404, detail=f"No active config for skill '{skill_name}'")
 

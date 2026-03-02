@@ -5,7 +5,7 @@ fullnameOverride: "servicetsunami-orchestration-worker"
 image:
   repository: gcr.io/ai-agency-479516/servicetsunami-api
   tag: latest
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 replicaCount: 1
 

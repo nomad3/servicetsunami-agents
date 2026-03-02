@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Badge,
@@ -10,27 +10,29 @@ import {
   Spinner,
 } from 'react-bootstrap';
 import {
-  FaSlack,
+  FaBook,
+  FaCalendar,
+  FaCheckCircle,
+  FaCog,
   FaEnvelope,
   FaGithub,
-  FaWhatsapp,
-  FaBook,
-  FaTasks,
-  FaCalendar,
-  FaProjectDiagram,
-  FaCog,
-  FaCheckCircle,
-  FaKey,
-  FaSave,
-  FaTimesCircle,
-  FaToggleOn,
-  FaToggleOff,
-  FaPlug,
-  FaPlay,
-  FaLinkedin,
   FaGoogle,
-  FaSignOutAlt,
+  FaKey,
   FaLink,
+  FaLinkedin,
+  FaPlay,
+  FaPlug,
+  FaPlus,
+  FaProjectDiagram,
+  FaSave,
+  FaSignOutAlt,
+  FaSlack,
+  FaTasks,
+  FaTimesCircle,
+  FaToggleOff,
+  FaToggleOn,
+  FaUserCircle,
+  FaWhatsapp,
 } from 'react-icons/fa';
 import skillConfigService from '../services/skillConfigService';
 import skillService from '../services/skillService';
@@ -104,9 +106,12 @@ const SkillsConfigPanel = () => {
         oauthProviders.map(async (provider) => {
           try {
             const res = await skillConfigService.oauthStatus(provider);
-            statuses[provider] = res.data?.connected ?? false;
+            statuses[provider] = {
+              connected: res.data?.connected ?? false,
+              accounts: res.data?.accounts ?? [],
+            };
           } catch {
-            statuses[provider] = false;
+            statuses[provider] = { connected: false, accounts: [] };
           }
         })
       );
@@ -127,7 +132,8 @@ const SkillsConfigPanel = () => {
   useEffect(() => {
     const handleMessage = (event) => {
       if (event.data?.type === 'oauth-success') {
-        setSuccess(`Connected to ${event.data.provider || 'provider'}`);
+        const email = event.data.email || '';
+        setSuccess(`Connected ${email || event.data.provider || 'account'}`);
         setTimeout(() => setSuccess(null), 4000);
         fetchData();
       } else if (event.data?.type === 'oauth-error') {
@@ -171,15 +177,15 @@ const SkillsConfigPanel = () => {
     }
   };
 
-  const handleOAuthDisconnect = async (provider) => {
+  const handleOAuthDisconnect = async (provider, accountEmail) => {
     try {
-      setSaving(provider);
-      await skillConfigService.oauthDisconnect(provider);
-      setSuccess(`Disconnected from ${provider}`);
+      setSaving(`${provider}-${accountEmail || 'all'}`);
+      await skillConfigService.oauthDisconnect(provider, accountEmail);
+      setSuccess(`Disconnected ${accountEmail || provider}`);
       setTimeout(() => setSuccess(null), 3000);
       await fetchData();
     } catch (err) {
-      setError(`Failed to disconnect ${provider}`);
+      setError(`Failed to disconnect ${accountEmail || provider}`);
       setTimeout(() => setError(null), 5000);
     } finally {
       setSaving(null);
@@ -300,65 +306,118 @@ const SkillsConfigPanel = () => {
   };
 
   // ---------------------------------------------------------------------------
-  // OAuth skill card (expanded section)
+  // OAuth skill card (expanded section) — multi-account
   // ---------------------------------------------------------------------------
   const renderOAuthExpanded = (skill) => {
     const provider = skill.oauth_provider;
     const brand = OAUTH_BRAND[provider] || { label: provider, icon: FaLink, bg: '#555', textColor: '#fff' };
     const BrandIcon = brand.icon;
-    const isConnected = oauthStatuses[provider] ?? false;
+    const providerStatus = oauthStatuses[provider] || { connected: false, accounts: [] };
+    const connectedAccounts = providerStatus.accounts || [];
     const isConnecting = connectingProvider === provider;
-    const isSaving = saving === provider;
-
-    if (isConnected) {
-      return (
-        <div className="text-center py-2">
-          <div className="d-flex align-items-center justify-content-center gap-2 mb-3">
-            <FaCheckCircle style={{ color: '#2d9d78' }} size={18} />
-            <span style={{ color: '#2d9d78', fontWeight: 600, fontSize: '0.9rem' }}>
-              Connected
-            </span>
-          </div>
-          <Button
-            variant="outline-danger"
-            size="sm"
-            onClick={() => handleOAuthDisconnect(provider)}
-            disabled={isSaving}
-          >
-            {isSaving ? (
-              <Spinner animation="border" size="sm" style={{ width: 14, height: 14, borderWidth: 1.5 }} className="me-2" />
-            ) : (
-              <FaSignOutAlt className="me-2" size={12} />
-            )}
-            Disconnect
-          </Button>
-        </div>
-      );
-    }
 
     return (
-      <div className="text-center py-2">
-        <Button
-          size="sm"
-          onClick={() => handleOAuthConnect(provider)}
-          disabled={isConnecting}
-          style={{
-            background: brand.bg,
-            color: brand.textColor,
-            border: provider === 'google' ? '1px solid #dadce0' : 'none',
-            fontWeight: 500,
-            fontSize: '0.88rem',
-            padding: '8px 20px',
-            borderRadius: 6,
-          }}
-        >
-          {isConnecting ? (
-            <Spinner animation="border" size="sm" style={{ width: 14, height: 14, borderWidth: 1.5 }} className="me-2" />
-          ) : (
-            <BrandIcon className="me-2" size={16} />
-          )}
-          Connect with {brand.label}
-        </Button>
+      <div className="py-2">
+        {/* Connected accounts list */}
+        {connectedAccounts.length > 0 && (
+          <div className="mb-3">
+            {connectedAccounts.map((account, idx) => {
+              const savingKey = `${provider}-${account.email || 'all'}`;
+              const isSaving = saving === savingKey;
+
+              return (
+                <div
+                  key={account.email || idx}
+                  className="d-flex align-items-center justify-content-between py-2"
+                  style={{
+                    borderBottom: idx < connectedAccounts.length - 1
+                      ? '1px solid var(--color-border)'
+                      : 'none',
+                  }}
+                >
+                  <div className="d-flex align-items-center gap-2">
+                    <FaUserCircle
+                      size={20}
+                      style={{ color: brand.color, opacity: 0.8, flexShrink: 0 }}
+                    />
+                    <div>
+                      <div
+                        style={{
+                          fontSize: '0.88rem',
+                          fontWeight: 500,
+                          color: 'var(--color-foreground)',
+                        }}
+                      >
+                        {account.email || 'Connected account'}
+                      </div>
+                      <div
+                        className="d-flex align-items-center gap-1"
+                        style={{ fontSize: '0.72rem', color: '#2d9d78' }}
+                      >
+                        <FaCheckCircle size={8} />
+                        Connected
+                      </div>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline-danger"
+                    size="sm"
+                    onClick={() => handleOAuthDisconnect(provider, account.email)}
+                    disabled={isSaving}
+                    style={{ fontSize: '0.78rem', padding: '4px 12px' }}
+                  >
+                    {isSaving ? (
+                      <Spinner
+                        animation="border"
+                        size="sm"
+                        style={{ width: 12, height: 12, borderWidth: 1.5 }}
+                        className="me-1"
+                      />
+                    ) : (
+                      <FaSignOutAlt className="me-1" size={10} />
+                    )}
+                    Disconnect
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Add / Connect button */}
+        <div className="text-center">
+          <Button
+            size="sm"
+            onClick={() => handleOAuthConnect(provider)}
+            disabled={isConnecting}
+            style={{
+              background: brand.bg,
+              color: brand.textColor,
+              border: provider === 'google' ? '1px solid #dadce0' : 'none',
+              fontWeight: 500,
+              fontSize: '0.85rem',
+              padding: '8px 20px',
+              borderRadius: 6,
+            }}
+          >
+            {isConnecting ? (
+              <Spinner
+                animation="border"
+                size="sm"
+                style={{ width: 14, height: 14, borderWidth: 1.5 }}
+                className="me-2"
+              />
+            ) : connectedAccounts.length > 0 ? (
+              <FaPlus className="me-2" size={12} />
+            ) : (
+              <BrandIcon className="me-2" size={16} />
+            )}
+            {connectedAccounts.length > 0
+              ? `Add another ${brand.label} account`
+              : `Connect with ${brand.label}`
+            }
+          </Button>
+        </div>
       </div>
     );
   };
@@ -370,12 +429,12 @@ const SkillsConfigPanel = () => {
     const config = getConfigForSkill(skill.skill_name);
     const isExpanded = expandedSkill === skill.skill_name;
     const isOAuth = skill.auth_type === 'oauth';
-    const isConfigured = isOAuth
-      ? (oauthStatuses[skill.oauth_provider] ?? false)
-      : !!config;
-    const isEnabled = isOAuth
-      ? (oauthStatuses[skill.oauth_provider] ?? false)
-      : (config?.enabled ?? false);
+    const providerStatus = isOAuth
+      ? (oauthStatuses[skill.oauth_provider] || { connected: false, accounts: [] })
+      : { connected: false, accounts: [] };
+    const isConfigured = isOAuth ? providerStatus.connected : !!config;
+    const isEnabled = isOAuth ? providerStatus.connected : (config?.enabled ?? false);
+    const accountCount = isOAuth ? providerStatus.accounts.length : 0;
     const accentColor = SKILL_COLORS[skill.skill_name] || '#6C757D';
     const formValues = credentialForms[skill.skill_name] || {};
 
@@ -439,7 +498,10 @@ const SkillsConfigPanel = () => {
                     {isEnabled ? (
                       <>
                         <FaCheckCircle size={8} className="me-1" />
-                        Connected
+                        {isOAuth && accountCount > 1
+                          ? `${accountCount} accounts`
+                          : 'Connected'
+                        }
                       </>
                     ) : (
                       'Disabled'
@@ -656,6 +718,11 @@ const SkillsConfigPanel = () => {
     );
   };
 
+  // Count total active connections (OAuth accounts + manual configs)
+  const totalActive = Object.values(oauthStatuses).reduce(
+    (sum, s) => sum + (s.accounts?.length || 0), 0
+  ) + configs.filter((c) => c.enabled).length;
+
   return (
     <Card
       className="mb-4"
@@ -684,7 +751,7 @@ const SkillsConfigPanel = () => {
             className="ms-2"
             style={{ fontSize: '0.68rem', fontWeight: 500 }}
           >
-            {Object.values(oauthStatuses).filter(Boolean).length + configs.filter((c) => c.enabled).length} active
+            {totalActive} active
           </Badge>
         </h6>
       </Card.Header>

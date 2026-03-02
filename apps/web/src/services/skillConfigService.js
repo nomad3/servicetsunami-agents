@@ -10,7 +10,10 @@ const skillConfigService = {
   revokeCredential: (id, key) => api.delete(`/skill-configs/${id}/credentials/${key}`),
   // OAuth
   oauthAuthorize: (provider) => api.get(`/oauth/${provider}/authorize`),
-  oauthDisconnect: (provider) => api.post(`/oauth/${provider}/disconnect`),
+  oauthDisconnect: (provider, accountEmail) =>
+    api.post(`/oauth/${provider}/disconnect`, null, {
+      params: accountEmail ? { account_email: accountEmail } : {},
+    }),
   oauthStatus: (provider) => api.get(`/oauth/${provider}/status`),
 };
 

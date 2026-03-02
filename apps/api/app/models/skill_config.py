@@ -14,6 +14,7 @@ class SkillConfig(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     skill_name = Column(String, nullable=False)  # e.g., "slack", "gmail", "github"
+    account_email = Column(String, nullable=True)  # OAuth account identifier (e.g., "user@gmail.com")
     enabled = Column(Boolean, default=True)
     requires_approval = Column(Boolean, default=False)
     rate_limit = Column(JSON, nullable=True)  # e.g., {"max_calls": 100, "window_seconds": 3600}

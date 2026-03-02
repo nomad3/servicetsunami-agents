@@ -6,6 +6,7 @@ import uuid
 
 class SkillConfigBase(BaseModel):
     skill_name: str
+    account_email: Optional[str] = None
     enabled: bool = True
     requires_approval: bool = False
     rate_limit: Optional[dict] = None
@@ -28,6 +29,7 @@ class SkillConfigUpdate(BaseModel):
 class SkillConfig(SkillConfigBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
+    account_email: Optional[str] = None
     instance_id: Optional[uuid.UUID] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
