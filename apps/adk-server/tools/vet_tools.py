@@ -90,6 +90,10 @@ async def analyze_ecg_image(
     if not urls:
         return {"status": "error", "error": "No image URLs provided"}
 
+    # Normalize URLs: prepend internal base URL for relative paths
+    base = settings.healthpets_api_url.rstrip("/")
+    urls = [u if u.startswith(("http://", "https://")) else f"{base}{u}" for u in urls]
+
     # Fetch breed reference ranges for comparison
     ref_ranges = await get_breed_reference_ranges(species, breed, tenant_id)
 

@@ -96,6 +96,7 @@ configMap:
     EMBEDDING_MODEL: "text-embedding-005"
     HCA_API_URL: "http://marketing-backend-microservice:3000"
     HCA_SERVICE_KEY: "hca-st-integration-key-2026-prod"
+    HEALTHPETS_API_URL: "http://healthpets-backend"
     GIT_AUTHOR_NAME: "ServiceTsunami Agent"
     GIT_AUTHOR_EMAIL: "agent@servicetsunami.com"
 

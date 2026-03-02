@@ -111,6 +111,13 @@ spec:
                 name: healthpets-backend
                 port:
                   number: 80
+          - path: /uploads
+            pathType: Prefix
+            backend:
+              service:
+                name: healthpets-backend
+                port:
+                  number: 80
           - path: /ws
             pathType: Prefix
             backend:
@@ -140,13 +147,14 @@ spec:
     - servicetsunami.com
     - www.servicetsunami.com
 ---
-# BackendConfig for Health Pets API health check
+# BackendConfig for Health Pets API health check + 300s timeout for agent calls
 apiVersion: cloud.google.com/v1
 kind: BackendConfig
 metadata:
   name: healthpets-backend-config
   namespace: prod
 spec:
+  timeoutSec: 300
   healthCheck:
     checkIntervalSec: 15
     timeoutSec: 5
