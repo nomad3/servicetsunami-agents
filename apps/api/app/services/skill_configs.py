@@ -26,7 +26,12 @@ def get_skill_configs_by_tenant(
 def create_tenant_skill_config(
     db: Session, *, item_in: SkillConfigCreate, tenant_id: uuid.UUID
 ) -> SkillConfig:
-    db_item = SkillConfig(**item_in.dict(), tenant_id=tenant_id)
+    try:
+        data = item_in.model_dump(exclude={"instance_id"})
+    except AttributeError:
+        data = item_in.dict(exclude={"instance_id"})
+
+    db_item = SkillConfig(**data, tenant_id=tenant_id)
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
