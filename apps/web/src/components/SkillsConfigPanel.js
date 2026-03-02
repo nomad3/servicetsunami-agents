@@ -31,8 +31,7 @@ import {
   FaTimesCircle,
   FaToggleOff,
   FaToggleOn,
-  FaUserCircle,
-  FaWhatsapp,
+  FaUserCircle
 } from 'react-icons/fa';
 import skillConfigService from '../services/skillConfigService';
 import skillService from '../services/skillService';
@@ -737,7 +736,7 @@ const SkillsConfigPanel = () => {
           style={{ color: 'var(--color-foreground)' }}
         >
           <FaPlug className="me-2" />
-          Connected Apps
+          Integrations
           <Badge
             bg="secondary"
             className="ms-2"
