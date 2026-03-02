@@ -1,5 +1,6 @@
 from typing import List
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 import uuid
 
@@ -62,7 +63,34 @@ def update_agent(db: Session, *, db_obj: Agent, obj_in: AgentBase) -> Agent:
 
 def delete_agent(db: Session, *, agent_id: uuid.UUID) -> Agent | None:
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
-    if agent:
-        db.delete(agent)
-        db.commit()
+    if not agent:
+        return None
+
+    aid = str(agent_id)
+
+    # Nullify nullable FK references
+    db.execute(text("UPDATE execution_traces SET agent_id = NULL WHERE agent_id = :aid"), {"aid": aid})
+    db.execute(text("UPDATE conversations SET agent_id = NULL WHERE agent_id = :aid"), {"aid": aid})
+    db.execute(text("UPDATE knowledge_entities SET source_agent_id = NULL WHERE source_agent_id = :aid"), {"aid": aid})
+    db.execute(text("UPDATE knowledge_relations SET discovered_by_agent_id = NULL WHERE discovered_by_agent_id = :aid"), {"aid": aid})
+
+    # Delete owned records
+    for tbl, col in [
+        ("agent_skills", "agent_id"),
+        ("deployments", "agent_id"),
+        ("agent_tasks", "assigned_agent_id"),
+        ("agent_tasks", "created_by_agent_id"),
+        ("agent_relationships", "from_agent_id"),
+        ("agent_relationships", "to_agent_id"),
+        ("agent_messages", "from_agent_id"),
+        ("agent_messages", "to_agent_id"),
+        ("agent_memory", "agent_id"),
+    ]:
+        try:
+            db.execute(text(f"DELETE FROM {tbl} WHERE {col} = :aid"), {"aid": aid})
+        except Exception:
+            pass  # Table may not exist yet
+
+    db.delete(agent)
+    db.commit()
     return agent
