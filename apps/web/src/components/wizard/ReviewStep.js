@@ -2,10 +2,9 @@ import React from 'react';
 import { Card, Row, Col, Badge, Button } from 'react-bootstrap';
 import { FaPen as Pencil } from 'react-icons/fa';
 
-const ReviewStep = ({ wizardData, datasets, onEdit }) => {
-  const { template, basicInfo, personality, skills, datasets: datasetIds } = wizardData;
+const ReviewStep = ({ wizardData, onEdit }) => {
+  const { template, basicInfo, personality, skills } = wizardData;
 
-  const selectedDatasets = datasets.filter((d) => datasetIds.includes(d.id));
   const enabledTools = Object.entries(skills)
     .filter(([_, enabled]) => enabled)
     .map(([tool, _]) => tool);
@@ -125,30 +124,6 @@ const ReviewStep = ({ wizardData, datasets, onEdit }) => {
             </Card.Body>
           </Card>
 
-          {/* Datasets */}
-          <Card className="mb-3">
-            <Card.Body>
-              <div className="d-flex justify-content-between align-items-start mb-2">
-                <h6 className="mb-0">Datasets</h6>
-                <Button variant="link" size="sm" className="p-0" onClick={() => onEdit(4)}>
-                  <Pencil size={14} className="me-1" />
-                  Edit
-                </Button>
-              </div>
-              {selectedDatasets.length > 0 ? (
-                <div>
-                  <div className="mb-1">
-                    <Badge bg="secondary">{selectedDatasets.length} dataset(s) connected</Badge>
-                  </div>
-                  <div className="small text-muted">
-                    {selectedDatasets.map((d) => d.name).join(', ')}
-                  </div>
-                </div>
-              ) : (
-                <small className="text-muted">No datasets connected</small>
-              )}
-            </Card.Body>
-          </Card>
         </Col>
       </Row>
     </div>

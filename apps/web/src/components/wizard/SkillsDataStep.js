@@ -1,8 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Form, Row, Col, Alert } from 'react-bootstrap';
+import React, { useState } from 'react';
+import { Card, Form, Alert } from 'react-bootstrap';
 import { FaDatabase as Database, FaCalculator as CalcIcon, FaChartBar as BarChart, FaProjectDiagram, FaSearch, FaChartLine } from 'react-icons/fa';
-import datasetService from '../../services/dataset';
-import { LoadingSpinner } from '../common';
 
 const TOOLS = [
   {
@@ -101,48 +99,17 @@ const ToolCard = ({ tool, isChecked, onToggle }) => {
 };
 
 const SkillsDataStep = ({ data, onChange, templateName }) => {
-  const [datasets, setDatasets] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchDatasets();
-  }, []);
-
-  const fetchDatasets = async () => {
-    try {
-      setLoading(true);
-      const response = await datasetService.getAll();
-      setDatasets(response.data || []);
-    } catch (error) {
-      console.error('Error fetching datasets:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleToolToggle = (toolId) => {
     const updatedSkills = { ...data.skills, [toolId]: !data.skills[toolId] };
     onChange({ ...data, skills: updatedSkills });
   };
 
-  const handleDatasetToggle = (datasetId) => {
-    const isSelected = data.datasets.includes(datasetId);
-    const updatedDatasets = isSelected
-      ? data.datasets.filter((id) => id !== datasetId)
-      : [...data.datasets, datasetId];
-    onChange({ ...data, datasets: updatedDatasets });
-  };
-
-  const sqlToolEnabled = data.skills.sql_query;
-  const noDatasetSelected = sqlToolEnabled && data.datasets.length === 0;
-
   return (
     <div className="skills-data-step">
       <h3 className="mb-2">What can your agent do?</h3>
-      <p className="text-muted mb-4">Configure your agent's capabilities and data access</p>
+      <p className="text-muted mb-4">Configure your agent's capabilities</p>
 
-      {/* Skills Section */}
-      <Card className="mb-4">
+      <Card>
         <Card.Body>
           <h5 className="mb-3">Skills</h5>
           {templateName && (
@@ -161,68 +128,6 @@ const SkillsDataStep = ({ data, onChange, templateName }) => {
               onToggle={() => handleToolToggle(tool.id)}
             />
           ))}
-        </Card.Body>
-      </Card>
-
-      {/* Datasets Section */}
-      <Card>
-        <Card.Body>
-          <h5 className="mb-2">Give Your Agent Access to Data</h5>
-          <p className="text-muted small mb-3">
-            Select which datasets your agent can analyze (you can change this later)
-          </p>
-
-          {noDatasetSelected && (
-            <Alert variant="warning" className="mb-3">
-              <small>
-                Data Analysis is enabled but no datasets are selected. Your agent won't be able to analyze data.
-              </small>
-            </Alert>
-          )}
-
-          {loading ? (
-            <LoadingSpinner text="Loading datasets..." />
-          ) : datasets.length === 0 ? (
-            <Alert variant="info">
-              <small>
-                No datasets uploaded yet.{' '}
-                <a href="/dashboard/datasets">Upload your first dataset →</a>
-              </small>
-            </Alert>
-          ) : (
-            <Row className="g-2">
-              {datasets.map((dataset) => (
-                <Col key={dataset.id} md={6}>
-                  <Card
-                    className={`dataset-card ${
-                      data.datasets.includes(dataset.id) ? 'selected' : ''
-                    }`}
-                    onClick={() => handleDatasetToggle(dataset.id)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <Card.Body className="p-3">
-                      <Form.Check
-                        type="checkbox"
-                        id={`dataset-${dataset.id}`}
-                        label={
-                          <div>
-                            <div className="fw-bold">{dataset.name}</div>
-                            <small className="text-muted">
-                              {dataset.row_count || 0} rows
-                              {dataset.columns && ` • ${dataset.columns.length} columns`}
-                            </small>
-                          </div>
-                        }
-                        checked={data.datasets.includes(dataset.id)}
-                        onChange={() => handleDatasetToggle(dataset.id)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </Card.Body>
-                  </Card>
-                </Col>
-              ))}
-            </Row>
-          )}
         </Card.Body>
       </Card>
     </div>

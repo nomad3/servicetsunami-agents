@@ -8,7 +8,6 @@ import PersonalityStep from './PersonalityStep';
 import SkillsDataStep from './SkillsDataStep';
 import ReviewStep from './ReviewStep';
 import agentService from '../../services/agent';
-import datasetService from '../../services/dataset';
 import { useToast } from '../common/Toast';
 import './AgentWizard.css';
 
@@ -16,7 +15,7 @@ const STEPS = [
   { number: 1, label: 'Template', component: 'TemplateSelector' },
   { number: 2, label: 'Basic Info', component: 'BasicInfo' },
   { number: 3, label: 'Personality', component: 'Personality' },
-  { number: 4, label: 'Skills & Data', component: 'SkillsData' },
+  { number: 4, label: 'Skills', component: 'SkillsData' },
   { number: 5, label: 'Review', component: 'Review' },
 ];
 
@@ -31,10 +30,8 @@ const AgentWizard = () => {
     basicInfo: { name: '', description: '', avatar: '' },
     personality: { preset: 'friendly', temperature: 0.7, max_tokens: 2000, system_prompt: '' },
     skills: { sql_query: false, data_summary: false, calculator: false, entity_extraction: false, knowledge_search: false, lead_scoring: false },
-    datasets: [],
     scoring_rubric: null,
   });
-  const [datasets, setDatasets] = useState([]);
   const [creating, setCreating] = useState(false);
   const [validationState, setValidationState] = useState({
     step1: false, // Template selected
@@ -65,19 +62,6 @@ const AgentWizard = () => {
     };
 
     loadDraft();
-  }, []);
-
-  // Fetch datasets on mount
-  useEffect(() => {
-    const fetchDatasets = async () => {
-      try {
-        const response = await datasetService.getAll();
-        setDatasets(response.data || []);
-      } catch (error) {
-        console.error('Error fetching datasets:', error);
-      }
-    };
-    fetchDatasets();
   }, []);
 
   // Auto-save draft to localStorage
@@ -160,7 +144,6 @@ const AgentWizard = () => {
           tools: Object.entries(wizardData.skills)
             .filter(([_, enabled]) => enabled)
             .map(([tool, _]) => tool),
-          datasets: wizardData.datasets,
           entity_schema: wizardData.template?.config?.entity_schema || null,
           scoring_rubric: wizardData.scoring_rubric || null,
         },
@@ -262,7 +245,7 @@ const AgentWizard = () => {
             )}
             {currentStep === 4 && (
               <SkillsDataStep
-                data={{ skills: wizardData.skills, datasets: wizardData.datasets }}
+                data={{ skills: wizardData.skills }}
                 onChange={(skillsData) => updateWizardData(skillsData)}
                 templateName={wizardData.template?.name}
               />
@@ -270,7 +253,6 @@ const AgentWizard = () => {
             {currentStep === 5 && (
               <ReviewStep
                 wizardData={wizardData}
-                datasets={datasets}
                 onEdit={(step) => setCurrentStep(step)}
               />
             )}
