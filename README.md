@@ -71,9 +71,10 @@ User Upload / API Ingest
 ## Key Features
 
 ### Multi-Agent Orchestration (Google ADK)
-- Supervisor pattern with sub-agents: data analyst, report generator, knowledge manager
-- Task delegation with configurable autonomy and depth limits
-- Tools for data operations, analytics, knowledge management
+- **Hierarchical Multi-Team Model**: Root supervisor routing to 5 top-level teams (Personal Assistant, Dev, Data, Sales, Marketing).
+- **Self-Modifying Agents**: Dev team with strict 5-step cycle, shell access, and autonomous deployment capabilities.
+- **Industry Specialization**: Pre-built agents for HealthPets (mobile cardiology), Remedia (pharmacy), and M&A Deal Pipelines.
+- **Task Delegation**: Configurable autonomy, depth limits, and inter-agent communication (supervisor pattern).
 
 ### Multi-LLM Router
 Smart routing across 5+ providers with cost optimization and automatic failover:
@@ -87,24 +88,25 @@ Smart routing across 5+ providers with cost optimization and automatic failover:
 | Claude | Complex reasoning | $3.00 |
 
 ### Databricks Lakehouse Integration
-- Automatic dataset sync to Unity Catalog via Temporal workflows
-- Bronze/Silver/Gold medallion architecture
-- MCP-compliant server with 9 tools for data operations
+- Automatic dataset sync to Unity Catalog via Temporal workflows.
+- Bronze/Silver/Gold medallion architecture.
+- MCP-compliant server with 9 tools for data operations.
+
+### Durable Business Workflows (Temporal)
+- **Deal Pipeline**: Discover → Score → Research → Outreach → Advance → Sync.
+- **Remedia Order**: E-commerce lifecycle with WhatsApp notifications and payment monitoring.
+- **HealthPets Billing**: Usage-based processing, invoice generation, and automated payments.
+- **Knowledge Extraction**: LLM-powered entity and relation extraction from chat history.
 
 ### Three-Tier Memory System
-- **Hot Context** (Redis) — Active session state, <1ms
-- **Semantic Memory** (Vector Store) — Past conversation embeddings, ~10ms
-- **Knowledge Graph** (PostgreSQL) — Entities and relationships, ~50ms
+- **Hot Context** (Redis) — Active session state, <1ms.
+- **Semantic Memory** (Vector Store) — Past conversation embeddings, ~10ms.
+- **Knowledge Graph** (PostgreSQL) — Entities, relationships, and **Lead Scoring** (rubric-based), ~50ms.
 
 ### Enterprise Multi-Tenancy
-- Full tenant isolation via JWT-secured APIs
-- Per-tenant data segregation, LLM configs, feature flags
-- Whitelabel branding with custom domains and industry templates
-
-### Pipeline Run Tracking
-- Scheduled and on-demand pipeline execution
-- Run history with status tracking and error reporting
-- Data source connectors with test-connection support
+- Full tenant isolation via JWT-secured APIs.
+- Per-tenant data segregation, LLM configs, feature flags.
+- Whitelabel branding with custom domains and industry templates.
 
 ---
 
@@ -196,8 +198,8 @@ servicetsunami/
 │   │       ├── components/   # Layout (glassmorphic sidebar), Wizard
 │   │       └── services/     # API clients
 │   ├── adk-server/           # Google ADK multi-agent server
-│   │   ├── servicetsunami_supervisor/  # Supervisor + sub-agents
-│   │   ├── tools/            # Agent tools (data, analytics, knowledge)
+│   │   ├── servicetsunami_supervisor/  # Hierarchical Team Agents
+│   │   ├── tools/            # Agent tools (data, shell, analytics, knowledge)
 │   │   └── server.py
 │   └── mcp-server/           # MCP server for Databricks integration
 │       ├── src/tools/        # 9 MCP tools
@@ -258,13 +260,12 @@ See `docs/KUBERNETES_DEPLOYMENT.md` for the full runbook.
 
 ## Recent Changes
 
-- **Pipeline Run Tracking** — Scheduled and on-demand pipeline execution with run history
-- **Integrations Hub** — Connector management with test-connection support
-- **Frontend Polish** — Enhanced error handling, loading states, UI improvements
-- **ADK Integration** — Google Agent Development Kit with supervisor pattern
-- **CEO-Friendly Prompts** — Suggested prompts on chat page for business users
-- **Temporal Workflows** — Data source sync and knowledge extraction workflows
-- **Connector Architecture** — Full connector management with extraction activities
+- **Hierarchical Agent Teams** — New ADK structure with 5 specialized teams and Root Supervisor.
+- **Self-Modifying Capabilities** — Dev team agents can now autonomously modify and deploy code.
+- **Industry Vertical Support** — Native agents and workflows for HealthPets, Remedia, and Deal Pipeline.
+- **Lead Scoring Rubrics** — Configurable LLM-powered entity scoring within the knowledge graph.
+- **Pipeline Run Tracking** — Scheduled and on-demand pipeline execution with run history.
+- **WhatsApp Integration Platform** — Multi-account WhatsApp orchestration for "Luna" and industry agents.
 
 ---
 

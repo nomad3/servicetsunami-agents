@@ -145,9 +145,22 @@ class WhatsAppService:
         """Compress the neonize SQLite file and store in channel_accounts.session_blob."""
         import gzip
         import os
+        import sqlite3
         path = self._client_name(tenant_id, account_id)
         if not os.path.exists(path):
             return
+            
+        # Try to checkpoint the DB before saving to merge WAL changes into the main .db file.
+        # This ensures we don't lose the latest auth keys that might be stuck in the WAL.
+        try:
+            # Connect with a short timeout to avoid blocking if neonize has it locked
+            conn = sqlite3.connect(path, timeout=2)
+            conn.execute("PRAGMA wal_checkpoint(FULL)")
+            conn.close()
+            logger.info(f"Checkpointed neonize DB for {tenant_id[:8]}")
+        except Exception as e:
+            logger.debug(f"Failed to checkpoint neonize DB (likely locked): {e}")
+
         try:
             with open(path, "rb") as f:
                 raw = f.read()
@@ -179,6 +192,18 @@ class WhatsAppService:
             raw = gzip.decompress(acct.session_blob)
             path = self._client_name(tenant_id, account_id)
             os.makedirs(os.path.dirname(path), exist_ok=True)
+            
+            # CRITICAL: Delete any stale WAL/SHM files before writing the restored .db file.
+            # SQLite will fail to open the database if it finds a WAL file that is
+            # inconsistent with the main .db file (which happens if we only restore the .db).
+            for suffix in ("-wal", "-shm"):
+                try:
+                    os.remove(path + suffix)
+                except FileNotFoundError:
+                    pass
+                except Exception:
+                    logger.warning(f"Failed to delete stale {suffix} file {path + suffix}")
+            
             with open(path, "wb") as f:
                 f.write(raw)
             logger.info(f"Restored neonize session from DB for {tenant_id[:8]}:{account_id} ({len(raw)} bytes)")
@@ -623,6 +648,17 @@ class WhatsAppService:
                     os.remove(session_path + suffix)
                 except FileNotFoundError:
                     pass
+            # Also clear the session blob in the database
+            db = self._get_db()
+            try:
+                acct = self._get_or_create_account(db, tenant_id, account_id)
+                acct.session_blob = None
+                acct.status = "pairing"
+                db.commit()
+            except Exception:
+                db.rollback()
+            finally:
+                db.close()
 
         # Create client and start connection (QR will be emitted via callback)
         client = self._create_client(tenant_id, account_id)
@@ -641,7 +677,7 @@ class WhatsAppService:
         )
 
         # Wait briefly for QR to be generated or existing session to restore
-        for i in range(20):
+        for i in range(30):
             await asyncio.sleep(0.5)
             if key in self._qr_codes:
                 return {
@@ -658,15 +694,22 @@ class WhatsAppService:
             # without events firing after whatsmeow's internal 515 reconnect).
             if i >= 6:
                 try:
+                    # Sync .connected attr is most reliable indicator of active connection
                     connected = getattr(client, "connected", False)
-                    # Fallback: is_logged_in survives 515 reconnects
-                    if not connected:
-                        try:
-                            logged_in = await asyncio.wait_for(client.is_logged_in(), timeout=3)
-                            connected = logged_in
-                        except Exception:
-                            pass
-                    logger.info(f"start_pairing: active probe i={i} connected={connected} for {key}")
+                    # Fallback: check if we have credentials on disk
+                    logged_in = False
+                    try:
+                        # Some versions of neonize aioze have is_logged_in as coroutine, some as attr
+                        res = client.is_logged_in()
+                        if inspect.isawaitable(res):
+                            logged_in = await asyncio.wait_for(res, timeout=2)
+                        else:
+                            logged_in = bool(res)
+                    except Exception:
+                        pass
+                        
+                    logger.info(f"start_pairing: active probe i={i} connected={connected} logged_in={logged_in} for {key}")
+                    
                     if connected:
                         phone = None
                         try:
@@ -684,6 +727,12 @@ class WhatsAppService:
                             "message": "Already connected (existing session restored)",
                             "connected": True,
                         }
+                    elif logged_in:
+                        # Authenticated but not yet connected to servers (maybe 515 reconnecting)
+                        # We stay in the loop to wait for real connection or QR
+                        self._statuses[key] = "connecting"
+                        self._qr_codes.pop(key, None)
+                        
                 except Exception as e:
                     logger.info(f"start_pairing: active probe error: {e}")
 
@@ -693,6 +742,7 @@ class WhatsAppService:
         }
 
     async def get_pairing_status(self, tenant_id: str, account_id: str = "default") -> dict:
+        import inspect
         key = self._key(tenant_id, account_id)
         status = self._statuses.get(key, "disconnected")
 
@@ -704,18 +754,24 @@ class WhatsAppService:
             try:
                 # Check sync .connected attr first
                 connected = getattr(client, "connected", False)
-                # Fallback: check is_logged_in which survives 515 reconnects
-                if not connected:
-                    try:
-                        logged_in = await asyncio.wait_for(client.is_logged_in(), timeout=3)
-                        connected = logged_in
-                    except Exception:
-                        pass
-                logger.info(f"Active detection probe for {key}: status={status}, connected={connected}")
+                
+                # Check logged_in as fallback
+                logged_in = False
+                try:
+                    res = client.is_logged_in()
+                    if inspect.isawaitable(res):
+                        logged_in = await asyncio.wait_for(res, timeout=2)
+                    else:
+                        logged_in = bool(res)
+                except Exception:
+                    pass
+                    
+                logger.info(f"Active detection probe for {key}: status={status}, connected={connected}, logged_in={logged_in}")
+                
                 if connected:
                     phone = None
                     try:
-                        me = await asyncio.wait_for(client.get_me(), timeout=3)
+                        me = await asyncio.wait_for(client.get_me(), timeout=2)
                         phone = me.User if me else None
                     except Exception:
                         pass
@@ -725,6 +781,11 @@ class WhatsAppService:
                     self._qr_codes.pop(key, None)
                     self._update_account_status(tenant_id, account_id, "connected", phone=phone)
                     self._save_session_to_db(tenant_id, account_id)
+                elif logged_in:
+                    # Authenticated but not fully connected yet
+                    if status != "pairing":
+                        status = "connecting"
+                        self._statuses[key] = "connecting"
             except Exception as e:
                 logger.warning(f"Active detection check failed for {key}: {type(e).__name__}: {e}")
 
@@ -892,16 +953,24 @@ class WhatsAppService:
                 .all()
             )
             logger.info(f"WhatsApp restore_connections: found {len(accounts)} accounts to restore")
+            tasks = []
             for acct in accounts:
                 tenant_id = str(acct.tenant_id)
                 account_id = acct.account_id
-                logger.info(f"Restoring WhatsApp connection for {tenant_id}:{account_id} (status={acct.status}, phone={acct.phone_number})")
-                try:
-                    # Restore neonize SQLite session from PostgreSQL before reconnecting
-                    self._restore_session_from_db(tenant_id, account_id)
-                    await self.reconnect(tenant_id, account_id)
-                except Exception:
-                    logger.exception(f"Failed to restore {tenant_id}:{account_id}")
+                
+                async def restore(tid, aid, status, phone):
+                    logger.info(f"Restoring WhatsApp connection for {tid}:{aid} (status={status}, phone={phone})")
+                    try:
+                        # Restore neonize SQLite session from PostgreSQL before reconnecting
+                        self._restore_session_from_db(tid, aid)
+                        await self.reconnect(tid, aid)
+                    except Exception:
+                        logger.exception(f"Failed to restore {tid}:{aid}")
+
+                tasks.append(restore(tenant_id, account_id, acct.status, acct.phone_number))
+            
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
         finally:
             db.close()
 

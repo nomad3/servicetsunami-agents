@@ -59,25 +59,36 @@ This is a **Turborepo monorepo** managed with `pnpm` workspaces:
 
 **Multi-LLM Router**: Supports multiple LLM providers (Anthropic, OpenAI, DeepSeek, etc.) with per-tenant configuration and cost-based routing. Models: `llm_provider.py`, `llm_model.py`, `llm_config.py`. Chat falls back to static templates if no API key is set.
 
-**Multi-Agent Orchestration**: Agent groups (`agent_group.py`) organize agents into teams. Agents have relationships (`agent_relationship.py`: supervises, delegates_to, collaborates_with), assigned tasks (`agent_task.py`), inter-agent messaging (`agent_message.py`), learnable skills (`agent_skill.py`), and semantic memory (`agent_memory.py`). Task execution is orchestrated through `TaskExecutionWorkflow` (Temporal) with 5 activities: dispatch → recall memory → execute via ADK → persist entities → evaluate results. All steps are recorded in `ExecutionTrace` for full in-platform traceability.
+**Multi-Agent Orchestration**: Agents are organized into a hierarchical multi-team structure. The **Root Supervisor** routes to 5 top-level teams, each with its own sub-supervisor:
+- **Personal Assistant Team**: "Luna", WhatsApp-native business co-pilot for high-level tasks.
+- **Dev Team**: Self-modifying team with a strict 5-step cycle (**Architect** → **Coder** → **Tester** → **DevOps** → **User Agent**). Agents have shell access and can autonomously modify code, run tests, and deploy via git.
+- **Data Team**: **Data Analyst**, **Report Generator**, **Knowledge Manager**. Handles SQL, analytics, and knowledge graph.
+- **Sales Team**: **Sales Agent** (deal management), **Customer Support** (inquiry handling).
+- **Marketing Team**: **Web Researcher** for market intelligence and prospect discovery.
+- **Specialized Industry Agents**: **HealthPets** platform agents (**Cardiac Analyst**, **Billing Agent**, **Vet Supervisor**), **Deal Team** agents (**Deal Analyst**, **Deal Researcher**, **Outreach Specialist**).
 
-**Credential Vault**: `CredentialVault` (`apps/api/app/services/orchestration/credential_vault.py`) provides Fernet encryption for skill API keys/tokens. Credentials are stored encrypted in `SkillCredential`, decrypted at runtime, injected per-request.
+**Enterprise Orchestration Engine**:
+- **Task Dispatcher**: Intelligent agent selection and task lifecycle management.
+- **Entity Validator**: High-fidelity validation of extracted knowledge entities against tenant-specific schemas.
+- **Credential Vault**: Fernet-encrypted storage for skill API keys and tokens.
+- **Skill Router**: Dynamic routing of agent tasks to external skill integrations.
 
-**Knowledge Graph**: Entities (`knowledge_entity.py`) and relations (`knowledge_relation.py`) form a knowledge graph. Supporting tables: `knowledge_observations` (raw facts from conversations), `knowledge_entity_history` (entity version tracking). Knowledge is extracted from chat and content via `knowledge_extraction.py`. The ADK knowledge_manager agent provides semantic search, entity CRUD, and graph traversal. Note: pgvector is not installed on Cloud SQL; the ADK knowledge_graph service falls back to text-based ILIKE search.
+**Knowledge Graph**: Entities (`knowledge_entity.py`) and relations (`knowledge_relation.py`) form a knowledge graph. Supports **Lead Scoring** via configurable rubrics and the `LeadScoringTool`. Knowledge is extracted via `KnowledgeExtractionWorkflow`. pgvector is not used; search falls back to text-based `ILIKE`.
 
-**Temporal workflows**: Durable workflow execution across two task queues. Workers in `apps/api/app/workers/`:
-- `orchestration_worker.py`: Task execution, channel health, and follow-up workflows (queue: `servicetsunami-orchestration`)
-- `databricks_worker.py`: Dataset sync, knowledge extraction, agent kit, data source sync (queue: `servicetsunami-databricks`)
-- `scheduler_worker.py`: Pipeline scheduling (cron/interval-based, polls every 60s)
+**UI/UX (Ocean Theme)**:
+- **Design System**: Glassmorphic "Ocean Theme" with support for high-contrast light and dark modes.
+- **Aesthetics**: Radial gradients, backdrop blurs (20px-30px), and "Metric Tiles" for data visualization.
+- **Animations**: Subtle Y-axis transitions (6px-8px) on hover for interactive elements.
+- **Custom Components**: `TaskTimeline` for execution traces and `SkillsConfigPanel` for integration management.
 
-Workflows in `apps/api/app/workflows/`:
-- `task_execution.py`: `TaskExecutionWorkflow` — dispatch, recall memory, execute, persist entities, evaluate (5 steps)
-- `dataset_sync.py`: `DatasetSyncWorkflow` — sync to bronze, transform to silver, update metadata
-- `data_source_sync.py`: `DataSourceSyncWorkflow` + `ScheduledSyncWorkflow` — connector extraction with incremental sync
-- `knowledge_extraction.py`: `KnowledgeExtractionWorkflow` — LLM entity extraction from chat sessions
-- `agent_kit_execution.py`: `AgentKitExecutionWorkflow` — agent kit task bundle execution
-- `channel_health.py`: `ChannelHealthMonitorWorkflow` — long-running channel health checks with continue_as_new
-- `follow_up.py`: `FollowUpWorkflow` — durable timer + follow-up action (WhatsApp, stage update, reminder)
+**Temporal workflows**: Durable workflow execution across three task queues:
+- `servicetsunami-orchestration`: `TaskExecutionWorkflow`, `ChannelHealthMonitorWorkflow`, `FollowUpWorkflow`.
+- `servicetsunami-databricks`: `DatasetSyncWorkflow`, `KnowledgeExtractionWorkflow`, `AgentKitExecutionWorkflow`, `DataSourceSyncWorkflow`.
+- `servicetsunami-business`: Industry-specific flows:
+  - `DealPipelineWorkflow`: Discover → Score → Research → Outreach → Advance → Sync (6 steps).
+  - `RemediaOrderWorkflow`: Create order → Confirm (WhatsApp) → Monitor payment → Notify delivery.
+  - `MonthlyBillingWorkflow`: Process usage → Generate invoices → Trigger payments (HealthPets).
+- `scheduler_worker.py`: Polls every 60s for cron/interval-based pipeline runs.
 
 **Pipeline Run Tracking**: `pipeline_run.py` model tracks pipeline execution history with status, duration, and error details. The scheduler worker handles automated pipeline execution.
 

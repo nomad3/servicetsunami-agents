@@ -30,24 +30,25 @@ ServiceTsunami now uses **Google Agent Development Kit (ADK)** with **Gemini 2.5
 
 ## Agent Structure
 
-The ADK service uses a **supervisor pattern** with specialist sub-agents:
+The ADK service uses a **hierarchical multi-team supervisor pattern**. The **Root Supervisor** routes requests to specialized team sub-supervisors:
 
-```
-servicetsunami_supervisor (root)
-├── data_analyst
-│   ├── discover_datasets
-│   ├── query_sql
-│   ├── generate_insights
-│   └── forecast
-├── report_generator
-│   ├── generate_report
-│   ├── format_output
-│   └── create_visualization
-└── knowledge_manager
-    ├── search_knowledge
-    ├── store_entity
-    └── record_observation
-```
+### 1. Root Supervisor
+- **Routing**: Personal Assistant, Dev Team, Data Team, Sales Team, Marketing Team.
+- **Goal**: Analyze intent and dispatch to the correct specialized team.
+
+### 2. Specialized Teams (Sub-Supervisors)
+
+| Team | Agents | Purpose |
+|------|--------|---------|
+| **Personal Assistant** | Luna (WhatsApp-native) | Business co-pilot, scheduling, reminders. |
+| **Dev Team** | Architect, Coder, Tester, DevOps, User Agent | **Self-modifying** team with shell/git access for autonomous coding. |
+| **Data Team** | Data Analyst, Report Generator, Knowledge Manager | SQL queries, visualization, knowledge graph management. |
+| **Sales Team** | Sales Agent, Customer Support | Deal pipeline management, inquiry handling. |
+| **Marketing Team** | Web Researcher | Market intelligence, prospect discovery. |
+
+### 3. Industry-Specific Agents
+- **HealthPets**: Cardiac Analyst, Billing Agent, Vet Supervisor.
+- **Deal Team**: Deal Analyst, Deal Researcher, Outreach Specialist.
 
 ## Configuration
 
@@ -57,15 +58,17 @@ servicetsunami_supervisor (root)
 |----------|-------------|---------|
 | `ADK_BASE_URL` | ADK service URL | `http://servicetsunami-adk` |
 | `ADK_APP_NAME` | ADK app name | `servicetsunami_supervisor` |
+| `HEALTHPETS_API_URL` | HealthPets backend | `http://healthpets-backend` |
 
 ### Environment Variables (ADK Service)
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `GOOGLE_GENAI_USE_VERTEXAI` | Use Vertex AI | `TRUE` |
-| `ADK_MODEL` | Gemini model | `gemini-2.5-flash` |
+| `ADK_MODEL` | Gemini model | `gemini-2.0-flash` (or 2.5) |
 | `VERTEX_PROJECT` | GCP project | `ai-agency-479516` |
 | `VERTEX_LOCATION` | GCP region | `us-central1` |
+| `GIT_AUTH_TOKEN` | Token for self-modifying agents | `ghp_xxxxxx` |
 
 ## Authentication
 
