@@ -5,7 +5,6 @@ import {
   FaSignOutAlt as BoxArrowRight,
   FaBuilding as BuildingFill,
   FaComments as ChatDotsFill,
-  FaMicrochip as CpuFill,
   FaDatabase as DatabaseFill,
   FaCog as GearFill,
   FaHome as HouseDoorFill,
@@ -57,7 +56,7 @@ const Layout = ({ children }) => {
     {
       title: 'AI OPERATIONS',
       items: [
-        { path: '/chat', icon: ChatDotsFill, label: 'AI Command', description: 'Command your AI agent fleet' },
+        { path: '/chat', icon: ChatDotsFill, label: 'AI Chat', description: 'Chat with your AI agent fleet' },
         { path: '/agents', icon: Robot, label: 'Agent Fleet', description: 'Manage your AI agent fleet' },
         { path: '/workflows', icon: ProjectDiagramFill, label: 'Workflows', description: 'Workflow designs and execution audit' },
         { path: '/memory', icon: DatabaseFill, label: 'Memory', description: 'Entities, signals, and relations' },
@@ -73,7 +72,6 @@ const Layout = ({ children }) => {
       title: 'ADMIN',
       items: [
         { path: '/tenants', icon: BuildingFill, label: 'Organizations', description: 'Manage organizations & business units' },
-        { path: '/settings/llm', icon: CpuFill, label: 'AI Models', description: 'Configure AI model providers' },
         { path: '/settings', icon: GearFill, label: 'Settings', description: 'Platform settings' },
       ]
     }

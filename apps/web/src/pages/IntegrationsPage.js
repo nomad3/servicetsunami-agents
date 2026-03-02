@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Badge,
@@ -13,8 +12,9 @@ import {
   Spinner,
   Table
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
-  FaSyncAlt,
+  FaBolt,
   FaCalendarAlt,
   FaCheckCircle,
   FaCloud,
@@ -22,8 +22,11 @@ import {
   FaDatabase,
   FaEdit,
   FaExclamationTriangle,
-  FaBolt,
+  FaEye,
+  FaEyeSlash,
   FaFileUpload,
+  FaKey,
+  FaMicrochip,
   FaNetworkWired,
   FaPen,
   FaPlay,
@@ -31,11 +34,11 @@ import {
   FaPlus,
   FaPlusCircle,
   FaServer,
-  FaTrash,
+  FaSyncAlt,
   FaTimesCircle,
-  FaCogs
+  FaTrash
 } from 'react-icons/fa';
-import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import SkillsConfigPanel from '../components/SkillsConfigPanel';
 import SyncStatusBadge from '../components/SyncStatusBadge';
@@ -44,6 +47,7 @@ import dataPipelineService from '../services/dataPipeline';
 import dataSourceService from '../services/dataSource';
 import datasetService from '../services/dataset';
 import datasetGroupService from '../services/datasetGroup';
+import llmService from '../services/llm';
 import './IntegrationsPage.css';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -103,7 +107,7 @@ const CONNECTOR_FIELDS = {
   ]
 };
 
-const TAB_KEYS = ['connected-apps', 'connectors', 'data-sources', 'datasets'];
+const TAB_KEYS = ['connected-apps', 'connectors', 'data-sources', 'datasets', 'ai-models'];
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -157,6 +161,14 @@ const IntegrationsPage = () => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
 
+  // ── AI Models (LLM Providers) state ──
+  const [llmProviders, setLlmProviders] = useState([]);
+  const [llmLoading, setLlmLoading] = useState(true);
+  const [llmApiKeys, setLlmApiKeys] = useState({});
+  const [llmShowKeys, setLlmShowKeys] = useState({});
+  const [llmSaving, setLlmSaving] = useState(null);
+  const [llmSaveSuccess, setLlmSaveSuccess] = useState({});
+
   // ── Tab change handler ──
   const handleTabChange = (tab) => {
     setActiveTab(tab);
@@ -171,6 +183,7 @@ const IntegrationsPage = () => {
     fetchDataSources();
     fetchDatasets();
     fetchGroups();
+    fetchLlmProviders();
   }, []);
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -612,6 +625,43 @@ const IntegrationsPage = () => {
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // AI MODELS (LLM Providers) logic
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const fetchLlmProviders = async () => {
+    try {
+      setLlmLoading(true);
+      const data = await llmService.getProviderStatus();
+      setLlmProviders(data);
+    } catch (err) {
+      console.error('Failed to load LLM providers:', err);
+    } finally {
+      setLlmLoading(false);
+    }
+  };
+
+  const handleLlmKeyChange = (providerName, value) => {
+    setLlmApiKeys(prev => ({ ...prev, [providerName]: value }));
+    setLlmSaveSuccess(prev => ({ ...prev, [providerName]: false }));
+  };
+
+  const handleLlmSaveKey = async (providerName) => {
+    const key = llmApiKeys[providerName];
+    if (!key) return;
+    try {
+      setLlmSaving(providerName);
+      await llmService.setProviderKey(providerName, key);
+      setLlmSaveSuccess(prev => ({ ...prev, [providerName]: true }));
+      setLlmApiKeys(prev => ({ ...prev, [providerName]: '' }));
+      await fetchLlmProviders();
+    } catch (err) {
+      setError(`Failed to save ${providerName} key`);
+    } finally {
+      setLlmSaving(null);
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // TAB CONTENT: Skills
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -805,7 +855,7 @@ const IntegrationsPage = () => {
                   <Card.Text className="text-muted small">
                     {ds.config?.host ? <span className="text-truncate d-block" title={ds.config.host}>Host: {ds.config.host}</span>
                       : ds.config?.base_url ? <span className="text-truncate d-block" title={ds.config.base_url}>{ds.config.base_url}</span>
-                      : <span>Configured</span>}
+                        : <span>Configured</span>}
                   </Card.Text>
                   <div className="mt-3 pt-3 border-top">
                     <div className="d-flex align-items-center text-success small">
@@ -966,6 +1016,9 @@ const IntegrationsPage = () => {
           <Nav.Item>
             <Nav.Link eventKey="datasets"><FaFileUpload className="me-2" />Datasets</Nav.Link>
           </Nav.Item>
+          <Nav.Item>
+            <Nav.Link eventKey="ai-models"><FaMicrochip className="me-2" />AI Models</Nav.Link>
+          </Nav.Item>
         </Nav>
 
         {/* Tab Content */}
@@ -973,6 +1026,70 @@ const IntegrationsPage = () => {
         {activeTab === 'connectors' && renderConnectorsTab()}
         {activeTab === 'data-sources' && renderDataSourcesTab()}
         {activeTab === 'datasets' && renderDatasetsTab()}
+        {activeTab === 'ai-models' && (
+          <div className="tab-content-inner">
+            <p className="text-muted mb-4">Configure API keys for your AI model providers</p>
+            {llmLoading ? (
+              <div className="text-center py-5"><Spinner animation="border" variant="primary" /></div>
+            ) : (
+              <Row xs={1} md={2} lg={3} className="g-4">
+                {llmProviders.map((provider) => (
+                  <Col key={provider.name}>
+                    <Card className="h-100" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--color-border)' }}>
+                      <Card.Body>
+                        <div className="d-flex align-items-center justify-content-between mb-3">
+                          <strong>{provider.display_name}</strong>
+                          {provider.configured ? (
+                            <Badge bg="success" className="bg-opacity-25 text-success border border-success">
+                              <FaCheckCircle className="me-1" size={10} /> Connected
+                            </Badge>
+                          ) : (
+                            <Badge bg="secondary" className="bg-opacity-25 text-secondary border border-secondary">
+                              Not configured
+                            </Badge>
+                          )}
+                        </div>
+                        <Form.Label className="small text-muted"><FaKey className="me-1" size={10} />API Key</Form.Label>
+                        <div className="d-flex gap-1 mb-2">
+                          <Form.Control
+                            size="sm"
+                            type={llmShowKeys[provider.name] ? 'text' : 'password'}
+                            placeholder={provider.configured ? '••••••••••••' : 'Enter API key'}
+                            value={llmApiKeys[provider.name] || ''}
+                            onChange={(e) => handleLlmKeyChange(provider.name, e.target.value)}
+                            disabled={llmSaving === provider.name}
+                          />
+                          <Button
+                            variant="outline-secondary"
+                            size="sm"
+                            onClick={() => setLlmShowKeys(prev => ({ ...prev, [provider.name]: !prev[provider.name] }))}
+                          >
+                            {llmShowKeys[provider.name] ? <FaEyeSlash size={12} /> : <FaEye size={12} />}
+                          </Button>
+                        </div>
+                        {llmSaveSuccess[provider.name] && (
+                          <small className="text-success d-block mb-2"><FaCheckCircle className="me-1" size={10} />Key saved</small>
+                        )}
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          className="w-100"
+                          onClick={() => handleLlmSaveKey(provider.name)}
+                          disabled={!llmApiKeys[provider.name] || llmSaving === provider.name}
+                        >
+                          {llmSaving === provider.name ? <Spinner animation="border" size="sm" /> : 'Save Key'}
+                        </Button>
+                        <div className="text-center mt-2">
+                          <small className="text-muted">{provider.is_openai_compatible ? 'OpenAI-compatible' : 'Native API'}</small>
+                        </div>
+                      </Card.Body>
+                    </Card>
+                  </Col>
+                ))}
+              </Row>
+            )}
+          </div>
+        )}
 
         {/* ── Connector Modal ── */}
         <Modal show={showConnectorModal} onHide={() => setShowConnectorModal(false)} size="lg">

@@ -145,7 +145,7 @@ const DashboardPage = () => {
         <div style={sectionLabel}>Quick Access</div>
         <Row className="g-3 mb-4">
           {[
-            { label: 'AI Command', desc: 'Chat with your agents', path: '/chat' },
+            { label: 'AI Chat', desc: 'Chat with your agents', path: '/chat' },
             { label: 'Agent Fleet', desc: 'View and manage agents', path: '/agents' },
             { label: 'Integrations', desc: 'Manage connected apps', path: '/integrations' },
             { label: 'Workflows', desc: 'Automation & execution', path: '/workflows' },

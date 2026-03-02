@@ -13,7 +13,6 @@ import DashboardPage from './pages/DashboardPage';
 // DatasetsPage and DataSourcesPage merged into IntegrationsPage
 import DeploymentsPage from './pages/DeploymentsPage';
 import IntegrationsPage from './pages/IntegrationsPage';
-import LLMSettingsPage from './pages/LLMSettingsPage';
 import LoginPage from './pages/LoginPage';
 import MemoryPage from './pages/MemoryPage';
 import NotebooksPage from './pages/NotebooksPage';
@@ -86,7 +85,7 @@ function App() {
               <Route path="/workflows" element={<ProtectedRoute><WorkflowsPage /></ProtectedRoute>} />
               <Route path="/task-console" element={<Navigate to="/workflows?tab=executions" replace />} />
               <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-              <Route path="/settings/llm" element={<ProtectedRoute><LLMSettingsPage /></ProtectedRoute>} />
+              <Route path="/settings/llm" element={<Navigate to="/integrations?tab=ai-models" replace />} />
               <Route path="/settings/branding" element={<ProtectedRoute><BrandingPage /></ProtectedRoute>} />
               <Route path="/branding" element={<ProtectedRoute><BrandingPage /></ProtectedRoute>} />
             </Routes>
