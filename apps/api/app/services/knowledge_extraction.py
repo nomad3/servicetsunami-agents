@@ -33,6 +33,28 @@ SUPPORTED_CONTENT_TYPES = {"chat_transcript", "html", "structured_json", "plain_
 # Maximum characters sent to the LLM to stay within context limits
 _MAX_CONTENT_CHARS = 12_000
 
+# Platform-internal terms that should never become entities.
+# Lowercase for case-insensitive matching.
+ENTITY_BLOCKLIST: set[str] = {
+    # Platform internals
+    "luna", "servicetsunami", "service tsunami",
+    "adk", "adk service", "adk server", "google adk",
+    "mcp", "mcp server",
+    # Communication channels (the channels themselves, not contacts)
+    "whatsapp", "gmail", "email", "inbox", "calendar",
+    "slack", "telegram", "sms",
+    # UI / platform concepts
+    "dashboard", "workflow", "workflows", "pipeline",
+    "knowledge_manager", "knowledge manager", "knowledge base",
+    "sales_agent", "sales agent", "data_analyst", "data analyst",
+    "report_generator", "report generator",
+    "personal_assistant", "personal assistant",
+    "agent", "agents", "supervisor", "tool", "tools",
+    # Generic noise
+    "user", "usuario", "assistant", "bot", "system",
+    "api", "database", "server", "client",
+}
+
 
 class KnowledgeExtractionService:
     """Universal entity extraction from arbitrary content sources."""
@@ -219,11 +241,19 @@ class KnowledgeExtractionService:
 
         parts.append(
             "\nReturn the result as a JSON array of objects. Each object must have:\n"
-            "- \"name\": string (the entity's primary name)\n"
-            "- \"type\": string (entity type, e.g. person, company, product, concept)\n"
-            "- \"description\": string (brief description)\n"
-            "- \"confidence\": number between 0.0 and 1.0\n"
-            "- \"attributes\": object (optional extra key-value pairs)\n"
+            '- "name": string (the entity\'s canonical name — use proper capitalization, e.g. "John Smith" not "john smith")\n'
+            '- "type": string (one of: person, organization, product, location, event, opportunity, task, concept)\n'
+            '- "category": string (one of: lead, contact, customer, investor, partner, competitor, '
+            'vendor, prospect, person, organization, location, product, event, opportunity, task, concept)\n'
+            '- "description": string (1-2 sentence description of who/what this entity is)\n'
+            '- "confidence": number between 0.0 and 1.0\n'
+            '- "attributes": object (optional extra key-value pairs like email, phone, company, role, url, address)\n'
+            "\nIMPORTANT RULES:\n"
+            "- DO NOT extract platform/tool names (WhatsApp, Gmail, Slack, Luna, etc.) as entities\n"
+            "- DO NOT extract generic terms (user, assistant, bot, agent, system, workflow, etc.)\n"
+            "- Normalize entity names: use the most complete, proper form (e.g. 'Dr. Maria Garcia' not 'maria')\n"
+            "- If the same entity appears multiple times with slight variations, use ONE canonical name\n"
+            "- Assign the most specific category that fits (e.g. 'lead' for a sales prospect, 'contact' for a known person)\n"
         )
 
         # Truncate content to avoid blowing up context window
@@ -305,9 +335,15 @@ class KnowledgeExtractionService:
 
         # Persist valid entities
         created: List[KnowledgeEntity] = []
+        blocked_count = 0
         for item in result.valid_entities:
             name = item.get("name", "").strip()
             if not name:
+                continue
+
+            # Skip blocklisted entities
+            if name.lower() in ENTITY_BLOCKLIST:
+                blocked_count += 1
                 continue
 
             # Determine entity_type: schema override > LLM output > default
@@ -316,10 +352,14 @@ class KnowledgeExtractionService:
             else:
                 entity_type = (item.get("type") or default_type).lower()
 
-            # Merge LLM-returned attributes with description
+            # Category from LLM output (falls back to entity_type)
+            category = (item.get("category") or entity_type).lower()
+
+            # Description as a top-level field
+            description = item.get("description", "")
+
+            # Structured attributes (email, phone, company, role, etc.)
             attributes: Dict[str, Any] = {}
-            if item.get("description"):
-                attributes["description"] = item["description"]
             if isinstance(item.get("attributes"), dict):
                 attributes.update(item["attributes"])
 
@@ -329,6 +369,8 @@ class KnowledgeExtractionService:
                 tenant_id=tenant_id,
                 name=name,
                 entity_type=entity_type,
+                category=category,
+                description=description or None,
                 attributes=attributes or None,
                 confidence=confidence,
                 source_agent_id=source_agent_id,
@@ -341,6 +383,9 @@ class KnowledgeExtractionService:
 
         if created:
             db.commit()
+
+        if blocked_count:
+            logger.info("Blocked %d noise entities via blocklist", blocked_count)
 
         logger.info(
             "Persisted %d entities, skipped %d dupes, rejected %d",
