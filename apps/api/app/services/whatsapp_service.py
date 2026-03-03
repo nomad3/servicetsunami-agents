@@ -5,6 +5,7 @@ Manages per-tenant WhatsApp Web sessions directly in the FastAPI process.
 import asyncio
 import base64
 import io
+import inspect
 import logging
 import uuid
 from datetime import datetime
@@ -703,13 +704,14 @@ class WhatsAppService:
                     # Fallback: check if we have credentials on disk
                     logged_in = False
                     try:
-                        # Some versions of neonize aioze have is_logged_in as coroutine, some as attr
+                        # Call is_logged_in and await if it returns an awaitable
                         res = client.is_logged_in()
                         if inspect.isawaitable(res):
                             logged_in = await asyncio.wait_for(res, timeout=2)
                         else:
                             logged_in = bool(res)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"is_logged_in check failed: {e}")
                         pass
                         
                     logger.info(f"start_pairing: active probe i={i} connected={connected} logged_in={logged_in} for {key}")
@@ -746,7 +748,6 @@ class WhatsAppService:
         }
 
     async def get_pairing_status(self, tenant_id: str, account_id: str = "default") -> dict:
-        import inspect
         key = self._key(tenant_id, account_id)
         status = self._statuses.get(key, "disconnected")
 
@@ -762,12 +763,14 @@ class WhatsAppService:
                 # Check logged_in as fallback
                 logged_in = False
                 try:
+                    # Call is_logged_in and await if it returns an awaitable
                     res = client.is_logged_in()
                     if inspect.isawaitable(res):
                         logged_in = await asyncio.wait_for(res, timeout=2)
                     else:
                         logged_in = bool(res)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"is_logged_in check failed: {e}")
                     pass
                     
                 logger.info(f"Active detection probe for {key}: status={status}, connected={connected}, logged_in={logged_in}")

@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     api_base_url: str = "http://servicetsunami-api"
 
     # Health-Pets API (for billing callbacks)
-    healthpets_api_url: str = "http://localhost:8000"
+    healthpets_api_url: str = "http://host.docker.internal:8001"
 
     # Remedia PharmApp API (medication marketplace)
     remedia_api_url: str = "http://remedia-api.prod.svc.cluster.local/api/v1"
