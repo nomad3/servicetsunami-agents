@@ -11,6 +11,7 @@ The Memory page (`/memory`) is the UI for the knowledge graph — entities, rela
 2. **No categorization** — Every entity shows as UNCATEGORIZED / CONCEPT / DRAFT
 3. **Noise entities** — Internal platform terms (Luna, ADK service, WhatsApp, Gmail, inbox) pollute the knowledge base
 4. **Flat unusable table** — Dense 9-column table, no grouping, no hierarchy
+
 5. **No entity detail view** — Can't see properties, observations, history
 6. **No CRUD from UI** — Can't edit, merge, delete, or reclassify entities
 7. **No pagination** — Hard-capped at 100 results
