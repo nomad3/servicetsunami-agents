@@ -189,8 +189,8 @@ function MemoryPage() {
         {/* Page Header */}
         <div className="memory-page-header">
           <div>
-            <h2 className="page-title">Knowledge Base</h2>
-            <p className="page-subtitle">Entities, relations, and signals from your conversations</p>
+            <h2 className="page-title">Memory</h2>
+            <p className="page-subtitle">What Luna knows, remembers, and has learned from your conversations</p>
           </div>
           <Button variant="primary" size="sm" onClick={() => setShowCreateModal(true)}>
             <FaPlus size={11} className="me-1" /> Add Entity

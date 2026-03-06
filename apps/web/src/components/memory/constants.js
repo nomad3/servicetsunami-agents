@@ -1,7 +1,10 @@
 import {
   FaUser, FaBuilding, FaMapMarkerAlt, FaBox, FaCalendarAlt,
   FaBriefcase, FaTasks, FaLightbulb, FaBullseye, FaHandshake,
-  FaChartLine, FaUserTie, FaStore, FaUsers
+  FaChartLine, FaUserTie, FaStore, FaUsers,
+  FaHeart, FaInfoCircle, FaStar, FaCheckCircle, FaWrench, FaListOl,
+  FaPlus, FaEdit, FaTrash, FaProjectDiagram, FaBrain, FaBolt,
+  FaTimesCircle, FaSearch,
 } from 'react-icons/fa';
 
 // ── Category config (icons, colors, labels) ──────────────────────
@@ -61,3 +64,39 @@ export const ALL_CATEGORIES = Object.keys(CATEGORY_CONFIG);
 
 // ── All statuses for filter dropdowns ────────────────────────────
 export const ALL_STATUSES = Object.keys(STATUS_CONFIG);
+
+// ── Memory type config ───────────────────────────────────────────
+export const MEMORY_TYPE_CONFIG = {
+  preference: { icon: FaHeart,       color: '#f472b6', bg: 'rgba(244, 114, 182, 0.15)', label: 'Preference' },
+  fact:       { icon: FaInfoCircle,  color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.15)',  label: 'Fact' },
+  experience: { icon: FaStar,        color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)',  label: 'Experience' },
+  decision:   { icon: FaCheckCircle, color: '#34d399', bg: 'rgba(52, 211, 153, 0.15)',  label: 'Decision' },
+  skill:      { icon: FaWrench,      color: '#a78bfa', bg: 'rgba(167, 139, 250, 0.15)', label: 'Skill' },
+  procedure:  { icon: FaListOl,      color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.15)',  label: 'Procedure' },
+};
+
+export const getMemoryTypeConfig = (type) => {
+  return MEMORY_TYPE_CONFIG[type?.toLowerCase()] || { icon: FaInfoCircle, color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.10)', label: type || 'Other' };
+};
+
+export const ALL_MEMORY_TYPES = Object.keys(MEMORY_TYPE_CONFIG);
+
+// ── Activity event type config ───────────────────────────────────
+export const ACTIVITY_EVENT_CONFIG = {
+  entity_created:   { icon: FaPlus,           color: '#34d399', label: 'Entity Created' },
+  entity_updated:   { icon: FaEdit,           color: '#60a5fa', label: 'Entity Updated' },
+  entity_deleted:   { icon: FaTrash,          color: '#f87171', label: 'Entity Deleted' },
+  relation_created: { icon: FaProjectDiagram, color: '#a78bfa', label: 'Relation Created' },
+  memory_created:   { icon: FaBrain,          color: '#f472b6', label: 'Memory Learned' },
+  memory_updated:   { icon: FaEdit,           color: '#f472b6', label: 'Memory Updated' },
+  action_triggered: { icon: FaBolt,           color: '#fbbf24', label: 'Action Triggered' },
+  action_completed: { icon: FaCheckCircle,    color: '#34d399', label: 'Action Completed' },
+  action_failed:    { icon: FaTimesCircle,    color: '#f87171', label: 'Action Failed' },
+  recall_used:      { icon: FaSearch,         color: '#38bdf8', label: 'Context Recalled' },
+};
+
+export const getActivityEventConfig = (type) => {
+  return ACTIVITY_EVENT_CONFIG[type] || { icon: FaInfoCircle, color: '#94a3b8', label: type || 'Event' };
+};
+
+export const ALL_ACTIVITY_SOURCES = ['chat', 'gmail', 'whatsapp', 'calendar', 'manual'];

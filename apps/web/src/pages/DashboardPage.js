@@ -72,7 +72,7 @@ const DashboardPage = () => {
       status: (overview?.total_datasets ?? 0) > 0 ? 'operational' : 'idle',
     },
     {
-      label: 'Knowledge Base',
+      label: 'Memory',
       value: overview?.total_vector_stores ?? 0,
       sub: 'vector stores',
       status: (overview?.total_vector_stores ?? 0) > 0 ? 'operational' : 'idle',

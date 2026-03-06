@@ -101,4 +101,40 @@ export const memoryService = {
     const response = await api.get('/knowledge/scoring-rubrics');
     return response.data;
   },
+
+  // ── Agent Memories (tenant-scoped) ─────────────────────────────
+  async getTenantMemories({ memoryType, skip = 0, limit = 50 } = {}) {
+    const params = new URLSearchParams();
+    if (memoryType) params.append('memory_type', memoryType);
+    params.append('skip', skip);
+    params.append('limit', limit);
+    const response = await api.get(`/memories/tenant?${params.toString()}`);
+    return response.data;
+  },
+
+  async updateMemoryItem(id, data) {
+    const response = await api.patch(`/memories/${id}`, data);
+    return response.data;
+  },
+
+  async deleteMemoryItem(id) {
+    await api.delete(`/memories/${id}`);
+  },
+
+  // ── Activity Feed ──────────────────────────────────────────────
+  async getActivityFeed({ source, eventType, skip = 0, limit = 20 } = {}) {
+    const params = new URLSearchParams();
+    if (source) params.append('source', source);
+    if (eventType) params.append('event_type', eventType);
+    params.append('skip', skip);
+    params.append('limit', limit);
+    const response = await api.get(`/memories/activity?${params.toString()}`);
+    return response.data;
+  },
+
+  // ── Stats ──────────────────────────────────────────────────────
+  async getMemoryStats() {
+    const response = await api.get('/memories/stats');
+    return response.data;
+  },
 };
