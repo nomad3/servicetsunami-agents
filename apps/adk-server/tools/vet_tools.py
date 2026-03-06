@@ -175,9 +175,8 @@ Only populate measurement fields you can actually read from the images. Set unre
                 mime_type = img_resp.headers.get("content-type", "").split(";")[0].strip()
                 if not mime_type or not mime_type.startswith("image/"):
                     mime_type = mimetypes.guess_type(url)[0] or "image/jpeg"
-                b64_data = base64.b64encode(img_resp.content).decode()
                 parts.append(genai.types.Part.from_bytes(
-                    data=base64.b64decode(b64_data),
+                    data=img_resp.content,
                     mime_type=mime_type,
                 ))
             except Exception as e:
@@ -217,7 +216,7 @@ async def get_breed_reference_ranges(
     breed: str,
     tenant_id: str = "auto",
 ) -> dict:
-    """Look up normal ECG reference ranges for a specific breed.
+    """Look up normal cardiac reference ranges for a specific breed.
 
     Queries knowledge entities with entity_type='reference' and
     category='breed_reference' matching the species and breed.
