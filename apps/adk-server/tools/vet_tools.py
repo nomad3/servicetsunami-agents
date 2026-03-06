@@ -266,6 +266,85 @@ async def transcribe_audio(
         return {"status": "error", "error": str(e)}
 
 
+async def parse_clinical_dictation(
+    text: str,
+    tenant_id: str = "auto",
+) -> dict:
+    """Parse free-text clinical dictation into structured visit patient fields.
+
+    Takes natural language from a cardiologist (typed or transcribed from voice)
+    and extracts structured clinical data matching the VisitPatient schema.
+
+    Args:
+        text: Free-text clinical dictation
+        tenant_id: Tenant context
+
+    Returns:
+        Dict with extracted fields: heart_rate, resp_rate, murmur_grade,
+        murmur_type, murmur_location, lungs, bcs, presenting_complaint,
+        echo_summary, assessment, plan, and any other recognized fields.
+    """
+    tenant_id = _resolve_tenant_id(tenant_id)
+
+    prompt = f"""You are an expert veterinary cardiologist parsing clinical dictation into structured data.
+
+Extract all clinical fields from this dictation. Only include fields that are actually mentioned.
+
+Dictation:
+{text}
+
+Return a JSON object with these fields (only include fields that were mentioned):
+- heart_rate (int) — heart rate in bpm
+- resp_rate (int) — respiratory rate
+- murmur_grade (str) — e.g. "II/VI", "III/VI"
+- murmur_type (str) — e.g. "systolic", "diastolic", "continuous"
+- murmur_location (str) — e.g. "left apex", "right base"
+- lungs (str) — lung auscultation findings
+- bcs (str) — body condition score e.g. "5/9"
+- presenting_complaint (str) — reason for visit
+- echo_summary (str) — echocardiographic findings narrative
+- assessment (str) — clinical assessment / diagnosis
+- plan (str) — treatment plan and recommendations
+- bun (float) — blood urea nitrogen
+- creatinine (float) — serum creatinine
+- sdma (float) — SDMA value
+- potassium (float) — serum potassium
+- t4 (float) — thyroxine level
+- blood_pressure (float) — systolic blood pressure
+- acvim_stage (str) — ACVIM cardiac staging (A/B1/B2/C/D)
+- hcm_stage (str) — HCM staging for cats
+
+Return ONLY valid JSON with "status": "success" and "fields": {{...extracted fields...}}.
+Do not include fields that were not mentioned in the dictation."""
+
+    try:
+        client = genai.Client()
+        response = await client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        text_content = response.text.strip()
+
+        json_match = re.search(r"\{[\s\S]*\}", text_content)
+        if json_match:
+            parsed = json.loads(json_match.group())
+            if "fields" not in parsed:
+                parsed = {"status": "success", "fields": parsed}
+            else:
+                parsed["status"] = "success"
+            return parsed
+        else:
+            return {
+                "status": "error",
+                "error": "Could not parse structured fields from dictation",
+                "raw_response": text_content,
+            }
+
+    except Exception as e:
+        logger.exception("Clinical dictation parsing failed: %s", e)
+        return {"status": "error", "error": str(e)}
+
+
 async def get_breed_reference_ranges(
     species: str,
     breed: str,
