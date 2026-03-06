@@ -71,26 +71,29 @@ class KnowledgeExtractionService:
         *,
         source_agent_id: Optional[uuid.UUID] = None,
         collection_task_id: Optional[uuid.UUID] = None,
-    ) -> List[KnowledgeEntity]:
-        """Extract knowledge entities from a chat session (backward-compat wrapper).
+    ) -> Dict[str, Any]:
+        """Extract knowledge from a chat session (backward-compat wrapper).
 
         Loads the ChatSession, converts its messages to a transcript, then
         delegates to :meth:`extract_from_content` with content_type="chat_transcript".
 
         Returns:
-            List of newly-created KnowledgeEntity rows (already committed).
+            Dict with keys: entities (List[KnowledgeEntity]), relations (List[dict]),
+            memories (List[dict]), action_triggers (List[dict]).
         """
+        empty_result = {"entities": [], "relations": [], "memories": [], "action_triggers": []}
+
         session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
         if not session:
             logger.warning("ChatSession %s not found — skipping extraction", session_id)
-            return []
+            return empty_result
 
         transcript = ""
         for msg in session.messages:
             transcript += f"{msg.role}: {msg.content}\n"
 
         if not transcript.strip():
-            return []
+            return empty_result
 
         return self.extract_from_content(
             db=db,
@@ -112,8 +115,8 @@ class KnowledgeExtractionService:
         source_url: Optional[str] = None,
         source_agent_id: Optional[uuid.UUID] = None,
         collection_task_id: Optional[uuid.UUID] = None,
-    ) -> List[KnowledgeEntity]:
-        """Extract entities from arbitrary content.
+    ) -> Dict[str, Any]:
+        """Extract entities, relations, memories, and action triggers from content.
 
         Args:
             db: SQLAlchemy session.
@@ -134,19 +137,22 @@ class KnowledgeExtractionService:
             collection_task_id: AgentTask that triggered the extraction.
 
         Returns:
-            List of newly-created (and committed) KnowledgeEntity rows.
+            Dict with keys: entities (List[KnowledgeEntity]), relations (List[dict]),
+            memories (List[dict]), action_triggers (List[dict]).
         """
+        empty_result = self._empty_result()
+
         if content_type not in SUPPORTED_CONTENT_TYPES:
             logger.error(
                 "Unsupported content_type '%s'. Must be one of %s",
                 content_type,
                 SUPPORTED_CONTENT_TYPES,
             )
-            return []
+            return empty_result
 
         if not content or not content.strip():
             logger.info("Empty content provided — nothing to extract")
-            return []
+            return empty_result
 
         # Build the LLM prompt
         prompt = self._build_prompt(content, content_type, entity_schema)
@@ -158,7 +164,7 @@ class KnowledgeExtractionService:
                 logger.warning(
                     "LLM service not configured (missing API key). Skipping knowledge extraction."
                 )
-                return []
+                return empty_result
 
             response = llm_service.generate_chat_response(
                 user_message=prompt,
@@ -167,10 +173,20 @@ class KnowledgeExtractionService:
                 temperature=0.0,
             )
 
-            entities_data = self._parse_json_response(response.get("text", ""))
+            parsed = self._parse_json_response(response.get("text", ""))
+            entities_data = parsed.get("entities", [])
+            relations_data = parsed.get("relations", [])
+            memories_data = parsed.get("memories", [])
+            triggers_data = parsed.get("action_triggers", [])
+
             if not entities_data:
                 logger.info("LLM returned no entities for content_type=%s", content_type)
-                return []
+                return {
+                    "entities": [],
+                    "relations": relations_data,
+                    "memories": memories_data,
+                    "action_triggers": triggers_data,
+                }
 
             created = self._persist_entities(
                 db=db,
@@ -183,16 +199,24 @@ class KnowledgeExtractionService:
             )
 
             logger.info(
-                "Extracted %d entities (%d new) from content_type=%s",
+                "Extracted %d entities (%d new), %d relations, %d memories, %d triggers from content_type=%s",
                 len(entities_data),
                 len(created),
+                len(relations_data),
+                len(memories_data),
+                len(triggers_data),
                 content_type,
             )
-            return created
+            return {
+                "entities": created,
+                "relations": relations_data,
+                "memories": memories_data,
+                "action_triggers": triggers_data,
+            }
 
         except Exception as e:
             logger.error("Knowledge extraction failed: %s", e)
-            return []
+            return empty_result
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -240,7 +264,7 @@ class KnowledgeExtractionService:
             )
 
         parts.append(
-            "\nReturn the result as a JSON array of objects. Each object must have:\n"
+            "\nExtract entities as a JSON array of objects. Each object must have:\n"
             '- "name": string (the entity\'s canonical name — use proper capitalization, e.g. "John Smith" not "john smith")\n'
             '- "type": string (one of: person, organization, product, location, event, opportunity, task, concept)\n'
             '- "category": string (one of: lead, contact, customer, investor, partner, competitor, '
@@ -256,6 +280,36 @@ class KnowledgeExtractionService:
             "- Assign the most specific category that fits (e.g. 'lead' for a sales prospect, 'contact' for a known person)\n"
         )
 
+        parts.append(
+            "\nAlso extract:\n"
+            "\nRELATIONS between entities (if any are apparent):\n"
+            'Return as "relations" array. Each object:\n'
+            '- "from": string (source entity name, must match an entity name above)\n'
+            '- "to": string (target entity name, must match an entity name above)\n'
+            '- "type": string (one of: works_at, knows, manages, reports_to, purchased, prefers, related_to, part_of, located_in, competes_with, owns)\n'
+            '- "confidence": number 0.0-1.0\n'
+            '- "evidence": string (brief text explaining why this relation exists)\n'
+            "\nMEMORIES — things learned about the user (preferences, facts, decisions):\n"
+            'Return as "memories" array. Each object:\n'
+            '- "type": string (one of: preference, fact, experience, decision)\n'
+            '- "content": string (the memory in natural language, e.g. "User prefers email over phone for follow-ups")\n'
+            '- "importance": number 0.0-1.0\n'
+            '- "source": string (how this was learned, e.g. "stated in conversation", "inferred from behavior")\n'
+            "\nOnly include memories that are genuinely about the USER's preferences, habits, decisions, or personal facts. "
+            "Do NOT include memories about entities (those are captured as entity attributes).\n"
+            "\nACTION TRIGGERS — if the user explicitly requests a reminder, follow-up, or scheduled action:\n"
+            'Return as "action_triggers" array. Each object:\n'
+            '- "type": string (one of: reminder, follow_up, research, auto_reply)\n'
+            '- "description": string (what should happen)\n'
+            '- "delay_hours": number (how many hours to wait, 0 for immediate)\n'
+            '- "entity_name": string (related entity name if any)\n'
+            "\nOnly include action triggers for EXPLICIT user requests (e.g. \"remind me in 3 days\", \"follow up next week\"). "
+            "Do NOT infer actions the user didn't ask for.\n"
+            '\nReturn the COMPLETE result as a JSON object:\n'
+            '{"entities": [...], "relations": [...], "memories": [...], "action_triggers": [...]}\n'
+            "\nIf any section has no items, return an empty array for it."
+        )
+
         # Truncate content to avoid blowing up context window
         truncated = content[:_MAX_CONTENT_CHARS]
         parts.append(f"\nContent:\n{truncated}")
@@ -263,10 +317,21 @@ class KnowledgeExtractionService:
         return "\n".join(parts)
 
     @staticmethod
-    def _parse_json_response(text: str) -> List[Dict[str, Any]]:
-        """Extract a JSON array from an LLM response, handling markdown fences."""
+    def _empty_result() -> Dict[str, Any]:
+        """Return an empty extraction result dict."""
+        return {"entities": [], "relations": [], "memories": [], "action_triggers": []}
+
+    @staticmethod
+    def _parse_json_response(text: str) -> Dict[str, Any]:
+        """Extract a JSON object from an LLM response, handling markdown fences.
+
+        Returns a dict with keys: entities, relations, memories, action_triggers.
+        Backward-compatible: raw arrays are treated as entity-only results.
+        """
+        empty: Dict[str, Any] = {"entities": [], "relations": [], "memories": [], "action_triggers": []}
+
         if not text:
-            return []
+            return empty
 
         cleaned = text.strip()
 
@@ -282,18 +347,29 @@ class KnowledgeExtractionService:
             parsed = json.loads(cleaned)
         except json.JSONDecodeError:
             logger.warning("Failed to parse LLM JSON response: %.200s", cleaned)
-            return []
+            return empty
 
-        # Normalise: accept both a raw list and {"entities": [...]}
+        # Full dict with expected keys -> return it (filling missing keys)
+        if isinstance(parsed, dict) and "entities" in parsed:
+            return {
+                "entities": parsed.get("entities", []) if isinstance(parsed.get("entities"), list) else [],
+                "relations": parsed.get("relations", []) if isinstance(parsed.get("relations"), list) else [],
+                "memories": parsed.get("memories", []) if isinstance(parsed.get("memories"), list) else [],
+                "action_triggers": parsed.get("action_triggers", []) if isinstance(parsed.get("action_triggers"), list) else [],
+            }
+
+        # Legacy dict formats (results, data, items) -> entity-only
         if isinstance(parsed, dict):
-            for key in ("entities", "results", "data", "items"):
+            for key in ("results", "data", "items"):
                 if key in parsed and isinstance(parsed[key], list):
-                    return parsed[key]
-            return []
-        elif isinstance(parsed, list):
-            return parsed
+                    return {**empty, "entities": parsed[key]}
+            return empty
 
-        return []
+        # Raw list -> treat as entities (backward compat)
+        if isinstance(parsed, list):
+            return {**empty, "entities": parsed}
+
+        return empty
 
     @staticmethod
     def _persist_entities(

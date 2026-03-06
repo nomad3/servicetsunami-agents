@@ -404,7 +404,7 @@ async def persist_entities(
 
         # Extract entities via LLM
         extraction_service = KnowledgeExtractionService()
-        entities = extraction_service.extract_from_content(
+        extraction_result = extraction_service.extract_from_content(
             db=db,
             content=response_text,
             content_type=content_type,
@@ -415,7 +415,7 @@ async def persist_entities(
         )
 
         # Count results
-        entities_created = len(entities)
+        entities_created = len(extraction_result.get("entities", []))
 
         duration_ms = int((time.time() - start) * 1000)
         _log_trace(

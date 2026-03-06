@@ -414,10 +414,10 @@ def _run_entity_extraction(
     Wrapped in try/except so extraction failures never break chat.
     """
     try:
-        extracted = knowledge_extraction_service.extract_from_session(
+        result = knowledge_extraction_service.extract_from_session(
             db, session.id, session.tenant_id
         )
-        entities_extracted = len(extracted)
+        entities_extracted = len(result.get("entities", []))
         if entities_extracted > 0 and context is not None:
             context["entities_extracted"] = entities_extracted
             logger.info("Extracted %d entities from session %s", entities_extracted, session.id)

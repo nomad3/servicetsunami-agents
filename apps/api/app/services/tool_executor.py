@@ -439,13 +439,14 @@ class EntityExtractionTool(Tool):
 
             from app.services.knowledge_extraction import KnowledgeExtractionService
             service = KnowledgeExtractionService()
-            entities = service.extract_from_content(
+            result = service.extract_from_content(
                 self.db,
                 self.tenant_id,
                 content,
                 content_type,
                 entity_schema=entity_schema,
             )
+            entities = result.get("entities", [])
 
             return ToolResult(
                 success=True,
