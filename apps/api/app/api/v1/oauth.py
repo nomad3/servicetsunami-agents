@@ -156,6 +156,42 @@ def _refresh_access_token(provider: str, refresh_token: str) -> Optional[str]:
         return None
 
 
+def _skill_to_provider(skill_name: str) -> Optional[str]:
+    """Map a skill name back to its OAuth provider."""
+    for provider, config in OAUTH_PROVIDERS.items():
+        if skill_name in config["skill_names"]:
+            return provider
+    return None
+
+
+def _update_stored_token(db: Session, skill_config_id: uuid.UUID, tenant_id: uuid.UUID, new_token: str):
+    """Replace the stored oauth_token credential with a fresh one."""
+    try:
+        old_cred = (
+            db.query(SkillCredential)
+            .filter(
+                SkillCredential.skill_config_id == skill_config_id,
+                SkillCredential.tenant_id == tenant_id,
+                SkillCredential.credential_key == "oauth_token",
+                SkillCredential.status == "active",
+            )
+            .first()
+        )
+        if old_cred:
+            revoke_credential(db, credential_id=old_cred.id, tenant_id=tenant_id)
+
+        store_credential(
+            db,
+            skill_config_id=skill_config_id,
+            tenant_id=tenant_id,
+            credential_key="oauth_token",
+            plaintext_value=new_token,
+            credential_type="oauth_token",
+        )
+    except Exception:
+        logger.exception("Failed to update stored token for config=%s", skill_config_id)
+
+
 def _lazy_backfill_email(
     db: Session, provider: str, skill_config: "SkillConfig", tenant_id: uuid.UUID,
 ) -> Optional[str]:
@@ -579,6 +615,9 @@ def get_skill_token(
 
     If account_email is provided, returns credentials for that specific account.
     Otherwise returns credentials for the first active account.
+
+    For Google OAuth: automatically refreshes the access token using the stored
+    refresh_token, since Google access tokens expire after ~1 hour.
     """
     try:
         tid = uuid.UUID(tenant_id)
@@ -603,5 +642,18 @@ def get_skill_token(
     creds = retrieve_credentials_for_skill(db, skill_config.id, tid)
     if not creds.get("oauth_token"):
         raise HTTPException(status_code=404, detail="No active OAuth token found")
+
+    # Auto-refresh Google tokens (they expire after ~1 hour)
+    provider = _skill_to_provider(skill_name)
+    refresh_token = creds.get("refresh_token")
+    if provider == "google" and refresh_token:
+        new_access_token = _refresh_access_token("google", refresh_token)
+        if new_access_token:
+            # Update stored credential with fresh token
+            _update_stored_token(db, skill_config.id, tid, new_access_token)
+            creds["oauth_token"] = new_access_token
+            logger.debug("Refreshed Google token for skill=%s tenant=%s", skill_name, tid)
+        else:
+            logger.warning("Token refresh failed for skill=%s tenant=%s, returning stored token", skill_name, tid)
 
     return creds
