@@ -274,7 +274,12 @@ def _generate_agentic_response(
             )
 
     try:
-        events = client.run(user_id=user_id, session_id=str(adk_session_id), message=user_message)
+        events = client.run(
+            user_id=user_id,
+            session_id=str(adk_session_id),
+            message=user_message,
+            state_delta={"tenant_id": str(session.tenant_id)},
+        )
         response_text, context = _extract_adk_response(events)
         _run_entity_extraction(db, session, context)
 
@@ -329,7 +334,12 @@ def _generate_agentic_response(
                     session.external_id = adk_session_id
                 db.commit()
                 db.refresh(session)
-                events = client.run(user_id=user_id, session_id=str(adk_session_id), message=user_message)
+                events = client.run(
+                    user_id=user_id,
+                    session_id=str(adk_session_id),
+                    message=user_message,
+                    state_delta={"tenant_id": str(session.tenant_id)},
+                )
                 response_text, context = _extract_adk_response(events)
                 _run_entity_extraction(db, session, context)
 
