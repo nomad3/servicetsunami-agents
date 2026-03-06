@@ -9,6 +9,7 @@ class KnowledgeEntityBase(BaseModel):
     entity_type: str  # customer, product, concept, person, organization, prospect
     category: Optional[str] = None  # lead, contact, investor, accelerator, signal, organization, person
     name: str
+    description: Optional[str] = None
     attributes: Optional[Dict[str, Any]] = None
     confidence: Optional[float] = 1.0
     status: Optional[str] = "draft"
@@ -23,7 +24,9 @@ class KnowledgeEntityCreate(KnowledgeEntityBase):
 
 class KnowledgeEntityUpdate(BaseModel):
     name: Optional[str] = None
+    entity_type: Optional[str] = None
     category: Optional[str] = None
+    description: Optional[str] = None
     attributes: Optional[Dict[str, Any]] = None
     confidence: Optional[float] = None
     status: Optional[str] = None

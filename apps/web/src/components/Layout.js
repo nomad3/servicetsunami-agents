@@ -59,7 +59,7 @@ const Layout = ({ children }) => {
         { path: '/chat', icon: ChatDotsFill, label: 'AI Chat', description: 'Chat with your AI agent fleet' },
         { path: '/agents', icon: Robot, label: 'Agent Fleet', description: 'Manage your AI agent fleet' },
         { path: '/workflows', icon: ProjectDiagramFill, label: 'Workflows', description: 'Workflow designs and execution audit' },
-        { path: '/memory', icon: DatabaseFill, label: 'Memory', description: 'Entities, signals, and relations' },
+        { path: '/memory', icon: DatabaseFill, label: 'Knowledge Base', description: 'Entities, relations, and signals' },
       ]
     },
     {

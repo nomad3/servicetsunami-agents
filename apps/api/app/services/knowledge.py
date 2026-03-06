@@ -16,6 +16,7 @@ def create_entity(db: Session, entity_in: KnowledgeEntityCreate, tenant_id: uuid
         entity_type=entity_in.entity_type,
         category=entity_in.category,
         name=entity_in.name,
+        description=entity_in.description,
         attributes=entity_in.attributes,
         confidence=entity_in.confidence or 1.0,
         source_agent_id=entity_in.source_agent_id,

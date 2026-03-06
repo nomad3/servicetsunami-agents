@@ -106,6 +106,8 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/servicetsunami
       - SECRET_KEY=${SECRET_KEY:-local_dev_secret_key}
       - GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI:-false}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - ADK_MODEL=${ADK_MODEL:-gemini-1.5-flash}
     volumes:
       - ./apps/adk-server:/app
     depends_on:

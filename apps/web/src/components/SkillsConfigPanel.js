@@ -31,7 +31,8 @@ import {
   FaTimesCircle,
   FaToggleOff,
   FaToggleOn,
-  FaUserCircle
+  FaUserCircle,
+  FaWhatsapp
 } from 'react-icons/fa';
 import skillConfigService from '../services/skillConfigService';
 import skillService from '../services/skillService';
