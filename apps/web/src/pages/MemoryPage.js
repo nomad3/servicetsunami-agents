@@ -4,6 +4,9 @@ import { FaCloudUploadAlt, FaFileAlt, FaLightbulb, FaPlus, FaSearch, FaTrash } f
 import EntityCard from '../components/memory/EntityCard';
 import EntityCreateModal from '../components/memory/EntityCreateModal';
 import EntityStatsBar from '../components/memory/EntityStatsBar';
+import OverviewTab from '../components/memory/OverviewTab';
+import MemoriesTab from '../components/memory/MemoriesTab';
+import ActivityFeed from '../components/memory/ActivityFeed';
 import { ALL_CATEGORIES, ALL_STATUSES, getCategoryConfig } from '../components/memory/constants';
 import Layout from '../components/Layout';
 import api from '../services/api';
@@ -26,7 +29,7 @@ function MemoryPage() {
   const [expandedId, setExpandedId] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [activeTab, setActiveTab] = useState('entities');
+  const [activeTab, setActiveTab] = useState('overview');
 
   // Import state
   const [importing, setImporting] = useState(false);
@@ -199,19 +202,18 @@ function MemoryPage() {
 
         {/* Tabs */}
         <div className="memory-tabs">
-          <button
-            className={`memory-tab-btn ${activeTab === 'entities' ? 'active' : ''}`}
-            onClick={() => setActiveTab('entities')}
-          >
-            Entities
-          </button>
-          <button
-            className={`memory-tab-btn ${activeTab === 'import' ? 'active' : ''}`}
-            onClick={() => setActiveTab('import')}
-          >
-            Import
-          </button>
+          {['overview', 'entities', 'memories', 'activity', 'import'].map(tab => (
+            <button
+              key={tab}
+              className={`memory-tab-btn ${activeTab === tab ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
         </div>
+
+        {activeTab === 'overview' && <OverviewTab />}
 
         {activeTab === 'entities' && (
           <>
@@ -318,6 +320,10 @@ function MemoryPage() {
             )}
           </>
         )}
+
+        {activeTab === 'memories' && <MemoriesTab />}
+
+        {activeTab === 'activity' && <ActivityFeed />}
 
         {activeTab === 'import' && (
           <div style={{ maxWidth: 700 }}>
