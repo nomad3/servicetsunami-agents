@@ -47,6 +47,15 @@ from app.workflows.activities.hca_activities import (
     hca_advance_pipeline,
     hca_sync_knowledge_graph,
 )
+from app.workflows.inbox_monitor import InboxMonitorWorkflow
+from app.workflows.activities.inbox_monitor import (
+    fetch_new_emails,
+    fetch_upcoming_events,
+    triage_items,
+    create_notifications,
+    extract_from_emails,
+    log_monitor_cycle,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -85,6 +94,7 @@ async def run_orchestration_worker():
             RemediaOrderWorkflow,
             DealPipelineWorkflow,
             AutoActionWorkflow,
+            InboxMonitorWorkflow,
         ],
         activities=[
             dispatch_task,
@@ -110,6 +120,12 @@ async def run_orchestration_worker():
             hca_generate_outreach,
             hca_advance_pipeline,
             hca_sync_knowledge_graph,
+            fetch_new_emails,
+            fetch_upcoming_events,
+            triage_items,
+            create_notifications,
+            extract_from_emails,
+            log_monitor_cycle,
         ],
     )
 

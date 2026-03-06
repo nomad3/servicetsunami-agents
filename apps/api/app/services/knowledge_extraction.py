@@ -117,6 +117,7 @@ class KnowledgeExtractionService:
         source_url: Optional[str] = None,
         source_agent_id: Optional[uuid.UUID] = None,
         collection_task_id: Optional[uuid.UUID] = None,
+        activity_source: str = "chat",  # "chat", "gmail", "calendar", "whatsapp"
     ) -> Dict[str, Any]:
         """Extract entities, relations, memories, and action triggers from content.
 
@@ -209,7 +210,7 @@ class KnowledgeExtractionService:
                     log_activity(
                         db, tenant_id, "entity_created",
                         f'Extracted "{entity.name}" ({entity.entity_type})',
-                        source="chat", entity_id=entity.id,
+                        source=activity_source, entity_id=entity.id,
                     )
                 except Exception:
                     logger.debug("Failed to log entity activity for %s", entity.name)
@@ -219,7 +220,7 @@ class KnowledgeExtractionService:
                     log_activity(
                         db, tenant_id, "relation_created",
                         f"Discovered {relations_created} relations",
-                        source="chat",
+                        source=activity_source,
                     )
                 except Exception:
                     logger.debug("Failed to log relation activity")
@@ -229,7 +230,7 @@ class KnowledgeExtractionService:
                     log_activity(
                         db, tenant_id, "memory_created",
                         f"Learned {memories_created} new memories",
-                        source="chat",
+                        source=activity_source,
                     )
                 except Exception:
                     logger.debug("Failed to log memory activity")

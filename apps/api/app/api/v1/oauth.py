@@ -464,6 +464,36 @@ def oauth_callback(
         provider, tenant_id, user_id, account_email,
     )
 
+    # Auto-start inbox monitor when Google connects
+    if provider == "google":
+        try:
+            import asyncio
+            from temporalio.client import Client as TemporalClient
+            from app.workflows.inbox_monitor import InboxMonitorWorkflow
+
+            async def _start_monitor():
+                tc = await TemporalClient.connect(settings.TEMPORAL_ADDRESS)
+                wf_id = f"inbox-monitor-{tenant_id}"
+                await tc.start_workflow(
+                    InboxMonitorWorkflow.run,
+                    args=[str(tenant_id), 900],  # 15 min interval
+                    id=wf_id,
+                    task_queue="servicetsunami-orchestration",
+                )
+                logger.info("Auto-started inbox monitor for tenant=%s", tenant_id)
+
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.ensure_future(_start_monitor())
+                else:
+                    loop.run_until_complete(_start_monitor())
+            except RuntimeError:
+                asyncio.run(_start_monitor())
+        except Exception as e:
+            # Don't fail OAuth if monitor start fails
+            logger.warning("Auto-start inbox monitor failed (non-fatal): %s", e)
+
     safe_email = (account_email or "").replace("'", "\\'")
 
     return HTMLResponse(CALLBACK_HTML.format(

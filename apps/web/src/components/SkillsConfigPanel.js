@@ -36,6 +36,7 @@ import {
 } from 'react-icons/fa';
 import skillConfigService from '../services/skillConfigService';
 import skillService from '../services/skillService';
+import { notificationService } from '../services/notifications';
 
 import WhatsAppChannelCard from './WhatsAppChannelCard';
 
@@ -84,6 +85,7 @@ const SkillsConfigPanel = () => {
   const [success, setSuccess] = useState(null);
   const [oauthStatuses, setOauthStatuses] = useState({});
   const [connectingProvider, setConnectingProvider] = useState(null);
+  const [monitorRunning, setMonitorRunning] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -117,6 +119,16 @@ const SkillsConfigPanel = () => {
         })
       );
       setOauthStatuses(statuses);
+
+      // Check inbox monitor status if Google is connected
+      if (statuses.google?.connected) {
+        try {
+          const monitorStatus = await notificationService.getInboxMonitorStatus();
+          setMonitorRunning(monitorStatus.running || false);
+        } catch {
+          // Ignore
+        }
+      }
     } catch (err) {
       console.error('Failed to load skill data:', err);
       setError('Failed to load integrations');
@@ -306,6 +318,20 @@ const SkillsConfigPanel = () => {
     setExpandedSkill(expandedSkill === skillName ? null : skillName);
   };
 
+  const handleToggleMonitor = async () => {
+    try {
+      if (monitorRunning) {
+        await notificationService.stopInboxMonitor();
+        setMonitorRunning(false);
+      } else {
+        await notificationService.startInboxMonitor(15);
+        setMonitorRunning(true);
+      }
+    } catch (err) {
+      console.error('Failed to toggle monitor:', err);
+    }
+  };
+
   // ---------------------------------------------------------------------------
   // OAuth skill card (expanded section) — multi-account
   // ---------------------------------------------------------------------------
@@ -419,6 +445,24 @@ const SkillsConfigPanel = () => {
             }
           </Button>
         </div>
+
+        {/* Show monitor toggle when Google is connected */}
+        {skill.oauth_provider === 'google' && oauthStatuses.google?.connected && (
+          <div className="d-flex align-items-center justify-content-between mt-3 pt-3"
+            style={{ borderTop: '1px solid var(--border-color)' }}>
+            <div>
+              <strong style={{ fontSize: '0.85rem' }}>Proactive Monitoring</strong>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                Luna monitors your inbox & calendar every 15 min
+              </div>
+            </div>
+            <Form.Check
+              type="switch"
+              checked={monitorRunning}
+              onChange={handleToggleMonitor}
+            />
+          </div>
+        )}
       </div>
     );
   };

@@ -22,6 +22,11 @@ from tools.google_tools import (
     list_calendar_events,
     create_calendar_event,
 )
+from tools.monitor_tools import (
+    start_inbox_monitor,
+    stop_inbox_monitor,
+    check_inbox_monitor_status,
+)
 from config.settings import settings
 
 personal_assistant = Agent(
@@ -105,6 +110,13 @@ When the user asks something that belongs to another team, guide them:
 - "Add a new tool" -> "The dev team can handle that."
 You don't transfer directly (that's the root supervisor's job), but you help the user understand what's possible and frame their requests.
 
+### 9. Inbox Monitoring
+- "Monitor my inbox" -> start_inbox_monitor to begin proactive email/calendar monitoring
+- "Stop monitoring my email" -> stop_inbox_monitor to pause
+- "Is monitoring active?" -> check_inbox_monitor_status to check
+- When the user mentions wanting to stay on top of their inbox or asks about email monitoring, offer to start it
+- If they ask "what's going on with my emails?", check the monitor status first, then search_emails
+
 ## Response style:
 - Keep WhatsApp messages short and scannable
 - Use bullet points for lists
@@ -126,5 +138,8 @@ You don't transfer directly (that's the root supervisor's job), but you help the
         send_email,
         list_calendar_events,
         create_calendar_event,
+        start_inbox_monitor,
+        stop_inbox_monitor,
+        check_inbox_monitor_status,
     ],
 )

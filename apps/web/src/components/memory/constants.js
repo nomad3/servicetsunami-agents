@@ -4,7 +4,7 @@ import {
   FaChartLine, FaUserTie, FaStore, FaUsers,
   FaHeart, FaInfoCircle, FaStar, FaCheckCircle, FaWrench, FaListOl,
   FaPlus, FaEdit, FaTrash, FaProjectDiagram, FaBrain, FaBolt,
-  FaTimesCircle, FaSearch,
+  FaTimesCircle, FaSearch, FaBell,
 } from 'react-icons/fa';
 
 // ── Category config (icons, colors, labels) ──────────────────────
@@ -92,11 +92,13 @@ export const ACTIVITY_EVENT_CONFIG = {
   action_triggered: { icon: FaBolt,           color: '#fbbf24', label: 'Action Triggered' },
   action_completed: { icon: FaCheckCircle,    color: '#34d399', label: 'Action Completed' },
   action_failed:    { icon: FaTimesCircle,    color: '#f87171', label: 'Action Failed' },
-  recall_used:      { icon: FaSearch,         color: '#38bdf8', label: 'Context Recalled' },
+  recall_used:          { icon: FaSearch,         color: '#38bdf8', label: 'Context Recalled' },
+  notification_created: { icon: FaBell,           color: '#ffa502', label: 'Notification Created' },
+  monitor_scan:         { icon: FaSearch,         color: '#747d8c', label: 'Inbox Scan' },
 };
 
 export const getActivityEventConfig = (type) => {
   return ACTIVITY_EVENT_CONFIG[type] || { icon: FaInfoCircle, color: '#94a3b8', label: type || 'Event' };
 };
 
-export const ALL_ACTIVITY_SOURCES = ['chat', 'gmail', 'whatsapp', 'calendar', 'manual'];
+export const ALL_ACTIVITY_SOURCES = ['chat', 'gmail', 'whatsapp', 'calendar', 'inbox_monitor', 'manual'];

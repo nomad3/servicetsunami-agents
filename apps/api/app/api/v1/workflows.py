@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user
+from app.core.config import settings
 from app.models.agent import Agent
 from app.models.agent_task import AgentTask
 from app.models.execution_trace import ExecutionTrace
@@ -242,6 +243,92 @@ async def list_workflows(
         "total": len(results),
         "workflows": results,
     }
+
+
+# ---------------------------------------------------------------------------
+# POST /workflows/inbox-monitor/start
+# ---------------------------------------------------------------------------
+@router.post("/inbox-monitor/start")
+async def start_inbox_monitor(
+    check_interval_minutes: int = 15,
+    current_user: User = Depends(get_current_user),
+):
+    """Start the proactive inbox monitor for the current tenant."""
+    from temporalio.client import Client
+    from app.workflows.inbox_monitor import InboxMonitorWorkflow
+
+    tenant_id = str(current_user.tenant_id)
+    workflow_id = f"inbox-monitor-{tenant_id}"
+    interval = max(5, min(check_interval_minutes, 60)) * 60  # Clamp 5-60 min → seconds
+
+    try:
+        client = await Client.connect(settings.TEMPORAL_ADDRESS)
+        handle = await client.start_workflow(
+            InboxMonitorWorkflow.run,
+            args=[tenant_id, interval],
+            id=workflow_id,
+            task_queue="servicetsunami-orchestration",
+        )
+        return {
+            "status": "started",
+            "workflow_id": workflow_id,
+            "run_id": handle.result_run_id,
+            "interval_minutes": check_interval_minutes,
+        }
+    except Exception as e:
+        if "already started" in str(e).lower() or "already running" in str(e).lower():
+            return {"status": "already_running", "workflow_id": workflow_id}
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# POST /workflows/inbox-monitor/stop
+# ---------------------------------------------------------------------------
+@router.post("/inbox-monitor/stop")
+async def stop_inbox_monitor(
+    current_user: User = Depends(get_current_user),
+):
+    """Stop the proactive inbox monitor for the current tenant."""
+    from temporalio.client import Client
+
+    tenant_id = str(current_user.tenant_id)
+    workflow_id = f"inbox-monitor-{tenant_id}"
+
+    try:
+        client = await Client.connect(settings.TEMPORAL_ADDRESS)
+        handle = client.get_workflow_handle(workflow_id)
+        await handle.cancel()
+        return {"status": "stopped", "workflow_id": workflow_id}
+    except Exception as e:
+        if "not found" in str(e).lower():
+            return {"status": "not_running", "workflow_id": workflow_id}
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# GET /workflows/inbox-monitor/status
+# ---------------------------------------------------------------------------
+@router.get("/inbox-monitor/status")
+async def inbox_monitor_status(
+    current_user: User = Depends(get_current_user),
+):
+    """Check if the inbox monitor is running for the current tenant."""
+    tenant_id = str(current_user.tenant_id)
+    workflow_id = f"inbox-monitor-{tenant_id}"
+
+    try:
+        client = await _get_temporal_client()
+        handle = client.get_workflow_handle(workflow_id)
+        desc = await handle.describe()
+        status = desc.status.name if desc.status else None
+        return {
+            "running": status == "RUNNING",
+            "workflow_id": workflow_id,
+            "status": status,
+            "start_time": desc.start_time.isoformat() if desc.start_time else None,
+        }
+    except Exception:
+        return {"running": False, "workflow_id": workflow_id, "status": None}
 
 
 # ---------------------------------------------------------------------------

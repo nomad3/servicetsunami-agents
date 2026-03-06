@@ -18,6 +18,7 @@ import {
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../App';
 import { useTheme } from '../context/ThemeContext';
+import NotificationBell from './NotificationBell';
 import './Layout.css';
 
 const Layout = ({ children }) => {
@@ -91,14 +92,17 @@ const Layout = ({ children }) => {
               </div>
               <span className="brand-text">{t('brand')}</span>
             </Link>
-            <button
-              className="theme-toggle"
-              onClick={toggleTheme}
-              aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-              title={theme === 'light' ? 'Dark mode' : 'Light mode'}
-            >
-              {theme === 'light' ? <MoonFill size={16} /> : <SunFill size={16} />}
-            </button>
+            <div className="d-flex align-items-center gap-1">
+              <NotificationBell />
+              <button
+                className="theme-toggle"
+                onClick={toggleTheme}
+                aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+                title={theme === 'light' ? 'Dark mode' : 'Light mode'}
+              >
+                {theme === 'light' ? <MoonFill size={16} /> : <SunFill size={16} />}
+              </button>
+            </div>
           </div>
         </div>
 
