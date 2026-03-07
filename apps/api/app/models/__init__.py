@@ -1,3 +1,4 @@
+from .tenant import Tenant
 from .dataset_group import DatasetGroup
 from .execution_trace import ExecutionTrace
 from .skill_config import SkillConfig
@@ -8,6 +9,7 @@ from .memory_activity import MemoryActivity
 from .notification import Notification
 
 __all__ = [
+    "Tenant",
     "DatasetGroup", "ExecutionTrace",
     "SkillConfig", "SkillCredential",
     "ChannelAccount", "ChannelEvent",
