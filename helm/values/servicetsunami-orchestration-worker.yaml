@@ -93,6 +93,12 @@ externalSecret:
     - secretKey: ANTHROPIC_API_KEY
       remoteRef:
         key: servicetsunami-anthropic-api-key
+    - secretKey: GOOGLE_CLIENT_ID
+      remoteRef:
+        key: servicetsunami-google-oauth-client-id
+    - secretKey: GOOGLE_CLIENT_SECRET
+      remoteRef:
+        key: servicetsunami-google-oauth-client-secret
 
 # Additional environment variables
 env:
