@@ -22,7 +22,7 @@ container:
 serviceAccount:
   create: true
   annotations:
-    iam.gke.io/gcp-service-account: servicetsunami-worker@ai-agency-479516.iam.gserviceaccount.com
+    iam.gke.io/gcp-service-account: dev-backend-app@ai-agency-479516.iam.gserviceaccount.com
 
 # Pod security
 podSecurityContext:
