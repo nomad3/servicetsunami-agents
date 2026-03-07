@@ -27,6 +27,10 @@ class KnowledgeEntity(Base):
     # Confidence and provenance
     confidence = Column(Float, default=1.0)  # How confident are we in this entity
     source_agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)
+    updated_by_agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)
+    extraction_model = Column(String(100), nullable=True)  # LLM model that extracted this
+    data_quality_score = Column(Float, nullable=True)  # 0.0-1.0 reliability score
+    tags = Column(JSON, default=list)  # Categorization tags
 
     # Entity lifecycle
     status = Column(String(20), default="draft")  # draft, verified, enriched, actioned, archived
@@ -39,11 +43,15 @@ class KnowledgeEntity(Base):
     scored_at = Column(DateTime, nullable=True)  # When last scored
     scoring_rubric_id = Column(String, nullable=True)  # Which rubric was used: ai_lead, hca_deal, marketing_signal
 
+    # Soft delete
+    deleted_at = Column(DateTime, nullable=True)
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     tenant = relationship("Tenant")
-    source_agent = relationship("Agent")
+    source_agent = relationship("Agent", foreign_keys=[source_agent_id])
+    updated_by = relationship("Agent", foreign_keys=[updated_by_agent_id])
     collection_task = relationship("AgentTask", foreign_keys=[collection_task_id])

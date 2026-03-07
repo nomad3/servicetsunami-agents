@@ -15,18 +15,29 @@ class KnowledgeRelationBase(BaseModel):
 
 class KnowledgeRelationCreate(KnowledgeRelationBase):
     discovered_by_agent_id: Optional[uuid.UUID] = None
+    confidence_source: Optional[str] = "extraction"
+    valid_from: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
 
 
 class KnowledgeRelationUpdate(BaseModel):
     strength: Optional[float] = None
     evidence: Optional[Dict[str, Any]] = None
+    confidence_source: Optional[str] = None
+    valid_from: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
 
 
 class KnowledgeRelation(KnowledgeRelationBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
-    discovered_by_agent_id: Optional[uuid.UUID]
+    discovered_by_agent_id: Optional[uuid.UUID] = None
+    updated_by_agent_id: Optional[uuid.UUID] = None
+    confidence_source: Optional[str] = None
+    valid_from: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

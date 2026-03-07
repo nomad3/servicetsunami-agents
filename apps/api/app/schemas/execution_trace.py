@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional, Literal
 from datetime import datetime
+from decimal import Decimal
 import uuid
 
 StepType = Literal[
@@ -18,6 +19,12 @@ class ExecutionTraceCreate(BaseModel):
     agent_id: Optional[uuid.UUID] = None
     details: Optional[dict] = None
     duration_ms: Optional[int] = None
+    error_message: Optional[str] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    cost_usd: Optional[Decimal] = None
+    parent_step_id: Optional[uuid.UUID] = None
+    retry_count: Optional[int] = 0
 
 
 class ExecutionTrace(ExecutionTraceCreate):

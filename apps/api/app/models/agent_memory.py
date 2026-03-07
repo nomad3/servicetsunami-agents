@@ -34,15 +34,22 @@ class AgentMemory(Base):
 
     # Importance and access tracking
     importance = Column(Float, default=0.5)
+    confidence = Column(Float, default=1.0)  # How reliable is this memory
     access_count = Column(Integer, default=0)
+    decay_rate = Column(Float, default=1.0)  # Memory decay multiplier
 
     # Source tracking
     source = Column(String(100), nullable=True)
     source_task_id = Column(UUID(as_uuid=True), ForeignKey("agent_tasks.id", ondelete="SET NULL"), nullable=True)
 
+    # Categorization and linking
+    tags = Column(JSON, default=list)  # e.g. ["project:luna", "priority:high"]
+    related_entity_ids = Column(JSON, default=list)  # Links to knowledge_entities
+
     # Lifecycle
     expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_accessed_at = Column(DateTime, nullable=True)
 
     # Relationships

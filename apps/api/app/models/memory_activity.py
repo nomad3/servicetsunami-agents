@@ -25,15 +25,24 @@ class MemoryActivity(Base):
     source = Column(String(50), nullable=True)  # chat, gmail, whatsapp, calendar, manual
     event_metadata = Column("metadata", JSON, nullable=True)  # Extra context
 
+    # Attribution
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    task_id = Column(UUID(as_uuid=True), ForeignKey("agent_tasks.id", ondelete="SET NULL"), nullable=True)
+
     # Optional references
     entity_id = Column(UUID(as_uuid=True), ForeignKey("knowledge_entities.id", ondelete="SET NULL"), nullable=True)
     memory_id = Column(UUID(as_uuid=True), ForeignKey("agent_memories.id", ondelete="SET NULL"), nullable=True)
     workflow_run_id = Column(String(100), nullable=True)  # Temporal workflow run ID
+    change_delta = Column(JSON, nullable=True)  # Before/after diff for updates
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
     # Relationships
     tenant = relationship("Tenant")
+    agent = relationship("Agent")
+    user = relationship("User")
+    task = relationship("AgentTask")
     entity = relationship("KnowledgeEntity")
     memory = relationship("AgentMemory")
 

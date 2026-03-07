@@ -26,12 +26,20 @@ class KnowledgeRelation(Base):
 
     # Provenance
     discovered_by_agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)
+    updated_by_agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)
+    confidence_source = Column(String(50), default="extraction")  # extraction, manual, inference
+
+    # Temporal validity
+    valid_from = Column(DateTime, nullable=True)
+    valid_until = Column(DateTime, nullable=True)
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     tenant = relationship("Tenant")
     from_entity = relationship("KnowledgeEntity", foreign_keys=[from_entity_id])
     to_entity = relationship("KnowledgeEntity", foreign_keys=[to_entity_id])
-    discovered_by_agent = relationship("Agent")
+    discovered_by_agent = relationship("Agent", foreign_keys=[discovered_by_agent_id])
+    updated_by_agent = relationship("Agent", foreign_keys=[updated_by_agent_id])

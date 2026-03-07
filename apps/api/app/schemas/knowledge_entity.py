@@ -20,6 +20,8 @@ class KnowledgeEntityCreate(KnowledgeEntityBase):
     source_agent_id: Optional[uuid.UUID] = None
     collection_task_id: Optional[uuid.UUID] = None
     enrichment_data: Optional[Dict[str, Any]] = None
+    extraction_model: Optional[str] = None
+    tags: Optional[List[str]] = None
 
 
 class KnowledgeEntityUpdate(BaseModel):
@@ -32,19 +34,26 @@ class KnowledgeEntityUpdate(BaseModel):
     status: Optional[str] = None
     source_url: Optional[str] = None
     enrichment_data: Optional[Dict[str, Any]] = None
+    tags: Optional[List[str]] = None
+    data_quality_score: Optional[float] = None
 
 
 class KnowledgeEntity(KnowledgeEntityBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
-    source_agent_id: Optional[uuid.UUID]
+    source_agent_id: Optional[uuid.UUID] = None
+    updated_by_agent_id: Optional[uuid.UUID] = None
     collection_task_id: Optional[uuid.UUID] = None
     enrichment_data: Optional[Dict[str, Any]] = None
     properties: Optional[Dict[str, Any]] = None
     description: Optional[str] = None
+    extraction_model: Optional[str] = None
+    data_quality_score: Optional[float] = None
+    tags: Optional[List[str]] = None
     score: Optional[int] = None
     scored_at: Optional[datetime] = None
     scoring_rubric_id: Optional[str] = None
+    deleted_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

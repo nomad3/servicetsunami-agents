@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Integer, ForeignKey, JSON, DateTime
+from sqlalchemy import Column, String, Integer, ForeignKey, JSON, DateTime, Text, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -18,8 +18,22 @@ class ExecutionTrace(Base):
     agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)
     details = Column(JSON, nullable=True)
     duration_ms = Column(Integer, nullable=True)
+
+    # Error tracking
+    error_message = Column(Text, nullable=True)
+
+    # LLM cost tracking
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    cost_usd = Column(Numeric(10, 6), nullable=True)
+
+    # Nested step support
+    parent_step_id = Column(UUID(as_uuid=True), ForeignKey("execution_traces.id"), nullable=True)
+    retry_count = Column(Integer, default=0)
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     task = relationship("AgentTask")
     tenant = relationship("Tenant")
     agent = relationship("Agent")
+    parent_step = relationship("ExecutionTrace", remote_side="ExecutionTrace.id")
