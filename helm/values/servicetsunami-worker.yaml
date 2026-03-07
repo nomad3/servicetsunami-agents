@@ -128,6 +128,27 @@ initContainers:
         drop:
           - ALL
 
+# Cloud SQL Proxy sidecar for secure database connection
+extraContainers:
+  - name: cloud-sql-proxy
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.8.0
+    args:
+      - "--private-ip"
+      - "--structured-logs"
+      - "--port=5432"
+      - "--http-port=9090"
+      - "ai-agency-479516:us-central1:dev-postgres-instance"
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
 # No HTTPRoute - internal service only
 httpRoute:
   enabled: false
