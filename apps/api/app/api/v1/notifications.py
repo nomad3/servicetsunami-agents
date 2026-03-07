@@ -27,10 +27,10 @@ def list_notifications(
     """List notifications for the current tenant."""
     query = db.query(Notification).filter(
         Notification.tenant_id == current_user.tenant_id,
-        Notification.dismissed == False,
+        Notification.dismissed.is_(False),
     )
     if unread_only:
-        query = query.filter(Notification.read == False)
+        query = query.filter(Notification.read.is_(False))
     if source:
         query = query.filter(Notification.source == source)
     return query.order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
@@ -44,8 +44,8 @@ def notification_count(
     """Get unread notification count."""
     count = db.query(func.count(Notification.id)).filter(
         Notification.tenant_id == current_user.tenant_id,
-        Notification.read == False,
-        Notification.dismissed == False,
+        Notification.read.is_(False),
+        Notification.dismissed.is_(False),
     ).scalar() or 0
     return {"unread": count}
 
@@ -76,7 +76,7 @@ def mark_all_read(
     """Mark all notifications as read."""
     db.query(Notification).filter(
         Notification.tenant_id == current_user.tenant_id,
-        Notification.read == False,
+        Notification.read.is_(False),
     ).update({"read": True})
     db.commit()
     return {"status": "ok"}
