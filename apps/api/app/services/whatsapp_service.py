@@ -21,6 +21,7 @@ from neonize.aioze.events import (
     PairStatusEv,
 )
 from neonize.utils import build_jid
+from neonize.utils.enum import ChatPresence, ChatPresenceMedia
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -461,6 +462,17 @@ class WhatsAppService:
             extra_data={"chat_jid": chat_jid, "is_group": is_group},
         )
 
+        # Show "typing..." indicator while processing
+        try:
+            reply_jid = build_jid(sender_phone)
+            await client.send_chat_presence(
+                reply_jid,
+                ChatPresence.CHAT_PRESENCE_COMPOSING,
+                ChatPresenceMedia.CHAT_PRESENCE_MEDIA_TEXT,
+            )
+        except Exception:
+            logger.debug(f"Failed to send composing presence for {sender_phone}")
+
         # Process through agent — use phone number (not LID) as session key
         response_text = await self._process_through_agent(tenant_id, sender_phone, text)
         if not response_text:
@@ -490,6 +502,15 @@ class WhatsAppService:
                     direction="outbound", remote_id=sender_phone,
                     message_content=response_text,
                 )
+                # Stop typing indicator
+                try:
+                    await client.send_chat_presence(
+                        reply_jid,
+                        ChatPresence.CHAT_PRESENCE_PAUSED,
+                        ChatPresenceMedia.CHAT_PRESENCE_MEDIA_TEXT,
+                    )
+                except Exception:
+                    pass
             except Exception:
                 logger.exception(f"Failed to send reply to {sender_phone} (jid={sender_jid})")
 
