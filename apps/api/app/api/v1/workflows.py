@@ -3,12 +3,52 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user
 from app.core.config import settings
+
+
+_optional_oauth2 = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+
+
+def _get_tenant_id_from_internal_or_user(
+    tenant_id: Optional[str] = Query(None),
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+    token: Optional[str] = Depends(_optional_oauth2),
+    db: Session = Depends(get_db),
+) -> str:
+    """Resolve tenant_id from JWT user or X-Internal-Key + tenant_id param.
+
+    ADK->API calls pass X-Internal-Key header with tenant_id as query param.
+    Browser calls pass a JWT Bearer token.
+    """
+    # Try internal key first
+    if x_internal_key and x_internal_key in (
+        getattr(settings, "API_INTERNAL_KEY", None),
+        getattr(settings, "MCP_API_KEY", None),
+    ):
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail="tenant_id required with internal key auth")
+        return tenant_id
+    # Fall back to JWT
+    if token:
+        try:
+            from jose import jwt as jose_jwt, JWTError
+            payload = jose_jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            email = payload.get("sub")
+            if email:
+                user = db.query(User).filter(User.email == email).first()
+                if user:
+                    return str(user.tenant_id)
+        except Exception:
+            pass
+    raise HTTPException(status_code=401, detail="Authentication required")
+
+
 from app.models.agent import Agent
 from app.models.agent_task import AgentTask
 from app.models.execution_trace import ExecutionTrace
@@ -251,13 +291,11 @@ async def list_workflows(
 @router.post("/inbox-monitor/start")
 async def start_inbox_monitor(
     check_interval_minutes: int = 15,
-    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(_get_tenant_id_from_internal_or_user),
 ):
     """Start the proactive inbox monitor for the current tenant."""
     from temporalio.client import Client
     from app.workflows.inbox_monitor import InboxMonitorWorkflow
-
-    tenant_id = str(current_user.tenant_id)
     workflow_id = f"inbox-monitor-{tenant_id}"
     interval = max(5, min(check_interval_minutes, 60)) * 60  # Clamp 5-60 min → seconds
 
@@ -286,12 +324,10 @@ async def start_inbox_monitor(
 # ---------------------------------------------------------------------------
 @router.post("/inbox-monitor/stop")
 async def stop_inbox_monitor(
-    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(_get_tenant_id_from_internal_or_user),
 ):
     """Stop the proactive inbox monitor for the current tenant."""
     from temporalio.client import Client
-
-    tenant_id = str(current_user.tenant_id)
     workflow_id = f"inbox-monitor-{tenant_id}"
 
     try:
@@ -310,10 +346,9 @@ async def stop_inbox_monitor(
 # ---------------------------------------------------------------------------
 @router.get("/inbox-monitor/status")
 async def inbox_monitor_status(
-    current_user: User = Depends(get_current_user),
+    tenant_id: str = Depends(_get_tenant_id_from_internal_or_user),
 ):
     """Check if the inbox monitor is running for the current tenant."""
-    tenant_id = str(current_user.tenant_id)
     workflow_id = f"inbox-monitor-{tenant_id}"
 
     try:
