@@ -26,6 +26,7 @@ import {
   FaDollarSign,
   FaDraftingCompass,
   FaFileInvoiceDollar,
+  FaEnvelope,
   FaExclamationTriangle,
   FaHeartbeat,
   FaLayerGroup,
@@ -423,6 +424,8 @@ const STATUS_COLORS = {
   CANCELED: 'secondary',
   TERMINATED: 'secondary',
   TIMED_OUT: 'danger',
+  CONTINUED_AS_NEW: 'info',
+  ContinuedAsNew: 'info',
 };
 
 const REFRESH_OPTIONS = [
@@ -455,6 +458,10 @@ const TYPE_ICONS = {
   TaskExecutionWorkflow: FaClipboardList,
   KnowledgeExtractionWorkflow: FaDatabase,
   AgentKitExecutionWorkflow: FaRobot,
+  InboxMonitorWorkflow: FaEnvelope,
+  ChannelHealthMonitorWorkflow: FaHeartbeat,
+  ProspectingPipelineWorkflow: FaBullseye,
+  FollowUpWorkflow: FaRedo,
 };
 
 const TYPE_COLORS = {
@@ -463,11 +470,16 @@ const TYPE_COLORS = {
   DatasetSyncWorkflow: '#34d399',
   DataSourceSyncWorkflow: '#fbbf24',
   TaskExecutionWorkflow: '#f472b6',
+  InboxMonitorWorkflow: '#a78bfa',
+  ChannelHealthMonitorWorkflow: '#f87171',
+  ProspectingPipelineWorkflow: '#fbbf24',
+  FollowUpWorkflow: '#34d399',
 };
 
 const formatStatus = (status) => {
   if (!status) return 'Unknown';
-  return status.replace(/_/g, ' ');
+  const map = { CONTINUED_AS_NEW: 'Continued', ContinuedAsNew: 'Continued' };
+  return map[status] || status.replace(/_/g, ' ');
 };
 
 const timeAgo = (dateStr) => {
@@ -887,6 +899,12 @@ const ExecutionsTab = () => {
     };
   }, [refreshInterval, fetchWorkflows, fetchStats]);
 
+  const [expandedGroups, setExpandedGroups] = useState({});
+
+  const toggleGroup = useCallback((groupKey) => {
+    setExpandedGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+  }, []);
+
   const filteredWorkflows = useMemo(() => {
     let items = workflows.filter((w) => matchesExecTab(w, activeTab));
     if (searchQuery) {
@@ -907,7 +925,24 @@ const ExecutionsTab = () => {
       });
     }
     if (sortBy === 'cost') items = [...items].sort((a, b) => (b.cost || 0) - (a.cost || 0));
-    return items;
+
+    // Group repeated Temporal workflow types (e.g., InboxMonitorWorkflow x100)
+    const groups = {};
+    const result = [];
+    for (const item of items) {
+      // Only group Temporal workflows (not agent_tasks)
+      if (item.source === 'temporal' && item.type) {
+        if (!groups[item.type]) {
+          groups[item.type] = { latest: item, children: [item], index: result.length };
+          result.push({ _isGroup: true, _groupKey: item.type, _items: groups[item.type] });
+        } else {
+          groups[item.type].children.push(item);
+        }
+      } else {
+        result.push(item);
+      }
+    }
+    return result;
   }, [workflows, activeTab, searchQuery, sortBy]);
 
   const combinedTraces = useMemo(() => {
@@ -1099,7 +1134,142 @@ const ExecutionsTab = () => {
               No workflows found
             </div>
           ) : (
-            filteredWorkflows.map((item, idx) => {
+            filteredWorkflows.map((entry, idx) => {
+              // Grouped Temporal workflows
+              if (entry._isGroup) {
+                const group = entry._items;
+                const item = group.latest;
+                const count = group.children.length;
+                const isExpanded = expandedGroups[entry._groupKey];
+                const IconComp = getTypeIcon(item.type);
+                const iconColor = TYPE_COLORS[item.type] || TYPE_COLORS.agent_task;
+                const latestStatus = item.status;
+                const statusColor = STATUS_COLORS[latestStatus] || 'secondary';
+                const runningCount = group.children.filter((c) => c.status === 'RUNNING').length;
+                const failedCount = group.children.filter((c) => c.status === 'FAILED').length;
+
+                return (
+                  <div key={entry._groupKey}>
+                    {/* Group header row */}
+                    <div
+                      className="workflow-table-row"
+                      onClick={() => count > 1 ? toggleGroup(entry._groupKey) : selectItem(item)}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '2.5rem 1fr 140px 100px 80px 80px 90px',
+                        gap: '0.5rem',
+                        padding: '0.65rem 0.85rem',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid var(--color-border)',
+                        alignItems: 'center',
+                        transition: 'background 0.15s',
+                        background: isExpanded ? 'var(--surface-contrast)' : undefined,
+                      }}
+                    >
+                      <div style={{
+                        width: '2rem',
+                        height: '2rem',
+                        borderRadius: '6px',
+                        background: `${iconColor}18`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        position: 'relative',
+                      }}>
+                        <IconComp size={12} color={iconColor} />
+                      </div>
+
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{
+                          fontSize: '0.82rem',
+                          fontWeight: 500,
+                          color: 'var(--color-foreground)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                        }}>
+                          {item.type || 'Workflow'}
+                          {count > 1 && (
+                            <Badge bg="secondary" pill style={{ fontSize: '0.65rem', fontWeight: 600 }}>
+                              {count} runs
+                            </Badge>
+                          )}
+                          {count > 1 && (isExpanded ? <FaChevronDown size={9} color="var(--color-muted)" /> : <FaChevronRight size={9} color="var(--color-muted)" />)}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          <span>Latest: {timeAgo(item.start_time)}</span>
+                          {runningCount > 0 && <span style={{ color: '#fbbf24' }}>{runningCount} running</span>}
+                          {failedCount > 0 && <span style={{ color: '#f87171' }}>{failedCount} failed</span>}
+                        </div>
+                      </div>
+
+                      <div style={{ fontSize: '0.72rem', color: 'var(--color-soft)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.type || 'agent_task'}
+                      </div>
+
+                      <div>
+                        <Badge bg={statusColor} style={{ fontSize: '0.68rem', fontWeight: 500, textTransform: 'capitalize' }}>
+                          {formatStatus(latestStatus)}
+                        </Badge>
+                      </div>
+
+                      <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', textAlign: 'right' }}>-</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', textAlign: 'right' }}>-</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', textAlign: 'right' }}>
+                        {formatDuration(item.start_time, item.close_time)}
+                      </div>
+                    </div>
+
+                    {/* Expanded children */}
+                    {isExpanded && group.children.map((child, ci) => {
+                      const childStatusColor = STATUS_COLORS[child.status] || 'secondary';
+                      return (
+                        <div
+                          key={child.workflow_id || ci}
+                          className="workflow-table-row"
+                          onClick={() => selectItem(child)}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '2.5rem 1fr 140px 100px 80px 80px 90px',
+                            gap: '0.5rem',
+                            padding: '0.5rem 0.85rem 0.5rem 2rem',
+                            cursor: 'pointer',
+                            borderBottom: '1px solid var(--color-border)',
+                            alignItems: 'center',
+                            transition: 'background 0.15s',
+                            background: 'var(--surface-contrast)',
+                            opacity: 0.85,
+                          }}
+                        >
+                          <div style={{ width: '2rem', display: 'flex', justifyContent: 'center' }}>
+                            <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: iconColor }} />
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--color-soft)' }}>
+                              {child.workflow_id && <span title={child.workflow_id}>{truncateId(child.workflow_id)}</span>}
+                            </div>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--color-muted)' }}>{timeAgo(child.start_time)}</div>
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)' }}>{child.type}</div>
+                          <div>
+                            <Badge bg={childStatusColor} style={{ fontSize: '0.65rem', fontWeight: 500, textTransform: 'capitalize' }}>
+                              {formatStatus(child.status)}
+                            </Badge>
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', textAlign: 'right' }}>-</div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', textAlign: 'right' }}>-</div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', textAlign: 'right' }}>
+                            {formatDuration(child.start_time, child.close_time)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              }
+
+              // Regular (non-grouped) items
+              const item = entry;
               const IconComp = getTypeIcon(item.type);
               const iconColor = TYPE_COLORS[item.type] || TYPE_COLORS.agent_task;
               const statusColor = STATUS_COLORS[item.status] || 'secondary';
@@ -1186,7 +1356,7 @@ const ExecutionsTab = () => {
           display: 'flex',
           justifyContent: 'space-between',
         }}>
-          <span>{filteredWorkflows.length} of {workflows.length} workflows</span>
+          <span>{workflows.length} workflows ({filteredWorkflows.length} groups)</span>
           {stats?.temporal_available === false && (
             <span style={{ color: '#fbbf24' }}>
               <FaExclamationTriangle size={10} style={{ marginRight: '0.2rem' }} />
