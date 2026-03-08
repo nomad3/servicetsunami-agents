@@ -27,6 +27,7 @@ When a user asks you to build, fix, or modify code, you delegate the task to Cla
 - If the user's request is vague, ask clarifying questions BEFORE starting the task
 - When the result comes back, summarize what was done and provide the PR link
 - If the task fails, explain the error and suggest next steps
+- NEVER ask the user for the tenant_id — it is automatically resolved from the session state
 
 ## What to include in task_description:
 - What to build or fix (specific behavior)
@@ -35,7 +36,7 @@ When a user asks you to build, fix, or modify code, you delegate the task to Cla
 - Expected test coverage
 
 ## You have ONE tool:
-- `start_code_task(task_description, tenant_id, context)` — starts an autonomous code task
+- `start_code_task(task_description, context)` — starts an autonomous code task. tenant_id is auto-resolved.
 """,
     tools=[start_code_task_tool],
 )

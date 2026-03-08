@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 import uuid
 
 from google.adk.tools import FunctionTool
@@ -12,10 +13,31 @@ logger = logging.getLogger(__name__)
 TEMPORAL_ADDRESS = os.environ.get("TEMPORAL_ADDRESS", "temporal:7233")
 TASK_QUEUE = "servicetsunami-code"
 
+_UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+_cached_tenant_id: str | None = None
+
+
+def set_current_tenant_id(tenant_id: str) -> None:
+    """Set the current tenant_id from session state (called by middleware)."""
+    global _cached_tenant_id
+    if _UUID_PATTERN.match(tenant_id):
+        _cached_tenant_id = tenant_id
+
+
+def _resolve_tenant_id(tenant_id: str) -> str:
+    """Resolve tenant_id — use cached from session state if LLM passes garbage."""
+    if _UUID_PATTERN.match(tenant_id):
+        return tenant_id
+    if _cached_tenant_id:
+        return _cached_tenant_id
+    raise ValueError(f"No valid tenant_id available (got: {tenant_id!r})")
+
 
 async def _start_code_workflow(task_description: str, tenant_id: str, context: str = "") -> dict:
     """Start a CodeTaskWorkflow on Temporal and wait for the result."""
     from temporalio.client import Client
+
+    tenant_id = _resolve_tenant_id(tenant_id)
 
     client = await Client.connect(TEMPORAL_ADDRESS)
 
@@ -48,12 +70,12 @@ async def _start_code_workflow(task_description: str, tenant_id: str, context: s
     }
 
 
-def start_code_task(task_description: str, tenant_id: str, context: str = "") -> dict:
+def start_code_task(task_description: str, tenant_id: str = "", context: str = "") -> dict:
     """Start an autonomous code task. Claude Code will implement the task, create a branch, and open a PR.
 
     Args:
         task_description: What to build or fix. Be specific.
-        tenant_id: The tenant ID (from session state).
+        tenant_id: The tenant ID. Usually auto-resolved from session state — pass empty string to use default.
         context: Optional additional context about the codebase or requirements.
 
     Returns:

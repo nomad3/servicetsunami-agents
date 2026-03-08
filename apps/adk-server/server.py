@@ -41,7 +41,9 @@ class StripPrefixMiddleware(BaseHTTPMiddleware):
                     tid = data["state"].get("tenant_id")
                 if tid:
                     from tools.knowledge_tools import set_current_tenant_id
+                    from tools.code_tools import set_current_tenant_id as set_code_tenant_id
                     set_current_tenant_id(tid)
+                    set_code_tenant_id(tid)
                 # Re-inject body so downstream can read it
                 async def receive():
                     return {"type": "http.request", "body": body}
