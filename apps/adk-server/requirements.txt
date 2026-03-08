@@ -17,6 +17,9 @@ psycopg2-binary>=2.9.0
 asyncpg>=0.29.0
 pgvector>=0.2.0
 
+# Temporal client (for code_agent tool)
+temporalio>=1.7.0
+
 # Async support
 asyncio>=3.4.3
 
