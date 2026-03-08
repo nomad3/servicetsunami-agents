@@ -1,6 +1,9 @@
+import json
 import time
+import uuid
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
+from sqlalchemy import text
 
 from app.db import base  # noqa: F401
 from app.db.session import engine
@@ -63,6 +66,7 @@ def init_db(db: Session) -> None:
     seed_llm_providers(db)
     seed_llm_models(db)
     seed_demo_data(db)
+    seed_system_skills(db)
 
 
 def seed_demo_data(db: Session) -> None:
@@ -501,3 +505,51 @@ def seed_llm_models(db: Session) -> None:
                 )
 
     db.commit()
+
+
+def seed_system_skills(db: Session) -> None:
+    """Seed system scoring rubrics as skills for the demo tenant."""
+    from app.services.scoring_rubrics import RUBRICS
+
+    # Find demo tenant
+    demo_tenant = db.query(Tenant).filter(Tenant.name == "Demo Enterprise").first()
+    if not demo_tenant:
+        return
+
+    # Check if skills table exists (migration 040 may not have run yet)
+    try:
+        result = db.execute(text("SELECT 1 FROM skills LIMIT 1"))
+        result.close()
+    except Exception:
+        db.rollback()
+        print("Skills table not found, skipping system skills seeding.")
+        return
+
+    for rubric_id, rubric in RUBRICS.items():
+        # Check if this rubric already exists as a skill for the demo tenant
+        existing = db.execute(
+            text("SELECT id FROM skills WHERE tenant_id = :tid AND name = :name AND is_system = true LIMIT 1"),
+            {"tid": str(demo_tenant.id), "name": rubric["name"]},
+        ).first()
+
+        if existing:
+            continue
+
+        skill_id = str(uuid.uuid4())
+        db.execute(
+            text(
+                "INSERT INTO skills (id, tenant_id, name, description, skill_type, config, is_system, enabled) "
+                "VALUES (:id, :tid, :name, :desc, :stype, :config, true, true)"
+            ),
+            {
+                "id": skill_id,
+                "tid": str(demo_tenant.id),
+                "name": rubric["name"],
+                "desc": rubric["description"],
+                "stype": "scoring",
+                "config": json.dumps(rubric),
+            },
+        )
+
+    db.commit()
+    print(f"System skills seeded: {len(RUBRICS)} rubrics checked.")
