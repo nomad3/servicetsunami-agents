@@ -91,6 +91,15 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
             {"key": "api_key", "label": "API Key", "type": "password", "required": True},
         ],
     },
+    "claude_code": {
+        "display_name": "Claude Code",
+        "description": "Autonomous coding agent — implements features, fixes bugs, creates PRs",
+        "icon": "FaTerminal",
+        "credentials": [
+            {"key": "session_token", "label": "Session Token", "type": "password", "required": True,
+             "help": "Run 'claude setup-token' in your terminal, then paste the token here"},
+        ],
+    },
 }
 
 

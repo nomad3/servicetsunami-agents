@@ -28,6 +28,7 @@ import {
   FaSignOutAlt,
   FaSlack,
   FaTasks,
+  FaTerminal,
   FaTimesCircle,
   FaToggleOff,
   FaToggleOn,
@@ -51,6 +52,7 @@ const ICON_MAP = {
   FaCalendar: FaCalendar,
   FaProjectDiagram: FaProjectDiagram,
   FaLinkedin: FaLinkedin,
+  FaTerminal: FaTerminal,
 };
 
 // Color accents per skill for visual distinction
@@ -64,6 +66,7 @@ const SKILL_COLORS = {
   google_calendar: '#4285F4',
   linear: '#5E6AD2',
   linkedin: '#0A66C2',
+  claude_code: '#D97706',
 };
 
 // Provider brand colors and icons for OAuth buttons
