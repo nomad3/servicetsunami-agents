@@ -96,6 +96,10 @@ export const ACTIVITY_EVENT_CONFIG = {
   recall_used:          { icon: FaSearch,         color: '#38bdf8', label: 'Context Recalled' },
   notification_created: { icon: FaBell,           color: '#ffa502', label: 'Notification Created' },
   monitor_scan:         { icon: FaSearch,         color: '#747d8c', label: 'Inbox Scan' },
+  skill_executed:       { icon: FaWrench,         color: '#a78bfa', label: 'Skill Executed' },
+  entity_scored:        { icon: FaStar,           color: '#fbbf24', label: 'Entity Scored' },
+  rubric_created:       { icon: FaPlus,           color: '#34d399', label: 'Rubric Created' },
+  rubric_updated:       { icon: FaEdit,           color: '#60a5fa', label: 'Rubric Updated' },
 };
 
 export const getActivityEventConfig = (type) => {
