@@ -6,11 +6,7 @@ from .knowledge_manager import knowledge_manager
 from .web_researcher import web_researcher
 from .customer_support import customer_support
 from .sales_agent import sales_agent
-from .architect import architect
-from .coder import coder
-from .tester import tester
-from .dev_ops import dev_ops
-from .user_agent import user_agent
+from .dev_agent import dev_agent
 from .personal_assistant import personal_assistant
 from .cardiac_analyst import cardiac_analyst
 from .billing_agent import billing_agent
@@ -23,7 +19,6 @@ from .prospect_scorer import prospect_scorer
 from .prospect_outreach import prospect_outreach
 
 # Team supervisors
-from .dev_team import dev_team
 from .data_team import data_team
 from .sales_team import sales_team
 from .marketing_team import marketing_team
@@ -37,7 +32,7 @@ from .agent import root_agent
 __all__ = [
     "root_agent",
     # Teams
-    "dev_team",
+    "dev_agent",
     "data_team",
     "sales_team",
     "marketing_team",
@@ -59,11 +54,6 @@ __all__ = [
     "web_researcher",
     "customer_support",
     "sales_agent",
-    "architect",
-    "coder",
-    "tester",
-    "dev_ops",
-    "user_agent",
     "cardiac_analyst",
     "billing_agent",
 ]
