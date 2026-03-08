@@ -4,6 +4,9 @@ set -euo pipefail
 # Strip trailing whitespace/newlines from secrets (K8s secret mounts can add them)
 GITHUB_TOKEN="$(echo -n "${GITHUB_TOKEN}" | tr -d '[:space:]')"
 
+# Mark /workspace as safe (ownership may differ across pod restarts)
+git config --global --add safe.directory /workspace
+
 echo "[dev-worker] Cloning repository..."
 if [ ! -d /workspace/.git ]; then
     git clone "https://${GITHUB_TOKEN}@github.com/nomad3/servicetsunami-agents.git" /workspace
