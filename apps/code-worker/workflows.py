@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 WORKSPACE = "/workspace"
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 API_INTERNAL_KEY = os.environ.get("API_INTERNAL_KEY", "").strip()
-API_BASE_URL = os.environ.get("API_BASE_URL", "http://servicetsunami-api:8000").strip()
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://servicetsunami-api").strip()
 
 
 @dataclass
