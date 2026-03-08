@@ -29,7 +29,7 @@ from app.api.v1 import (
     integrations,
     users,
     skill_configs,
-    skills,
+    skills_new,
     workflows,
     remedia,
     webhooks,
@@ -72,7 +72,7 @@ router.include_router(tenant_analytics.router, prefix="/tenant-analytics", tags=
 router.include_router(integration_configs.router, prefix="/integration-configs", tags=["integration-configs"])
 router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
 router.include_router(skill_configs.router, prefix="/skill-configs", tags=["skill-configs"])
-router.include_router(skills.router, prefix="/skills", tags=["skills"])
+router.include_router(skills_new.router, prefix="/skills", tags=["skills"])
 router.include_router(workflows.router, prefix="/workflows", tags=["workflows"])
 router.include_router(remedia.router, prefix="/remedia", tags=["remedia"])
 router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])

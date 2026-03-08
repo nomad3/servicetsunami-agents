@@ -32,8 +32,10 @@ from .notification import Notification
 from .pipeline_run import PipelineRun
 from .integration_config import IntegrationConfig
 from .integration_credential import IntegrationCredential
+from .skill import Skill
 from .skill_config import SkillConfig
 from .skill_credential import SkillCredential
+from .skill_execution import SkillExecution
 from .tenant_analytics import TenantAnalytics
 from .tenant_branding import TenantBranding
 from .tenant_features import TenantFeatures
@@ -54,7 +56,7 @@ __all__ = [
     "MemoryActivity", "Notebook", "Notification",
     "PipelineRun",
     "IntegrationConfig", "IntegrationCredential",
-    "SkillConfig", "SkillCredential",
+    "Skill", "SkillConfig", "SkillCredential", "SkillExecution",
     "TenantAnalytics", "TenantBranding", "TenantFeatures",
     "Tool", "VectorStore",
 ]

@@ -27,6 +27,9 @@ class ExecutionTrace(Base):
     output_tokens = Column(Integer, nullable=True)
     cost_usd = Column(Numeric(10, 6), nullable=True)
 
+    # Skill tracking
+    skill_id = Column(UUID(as_uuid=True), ForeignKey("skills.id"), nullable=True)
+
     # Nested step support
     parent_step_id = Column(UUID(as_uuid=True), ForeignKey("execution_traces.id"), nullable=True)
     retry_count = Column(Integer, default=0)
@@ -36,4 +39,5 @@ class ExecutionTrace(Base):
     task = relationship("AgentTask")
     tenant = relationship("Tenant")
     agent = relationship("Agent")
+    skill = relationship("Skill")
     parent_step = relationship("ExecutionTrace", remote_side="ExecutionTrace.id")

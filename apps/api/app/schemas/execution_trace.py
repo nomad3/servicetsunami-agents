@@ -17,6 +17,7 @@ class ExecutionTraceCreate(BaseModel):
     step_type: StepType
     step_order: int
     agent_id: Optional[uuid.UUID] = None
+    skill_id: Optional[uuid.UUID] = None
     details: Optional[dict] = None
     duration_ms: Optional[int] = None
     error_message: Optional[str] = None
