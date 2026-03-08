@@ -29,7 +29,7 @@ class SkillInDB(SkillBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
     is_system: bool = False
-    created_at: datetime
+    created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:

@@ -538,8 +538,8 @@ def seed_system_skills(db: Session) -> None:
         skill_id = str(uuid.uuid4())
         db.execute(
             text(
-                "INSERT INTO skills (id, tenant_id, name, description, skill_type, config, is_system, enabled) "
-                "VALUES (:id, :tid, :name, :desc, :stype, :config, true, true)"
+                "INSERT INTO skills (id, tenant_id, name, description, skill_type, config, is_system, enabled, created_at, updated_at) "
+                "VALUES (:id, :tid, :name, :desc, :stype, :config, true, true, now(), now())"
             ),
             {
                 "id": skill_id,
