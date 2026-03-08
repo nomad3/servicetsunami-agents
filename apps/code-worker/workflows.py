@@ -52,7 +52,7 @@ def _run(cmd: str, cwd: str = WORKSPACE, timeout: int = 600) -> str:
 
 def _fetch_claude_token(tenant_id: str) -> str:
     """Fetch the Claude Code session token from the API's internal endpoint."""
-    url = f"{API_BASE_URL}/api/v1/oauth/internal/token/claude_code"
+    url = f"{API_BASE_URL}/api/v1/oauth/internal/token/claude_code"  # integration_name=claude_code
     headers = {"X-Internal-Key": API_INTERNAL_KEY}
     params = {"tenant_id": tenant_id}
 

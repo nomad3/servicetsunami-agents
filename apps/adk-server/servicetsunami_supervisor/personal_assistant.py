@@ -34,6 +34,13 @@ from tools.monitor_tools import (
     check_inbox_monitor_status,
 )
 from tools.data_tools import query_sql, discover_datasets, generate_insights
+from tools.jira_tools import (
+    search_jira_issues,
+    get_jira_issue,
+    create_jira_issue,
+    update_jira_issue,
+    list_jira_projects,
+)
 from config.settings import settings
 
 personal_assistant = Agent(
@@ -120,6 +127,15 @@ INBOX MONITOR
 
 Offer to start monitoring when the user talks about staying on top of emails.
 
+JIRA PROJECT MANAGEMENT
+- list_jira_projects — See all accessible Jira projects
+- search_jira_issues — Search issues with JQL (e.g., "status = 'In Progress'", "assignee = currentUser()")
+- get_jira_issue — Get full details of an issue by key (e.g., "PROJ-123")
+- create_jira_issue — Create new issues (project_key, summary, description, type, priority)
+- update_jira_issue — Update fields, transition status, or add comments
+
+When the user mentions Jira tickets, bugs, tasks, or sprints, use these tools proactively.
+
 TASK & PIPELINE MANAGEMENT
 - schedule_followup — Set reminders and follow-ups (action: send_whatsapp, update_stage, remind)
 - qualify_lead — Run BANT analysis on a lead
@@ -190,6 +206,12 @@ ALWAYS respond in the same language the user writes in
         discover_datasets,
         generate_insights,
         query_data_source,
+        # Jira
+        search_jira_issues,
+        get_jira_issue,
+        create_jira_issue,
+        update_jira_issue,
+        list_jira_projects,
         # Pipeline & Follow-ups
         schedule_followup,
         qualify_lead,

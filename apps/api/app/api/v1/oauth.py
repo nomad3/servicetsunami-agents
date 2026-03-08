@@ -7,7 +7,7 @@ Endpoints:
   GET  /oauth/{provider}/callback           — Provider redirect (unauthenticated)
   POST /oauth/{provider}/disconnect         — Revoke credentials (authenticated)
   GET  /oauth/{provider}/status             — Connection status (authenticated)
-  GET  /oauth/internal/token/{skill_name}   — Decrypted token (internal only)
+  GET  /oauth/internal/token/{integration_name}   — Decrypted token (internal only)
 """
 
 import logging
@@ -53,21 +53,21 @@ OAUTH_PROVIDERS = {
             "https://www.googleapis.com/auth/calendar.events",
             "https://www.googleapis.com/auth/userinfo.email",
         ],
-        "skill_names": ["gmail", "google_calendar"],
+        "integration_names": ["gmail", "google_calendar"],
     },
     "github": {
         "authorize_url": "https://github.com/login/oauth/authorize",
         "token_url": "https://github.com/login/oauth/access_token",
         "userinfo_url": "https://api.github.com/user",
         "scopes": ["repo", "read:user", "read:org"],
-        "skill_names": ["github"],
+        "integration_names": ["github"],
     },
     "linkedin": {
         "authorize_url": "https://www.linkedin.com/oauth/v2/authorization",
         "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
         "userinfo_url": "https://api.linkedin.com/v2/userinfo",
         "scopes": ["openid", "profile", "email", "w_member_social"],
-        "skill_names": ["linkedin"],
+        "integration_names": ["linkedin"],
     },
 }
 
@@ -156,10 +156,10 @@ def _refresh_access_token(provider: str, refresh_token: str) -> Optional[str]:
         return None
 
 
-def _skill_to_provider(skill_name: str) -> Optional[str]:
-    """Map a skill name back to its OAuth provider."""
+def _integration_to_provider(integration_name: str) -> Optional[str]:
+    """Map an integration name back to its OAuth provider."""
     for provider, config in OAUTH_PROVIDERS.items():
-        if skill_name in config["skill_names"]:
+        if integration_name in config["integration_names"]:
             return provider
     return None
 
@@ -375,8 +375,8 @@ def oauth_callback(
     account_email = _fetch_account_email(provider, access_token)
     logger.info("OAuth %s account email: %s", provider, account_email)
 
-    # Store tokens for each skill associated with this provider
-    for skill_name in config["skill_names"]:
+    # Store tokens for each integration associated with this provider
+    for integration_name in config["integration_names"]:
         # Find existing IntegrationConfig for THIS specific account (by email)
         # or fall back to any config without an email (legacy)
         ic = None
@@ -385,7 +385,7 @@ def oauth_callback(
                 db.query(IntegrationConfig)
                 .filter(
                     IntegrationConfig.tenant_id == tenant_id,
-                    IntegrationConfig.skill_name == skill_name,
+                    IntegrationConfig.integration_name == integration_name,
                     IntegrationConfig.account_email == account_email,
                 )
                 .first()
@@ -397,7 +397,7 @@ def oauth_callback(
                 db.query(IntegrationConfig)
                 .filter(
                     IntegrationConfig.tenant_id == tenant_id,
-                    IntegrationConfig.skill_name == skill_name,
+                    IntegrationConfig.integration_name == integration_name,
                     IntegrationConfig.account_email.is_(None),
                 )
                 .first()
@@ -415,7 +415,7 @@ def oauth_callback(
                 ic = IntegrationConfig(
                     id=uuid.uuid4(),
                     tenant_id=tenant_id,
-                    skill_name=skill_name,
+                    integration_name=integration_name,
                     account_email=account_email,
                     enabled=True,
                 )
@@ -524,12 +524,12 @@ def oauth_disconnect(
     config = OAUTH_PROVIDERS[provider]
     revoked_count = 0
 
-    for skill_name in config["skill_names"]:
+    for integration_name in config["integration_names"]:
         query = (
             db.query(IntegrationConfig)
             .filter(
                 IntegrationConfig.tenant_id == current_user.tenant_id,
-                IntegrationConfig.skill_name == skill_name,
+                IntegrationConfig.integration_name == integration_name,
             )
         )
         if account_email:
@@ -580,13 +580,13 @@ def oauth_status(
     accounts = []
 
     # Use the first skill to check (e.g., "gmail" for google)
-    primary_skill = config["skill_names"][0]
+    primary_integration = config["integration_names"][0]
 
     configs = (
         db.query(IntegrationConfig)
         .filter(
             IntegrationConfig.tenant_id == current_user.tenant_id,
-            IntegrationConfig.skill_name == primary_skill,
+            IntegrationConfig.integration_name == primary_integration,
             IntegrationConfig.enabled.is_(True),
         )
         .all()
@@ -623,7 +623,7 @@ def oauth_status(
 
 
 # ---------------------------------------------------------------------------
-# GET /oauth/internal/token/{skill_name}  (service-to-service only)
+# GET /oauth/internal/token/{integration_name}  (service-to-service only)
 # ---------------------------------------------------------------------------
 
 def _verify_internal_key(
@@ -633,15 +633,15 @@ def _verify_internal_key(
         raise HTTPException(status_code=401, detail="Invalid internal key")
 
 
-@router.get("/internal/token/{skill_name}")
-def get_skill_token(
-    skill_name: str,
+@router.get("/internal/token/{integration_name}")
+def get_integration_token(
+    integration_name: str,
     tenant_id: str = Query(...),
     account_email: Optional[str] = Query(None, description="Specific account email"),
     db: Session = Depends(deps.get_db),
     _auth: None = Depends(_verify_internal_key),
 ):
-    """Return decrypted OAuth credentials for a skill. Internal use only.
+    """Return decrypted OAuth credentials for an integration. Internal use only.
 
     If account_email is provided, returns credentials for that specific account.
     Otherwise returns credentials for the first active account.
@@ -658,7 +658,7 @@ def get_skill_token(
         db.query(IntegrationConfig)
         .filter(
             IntegrationConfig.tenant_id == tid,
-            IntegrationConfig.skill_name == skill_name,
+            IntegrationConfig.integration_name == integration_name,
             IntegrationConfig.enabled.is_(True),
         )
     )
@@ -667,16 +667,16 @@ def get_skill_token(
 
     config = query.first()
     if not config:
-        raise HTTPException(status_code=404, detail=f"No active config for skill '{skill_name}'")
+        raise HTTPException(status_code=404, detail=f"No active config for '{integration_name}'")
 
     creds = retrieve_credentials_for_skill(db, config.id, tid)
 
     # For OAuth integrations, require oauth_token; for manual, require any credential
-    provider = _skill_to_provider(skill_name)
+    provider = _integration_to_provider(integration_name)
     if provider and not creds.get("oauth_token"):
         raise HTTPException(status_code=404, detail="No active OAuth token found")
     elif not provider and not creds:
-        raise HTTPException(status_code=404, detail=f"No active credentials for '{skill_name}'")
+        raise HTTPException(status_code=404, detail=f"No active credentials for '{integration_name}'")
 
     # Auto-refresh Google tokens (they expire after ~1 hour)
     refresh_token = creds.get("refresh_token")
@@ -686,8 +686,8 @@ def get_skill_token(
             # Update stored credential with fresh token
             _update_stored_token(db, config.id, tid, new_access_token)
             creds["oauth_token"] = new_access_token
-            logger.debug("Refreshed Google token for skill=%s tenant=%s", skill_name, tid)
+            logger.debug("Refreshed Google token for integration=%s tenant=%s", integration_name, tid)
         else:
-            logger.warning("Token refresh failed for skill=%s tenant=%s, returning stored token", skill_name, tid)
+            logger.warning("Token refresh failed for integration=%s tenant=%s, returning stored token", integration_name, tid)
 
     return creds

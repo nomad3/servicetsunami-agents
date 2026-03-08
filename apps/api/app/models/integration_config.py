@@ -13,7 +13,7 @@ class IntegrationConfig(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
-    skill_name = Column(String, nullable=False)  # e.g., "slack", "gmail", "github"
+    integration_name = Column(String, nullable=False)  # e.g., "slack", "gmail", "github"
     account_email = Column(String, nullable=True)  # OAuth account identifier (e.g., "user@gmail.com")
     enabled = Column(Boolean, default=True)
     requires_approval = Column(Boolean, default=False)
@@ -33,4 +33,4 @@ class IntegrationConfig(Base):
     llm_config = relationship("LLMConfig", foreign_keys=[llm_config_id])
 
     def __repr__(self):
-        return f"<IntegrationConfig {self.skill_name} tenant={self.tenant_id}>"
+        return f"<IntegrationConfig {self.integration_name} tenant={self.tenant_id}>"

@@ -116,10 +116,10 @@ def get_integration_registry(
     The frontend uses this to render dynamic credential forms.
     """
     entries = []
-    for skill_name, schema in INTEGRATION_CREDENTIAL_SCHEMAS.items():
+    for integration_name, schema in INTEGRATION_CREDENTIAL_SCHEMAS.items():
         entries.append(
             schemas.integration_config.IntegrationRegistryEntry(
-                skill_name=skill_name,
+                integration_name=integration_name,
                 display_name=schema["display_name"],
                 description=schema["description"],
                 icon=schema["icon"],

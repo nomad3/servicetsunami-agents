@@ -12,7 +12,8 @@ router = APIRouter()
 
 
 class SkillExecuteRequest(BaseModel):
-    skill_name: str
+    skill_name: Optional[str] = None  # deprecated, use integration_name
+    integration_name: Optional[str] = None
     payload: dict
     task_id: Optional[uuid.UUID] = None
     agent_id: Optional[uuid.UUID] = None
@@ -27,16 +28,17 @@ def execute_skill(
     """Execute a skill through the tenant's skill router."""
     import logging
     logger = logging.getLogger(__name__)
+    name = request.integration_name or request.skill_name or ""
     skill_router = SkillRouter(db=db, tenant_id=current_user.tenant_id)
     result = skill_router.execute_skill(
-        skill_name=request.skill_name,
+        integration_name=name,
         payload=request.payload,
         task_id=request.task_id,
         agent_id=request.agent_id,
     )
     if result.get("status") == "error":
         error_detail = result.get("error", "Unknown error")
-        logger.error("Skill execution failed for '%s': %s", request.skill_name, error_detail)
+        logger.error("Skill execution failed for '%s': %s", name, error_detail)
         raise HTTPException(status_code=502, detail=error_detail)
     return result
 

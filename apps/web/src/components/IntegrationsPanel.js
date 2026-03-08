@@ -163,7 +163,7 @@ const IntegrationsPanel = () => {
   }, [fetchData]);
 
   const getConfigForSkill = (skillName) =>
-    configs.find((c) => c.skill_name === skillName);
+    configs.find((c) => c.integration_name === skillName);
 
   const getIcon = (iconName) => {
     const IconComponent = ICON_MAP[iconName];
@@ -209,16 +209,16 @@ const IntegrationsPanel = () => {
   };
 
   const handleToggleSkill = async (skill) => {
-    const existing = getConfigForSkill(skill.skill_name);
+    const existing = getConfigForSkill(skill.integration_name);
     try {
-      setSaving(skill.skill_name);
+      setSaving(skill.integration_name);
       if (existing) {
         await integrationConfigService.update(existing.id, {
           enabled: !existing.enabled,
         });
       } else {
         await integrationConfigService.create({
-          skill_name: skill.skill_name,
+          integration_name: skill.integration_name,
           enabled: true,
         });
       }
@@ -234,10 +234,10 @@ const IntegrationsPanel = () => {
   };
 
   const handleToggleApproval = async (skill) => {
-    const existing = getConfigForSkill(skill.skill_name);
+    const existing = getConfigForSkill(skill.integration_name);
     if (!existing) return;
     try {
-      setSaving(skill.skill_name);
+      setSaving(skill.integration_name);
       await integrationConfigService.update(existing.id, {
         requires_approval: !existing.requires_approval,
       });
@@ -261,10 +261,10 @@ const IntegrationsPanel = () => {
   };
 
   const handleSaveCredentials = async (skill) => {
-    const existing = getConfigForSkill(skill.skill_name);
+    const existing = getConfigForSkill(skill.integration_name);
     if (!existing) return;
 
-    const formValues = credentialForms[skill.skill_name] || {};
+    const formValues = credentialForms[skill.integration_name] || {};
     const credentialsToSave = skill.credentials.filter(
       (cred) => formValues[cred.key]?.trim()
     );
@@ -276,7 +276,7 @@ const IntegrationsPanel = () => {
     }
 
     try {
-      setSaving(skill.skill_name);
+      setSaving(skill.integration_name);
       for (const cred of credentialsToSave) {
         await integrationConfigService.addCredential(existing.id, {
           credential_key: cred.key,
@@ -286,7 +286,7 @@ const IntegrationsPanel = () => {
       }
       setCredentialForms((prev) => ({
         ...prev,
-        [skill.skill_name]: {},
+        [skill.integration_name]: {},
       }));
       setSuccess(`Credentials saved for ${skill.display_name}`);
       setTimeout(() => setSuccess(null), 3000);
@@ -300,10 +300,10 @@ const IntegrationsPanel = () => {
 
   const handleTestSkill = async (skill) => {
     try {
-      setTestingSkill(skill.skill_name);
+      setTestingSkill(skill.integration_name);
       setError(null);
       const res = await skillService.execute({
-        skill_name: skill.skill_name,
+        integration_name: skill.integration_name,
         payload: { test: true, message: 'ping' },
       });
       setSuccess(`${skill.display_name}: connected (${res.data?.duration_ms || 0}ms)`);
@@ -474,8 +474,8 @@ const IntegrationsPanel = () => {
   // Skill card renderer
   // ---------------------------------------------------------------------------
   const renderSkillCard = (skill) => {
-    const config = getConfigForSkill(skill.skill_name);
-    const isExpanded = expandedSkill === skill.skill_name;
+    const config = getConfigForSkill(skill.integration_name);
+    const isExpanded = expandedSkill === skill.integration_name;
     const isOAuth = skill.auth_type === 'oauth';
     const providerStatus = isOAuth
       ? (oauthStatuses[skill.oauth_provider] || { connected: false, accounts: [] })
@@ -483,11 +483,11 @@ const IntegrationsPanel = () => {
     const isConfigured = isOAuth ? providerStatus.connected : !!config;
     const isEnabled = isOAuth ? providerStatus.connected : (config?.enabled ?? false);
     const accountCount = isOAuth ? providerStatus.accounts.length : 0;
-    const accentColor = SKILL_COLORS[skill.skill_name] || '#6C757D';
-    const formValues = credentialForms[skill.skill_name] || {};
+    const accentColor = SKILL_COLORS[skill.integration_name] || '#6C757D';
+    const formValues = credentialForms[skill.integration_name] || {};
 
     return (
-      <Col md={6} lg={4} key={skill.skill_name} className="mb-3">
+      <Col md={6} lg={4} key={skill.integration_name} className="mb-3">
         <Card
           style={{
             border: `1px solid ${isExpanded ? accentColor : 'var(--color-border)'}`,
@@ -502,7 +502,7 @@ const IntegrationsPanel = () => {
         >
           {/* Card header */}
           <Card.Body
-            onClick={() => handleCardClick(skill.skill_name)}
+            onClick={() => handleCardClick(skill.integration_name)}
             style={{ padding: '1rem 1.25rem' }}
           >
             <div className="d-flex align-items-center justify-content-between">
@@ -600,7 +600,7 @@ const IntegrationsPanel = () => {
                       >
                         {isEnabled ? 'Enabled' : 'Disabled'}
                       </span>
-                      {saving === skill.skill_name && (
+                      {saving === skill.integration_name && (
                         <Spinner
                           animation="border"
                           size="sm"
@@ -614,7 +614,7 @@ const IntegrationsPanel = () => {
                       <div className="d-flex align-items-center gap-2">
                         <Form.Check
                           type="switch"
-                          id={`approval-${skill.skill_name}`}
+                          id={`approval-${skill.integration_name}`}
                           label={
                             <span style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>
                               Requires approval
@@ -622,7 +622,7 @@ const IntegrationsPanel = () => {
                           }
                           checked={config?.requires_approval ?? false}
                           onChange={() => handleToggleApproval(skill)}
-                          disabled={saving === skill.skill_name}
+                          disabled={saving === skill.integration_name}
                         />
                       </div>
                     )}
@@ -631,7 +631,7 @@ const IntegrationsPanel = () => {
                   {/* Credential Form (non-channel skills) */}
                   {!!config && isEnabled && (
                     <>
-                      {skill.skill_name === 'whatsapp' ? (
+                      {skill.integration_name === 'whatsapp' ? (
                         <WhatsAppChannelCard />
                       ) : (
                         <>
@@ -671,7 +671,7 @@ const IntegrationsPanel = () => {
                                 value={formValues[cred.key] || ''}
                                 onChange={(e) =>
                                   handleCredentialChange(
-                                    skill.skill_name,
+                                    skill.integration_name,
                                     cred.key,
                                     e.target.value
                                   )
@@ -692,9 +692,9 @@ const IntegrationsPanel = () => {
                               size="sm"
                               className="flex-grow-1"
                               onClick={() => handleSaveCredentials(skill)}
-                              disabled={saving === skill.skill_name}
+                              disabled={saving === skill.integration_name}
                             >
-                              {saving === skill.skill_name ? (
+                              {saving === skill.integration_name ? (
                                 <Spinner
                                   animation="border"
                                   size="sm"
@@ -710,10 +710,10 @@ const IntegrationsPanel = () => {
                               variant="outline-success"
                               size="sm"
                               onClick={() => handleTestSkill(skill)}
-                              disabled={testingSkill === skill.skill_name || saving === skill.skill_name}
+                              disabled={testingSkill === skill.integration_name || saving === skill.integration_name}
                               title="Test connection"
                             >
-                              {testingSkill === skill.skill_name ? (
+                              {testingSkill === skill.integration_name ? (
                                 <Spinner
                                   animation="border"
                                   size="sm"
@@ -742,9 +742,9 @@ const IntegrationsPanel = () => {
                         variant="outline-primary"
                         size="sm"
                         onClick={() => handleToggleSkill(skill)}
-                        disabled={saving === skill.skill_name}
+                        disabled={saving === skill.integration_name}
                       >
-                        {saving === skill.skill_name ? (
+                        {saving === skill.integration_name ? (
                           <Spinner
                             animation="border"
                             size="sm"

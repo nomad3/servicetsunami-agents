@@ -5,7 +5,7 @@ import uuid
 
 
 class IntegrationConfigBase(BaseModel):
-    skill_name: str
+    integration_name: str
     account_email: Optional[str] = None
     enabled: bool = True
     requires_approval: bool = False
@@ -57,7 +57,7 @@ class CredentialOut(BaseModel):
 
 
 class IntegrationRegistryEntry(BaseModel):
-    skill_name: str
+    integration_name: str
     display_name: str
     description: str
     icon: str

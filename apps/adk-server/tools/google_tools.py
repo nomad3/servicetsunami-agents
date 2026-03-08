@@ -37,20 +37,20 @@ def _get_google_client() -> httpx.AsyncClient:
     return _google_client
 
 
-async def _get_google_token(tenant_id: str, skill_name: str) -> Optional[str]:
+async def _get_google_token(tenant_id: str, integration_name: str) -> Optional[str]:
     """Retrieve decrypted OAuth access token from the API credential vault."""
     client = _get_api_client()
     try:
         resp = await client.get(
-            f"/api/v1/oauth/internal/token/{skill_name}",
+            f"/api/v1/oauth/internal/token/{integration_name}",
             headers={"X-Internal-Key": settings.mcp_api_key},
             params={"tenant_id": tenant_id},
         )
         if resp.status_code == 200:
             return resp.json().get("oauth_token")
-        logger.warning("Token retrieval for %s returned %s", skill_name, resp.status_code)
+        logger.warning("Token retrieval for %s returned %s", integration_name, resp.status_code)
     except Exception:
-        logger.exception("Failed to retrieve %s token", skill_name)
+        logger.exception("Failed to retrieve %s token", integration_name)
     return None
 
 

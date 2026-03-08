@@ -23,7 +23,7 @@ class SkillRouter:
 
     def execute_skill(
         self,
-        skill_name: str,
+        integration_name: str,
         payload: Dict[str, Any],
         task_id: Optional[uuid.UUID] = None,
         agent_id: Optional[uuid.UUID] = None,

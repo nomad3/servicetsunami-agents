@@ -46,14 +46,14 @@ def _refresh_google_token(refresh_token: str) -> Optional[str]:
         return None
 
 
-def _get_google_token(db, tenant_id: str, skill_name: str) -> Optional[str]:
+def _get_google_token(db, tenant_id: str, integration_name: str) -> Optional[str]:
     """Retrieve and auto-refresh Google OAuth token from credential vault."""
     tid = uuid.UUID(tenant_id)
     config = (
         db.query(IntegrationConfig)
         .filter(
             IntegrationConfig.tenant_id == tid,
-            IntegrationConfig.skill_name == skill_name,
+            IntegrationConfig.integration_name == integration_name,
             IntegrationConfig.enabled.is_(True),
         )
         .first()
