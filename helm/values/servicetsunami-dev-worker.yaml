@@ -1,0 +1,113 @@
+# ServiceTsunami Dev Worker - Claude Code CLI Temporal Worker
+nameOverride: "servicetsunami-dev-worker"
+fullnameOverride: "servicetsunami-dev-worker"
+
+image:
+  repository: gcr.io/ai-agency-479516/servicetsunami-dev-worker
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+container:
+  port: 8000
+  command:
+    - /app/entrypoint.sh
+
+# Service account with Workload Identity
+serviceAccount:
+  create: true
+  annotations:
+    iam.gke.io/gcp-service-account: dev-backend-app@ai-agency-479516.iam.gserviceaccount.com
+
+# Pod security — relaxed for git + Claude Code CLI
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# Resources — Claude Code needs more memory than typical workers
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+
+# Disable HTTP probes — worker doesn't serve HTTP
+livenessProbe:
+  enabled: false
+
+readinessProbe:
+  enabled: false
+
+# Service not needed for worker
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+# ConfigMap with non-sensitive configuration
+configMap:
+  enabled: true
+  data:
+    TEMPORAL_NAMESPACE: "default"
+    API_BASE_URL: "http://servicetsunami-api:8000"
+
+# External Secrets — GitHub token + API internal key only (no DB access)
+externalSecret:
+  enabled: true
+  refreshInterval: 1m
+  secretStoreRef:
+    name: gcpsm-secret-store
+    kind: SecretStore
+  target:
+    name: servicetsunami-dev-worker-secret
+    creationPolicy: Owner
+  data:
+    - secretKey: GITHUB_TOKEN
+      remoteRef:
+        key: servicetsunami-github-token
+    - secretKey: API_INTERNAL_KEY
+      remoteRef:
+        key: servicetsunami-api-internal-key
+
+# Additional environment variables
+env:
+  - name: TEMPORAL_ADDRESS
+    value: "temporal:7233"
+
+# No autoscaling — single instance
+autoscaling:
+  enabled: false
+
+# Writable dirs for git + Claude Code
+tmpDirs:
+  - /tmp
+  - /workspace
+  - /home/devworker
+
+# Init container to wait for Temporal
+initContainers:
+  - name: wait-for-temporal
+    image: busybox:1.36
+    command: ['sh', '-c', 'echo "Waiting for Temporal..."; sleep 15']
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
+
+# No Cloud SQL proxy — dev worker doesn't access the database
+# No HTTPRoute — internal service only
+httpRoute:
+  enabled: false
