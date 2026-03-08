@@ -8,7 +8,7 @@ from app.api import deps
 from app.services import skill_configs as skill_config_service
 from app.services.orchestration.credential_vault import store_credential, revoke_credential
 from app.models.user import User
-from app.models.skill_credential import SkillCredential
+from app.models.integration_credential import IntegrationCredential
 import uuid
 
 router = APIRouter()
@@ -248,12 +248,12 @@ def delete_credential(
 
     # Find the active credential by key
     credential = (
-        db.query(SkillCredential)
+        db.query(IntegrationCredential)
         .filter(
-            SkillCredential.skill_config_id == skill_config_id,
-            SkillCredential.credential_key == credential_key,
-            SkillCredential.tenant_id == current_user.tenant_id,
-            SkillCredential.status == "active",
+            IntegrationCredential.integration_config_id == skill_config_id,
+            IntegrationCredential.credential_key == credential_key,
+            IntegrationCredential.tenant_id == current_user.tenant_id,
+            IntegrationCredential.status == "active",
         )
         .first()
     )
