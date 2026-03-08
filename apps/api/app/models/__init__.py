@@ -30,6 +30,8 @@ from .memory_activity import MemoryActivity
 from .notebook import Notebook
 from .notification import Notification
 from .pipeline_run import PipelineRun
+from .integration_config import IntegrationConfig
+from .integration_credential import IntegrationCredential
 from .skill_config import SkillConfig
 from .skill_credential import SkillCredential
 from .tenant_analytics import TenantAnalytics
@@ -51,6 +53,7 @@ __all__ = [
     "LLMConfig", "LLMModel", "LLMProvider",
     "MemoryActivity", "Notebook", "Notification",
     "PipelineRun",
+    "IntegrationConfig", "IntegrationCredential",
     "SkillConfig", "SkillCredential",
     "TenantAnalytics", "TenantBranding", "TenantFeatures",
     "Tool", "VectorStore",
