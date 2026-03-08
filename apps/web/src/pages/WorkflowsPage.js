@@ -11,6 +11,7 @@ import {
 import {
   FaBolt,
   FaBrain,
+  FaBullseye,
   FaCheck,
   FaCheckCircle,
   FaChevronDown,
@@ -196,6 +197,7 @@ const WORKFLOW_DEFINITIONS = [
     color: '#f59e0b',
     steps: [
       { name: 'hca_discover_prospects', timeout: '5m', retry: '3x / 10s', type: 'start', description: 'AI prospect discovery by industry and criteria' },
+      { name: 'Score', description: 'Score prospects using deal intelligence rubric' },
       { name: 'hca_score_prospects', timeout: '5m', retry: '3x / 10s', description: 'Score each prospect for sell-likelihood (threshold filtering)' },
       { name: 'hca_generate_research', timeout: '10m', retry: '3x / 10s', description: 'Generate research briefs for high-scorers' },
       { name: 'hca_generate_outreach', timeout: '5m', retry: '3x / 10s', description: 'Create outreach drafts (cold email, LinkedIn, one-pager)' },
@@ -231,6 +233,21 @@ const WORKFLOW_DEFINITIONS = [
       { name: 'execute_auto_action', timeout: '10m', retry: '3x / 30s', type: 'start', description: 'Execute via ADK: reply_email, send_whatsapp, research, analyze, create_task' },
     ],
     note: 'Triggered by memory extraction action_triggers',
+  },
+  {
+    id: 'prospecting-pipeline',
+    name: 'Prospecting Pipeline',
+    description: 'Automated prospect research, scoring, qualification, and outreach',
+    queue: 'servicetsunami-orchestration',
+    icon: FaBullseye,
+    color: '#34d399',
+    steps: [
+      { name: 'Research', description: 'Web scrape and enrich entity properties' },
+      { name: 'Score', description: 'Invoke scoring skill using tenant rubric' },
+      { name: 'Qualify', description: 'BANT qualification on entities above threshold' },
+      { name: 'Outreach', description: 'Draft outreach for qualified leads' },
+      { name: 'Notify', description: 'Create notifications with results summary' },
+    ],
   },
 ];
 
