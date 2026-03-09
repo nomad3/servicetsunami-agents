@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -132,6 +132,62 @@ def post_message(
     return chat_schema.ChatTurn(
         user_message=chat_schema.ChatMessage.model_validate(user_message),
         assistant_message=chat_schema.ChatMessage.model_validate(assistant_message)
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/messages/upload",
+    response_model=chat_schema.ChatTurn,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_message_with_file(
+    session_id: uuid.UUID,
+    content: str = Form(""),
+    file: UploadFile = File(...),
+    *,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Post a message with a file attachment (image, audio, or PDF)."""
+    session = chat_service.get_session(
+        db, session_id=session_id, tenant_id=current_user.tenant_id,
+    )
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+
+    from app.services.media_utils import build_media_parts, classify_media
+
+    file_bytes = await file.read()
+    mime_type = file.content_type or "application/octet-stream"
+
+    media_type = classify_media(mime_type)
+    if media_type == "unsupported":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file type: {mime_type}",
+        )
+
+    try:
+        parts, attachment_meta = build_media_parts(
+            media_bytes=file_bytes,
+            mime_type=mime_type,
+            caption=content,
+            filename=file.filename or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    user_msg, assistant_msg = chat_service.post_user_message(
+        db,
+        session=session,
+        user_id=current_user.id,
+        content=content or f"[Sent {media_type}: {file.filename}]",
+        media_parts=parts,
+        attachment_meta=attachment_meta,
+    )
+    return chat_schema.ChatTurn(
+        user_message=chat_schema.ChatMessage.model_validate(user_msg),
+        assistant_message=chat_schema.ChatMessage.model_validate(assistant_msg),
     )
 
 

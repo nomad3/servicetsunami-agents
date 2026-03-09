@@ -27,3 +27,4 @@ cryptography
 websockets
 neonize>=0.3.14
 segno
+pdfplumber>=0.10.0

@@ -59,17 +59,27 @@ class ADKClient:
         *,
         user_id: uuid.UUID,
         session_id: str,
-        message: str,
+        message: Optional[str] = None,
+        parts: Optional[List[Dict[str, Any]]] = None,
         state_delta: Optional[Dict[str, Any]] = None,
         max_retries: int = 3,
     ) -> List[Dict[str, Any]]:
+        # Build message parts: use explicit parts if provided, otherwise
+        # fall back to a single text part from the message string.
+        if parts is not None:
+            message_parts = parts
+        elif message is not None:
+            message_parts = [{"text": message}]
+        else:
+            raise ValueError("Either 'message' or 'parts' must be provided.")
+
         body: Dict[str, Any] = {
             "app_name": self.app_name,
             "user_id": str(user_id),
             "session_id": session_id,
             "new_message": {
                 "role": "user",
-                "parts": [{"text": message}],
+                "parts": message_parts,
             },
         }
         if state_delta:

@@ -173,14 +173,20 @@ def post_user_message(
     user_id: uuid.UUID,
     content: str,
     sender_phone: str | None = None,
+    media_parts: list | None = None,
+    attachment_meta: dict | None = None,
 ) -> Tuple[ChatMessage, ChatMessage]:
-    user_message = _append_message(db, session=session, role="user", content=content)
+    user_context = {"attachment": attachment_meta} if attachment_meta else None
+    user_message = _append_message(
+        db, session=session, role="user", content=content, context=user_context,
+    )
     assistant_message = _generate_agentic_response(
         db,
         session=session,
         user_id=user_id,
         user_message=content,
         sender_phone=sender_phone,
+        media_parts=media_parts,
     )
     return user_message, assistant_message
 
@@ -192,6 +198,7 @@ def _generate_agentic_response(
     user_id: uuid.UUID,
     user_message: str,
     sender_phone: str | None = None,
+    media_parts: list | None = None,
 ) -> ChatMessage:
     if not settings.ADK_BASE_URL:
         logger.error(f"ADK_BASE_URL is missing in settings: {settings.ADK_BASE_URL}")
@@ -308,12 +315,20 @@ def _generate_agentic_response(
             pass  # Never break chat for logging
 
     try:
-        events = client.run(
-            user_id=user_id,
-            session_id=str(adk_session_id),
-            message=user_message,
-            state_delta=state_delta,
-        )
+        if media_parts:
+            events = client.run(
+                user_id=user_id,
+                session_id=str(adk_session_id),
+                parts=media_parts,
+                state_delta=state_delta,
+            )
+        else:
+            events = client.run(
+                user_id=user_id,
+                session_id=str(adk_session_id),
+                message=user_message,
+                state_delta=state_delta,
+            )
         response_text, context = _extract_adk_response(events)
         _run_entity_extraction(db, session, context)
 
@@ -397,12 +412,20 @@ def _generate_agentic_response(
                     except Exception:
                         pass  # Never break chat for logging
 
-                events = client.run(
-                    user_id=user_id,
-                    session_id=str(adk_session_id),
-                    message=user_message,
-                    state_delta=retry_state_delta,
-                )
+                if media_parts:
+                    events = client.run(
+                        user_id=user_id,
+                        session_id=str(adk_session_id),
+                        parts=media_parts,
+                        state_delta=retry_state_delta,
+                    )
+                else:
+                    events = client.run(
+                        user_id=user_id,
+                        session_id=str(adk_session_id),
+                        message=user_message,
+                        state_delta=retry_state_delta,
+                    )
                 response_text, context = _extract_adk_response(events)
                 _run_entity_extraction(db, session, context)
 

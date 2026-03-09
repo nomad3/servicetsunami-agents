@@ -51,6 +51,7 @@ Your ONLY capability is to transfer tasks to your teams or personal assistant us
 - General orchestration requests, "help me with..."
 - Greetings, casual conversation, general chat
 - WhatsApp messages from the owner/admin
+- Multimedia messages (images, voice notes, PDFs) from WhatsApp or web chat
 - Ambiguous personal requests
 - "Check my email/Slack/calendar"
 

@@ -405,7 +405,37 @@ class WhatsAppService:
         # Extract message ID for echo detection
         msg_id = info.ID if hasattr(info, 'ID') else ""
 
-        if not text:
+        # Detect media messages (images, audio, documents)
+        media_bytes = None
+        media_mime = None
+        media_type = None
+        media_caption = text
+
+        if msg.imageMessage and msg.imageMessage.mimetype:
+            media_mime = msg.imageMessage.mimetype
+            media_caption = msg.imageMessage.caption or text
+            media_type = "image"
+        elif msg.audioMessage and msg.audioMessage.mimetype:
+            media_mime = msg.audioMessage.mimetype
+            media_type = "audio"
+        elif msg.documentMessage and msg.documentMessage.mimetype:
+            media_mime = msg.documentMessage.mimetype
+            media_caption = msg.documentMessage.title or msg.documentMessage.fileName or text
+            media_type = "document"
+
+        # Download media if present
+        if media_type:
+            try:
+                media_bytes = await asyncio.wait_for(
+                    client.download_any(event.Message), timeout=30,
+                )
+                logger.info(f"Downloaded {media_type} ({len(media_bytes)} bytes) from {sender_jid}")
+            except Exception as e:
+                logger.warning(f"Failed to download {media_type} from {sender_jid}: {e}")
+                media_bytes = None
+
+        # Skip if no text AND no media
+        if not text and not media_bytes:
             return
 
         # Skip group messages — only handle DMs for now
@@ -486,7 +516,26 @@ class WhatsAppService:
             logger.debug(f"Failed to send composing presence for {sender_phone}")
 
         # Process through agent — use phone number (not LID) as session key
-        response_text = await self._process_through_agent(tenant_id, sender_phone, text)
+        media_parts = None
+        if media_bytes:
+            try:
+                from app.services.media_utils import build_media_parts
+                media_filename = ""
+                if media_type == "document" and msg.documentMessage:
+                    media_filename = msg.documentMessage.fileName or msg.documentMessage.title or ""
+                media_parts, _ = build_media_parts(
+                    media_bytes=media_bytes,
+                    mime_type=media_mime,
+                    caption=media_caption or "",
+                    filename=media_filename,
+                )
+            except ValueError as e:
+                logger.warning(f"Media processing failed for {sender_phone}: {e}")
+
+        agent_text = media_caption or text or f"[Sent {media_type}]"
+        response_text = await self._process_through_agent(
+            tenant_id, sender_phone, agent_text, media_parts=media_parts,
+        )
         if not response_text:
             logger.warning(f"Empty response from agent for {sender_phone}, not sending reply")
         if response_text:
@@ -528,6 +577,7 @@ class WhatsAppService:
 
     async def _process_through_agent(
         self, tenant_id: str, sender_id: str, message: str,
+        media_parts: list | None = None,
     ) -> Optional[str]:
         """Route inbound message through the same ADK agent pipeline as the chat UI.
 
@@ -597,6 +647,7 @@ class WhatsAppService:
                     user_id=user.id,
                     content=message,
                     sender_phone=sender_id,
+                    media_parts=media_parts,
                 )
                 # Eagerly capture content before leaving the thread
                 return assistant_msg.content if assistant_msg else None
