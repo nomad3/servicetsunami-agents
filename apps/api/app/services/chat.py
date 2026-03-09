@@ -869,6 +869,7 @@ def _extract_adk_response(events: List[Dict[str, Any]]) -> Tuple[str, Dict[str, 
         prompt_tokens += usage.get("promptTokenCount", 0)
         completion_tokens += usage.get("candidatesTokenCount", 0)
 
+    # Look for text response from agent (reverse order to get latest)
     for event in reversed(events):
         author = event.get("author")
         if author and author.lower() != "user":
@@ -880,6 +881,21 @@ def _extract_adk_response(events: List[Dict[str, Any]]) -> Tuple[str, Dict[str, 
                     text_parts.append(part["text"])
             if text_parts:
                 assistant_text = "\n".join(text_parts).strip()
+                break
+
+    # Fallback: extract error messages from tool/function responses
+    if not assistant_text:
+        for event in reversed(events):
+            content = event.get("content") or {}
+            parts = content.get("parts", []) if isinstance(content, dict) else []
+            for part in parts:
+                if isinstance(part, dict):
+                    fn_resp = part.get("functionResponse") or part.get("function_response") or {}
+                    resp_data = fn_resp.get("response") or {}
+                    if isinstance(resp_data, dict) and resp_data.get("error"):
+                        assistant_text = resp_data["error"]
+                        break
+            if assistant_text:
                 break
 
     if not assistant_text:
