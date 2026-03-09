@@ -96,7 +96,7 @@ async def search_jira_issues(
     headers = {"Authorization": auth, "Accept": "application/json"}
 
     if not jql:
-        jql = "ORDER BY updated DESC"
+        jql = "updated >= -30d ORDER BY updated DESC"
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
