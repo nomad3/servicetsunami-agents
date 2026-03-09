@@ -6,7 +6,7 @@ operate on entities in the knowledge graph.
 """
 import logging
 import uuid
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 
 import httpx
@@ -319,7 +319,7 @@ async def get_pipeline_summary(
 async def generate_proposal(
     entity_id: str,
     tenant_id: str,
-    product_ids: Optional[list] = None,
+    product_ids: Optional[List[str]] = None,
 ) -> dict:
     """Generate a proposal document for a lead based on their profile and products.
 
