@@ -95,9 +95,9 @@ def create_session(
         if not agent_kit or str(agent_kit.tenant_id) != str(tenant_id):
             raise ValueError("Agent kit not found for tenant")
     else:
-        # Auto-select the tenant's default kit when none is specified
+        # Auto-select the tenant's first kit when none is specified
         tenant_kits = agent_kit_service.get_agent_kits_by_tenant(db, tenant_id=tenant_id)
-        if len(tenant_kits) == 1:
+        if tenant_kits:
             agent_kit = tenant_kits[0]
 
     session_title = title

@@ -47,6 +47,7 @@ class WhatsAppService:
         self._statuses: Dict[str, str] = {}
         self._reconnect_counts: Dict[str, int] = {}
         self._sent_message_ids: Dict[str, set] = {}  # Track bot-sent msg IDs to avoid echo loops
+        self._lid_phone_cache: Dict[str, str] = {}  # LID→phone cache for resolved numbers
         self._db_url = db_url
 
     def _key(self, tenant_id: str, account_id: str = "default") -> str:
@@ -431,8 +432,17 @@ class WhatsAppService:
                 resolved = pn_result.User if hasattr(pn_result, 'User') else str(pn_result)
                 logger.info(f"Resolved LID {sender_jid} → phone {resolved}")
                 sender_phone = resolved
+                self._lid_phone_cache[sender_jid] = resolved
         except Exception as e:
             logger.debug(f"LID→phone resolution failed for {sender_jid}: {e}")
+            # Fallback 1: check LID→phone cache from previous successful resolutions
+            if sender_jid in self._lid_phone_cache:
+                sender_phone = self._lid_phone_cache[sender_jid]
+                logger.info(f"Using cached LID→phone: {sender_jid} → {sender_phone}")
+            # Fallback 2: in DMs, chat_jid is often the phone number even when sender is a LID
+            elif not is_group and chat_jid and chat_jid != sender_jid:
+                sender_phone = chat_jid
+                logger.info(f"Using chat JID as phone fallback: {sender_jid} → {chat_jid}")
 
         # DM policy enforcement
         db = self._get_db()
@@ -441,12 +451,14 @@ class WhatsAppService:
             if acct.dm_policy == "allowlist":
                 allowed = acct.allow_from or []
                 if "*" not in allowed:
-                    # Check both the raw JID and resolved phone against allowlist
-                    matches = (
-                        sender_jid in allowed
-                        or f"+{sender_jid}" in allowed
-                        or sender_phone in allowed
-                        or f"+{sender_phone}" in allowed
+                    # Normalize: strip '+' for comparison to handle format mismatches
+                    allowed_normalized = {a.lstrip('+') for a in allowed}
+                    candidates = {
+                        sender_jid, sender_phone,
+                        sender_jid.lstrip('+'), sender_phone.lstrip('+'),
+                    }
+                    matches = bool(candidates & allowed_normalized) or bool(
+                        {sender_jid, f"+{sender_jid}", sender_phone, f"+{sender_phone}"} & set(allowed)
                     )
                     if not matches:
                         logger.info(f"Blocked message from {sender_jid} (phone={sender_phone}, not in allowlist {allowed})")
