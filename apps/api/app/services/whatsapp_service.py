@@ -649,6 +649,22 @@ class WhatsAppService:
         finally:
             db.close()
 
+    async def update_settings(
+        self, tenant_id: str, account_id: str = "default",
+        dm_policy: str = "allowlist", allow_from: list = None,
+    ) -> dict:
+        """Update allowlist / DM policy without changing enabled state."""
+        db = self._get_db()
+        try:
+            acct = self._get_or_create_account(db, tenant_id, account_id)
+            acct.dm_policy = dm_policy
+            acct.allow_from = allow_from or []
+            acct.updated_at = datetime.utcnow()
+            db.commit()
+            return {"account_id": account_id, "dm_policy": dm_policy, "allow_from": acct.allow_from}
+        finally:
+            db.close()
+
     async def start_pairing(
         self, tenant_id: str, account_id: str = "default", force: bool = False,
     ) -> dict:

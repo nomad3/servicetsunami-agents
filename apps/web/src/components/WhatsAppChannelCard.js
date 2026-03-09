@@ -33,6 +33,12 @@ const WhatsAppChannelCard = () => {
   const [pairing, setPairing] = useState(false);
   const pollRef = useRef(null);
 
+  // Allowlist editing
+  const [editingAllowlist, setEditingAllowlist] = useState(false);
+  const [editAllowFrom, setEditAllowFrom] = useState('');
+  const [editDmPolicy, setEditDmPolicy] = useState('allowlist');
+  const [savingAllowlist, setSavingAllowlist] = useState(false);
+
   // Send test
   const [sendTo, setSendTo] = useState('');
   const [sendMessage, setSendMessage] = useState('');
@@ -310,10 +316,101 @@ const WhatsAppChannelCard = () => {
         </div>
       )}
 
-      {/* ── Enabled but not linked: Show pair button / QR ── */}
+      {/* ── Enabled: Show allowlist settings + pair/disable buttons ── */}
       {isEnabled && !isLinked && !qrDataUrl && (
-        <div className="text-center">
-          <p className="text-muted mb-2" style={{ fontSize: '0.82rem' }}>
+        <div>
+          {/* Allowlist settings */}
+          <div className="mb-3">
+            <Form.Group className="mb-2">
+              <Form.Label style={{ fontSize: '0.78rem', color: 'var(--color-muted)' }}>
+                DM Policy
+              </Form.Label>
+              <Form.Select
+                size="sm"
+                value={editingAllowlist ? editDmPolicy : (status?.dm_policy || 'allowlist')}
+                onChange={(e) => {
+                  setEditingAllowlist(true);
+                  setEditDmPolicy(e.target.value);
+                }}
+                style={{
+                  background: 'var(--surface-contrast, rgba(0,0,0,0.2))',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-foreground)',
+                  fontSize: '0.82rem',
+                }}
+              >
+                <option value="allowlist">Allowlist (specific numbers only)</option>
+                <option value="pairing">Pairing (approve new contacts)</option>
+                <option value="open">Open (anyone can message)</option>
+              </Form.Select>
+            </Form.Group>
+
+            <Form.Group className="mb-2">
+              <Form.Label style={{ fontSize: '0.78rem', color: 'var(--color-muted)' }}>
+                Allowed Phone Numbers (comma-separated, E.164)
+              </Form.Label>
+              <Form.Control
+                type="text"
+                size="sm"
+                placeholder="+15551234567, +15559876543"
+                value={editingAllowlist ? editAllowFrom : (status?.allow_from || []).join(', ')}
+                onChange={(e) => {
+                  setEditingAllowlist(true);
+                  setEditAllowFrom(e.target.value);
+                }}
+                onFocus={() => {
+                  if (!editingAllowlist) {
+                    setEditAllowFrom((status?.allow_from || []).join(', '));
+                    setEditDmPolicy(status?.dm_policy || 'allowlist');
+                    setEditingAllowlist(true);
+                  }
+                }}
+                style={{
+                  background: 'var(--surface-contrast, rgba(0,0,0,0.2))',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-foreground)',
+                  fontSize: '0.82rem',
+                }}
+              />
+            </Form.Group>
+
+            {editingAllowlist && (
+              <Button
+                variant="primary"
+                size="sm"
+                className="w-100 mb-2"
+                onClick={async () => {
+                  try {
+                    setSavingAllowlist(true);
+                    const phones = editAllowFrom.split(',').map(p => p.trim()).filter(Boolean);
+                    await channelService.updateWhatsAppSettings({
+                      dm_policy: editDmPolicy,
+                      allow_from: phones,
+                    });
+                    setEditingAllowlist(false);
+                    setSuccess('Allowlist updated');
+                    setTimeout(() => setSuccess(null), 3000);
+                    await fetchStatus();
+                  } catch (err) {
+                    setError(err.response?.data?.detail || 'Failed to update settings');
+                    setTimeout(() => setError(null), 5000);
+                  } finally {
+                    setSavingAllowlist(false);
+                  }
+                }}
+                disabled={savingAllowlist}
+              >
+                {savingAllowlist ? (
+                  <Spinner animation="border" size="sm" style={{ width: 14, height: 14, borderWidth: 1.5 }} className="me-2" />
+                ) : (
+                  <FaCheckCircle className="me-2" size={12} />
+                )}
+                Save Settings
+              </Button>
+            )}
+          </div>
+
+          <p className="text-muted mb-2 text-center" style={{ fontSize: '0.82rem' }}>
             Link your WhatsApp by scanning a QR code
           </p>
           <div className="d-flex gap-2">
@@ -407,6 +504,75 @@ const WhatsAppChannelCard = () => {
               ))}
             </div>
           )}
+
+          {/* Allowlist settings (editable when connected) */}
+          <div className="mb-3 pb-3" style={{ borderBottom: '1px solid var(--color-border)' }}>
+            <div className="d-flex align-items-center justify-content-between mb-2">
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-foreground)' }}>
+                Allowlist
+              </span>
+              <Badge bg="info" style={{ fontSize: '0.65rem' }}>
+                {status?.dm_policy || 'allowlist'}
+              </Badge>
+            </div>
+            <Form.Control
+              type="text"
+              size="sm"
+              placeholder="+15551234567, +15559876543"
+              value={editingAllowlist ? editAllowFrom : (status?.allow_from || []).join(', ')}
+              onChange={(e) => {
+                setEditingAllowlist(true);
+                setEditAllowFrom(e.target.value);
+              }}
+              onFocus={() => {
+                if (!editingAllowlist) {
+                  setEditAllowFrom((status?.allow_from || []).join(', '));
+                  setEditDmPolicy(status?.dm_policy || 'allowlist');
+                  setEditingAllowlist(true);
+                }
+              }}
+              style={{
+                background: 'var(--surface-contrast, rgba(0,0,0,0.2))',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-foreground)',
+                fontSize: '0.82rem',
+              }}
+            />
+            {editingAllowlist && (
+              <Button
+                variant="primary"
+                size="sm"
+                className="w-100 mt-2"
+                onClick={async () => {
+                  try {
+                    setSavingAllowlist(true);
+                    const phones = editAllowFrom.split(',').map(p => p.trim()).filter(Boolean);
+                    await channelService.updateWhatsAppSettings({
+                      dm_policy: editDmPolicy,
+                      allow_from: phones,
+                    });
+                    setEditingAllowlist(false);
+                    setSuccess('Allowlist updated');
+                    setTimeout(() => setSuccess(null), 3000);
+                    await fetchStatus();
+                  } catch (err) {
+                    setError(err.response?.data?.detail || 'Failed to update settings');
+                    setTimeout(() => setError(null), 5000);
+                  } finally {
+                    setSavingAllowlist(false);
+                  }
+                }}
+                disabled={savingAllowlist}
+              >
+                {savingAllowlist ? (
+                  <Spinner animation="border" size="sm" style={{ width: 14, height: 14, borderWidth: 1.5 }} className="me-2" />
+                ) : (
+                  <FaCheckCircle className="me-2" size={12} />
+                )}
+                Save Allowlist
+              </Button>
+            )}
+          </div>
 
           {/* Test send form */}
           <div

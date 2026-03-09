@@ -59,15 +59,33 @@ async def enable_whatsapp(
 
 @router.post("/whatsapp/disable")
 async def disable_whatsapp(
-    request: WhatsAppLogoutRequest = WhatsAppLogoutRequest(),
+    request: WhatsAppLogoutRequest = None,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ):
     """Disable the WhatsApp channel."""
+    account_id = request.account_id if request else "default"
     result = await whatsapp_service.disable(
-        str(current_user.tenant_id), request.account_id,
+        str(current_user.tenant_id), account_id,
     )
     return {"status": "disabled", "data": result}
+
+
+@router.put("/whatsapp/settings")
+async def update_whatsapp_settings(
+    request: WhatsAppEnableRequest,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Update WhatsApp channel settings (allowlist, DM policy) without re-enabling."""
+    allow_from = request.allow_from
+    if request.dm_policy == "open" and "*" not in allow_from:
+        allow_from = ["*"] + allow_from
+    result = await whatsapp_service.update_settings(
+        str(current_user.tenant_id), request.account_id,
+        request.dm_policy, allow_from,
+    )
+    return {"status": "updated", "data": result}
 
 
 @router.get("/whatsapp/status")
