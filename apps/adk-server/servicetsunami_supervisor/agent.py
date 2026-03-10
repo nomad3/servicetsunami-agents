@@ -9,6 +9,7 @@ from .personal_assistant import personal_assistant
 from .code_agent import code_agent
 from .data_team import data_team
 from .sales_team import sales_team
+from .marketing_team import marketing_team
 from .prospecting_team import prospecting_team
 from .vet_supervisor import vet_supervisor
 from .deal_team import deal_team
@@ -34,7 +35,9 @@ Your ONLY capability is to transfer tasks to your teams or personal assistant us
 
 - **sales_team**: Customer support (customer_support). For customer inquiries, FAQ, order status, complaints, and PharmApp/Remedia support.
 
-- **prospecting_team**: Full prospecting pipeline (prospect_researcher + prospect_scorer + prospect_outreach). For web research, lead generation, entity enrichment, lead scoring, BANT qualification, outreach drafting, pipeline management, and proposals.
+- **marketing_team**: Web research and marketing intelligence (web_researcher + knowledge_manager). For web scraping, competitive analysis, internet presence audits, company research, market intelligence, and storing research in the knowledge graph.
+
+- **prospecting_team**: Full prospecting pipeline (prospect_researcher + prospect_scorer + prospect_outreach). For lead scoring, BANT qualification, outreach drafting, pipeline management, and proposals.
 
 - **vet_supervisor**: Veterinary cardiology team (cardiac_analyst + report_generator + billing_agent). For ECG analysis, cardiac reports, veterinary billing, clinic invoicing.
 
@@ -73,13 +76,20 @@ Your ONLY capability is to transfer tasks to your teams or personal assistant us
 - Complaints, feedback
 - PharmApp / Remedia: medication search, price comparison, order status, pharmacy info
 
+### marketing_team:
+- Web research, scraping, competitive analysis
+- Internet presence audits, company digital footprint
+- Market intelligence, industry research
+- Community management research, social media analysis
+- "Research X company", "Analyze their online presence"
+- "Find competitors in Y market"
+- Store research findings in knowledge graph
+
 ### prospecting_team:
-- Web research, scraping, lead generation, company discovery
-- Entity enrichment, intelligence gathering (tech stack, hiring, funding)
 - Lead scoring (ai_lead, hca_deal, marketing_signal rubrics)
 - BANT qualification, lead assessment
+- Entity enrichment, intelligence gathering (tech stack, hiring, funding)
 - Outreach drafting, pipeline management, proposals
-- "Research X", "Find companies that do Y"
 - "Score this lead", "Qualify this prospect"
 - "Draft outreach for X", "Pipeline summary"
 
@@ -108,5 +118,5 @@ Your ONLY capability is to transfer tasks to your teams or personal assistant us
 - Spanish greetings ("hola", "buenos dias") -> personal_assistant
 - Always explain what you're doing before delegating
 """,
-    sub_agents=[personal_assistant, code_agent, data_team, sales_team, prospecting_team, vet_supervisor, deal_team],
+    sub_agents=[personal_assistant, code_agent, data_team, sales_team, marketing_team, prospecting_team, vet_supervisor, deal_team],
 )
