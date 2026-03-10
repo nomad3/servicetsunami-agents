@@ -358,28 +358,14 @@ def _generate_agentic_response(
             db.commit()
         return assistant_msg
 
-    except ADKError as adk_exc:
-        # Known ADK error with a specific user-facing message
-        logger.error("ADK error %s: %s", adk_exc.status_code, adk_exc.detail)
-        if bridge_task_id:
-            _bridge_complete_task(
-                db, task_id=bridge_task_id, tenant_id=session.tenant_id,
-                agent_id=bridge_agent_id, success=False,
-                duration_ms=int((time.time() - bridge_start) * 1000),
-                error=adk_exc.detail,
-            )
-        return _append_message(
-            db,
-            session=session,
-            role="assistant",
-            content=adk_exc.user_message,
-            context={"error": adk_exc.detail, "error_code": adk_exc.status_code},
-        )
-
     except Exception as exc:
         # ADK sessions are in-memory; if the pod restarted the session is gone.
         # Detect 404 "Session not found" and transparently re-create.
-        is_session_lost = "404" in str(exc) or "Session not found" in str(exc)
+        is_session_lost = (
+            (isinstance(exc, ADKError) and (exc.status_code == 404 or "NOT_FOUND" in exc.detail or "Session not found" in exc.detail))
+            or "404" in str(exc)
+            or "Session not found" in str(exc)
+        )
         if is_session_lost:
             logger.warning("ADK session %s lost (pod restart?), re-creating.", adk_session_id)
             try:
@@ -517,14 +503,21 @@ def _generate_agentic_response(
                 duration_ms=int((time.time() - bridge_start) * 1000),
                 error=str(exc),
             )
-        error_detail = str(exc)
-        user_msg = f"The AI service encountered an error: {error_detail[:200]}"
+        # Use ADKError's user-friendly message when available
+        if isinstance(exc, ADKError):
+            user_msg = exc.user_message
+            error_detail = exc.detail
+            error_context = {"error": error_detail, "error_code": exc.status_code}
+        else:
+            error_detail = str(exc)
+            user_msg = f"The AI service encountered an error: {error_detail[:200]}"
+            error_context = {"error": error_detail}
         return _append_message(
             db,
             session=session,
             role="assistant",
             content=user_msg,
-            context={"error": error_detail},
+            context=error_context,
         )
 
 
