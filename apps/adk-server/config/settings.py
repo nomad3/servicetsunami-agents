@@ -8,7 +8,7 @@ class Settings(BaseSettings):
 
     # Google AI - Using Google AI Studio with API key
     google_genai_use_vertexai: bool = False
-    adk_model: str = "gemini-2.5-pro"
+    adk_model: str = "gemini-2.5-flash"
 
     # Database (shared with FastAPI)
     database_url: str = "postgresql://postgres:postgres@localhost:5432/servicetsunami"
