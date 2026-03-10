@@ -84,7 +84,7 @@ configMap:
   enabled: true
   data:
     GOOGLE_GENAI_USE_VERTEXAI: "FALSE"
-    ADK_MODEL: "gemini-3.1-pro-preview"
+    ADK_MODEL: "gemini-2.5-flash"
     MCP_SERVER_URL: "http://st-mcp-server-st-microservice"
     MCP_SCRAPER_URL: "http://servicetsunami-mcp"
     MCP_TENANT_CODE: "scdp"
