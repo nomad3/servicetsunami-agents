@@ -100,6 +100,41 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
              "help": "Run 'claude setup-token' in your terminal, then paste the token here"},
         ],
     },
+    "meta_ads": {
+        "display_name": "Meta Ads",
+        "description": "Manage Facebook & Instagram ad campaigns, view insights, monitor competitor ads",
+        "icon": "FaFacebook",
+        "credentials": [
+            {"key": "access_token", "label": "Access Token", "type": "password", "required": True,
+             "help": "Long-lived access token from Meta Business Suite > Settings > API"},
+            {"key": "ad_account_id", "label": "Ad Account ID", "type": "text", "required": True,
+             "help": "Format: act_123456789. Find in Meta Business Suite > Settings > Ad Accounts"},
+        ],
+    },
+    "google_ads": {
+        "display_name": "Google Ads",
+        "description": "Manage Google search and display campaigns, view keyword performance",
+        "icon": "FaGoogle",
+        "credentials": [
+            {"key": "developer_token", "label": "Developer Token", "type": "password", "required": True,
+             "help": "From Google Ads API Center. Apply at ads.google.com/aw/apicenter"},
+            {"key": "customer_id", "label": "Customer ID", "type": "text", "required": True,
+             "help": "10-digit Google Ads customer ID (no dashes). Found at top-right of Google Ads UI"},
+            {"key": "refresh_token", "label": "OAuth Refresh Token", "type": "password", "required": True,
+             "help": "OAuth2 refresh token. Generate using Google OAuth Playground for Ads API scope"},
+        ],
+    },
+    "tiktok_ads": {
+        "display_name": "TikTok Ads",
+        "description": "Manage TikTok ad campaigns and view performance insights",
+        "icon": "FaTiktok",
+        "credentials": [
+            {"key": "access_token", "label": "Access Token", "type": "password", "required": True,
+             "help": "From TikTok Business Center > Developer Portal > My Apps"},
+            {"key": "advertiser_id", "label": "Advertiser ID", "type": "text", "required": True,
+             "help": "Found in TikTok Ads Manager > Account Info"},
+        ],
+    },
 }
 
 
