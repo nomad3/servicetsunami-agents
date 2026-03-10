@@ -4,6 +4,7 @@ from .data_analyst import data_analyst
 from .report_generator import report_generator
 from .knowledge_manager import knowledge_manager
 from .web_researcher import web_researcher
+from .marketing_analyst import marketing_analyst
 from .customer_support import customer_support
 from .sales_agent import sales_agent
 from .code_agent import code_agent
@@ -52,6 +53,7 @@ __all__ = [
     "report_generator",
     "knowledge_manager",
     "web_researcher",
+    "marketing_analyst",
     "customer_support",
     "sales_agent",
     "cardiac_analyst",
