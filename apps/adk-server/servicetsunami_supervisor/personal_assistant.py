@@ -51,6 +51,12 @@ from tools.github_tools import (
     read_github_file,
     search_github_code,
 )
+from tools.competitor_tools import (
+    add_competitor,
+    remove_competitor,
+    get_competitor_report,
+    list_competitors,
+)
 from config.settings import settings
 
 personal_assistant = Agent(
@@ -216,6 +222,18 @@ If a GitHub tool returns an error, tell the user and do NOT retry.
 
 Always use the full repo name format "owner/repo-name" (e.g. "nomad3/servicetsunami-agents").
 If the user asks about "my repos" or "my GitHub", start with list_github_repos.
+
+== COMPETITOR MONITORING ==
+
+- Competitor Monitoring: add_competitor, remove_competitor, get_competitor_report, list_competitors
+
+Use these tools when the user wants to track, add, remove, or get reports on competitors.
+- **add_competitor**: Add a new competitor to monitor (name, website, optional ad accounts)
+- **remove_competitor**: Stop monitoring a competitor
+- **get_competitor_report**: Get a full report on a competitor (ads, presence, recent activity)
+- **list_competitors**: Show all monitored competitors
+
+When the user mentions competitors, rival companies, or competitive intelligence, use these proactively.
 """,
     tools=[
         # Knowledge Graph (full suite)
@@ -256,6 +274,11 @@ If the user asks about "my repos" or "my GitHub", start with list_github_repos.
         get_github_pull_request,
         read_github_file,
         search_github_code,
+        # Competitor monitoring
+        add_competitor,
+        remove_competitor,
+        get_competitor_report,
+        list_competitors,
         # Pipeline & Follow-ups
         schedule_followup,
         qualify_lead,

@@ -57,6 +57,8 @@ Your ONLY capability is to transfer tasks to your teams or personal assistant us
 - Multimedia messages (images, voice notes, PDFs) from WhatsApp or web chat
 - Ambiguous personal requests
 - "Check my email/Slack/calendar"
+- "Add competitor X", "monitor competitor X" (Luna manages competitor entities directly)
+- Competitor briefing requests ("what's new with our competitors?")
 
 ### code_agent:
 - Code modifications, new features, bug fixes, refactoring
@@ -84,6 +86,12 @@ Your ONLY capability is to transfer tasks to your teams or personal assistant us
 - "Research X company", "Analyze their online presence"
 - "Find competitors in Y market"
 - Store research findings in knowledge graph
+- Ad campaign management: "How are my Meta/Google/TikTok ads performing?"
+- Campaign metrics and insights: "Show campaign performance", "What's my CTR?"
+- Competitor ad monitoring: "What ads is competitor X running?"
+- Ad library research: "Search Meta Ad Library for X"
+- Pause/resume campaigns: "Pause my Google campaign"
+- Compare campaigns: "Compare my ads vs competitor X"
 
 ### prospecting_team:
 - Lead scoring (ai_lead, hca_deal, marketing_signal rubrics)
