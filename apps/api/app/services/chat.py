@@ -18,7 +18,7 @@ from app.models.dataset import Dataset
 from app.models.execution_trace import ExecutionTrace
 from app.services import agent_kits as agent_kit_service
 from app.services import datasets as dataset_service
-from app.services.adk_client import ADKNotConfiguredError, get_adk_client
+from app.services.adk_client import ADKError, ADKNotConfiguredError, get_adk_client
 from app.services.knowledge_extraction import knowledge_extraction_service
 from app.services.memory_recall import build_memory_context
 
@@ -358,6 +358,24 @@ def _generate_agentic_response(
             db.commit()
         return assistant_msg
 
+    except ADKError as adk_exc:
+        # Known ADK error with a specific user-facing message
+        logger.error("ADK error %s: %s", adk_exc.status_code, adk_exc.detail)
+        if bridge_task_id:
+            _bridge_complete_task(
+                db, task_id=bridge_task_id, tenant_id=session.tenant_id,
+                agent_id=bridge_agent_id, success=False,
+                duration_ms=int((time.time() - bridge_start) * 1000),
+                error=adk_exc.detail,
+            )
+        return _append_message(
+            db,
+            session=session,
+            role="assistant",
+            content=adk_exc.user_message,
+            context={"error": adk_exc.detail, "error_code": adk_exc.status_code},
+        )
+
     except Exception as exc:
         # ADK sessions are in-memory; if the pod restarted the session is gone.
         # Detect 404 "Session not found" and transparently re-create.
@@ -455,6 +473,23 @@ def _generate_agentic_response(
                     db.commit()
                 return assistant_msg
 
+            except ADKError as retry_adk_exc:
+                logger.error("ADK retry failed: %s", retry_adk_exc.detail)
+                if bridge_task_id:
+                    _bridge_complete_task(
+                        db, task_id=bridge_task_id, tenant_id=session.tenant_id,
+                        agent_id=bridge_agent_id, success=False,
+                        duration_ms=int((time.time() - bridge_start) * 1000),
+                        error=retry_adk_exc.detail,
+                    )
+                return _append_message(
+                    db,
+                    session=session,
+                    role="assistant",
+                    content=retry_adk_exc.user_message,
+                    context={"error": retry_adk_exc.detail, "error_code": retry_adk_exc.status_code},
+                )
+
             except Exception as retry_exc:
                 logger.exception("ADK retry after session re-creation also failed: %s", retry_exc)
                 if bridge_task_id:
@@ -464,12 +499,13 @@ def _generate_agentic_response(
                         duration_ms=int((time.time() - bridge_start) * 1000),
                         error=str(retry_exc),
                     )
+                retry_detail = str(retry_exc)
                 return _append_message(
                     db,
                     session=session,
                     role="assistant",
-                    content=ADK_FAILURE_MESSAGE,
-                    context={"error": str(retry_exc)},
+                    content=f"The AI service encountered an error: {retry_detail[:200]}",
+                    context={"error": retry_detail},
                 )
 
         logger.exception("ADK run failed: %s", exc)
@@ -481,12 +517,14 @@ def _generate_agentic_response(
                 duration_ms=int((time.time() - bridge_start) * 1000),
                 error=str(exc),
             )
+        error_detail = str(exc)
+        user_msg = f"The AI service encountered an error: {error_detail[:200]}"
         return _append_message(
             db,
             session=session,
             role="assistant",
-            content=ADK_FAILURE_MESSAGE,
-            context={"error": str(exc)},
+            content=user_msg,
+            context={"error": error_detail},
         )
 
 

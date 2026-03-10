@@ -17,6 +17,52 @@ class ADKNotConfiguredError(RuntimeError):
     """Raised when ADK integration is requested without configuration."""
 
 
+class ADKError(RuntimeError):
+    """Raised when an ADK /run call fails with a specific error."""
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(f"ADK error {status_code}: {detail}")
+
+    @property
+    def user_message(self) -> str:
+        """Return a user-friendly error message."""
+        if "RESOURCE_EXHAUSTED" in self.detail or "quota" in self.detail.lower():
+            return "The AI service has reached its daily usage limit. Please try again later or contact support."
+        if "INVALID_ARGUMENT" in self.detail:
+            return "The AI service rejected the request due to an invalid input. Please try a different message."
+        if "Session not found" in self.detail or "404" in str(self.status_code):
+            return "Your session has expired. Please start a new conversation."
+        return f"The AI service encountered an error. Details: {self.detail[:200]}"
+
+
+def _extract_error_detail(response: httpx.Response) -> str:
+    """Extract a meaningful error description from an ADK error response."""
+    try:
+        body = response.text
+        # ADK errors often contain a traceback — look for the last meaningful line
+        if "RESOURCE_EXHAUSTED" in body:
+            return "RESOURCE_EXHAUSTED: Gemini API daily quota exceeded"
+        if "INVALID_ARGUMENT" in body:
+            # Try to find the specific field issue
+            for line in body.split("\n"):
+                if "INVALID_ARGUMENT" in line:
+                    return line.strip()[:300]
+            return "INVALID_ARGUMENT: Gemini rejected the request"
+        if "Permission" in body or "PERMISSION_DENIED" in body:
+            return "PERMISSION_DENIED: API key may be invalid or missing"
+        if "NOT_FOUND" in body:
+            return "NOT_FOUND: Model or session not found"
+        # Generic: return last non-empty line of the traceback
+        lines = [l.strip() for l in body.strip().split("\n") if l.strip()]
+        if lines:
+            return lines[-1][:300]
+    except Exception:
+        pass
+    return f"HTTP {response.status_code}"
+
+
 class ADKClient:
     """Simple wrapper around the ADK FastAPI server."""
 
@@ -86,18 +132,29 @@ class ADKClient:
             body["state_delta"] = state_delta
 
         last_exc: Optional[Exception] = None
+        last_detail: str = ""
         for attempt in range(max_retries + 1):
             response = self._client.post("/run", json=body)
             if response.status_code == 200:
                 return response.json()
-            # Retry on 500 (ADK wraps Vertex AI 429 rate limits as 500)
+
+            # Try to extract a meaningful error detail from the response body
+            detail = _extract_error_detail(response)
+
+            # Don't retry on quota exhaustion — it won't help
+            if "RESOURCE_EXHAUSTED" in detail or "quota" in detail.lower():
+                raise ADKError(response.status_code, detail)
+
+            # Retry on other 500s (transient failures)
             if response.status_code >= 500 and attempt < max_retries:
                 delay = 2 ** attempt  # 1s, 2s, 4s
                 logger.warning(
-                    "ADK /run returned %s (attempt %d/%d), retrying in %ds",
+                    "ADK /run returned %s (attempt %d/%d), retrying in %ds — %s",
                     response.status_code, attempt + 1, max_retries + 1, delay,
+                    detail[:200],
                 )
                 time.sleep(delay)
+                last_detail = detail
                 last_exc = httpx.HTTPStatusError(
                     message=f"Server error '{response.status_code}' for url '{response.url}'",
                     request=response.request,
@@ -105,11 +162,11 @@ class ADKClient:
                 )
                 continue
             # Non-retryable error or last attempt
-            response.raise_for_status()
+            raise ADKError(response.status_code, detail)
 
-        # Should not reach here, but just in case
+        # All retries exhausted
         if last_exc:
-            raise last_exc
+            raise ADKError(500, last_detail or str(last_exc))
         return []
 
     def close(self) -> None:
