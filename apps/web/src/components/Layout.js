@@ -13,7 +13,8 @@ import {
   FaPlug as PlugFill,
   FaProjectDiagram as ProjectDiagramFill,
   FaRobot as Robot,
-  FaSun as SunFill
+  FaSun as SunFill,
+  FaPuzzlePiece as PuzzlePiece
 } from 'react-icons/fa';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../App';
@@ -61,6 +62,7 @@ const Layout = ({ children }) => {
         { path: '/agents', icon: Robot, label: t('sidebar.agents'), description: t('sidebar_desc.agents') },
         { path: '/workflows', icon: ProjectDiagramFill, label: t('sidebar.workflows'), description: t('sidebar_desc.workflows') },
         { path: '/memory', icon: DatabaseFill, label: t('sidebar.memory'), description: t('sidebar_desc.memory') },
+        { path: '/skills', icon: PuzzlePiece, label: t('sidebar.skills'), description: t('sidebar_desc.skills') },
       ]
     },
     {
