@@ -72,6 +72,25 @@ def _extract_goal(task_description: str) -> str:
     return task_description[:70]
 
 
+_TAG_KEYWORDS = {
+    'fix': ['fix', 'bug', 'broken', 'error', 'crash', 'issue', 'patch', 'repair', 'resolve'],
+    'feat': ['add', 'create', 'implement', 'build', 'new', 'feature', 'introduce', 'support'],
+    'infra': ['helm', 'kubernetes', 'k8s', 'deploy', 'terraform', 'ci', 'cd', 'pipeline', 'docker', 'infra'],
+    'db': ['migration', 'schema', 'table', 'column', 'database', 'sql', 'index', 'alter'],
+    'refactor': ['refactor', 'rename', 'reorganize', 'clean', 'simplify', 'restructure'],
+    'docs': ['document', 'readme', 'comment', 'docstring', 'jsdoc'],
+}
+
+
+def _detect_tag(task_description: str) -> str:
+    """Detect a conventional tag (fix/feat/infra/db/refactor/docs) from task text."""
+    text = task_description.lower()
+    for tag, keywords in _TAG_KEYWORDS.items():
+        if any(kw in text for kw in keywords):
+            return tag
+    return 'feat'
+
+
 def _fetch_claude_token(tenant_id: str) -> str:
     """Fetch the Claude Code session token from the API's internal endpoint."""
     url = f"{API_BASE_URL}/api/v1/oauth/internal/token/claude_code"  # integration_name=claude_code
@@ -92,11 +111,12 @@ def _fetch_claude_token(tenant_id: str) -> str:
 @activity.defn
 async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
     """Execute a code task using Claude Code CLI."""
-    # Generate readable branch name from the goal line + timestamp
+    # Generate readable branch name: code/feat/add-comment-to-main-03-11-1456
     goal = _extract_goal(task_input.task_description)
+    tag = _detect_tag(task_input.task_description)
     slug = re.sub(r'[^a-z0-9]+', '-', goal[:60].lower()).strip('-')[:40]
     ts = time.strftime('%m-%d-%H%M')
-    branch_name = f"code/{slug}-{ts}"
+    branch_name = f"code/{tag}/{slug}-{ts}"
 
     try:
         # 1. Fetch tenant's Claude Code session token
@@ -180,7 +200,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         activity.heartbeat("Pushing changes...")
         _run("git add -A")
         commit_msg = _extract_goal(task_input.task_description)[:100].replace('"', '\\"')
-        _run(f'git commit -m "feat: {commit_msg}"')
+        _run(f'git commit -m "{tag}: {commit_msg}"')
         _run(f'git push origin {branch_name}')
 
         # 9. Get changed files
@@ -189,7 +209,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
 
         # 10. Create PR
         activity.heartbeat("Creating PR...")
-        pr_title = _extract_goal(task_input.task_description)[:70]
+        pr_title = f"{tag}: {_extract_goal(task_input.task_description)[:67]}"
 
         # Gather commit log and claude summary for traceability
         commit_log = _run(f"git log main..{branch_name} --pretty=format:'- %h %s' --reverse")
