@@ -11,6 +11,7 @@ from typing import Optional
 
 import httpx
 from temporalio import activity, workflow
+from temporalio.common import RetryPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,7 @@ class CodeTaskWorkflow:
 
     @workflow.run
     async def run(self, task_input: CodeTaskInput) -> CodeTaskResult:
-        retry_policy = workflow.RetryPolicy(
+        retry_policy = RetryPolicy(
             maximum_attempts=2,
             initial_interval=timedelta(seconds=30),
             backoff_coefficient=2.0,
