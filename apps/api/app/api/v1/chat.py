@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import List, Optional
 import uuid
 
@@ -177,7 +178,8 @@ async def post_message_with_file(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    user_msg, assistant_msg = chat_service.post_user_message(
+    user_msg, assistant_msg = await asyncio.to_thread(
+        chat_service.post_user_message,
         db,
         session=session,
         user_id=current_user.id,
