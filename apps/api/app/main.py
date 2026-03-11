@@ -1,3 +1,4 @@
+# Code Agent Test - session token auth verified
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
