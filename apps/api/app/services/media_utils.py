@@ -31,11 +31,18 @@ AUDIO_MIMES = {
 
 PDF_MIMES = {"application/pdf"}
 
+SPREADSHEET_MIMES = {
+    "text/csv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
 # ── Size limits (bytes) ────────────────────────────────────────────────────
 
 MAX_IMAGE_SIZE = 10 * 1024 * 1024   # 10 MB
 MAX_AUDIO_SIZE = 25 * 1024 * 1024   # 25 MB
 MAX_PDF_SIZE = 20 * 1024 * 1024     # 20 MB
+MAX_SPREADSHEET_SIZE = 10 * 1024 * 1024  # 10 MB
 
 # ── Default prompts ────────────────────────────────────────────────────────
 
@@ -62,6 +69,8 @@ def classify_media(mime_type: str) -> str:
         return "audio"
     if clean in PDF_MIMES:
         return "pdf"
+    if clean in SPREADSHEET_MIMES:
+        return "spreadsheet"
     return "unsupported"
 
 
@@ -100,14 +109,22 @@ def build_media_parts(
         raise ValueError(
             f"PDF too large: {size} bytes (max {MAX_PDF_SIZE} bytes)"
         )
+    if media_class == "spreadsheet" and size > MAX_SPREADSHEET_SIZE:
+        raise ValueError(
+            f"Spreadsheet too large: {size} bytes (max {MAX_SPREADSHEET_SIZE} bytes)"
+        )
 
     # Build parts by media class
     if media_class == "image":
         parts = _build_image_parts(media_bytes, clean_mime, caption)
     elif media_class == "audio":
         parts = _build_audio_parts(media_bytes, clean_mime, caption)
-    else:
+    elif media_class == "pdf":
         parts = _build_pdf_parts(media_bytes, caption, filename)
+    elif media_class == "spreadsheet":
+        parts = _build_spreadsheet_parts(media_bytes, clean_mime, caption, filename)
+    else:
+        raise ValueError(f"Unsupported media type: {mime_type}")
 
     attachment_meta = {
         "type": media_class,
@@ -197,3 +214,53 @@ def _build_pdf_parts(
     content = f"{prompt}\n\n--- PDF Content ({header}) ---\n{full_text}"
 
     return [{"text": content}]
+
+
+MAX_SPREADSHEET_CHARS = 50_000
+
+
+def _build_spreadsheet_parts(
+    file_bytes: bytes,
+    mime_type: str,
+    caption: str,
+    filename: str,
+) -> List[Dict]:
+    """Extract text from CSV or Excel and return a text part."""
+    try:
+        if mime_type == "text/csv":
+            text_content = file_bytes.decode("utf-8", errors="replace")
+        else:
+            # Excel file — extract with openpyxl
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+            sheets = []
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                rows = []
+                for row in ws.iter_rows(values_only=True):
+                    row_vals = [str(c) if c is not None else "" for c in row]
+                    if any(v for v in row_vals):
+                        rows.append(",".join(row_vals))
+                if rows:
+                    sheets.append(f"--- Sheet: {sheet_name} ---\n" + "\n".join(rows))
+            text_content = "\n\n".join(sheets)
+
+        truncated = False
+        if len(text_content) > MAX_SPREADSHEET_CHARS:
+            text_content = text_content[:MAX_SPREADSHEET_CHARS]
+            truncated = True
+
+        header_parts = []
+        if filename:
+            header_parts.append(f"Filename: {filename}")
+        if truncated:
+            header_parts.append(f"(truncated to {MAX_SPREADSHEET_CHARS} chars)")
+        header = " | ".join(header_parts) if header_parts else "Spreadsheet"
+
+        prompt = caption if caption else "The user sent a spreadsheet. Please review and respond."
+        content = f"{prompt}\n\n--- Spreadsheet Content ({header}) ---\n{text_content}"
+
+        return [{"text": content}]
+    except Exception:
+        logger.exception("Failed to extract spreadsheet content")
+        return [{"text": f"{caption or 'The user sent a spreadsheet.'}\n\n[Could not extract spreadsheet content from {filename}]"}]
