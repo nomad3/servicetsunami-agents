@@ -11,7 +11,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -35,315 +35,212 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 REPORT_TTL_HOURS = 24
 
 # ---------------------------------------------------------------------------
-# Pydantic schemas
+# Pydantic schemas — matches ADK report_tools schema
 # ---------------------------------------------------------------------------
+
+
+class ProductionData(BaseModel):
+    doctor: Optional[float] = None
+    specialty: Optional[float] = None
+    hygiene: Optional[float] = None
+    total: Optional[float] = None
+    net_production: Optional[float] = None
+    collections: Optional[float] = None
 
 
 class ProviderData(BaseModel):
     name: str
-    production: float = 0.0
-    collections: float = 0.0
-    visits: int = 0
-    presented: float = 0.0
-    accepted: float = 0.0
+    role: str = "doctor"
+    visits: Optional[int] = None
+    gross_production: Optional[float] = None
+    production_per_visit: Optional[float] = None
+    treatment_presented: Optional[float] = None
+    treatment_accepted: Optional[float] = None
+    acceptance_rate: Optional[float] = None
 
 
 class HygieneData(BaseModel):
-    name: str
-    production: float = 0.0
-    collections: float = 0.0
-    visits: int = 0
-    capacity: int = 0
-    utilized: int = 0
-    reappointment_rate: float = 0.0
-
-
-class ProductionData(BaseModel):
-    period: str = ""
-    practice_name: str = "Practice"
-    doctors: List[ProviderData] = Field(default_factory=list)
-    specialists: List[ProviderData] = Field(default_factory=list)
-    hygienists: List[HygieneData] = Field(default_factory=list)
-    adjustments: float = 0.0
-    write_offs: float = 0.0
-    refunds: float = 0.0
+    visits: Optional[int] = None
+    capacity: Optional[int] = None
+    capacity_pct: Optional[float] = None
+    reappointment_rate: Optional[float] = None
+    net_production: Optional[float] = None
 
 
 class ReportRequest(BaseModel):
-    report_type: str = "monthly_performance"
-    period: str = ""
-    data: ProductionData = Field(default_factory=ProductionData)
+    practice_name: str = "Practice"
+    report_period: str = ""
+    production: Optional[ProductionData] = None
+    providers: List[ProviderData] = Field(default_factory=list)
+    hygiene: Optional[HygieneData] = None
+    report_title: Optional[str] = None
 
 
 class ReportResponse(BaseModel):
     file_id: str
     download_url: str
+    filename: str
     expires_at: str
 
 
 # ---------------------------------------------------------------------------
-# Excel styling helpers
+# Excel styling
 # ---------------------------------------------------------------------------
 TITLE_FONT = Font(name="Calibri", size=14, bold=True)
 HEADER_FONT = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
 HEADER_FILL = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
 SUBHEADER_FONT = Font(name="Calibri", size=11, bold=True)
 SUBHEADER_FILL = PatternFill(start_color="D6E4F0", end_color="D6E4F0", fill_type="solid")
+DATA_FONT = Font(name="Calibri", size=10)
 
 FMT_CURRENCY = '$#,##0.00'
 FMT_PERCENT = '0.0%'
 FMT_NUMBER = '#,##0'
 
 
-def _apply_header_row(ws, row: int, values: list, col_start: int = 1):
-    """Write a styled header row."""
+def _header_row(ws, row, values, col_start=1):
     for idx, val in enumerate(values, start=col_start):
         cell = ws.cell(row=row, column=idx, value=val)
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
-        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.alignment = Alignment(horizontal="center")
 
 
-def _apply_subheader_row(ws, row: int, values: list, col_start: int = 1):
-    """Write a styled sub-header row."""
+def _subheader_row(ws, row, values, col_start=1):
     for idx, val in enumerate(values, start=col_start):
         cell = ws.cell(row=row, column=idx, value=val)
         cell.font = SUBHEADER_FONT
         cell.fill = SUBHEADER_FILL
-        cell.alignment = Alignment(horizontal="center", vertical="center")
 
 
-def _write_currency(ws, row: int, col: int, value: float):
-    cell = ws.cell(row=row, column=col, value=value)
-    cell.number_format = FMT_CURRENCY
-    return cell
-
-
-def _write_percent(ws, row: int, col: int, value: float):
-    cell = ws.cell(row=row, column=col, value=value)
-    cell.number_format = FMT_PERCENT
-    return cell
-
-
-def _write_number(ws, row: int, col: int, value):
-    cell = ws.cell(row=row, column=col, value=value)
-    cell.number_format = FMT_NUMBER
-    return cell
+def _write_row(ws, row, label, value, fmt=None, bold=False):
+    c1 = ws.cell(row=row, column=1, value=label)
+    c1.font = Font(name="Calibri", size=10, bold=bold)
+    c2 = ws.cell(row=row, column=2, value=value)
+    c2.font = Font(name="Calibri", size=10, bold=bold)
+    if fmt and value is not None:
+        c2.number_format = fmt
+    c2.alignment = Alignment(horizontal="right")
+    return row + 1
 
 
 # ---------------------------------------------------------------------------
 # Excel builder
 # ---------------------------------------------------------------------------
 
-def _build_excel(data: ProductionData, period: str) -> str:
-    """Build a formatted Excel workbook and return the file path (without tenant prefix)."""
+def _build_excel(data: ReportRequest) -> tuple:
+    """Build a formatted Excel workbook. Returns (workbook, file_id)."""
     wb = Workbook()
     ws = wb.active
-    ws.title = "Practice Performance"
+    ws.title = "Operations Report"
 
-    # Column widths
-    ws.column_dimensions["A"].width = 28
-    for col_letter in ("B", "C", "D", "E", "F"):
-        ws.column_dimensions[col_letter].width = 18
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 20
 
     row = 1
 
-    # ── Title ──────────────────────────────────────────────────────────────
-    title_cell = ws.cell(row=row, column=1, value=f"{data.practice_name} — Performance Report")
-    title_cell.font = TITLE_FONT
+    # ── Title ──
+    title = data.report_title or f"{data.practice_name} — Monthly Operations Report"
+    ws.cell(row=row, column=1, value=title).font = TITLE_FONT
     row += 1
-    if period:
-        ws.cell(row=row, column=1, value=f"Period: {period}")
+    if data.report_period:
+        ws.cell(row=row, column=1, value=f"Period: {data.report_period}").font = DATA_FONT
     row += 2
 
-    # ── Section 1: Production & Collections ────────────────────────────────
-    ws.cell(row=row, column=1, value="PRODUCTION & COLLECTIONS").font = Font(
-        name="Calibri", size=12, bold=True,
-    )
-    row += 1
-    _apply_header_row(ws, row, ["Provider", "Gross Production", "Net Production", "Collections", "% Net Production"])
-    row += 1
+    doctors = [p for p in data.providers if p.role == "doctor"]
+    specialists = [p for p in data.providers if p.role == "specialist"]
+    hygienists = [p for p in data.providers if p.role == "hygienist"]
 
-    all_providers: list[ProviderData] = []
-
-    # Doctors
-    if data.doctors:
-        _apply_subheader_row(ws, row, ["Doctors", "", "", "", ""])
+    # ── PRODUCTION & COLLECTIONS ──
+    prod = data.production
+    if prod:
+        _header_row(ws, row, ["PRODUCTION & COLLECTIONS", ""])
         row += 1
-        for doc in data.doctors:
-            ws.cell(row=row, column=1, value=doc.name)
-            _write_currency(ws, row, 2, doc.production)
-            net = doc.production - (data.adjustments + data.write_offs) / max(len(data.doctors) + len(data.specialists), 1)
-            _write_currency(ws, row, 3, net)
-            _write_currency(ws, row, 4, doc.collections)
-            pct = (net / doc.production) if doc.production else 0.0
-            _write_percent(ws, row, 5, pct)
-            all_providers.append(doc)
-            row += 1
-
-    # Specialists
-    if data.specialists:
-        _apply_subheader_row(ws, row, ["Specialists", "", "", "", ""])
+        row = _write_row(ws, row, "Gross Production", None, bold=True)
+        row = _write_row(ws, row, "  Doctor", prod.doctor, FMT_CURRENCY)
+        row = _write_row(ws, row, "  Specialty", prod.specialty, FMT_CURRENCY)
+        row = _write_row(ws, row, "  Hygiene", prod.hygiene, FMT_CURRENCY)
+        row = _write_row(ws, row, "  Total", prod.total, FMT_CURRENCY, bold=True)
         row += 1
-        for sp in data.specialists:
-            ws.cell(row=row, column=1, value=sp.name)
-            _write_currency(ws, row, 2, sp.production)
-            net = sp.production - (data.adjustments + data.write_offs) / max(len(data.doctors) + len(data.specialists), 1)
-            _write_currency(ws, row, 3, net)
-            _write_currency(ws, row, 4, sp.collections)
-            pct = (net / sp.production) if sp.production else 0.0
-            _write_percent(ws, row, 5, pct)
-            all_providers.append(sp)
-            row += 1
-
-    # Hygiene
-    if data.hygienists:
-        _apply_subheader_row(ws, row, ["Hygiene", "", "", "", ""])
-        row += 1
-        for hyg in data.hygienists:
-            ws.cell(row=row, column=1, value=hyg.name)
-            _write_currency(ws, row, 2, hyg.production)
-            _write_currency(ws, row, 3, hyg.production)  # hygiene = gross
-            _write_currency(ws, row, 4, hyg.collections)
-            pct = (hyg.production / hyg.production) if hyg.production else 0.0
-            _write_percent(ws, row, 5, pct)
-            row += 1
-
-    # Totals
-    total_gross = sum(p.production for p in all_providers) + sum(h.production for h in data.hygienists)
-    total_net = total_gross - data.adjustments - data.write_offs - data.refunds
-    total_collections = sum(p.collections for p in all_providers) + sum(h.collections for h in data.hygienists)
-    row += 1
-    ws.cell(row=row, column=1, value="TOTAL").font = SUBHEADER_FONT
-    _write_currency(ws, row, 2, total_gross)
-    _write_currency(ws, row, 3, total_net)
-    _write_currency(ws, row, 4, total_collections)
-    _write_percent(ws, row, 5, (total_net / total_gross) if total_gross else 0.0)
-    row += 2
-
-    # ── Section 2: Patient Visits ──────────────────────────────────────────
-    ws.cell(row=row, column=1, value="PATIENT VISITS").font = Font(
-        name="Calibri", size=12, bold=True,
-    )
-    row += 1
-    _apply_header_row(ws, row, ["Provider", "Visits"])
-    row += 1
-
-    if data.doctors:
-        _apply_subheader_row(ws, row, ["Doctors", ""])
-        row += 1
-        for doc in data.doctors:
-            ws.cell(row=row, column=1, value=doc.name)
-            _write_number(ws, row, 2, doc.visits)
-            row += 1
-
-    if data.specialists:
-        _apply_subheader_row(ws, row, ["Specialists", ""])
-        row += 1
-        for sp in data.specialists:
-            ws.cell(row=row, column=1, value=sp.name)
-            _write_number(ws, row, 2, sp.visits)
-            row += 1
-
-    if data.hygienists:
-        _apply_subheader_row(ws, row, ["Hygienists", ""])
-        row += 1
-        for hyg in data.hygienists:
-            ws.cell(row=row, column=1, value=hyg.name)
-            _write_number(ws, row, 2, hyg.visits)
-            row += 1
-
-    total_visits = (
-        sum(d.visits for d in data.doctors)
-        + sum(s.visits for s in data.specialists)
-        + sum(h.visits for h in data.hygienists)
-    )
-    row += 1
-    ws.cell(row=row, column=1, value="TOTAL").font = SUBHEADER_FONT
-    _write_number(ws, row, 2, total_visits)
-    row += 2
-
-    # ── Section 3: Gross Production By Provider ────────────────────────────
-    ws.cell(row=row, column=1, value="GROSS PRODUCTION BY PROVIDER").font = Font(
-        name="Calibri", size=12, bold=True,
-    )
-    row += 1
-    _apply_header_row(ws, row, ["Provider", "Gross Production", "% of Total"])
-    row += 1
-    everyone = [(p.name, p.production) for p in data.doctors + data.specialists] + [
-        (h.name, h.production) for h in data.hygienists
-    ]
-    for name, prod in everyone:
-        ws.cell(row=row, column=1, value=name)
-        _write_currency(ws, row, 2, prod)
-        _write_percent(ws, row, 3, (prod / total_gross) if total_gross else 0.0)
-        row += 1
-    row += 1
-
-    # ── Section 4: Production Per Visit ────────────────────────────────────
-    ws.cell(row=row, column=1, value="PRODUCTION PER VISIT").font = Font(
-        name="Calibri", size=12, bold=True,
-    )
-    row += 1
-    _apply_header_row(ws, row, ["Provider", "Production", "Visits", "Per Visit"])
-    row += 1
-    for name, prod in everyone:
-        visits = 0
-        for p in data.doctors + data.specialists:
-            if p.name == name:
-                visits = p.visits
-                break
-        else:
-            for h in data.hygienists:
-                if h.name == name:
-                    visits = h.visits
-                    break
-        ws.cell(row=row, column=1, value=name)
-        _write_currency(ws, row, 2, prod)
-        _write_number(ws, row, 3, visits)
-        _write_currency(ws, row, 4, (prod / visits) if visits else 0.0)
-        row += 1
-    row += 1
-
-    # ── Section 5: Case Acceptance ─────────────────────────────────────────
-    ws.cell(row=row, column=1, value="CASE ACCEPTANCE").font = Font(
-        name="Calibri", size=12, bold=True,
-    )
-    row += 1
-    _apply_header_row(ws, row, ["Provider", "Presented", "Accepted", "Acceptance Rate"])
-    row += 1
-    for prov in data.doctors + data.specialists:
-        ws.cell(row=row, column=1, value=prov.name)
-        _write_currency(ws, row, 2, prov.presented)
-        _write_currency(ws, row, 3, prov.accepted)
-        rate = (prov.accepted / prov.presented) if prov.presented else 0.0
-        _write_percent(ws, row, 4, rate)
-        row += 1
-    total_presented = sum(p.presented for p in data.doctors + data.specialists)
-    total_accepted = sum(p.accepted for p in data.doctors + data.specialists)
-    row += 1
-    ws.cell(row=row, column=1, value="TOTAL").font = SUBHEADER_FONT
-    _write_currency(ws, row, 2, total_presented)
-    _write_currency(ws, row, 3, total_accepted)
-    _write_percent(ws, row, 4, (total_accepted / total_presented) if total_presented else 0.0)
-    row += 2
-
-    # ── Section 6: Recare ──────────────────────────────────────────────────
-    ws.cell(row=row, column=1, value="RECARE").font = Font(
-        name="Calibri", size=12, bold=True,
-    )
-    row += 1
-    _apply_header_row(ws, row, ["Hygienist", "Capacity", "Utilized", "Utilization %", "Reappointment Rate"])
-    row += 1
-    for hyg in data.hygienists:
-        ws.cell(row=row, column=1, value=hyg.name)
-        _write_number(ws, row, 2, hyg.capacity)
-        _write_number(ws, row, 3, hyg.utilized)
-        _write_percent(ws, row, 4, (hyg.utilized / hyg.capacity) if hyg.capacity else 0.0)
-        _write_percent(ws, row, 5, hyg.reappointment_rate)
+        row = _write_row(ws, row, "Net Production (Revenue)", prod.net_production, FMT_CURRENCY, bold=True)
+        row = _write_row(ws, row, "Collections", prod.collections, FMT_CURRENCY, bold=True)
+        if prod.net_production and prod.collections:
+            pct = prod.collections / prod.net_production
+            row = _write_row(ws, row, "  % Net Production", pct, FMT_PERCENT)
         row += 1
 
-    # Save to temp file — file_id only (tenant prefix added by caller)
+    # ── PATIENT VISITS ──
+    if any(p.visits for p in data.providers):
+        _header_row(ws, row, ["PATIENT VISITS", ""])
+        row += 1
+
+        if doctors:
+            row = _write_row(ws, row, "Doctors", None, bold=True)
+            total_doc_visits = 0
+            for p in doctors:
+                row = _write_row(ws, row, f"  {p.name}", p.visits, FMT_NUMBER)
+                total_doc_visits += p.visits or 0
+            row = _write_row(ws, row, "  Total Doctors", total_doc_visits, FMT_NUMBER, bold=True)
+
+        if specialists:
+            row = _write_row(ws, row, "Specialists", None, bold=True)
+            for p in specialists:
+                row = _write_row(ws, row, f"  {p.name}", p.visits, FMT_NUMBER)
+
+        if hygienists:
+            row = _write_row(ws, row, "Hygienists", None, bold=True)
+            for p in hygienists:
+                row = _write_row(ws, row, f"  {p.name}", p.visits, FMT_NUMBER)
+
+        all_visits = sum(p.visits or 0 for p in data.providers)
+        row = _write_row(ws, row, "Total", all_visits, FMT_NUMBER, bold=True)
+        row += 1
+
+    # ── GROSS PRODUCTION BY PROVIDER ──
+    if any(p.gross_production for p in data.providers):
+        _header_row(ws, row, ["GROSS PRODUCTION BY PROVIDER", ""])
+        row += 1
+        total_gp = sum(p.gross_production or 0 for p in data.providers)
+        for p in data.providers:
+            if p.gross_production:
+                row = _write_row(ws, row, f"  {p.name}", p.gross_production, FMT_CURRENCY)
+        row = _write_row(ws, row, "  Total", total_gp, FMT_CURRENCY, bold=True)
+        row += 1
+
+    # ── PRODUCTION PER VISIT ──
+    if any(p.production_per_visit for p in data.providers):
+        _header_row(ws, row, ["PRODUCTION PER VISIT", ""])
+        row += 1
+        for p in data.providers:
+            if p.production_per_visit:
+                row = _write_row(ws, row, f"  {p.name}", p.production_per_visit, FMT_CURRENCY)
+        row += 1
+
+    # ── CASE ACCEPTANCE ──
+    if any(p.treatment_presented for p in data.providers):
+        _header_row(ws, row, ["CASE ACCEPTANCE", ""])
+        row += 1
+        for p in data.providers:
+            if p.treatment_presented:
+                row = _write_row(ws, row, p.name, None, bold=True)
+                row = _write_row(ws, row, "  Treatment Presented", p.treatment_presented, FMT_CURRENCY)
+                row = _write_row(ws, row, "  Treatment Accepted", p.treatment_accepted, FMT_CURRENCY)
+                row = _write_row(ws, row, "  Acceptance Rate", p.acceptance_rate, FMT_PERCENT)
+                row += 1
+
+    # ── RECARE ──
+    hyg = data.hygiene
+    if hyg:
+        _header_row(ws, row, ["RECARE", ""])
+        row += 1
+        row = _write_row(ws, row, "Capacity Utilization", None, bold=True)
+        row = _write_row(ws, row, "  Hygiene Visits", hyg.visits, FMT_NUMBER)
+        row = _write_row(ws, row, "  Hygiene Capacity", hyg.capacity, FMT_NUMBER)
+        row = _write_row(ws, row, "  % Capacity", hyg.capacity_pct, FMT_PERCENT)
+        row += 1
+        row = _write_row(ws, row, "Reappointment Rate", hyg.reappointment_rate, FMT_PERCENT)
+        row = _write_row(ws, row, "Hygiene Net Production", hyg.net_production, FMT_CURRENCY)
+
     file_id = str(uuid.uuid4())
     return wb, file_id
 
@@ -396,14 +293,12 @@ def download_report(
     tenant_id: str = Query(...),
 ):
     """Serve a previously generated Excel report for download."""
-    # Sanitise inputs
     if ".." in file_id or "/" in file_id or "\\" in file_id:
         raise HTTPException(status_code=400, detail="Invalid file_id")
     if ".." in tenant_id or "/" in tenant_id or "\\" in tenant_id:
         raise HTTPException(status_code=400, detail="Invalid tenant_id")
 
-    file_name = f"{tenant_id}_{file_id}.xlsx"
-    file_path = REPORTS_DIR / file_name
+    file_path = REPORTS_DIR / f"{tenant_id}_{file_id}.xlsx"
 
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="Report not found or expired")
@@ -423,18 +318,20 @@ def _do_generate(payload: ReportRequest, tenant_id: str) -> dict:
     """Build the Excel file, persist it, return metadata."""
     _cleanup_expired_reports()
 
-    wb, file_id = _build_excel(payload.data, payload.period)
+    wb, file_id = _build_excel(payload)
 
-    file_name = f"{tenant_id}_{file_id}.xlsx"
-    file_path = REPORTS_DIR / file_name
+    file_path = REPORTS_DIR / f"{tenant_id}_{file_id}.xlsx"
     wb.save(str(file_path))
     logger.info("Generated report %s for tenant %s", file_id, tenant_id)
 
     expires_at = (datetime.utcnow() + timedelta(hours=REPORT_TTL_HOURS)).isoformat()
+    safe_name = payload.practice_name.replace(" ", "_")
+    filename = f"{safe_name}_Operations_Report_{payload.report_period.replace(' ', '_')}.xlsx"
     download_url = f"/api/v1/reports/download/{file_id}?tenant_id={tenant_id}"
 
     return {
         "file_id": file_id,
         "download_url": download_url,
+        "filename": filename,
         "expires_at": expires_at,
     }
