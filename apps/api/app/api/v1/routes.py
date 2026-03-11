@@ -34,6 +34,7 @@ from app.api.v1 import (
     webhooks,
     oauth,
     notifications,
+    reports,
 )
 
 router = APIRouter()
@@ -76,3 +77,4 @@ router.include_router(remedia.router, prefix="/remedia", tags=["remedia"])
 router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 router.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+router.include_router(reports.router, prefix="/reports", tags=["reports"])
