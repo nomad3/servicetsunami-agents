@@ -139,13 +139,26 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         # 10. Create PR
         activity.heartbeat("Creating PR...")
         pr_title = task_input.task_description[:70]
-        pr_body = f"## Summary\\n\\nAutonomously implemented by Claude Code.\\n\\n## Task\\n\\n{task_input.task_description}\\n\\n---\\n\\nFiles changed: {len(files_changed)}"
-        pr_output = _run(
-            f'gh pr create --title "{pr_title}" --body "{pr_body}" --head {branch_name} --base main'
+        pr_body = (
+            f"## Summary\n\n"
+            f"Autonomously implemented by Claude Code.\n\n"
+            f"## Task\n\n"
+            f"{task_input.task_description}\n\n"
+            f"---\n\n"
+            f"Files changed: {len(files_changed)}"
         )
+        logger.info("Creating PR: title=%s", pr_title)
+        pr_result = subprocess.run(
+            ["gh", "pr", "create", "--title", pr_title, "--body", pr_body,
+             "--head", branch_name, "--base", "main"],
+            cwd=WORKSPACE, capture_output=True, text=True, timeout=60,
+        )
+        if pr_result.returncode != 0:
+            raise RuntimeError(f"gh pr create failed: {pr_result.stderr or pr_result.stdout}")
+        pr_output = pr_result.stdout.strip()
 
         # Extract PR URL from gh output
-        pr_url = pr_output.strip().split("\n")[-1]
+        pr_url = pr_output.split("\n")[-1]
 
         summary = claude_data.get("result", claude_output[:2000]) if isinstance(claude_data, dict) else claude_output[:2000]
 
