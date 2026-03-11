@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
@@ -91,10 +92,11 @@ def _fetch_claude_token(tenant_id: str) -> str:
 @activity.defn
 async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
     """Execute a code task using Claude Code CLI."""
-    # Generate readable branch name from the goal line
+    # Generate readable branch name from the goal line + timestamp
     goal = _extract_goal(task_input.task_description)
-    slug = re.sub(r'[^a-z0-9]+', '-', goal[:60].lower()).strip('-')[:50]
-    branch_name = f"code/{slug}"
+    slug = re.sub(r'[^a-z0-9]+', '-', goal[:60].lower()).strip('-')[:40]
+    ts = int(time.time())
+    branch_name = f"code/{slug}-{ts}"
 
     try:
         # 1. Fetch tenant's Claude Code session token
