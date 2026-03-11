@@ -48,9 +48,9 @@ livenessProbe:
     path: /api/v1/
     port: http
   initialDelaySeconds: 30
-  periodSeconds: 10
-  timeoutSeconds: 5
-  failureThreshold: 3
+  periodSeconds: 15
+  timeoutSeconds: 10
+  failureThreshold: 6
 
 readinessProbe:
   enabled: true
@@ -58,9 +58,9 @@ readinessProbe:
     path: /api/v1/
     port: http
   initialDelaySeconds: 10
-  periodSeconds: 5
-  timeoutSeconds: 3
-  failureThreshold: 3
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
 
 startupProbe:
   enabled: true
