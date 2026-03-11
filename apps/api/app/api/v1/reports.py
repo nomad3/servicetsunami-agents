@@ -50,9 +50,10 @@ class ProductionData(BaseModel):
 
 class ProviderData(BaseModel):
     name: str
-    role: str = "doctor"
+    role: str = "staff"
     visits: Optional[int] = None
     gross_production: Optional[float] = None
+    collections: Optional[float] = None
     production_per_visit: Optional[float] = None
     treatment_presented: Optional[float] = None
     treatment_accepted: Optional[float] = None
@@ -147,6 +148,7 @@ def _build_excel(data: ReportRequest) -> tuple:
         ws.cell(row=row, column=1, value=f"Period: {data.report_period}").font = DATA_FONT
     row += 2
 
+    role_order = ["doctor", "specialist", "hygienist", "staff"]
     doctors = [p for p in data.providers if p.role == "doctor"]
     specialists = [p for p in data.providers if p.role == "specialist"]
     hygienists = [p for p in data.providers if p.role == "hygienist"]
@@ -196,15 +198,42 @@ def _build_excel(data: ReportRequest) -> tuple:
         row = _write_row(ws, row, "Total", all_visits, FMT_NUMBER, bold=True)
         row += 1
 
-    # ── GROSS PRODUCTION BY PROVIDER ──
-    if any(p.gross_production for p in data.providers):
-        _header_row(ws, row, ["GROSS PRODUCTION BY PROVIDER", ""])
+    # ── PRODUCTION BY PROVIDER ──
+    providers_with_prod = [p for p in data.providers if p.gross_production]
+    if providers_with_prod:
+        _header_row(ws, row, ["PRODUCTION BY PROVIDER", ""])
         row += 1
-        total_gp = sum(p.gross_production or 0 for p in data.providers)
-        for p in data.providers:
-            if p.gross_production:
-                row = _write_row(ws, row, f"  {p.name}", p.gross_production, FMT_CURRENCY)
-        row = _write_row(ws, row, "  Total", total_gp, FMT_CURRENCY, bold=True)
+        for role in role_order:
+            role_providers = [p for p in providers_with_prod if p.role == role]
+            if role_providers:
+                role_label = role.capitalize() + "s"
+                _subheader_row(ws, row, [role_label, ""])
+                row += 1
+                for p in role_providers:
+                    row = _write_row(ws, row, f"  {p.name}", p.gross_production, FMT_CURRENCY)
+                role_total = sum(p.gross_production or 0 for p in role_providers)
+                row = _write_row(ws, row, f"  Subtotal {role_label}", role_total, FMT_CURRENCY, bold=True)
+        total_gp = sum(p.gross_production or 0 for p in providers_with_prod)
+        row = _write_row(ws, row, "Total Production", total_gp, FMT_CURRENCY, bold=True)
+        row += 1
+
+    # ── COLLECTIONS BY PROVIDER ──
+    providers_with_coll = [p for p in data.providers if p.collections]
+    if providers_with_coll:
+        _header_row(ws, row, ["COLLECTIONS BY PROVIDER", ""])
+        row += 1
+        for role in role_order:
+            role_providers = [p for p in providers_with_coll if p.role == role]
+            if role_providers:
+                role_label = role.capitalize() + "s"
+                _subheader_row(ws, row, [role_label, ""])
+                row += 1
+                for p in role_providers:
+                    row = _write_row(ws, row, f"  {p.name}", p.collections, FMT_CURRENCY)
+                role_total = sum(p.collections or 0 for p in role_providers)
+                row = _write_row(ws, row, f"  Subtotal {role_label}", role_total, FMT_CURRENCY, bold=True)
+        total_coll = sum(p.collections or 0 for p in providers_with_coll)
+        row = _write_row(ws, row, "Total Collections", total_coll, FMT_CURRENCY, bold=True)
         row += 1
 
     # ── PRODUCTION PER VISIT ──
@@ -217,16 +246,25 @@ def _build_excel(data: ReportRequest) -> tuple:
         row += 1
 
     # ── CASE ACCEPTANCE ──
-    if any(p.treatment_presented for p in data.providers):
+    providers_with_tx = [p for p in data.providers if p.treatment_presented]
+    if providers_with_tx:
         _header_row(ws, row, ["CASE ACCEPTANCE", ""])
         row += 1
-        for p in data.providers:
-            if p.treatment_presented:
-                row = _write_row(ws, row, p.name, None, bold=True)
-                row = _write_row(ws, row, "  Treatment Presented", p.treatment_presented, FMT_CURRENCY)
-                row = _write_row(ws, row, "  Treatment Accepted", p.treatment_accepted, FMT_CURRENCY)
-                row = _write_row(ws, row, "  Acceptance Rate", p.acceptance_rate, FMT_PERCENT)
-                row += 1
+        total_presented = 0
+        total_accepted = 0
+        for p in providers_with_tx:
+            row = _write_row(ws, row, p.name, None, bold=True)
+            row = _write_row(ws, row, "  Treatment Presented", p.treatment_presented, FMT_CURRENCY)
+            row = _write_row(ws, row, "  Treatment Accepted", p.treatment_accepted, FMT_CURRENCY)
+            row = _write_row(ws, row, "  Acceptance Rate", p.acceptance_rate, FMT_PERCENT)
+            total_presented += p.treatment_presented or 0
+            total_accepted += p.treatment_accepted or 0
+        row += 1
+        row = _write_row(ws, row, "Total Presented", total_presented, FMT_CURRENCY, bold=True)
+        row = _write_row(ws, row, "Total Accepted", total_accepted, FMT_CURRENCY, bold=True)
+        if total_presented > 0:
+            row = _write_row(ws, row, "Overall Acceptance Rate", total_accepted / total_presented, FMT_PERCENT, bold=True)
+        row += 1
 
     # ── RECARE ──
     hyg = data.hygiene

@@ -35,36 +35,51 @@ def _get_api_client() -> httpx.AsyncClient:
 
 _REPORT_SCHEMA = {
     "practice_name": {"type": "string", "description": "Name of the dental practice"},
-    "report_period": {"type": "string", "description": "Period covered, e.g. 'January 2026' or 'Q1 2026'"},
+    "report_period": {"type": "string", "description": "Period covered, e.g. 'June 2025' or 'Q1 2026'"},
     "production": {
         "type": "object",
+        "description": "Aggregate production and collections for the entire practice",
         "properties": {
-            "doctor": {"type": "number", "description": "Doctor production in dollars"},
-            "specialty": {"type": "number", "description": "Specialty production in dollars"},
-            "hygiene": {"type": "number", "description": "Hygiene production in dollars"},
-            "total": {"type": "number", "description": "Total gross production in dollars"},
-            "net_production": {"type": "number", "description": "Net production (after adjustments) in dollars"},
-            "collections": {"type": "number", "description": "Total collections in dollars"},
+            "doctor": {"type": "number", "description": "Sum of production for all providers with role=doctor"},
+            "specialty": {"type": "number", "description": "Sum of production for all providers with role=specialist"},
+            "hygiene": {"type": "number", "description": "Sum of production for all providers with role=hygienist"},
+            "total": {"type": "number", "description": "Total gross production (doctor + specialty + hygiene)"},
+            "net_production": {"type": "number", "description": "Net production after adjustments/write-offs"},
+            "collections": {"type": "number", "description": "Total collections across all providers"},
         },
     },
     "providers": {
         "type": "array",
+        "description": "EVERY provider from the source document. Include ALL staff with production or collections > $0.",
         "items": {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Provider full name"},
-                "role": {"type": "string", "description": "Role: 'doctor', 'hygienist', or 'specialist'"},
-                "visits": {"type": "integer", "description": "Number of patient visits"},
-                "gross_production": {"type": "number", "description": "Gross production in dollars"},
-                "production_per_visit": {"type": "number", "description": "Average production per visit in dollars"},
-                "treatment_presented": {"type": "number", "description": "Total treatment presented in dollars"},
-                "treatment_accepted": {"type": "number", "description": "Total treatment accepted in dollars"},
-                "acceptance_rate": {"type": "number", "description": "Case acceptance rate as decimal 0-1"},
+                "name": {"type": "string", "description": "Provider full name as shown in the document"},
+                "role": {
+                    "type": "string",
+                    "description": (
+                        "Provider role. Use ONLY these values: 'doctor', 'hygienist', 'specialist', 'staff'. "
+                        "Classification rules for dental practices: "
+                        "- doctor: Has 'D.D.S.', 'D.M.D.', 'Dr.' in name, or is listed as the practice owner. "
+                        "- specialist: Oral surgeons, orthodontists, periodontists, endodontists. "
+                        "- hygienist: Names appearing under 'Hygiene' sections, or labeled 'Sub Hygiene'/'Sub Hygienist'. "
+                        "- staff: Front office, assistants, billing coordinators, lab techs — anyone not a doctor/specialist/hygienist. "
+                        "When unsure, use 'staff'. Do NOT guess 'doctor' for non-clinical staff."
+                    ),
+                },
+                "visits": {"type": "integer", "description": "Number of patient visits (null if not available)"},
+                "gross_production": {"type": "number", "description": "Total production amount from 'Totals' line"},
+                "collections": {"type": "number", "description": "Total collections amount from 'Totals' line"},
+                "production_per_visit": {"type": "number", "description": "Production / visits (null if visits unknown)"},
+                "treatment_presented": {"type": "number", "description": "From treatment plan reports: total proposed/posted to walkout"},
+                "treatment_accepted": {"type": "number", "description": "From treatment plan reports: total accepted"},
+                "acceptance_rate": {"type": "number", "description": "treatment_accepted / treatment_presented as decimal 0-1"},
             },
         },
     },
     "hygiene": {
         "type": "object",
+        "description": "Aggregate hygiene department metrics (capacity, reappointment, etc.)",
         "properties": {
             "visits": {"type": "integer", "description": "Total hygiene visits"},
             "capacity": {"type": "integer", "description": "Total hygiene capacity (available slots)"},
@@ -98,19 +113,41 @@ def extract_document_data(
         "status": "schema_provided",
         "target_schema": _REPORT_SCHEMA,
         "instructions": (
-            "Extract structured data from the file text below and populate "
-            "the target_schema fields. Follow these rules:\n"
-            "1. Convert percentages to decimals (e.g. 85% → 0.85).\n"
-            "2. Remove currency symbols and commas from numbers "
-            "(e.g. $1,234.56 → 1234.56).\n"
-            "3. Use null for any field that cannot be found in the text.\n"
-            "4. If data spans multiple files, merge values — sum dollar "
-            "amounts and average rates where appropriate.\n"
-            "5. Provider names should be 'Dr. FirstName LastName' for doctors.\n"
-            "6. The acceptance_rate, capacity_pct, and reappointment_rate "
-            "must be decimals between 0 and 1."
+            "Extract structured data from the file text and populate the target_schema fields.\n\n"
+            "## Extraction Rules\n"
+            "1. Convert percentages to decimals (85% → 0.85).\n"
+            "2. Remove currency symbols and commas (e.g. $1,234.56 → 1234.56).\n"
+            "3. Use null for any field not found in the text.\n"
+            "4. Negative values in parentheses: ($1,234) → -1234.\n\n"
+            "## Provider Classification (CRITICAL)\n"
+            "Include EVERY provider/person listed in the document as a separate entry.\n"
+            "- **doctor**: Has 'D.D.S.', 'D.M.D.', 'Dr.' prefix, or is the practice owner\n"
+            "- **specialist**: Oral surgeons, orthodontists, periodontists, endodontists\n"
+            "- **hygienist**: Listed under 'Hygiene' sections, or name contains "
+            "'Sub Hygiene', 'Sub Hygienist', 'RDH'\n"
+            "- **staff**: Everyone else — front office, assistants, billing, lab techs, "
+            "coordinators. When in doubt, use 'staff'\n"
+            "Do NOT default to 'doctor'. Most non-clinical staff are 'staff'.\n\n"
+            "## Performance Summary Documents\n"
+            "Each page typically shows one provider with:\n"
+            "- 'Services' line = gross production\n"
+            "- 'Totals' line = net production (after deleted services, discounts, etc.)\n"
+            "- 'Collections' column totals = total collections\n"
+            "Use the 'Totals' line for gross_production and the Collections 'Totals' for collections.\n"
+            "Include providers even if production is $0 but collections > $0.\n\n"
+            "## Treatment Plan Documents\n"
+            "Look for 'Total Proposed/Posted to Walkout' = treatment_presented.\n"
+            "Look for 'Total Accepted' = treatment_accepted.\n"
+            "acceptance_rate = treatment_accepted / treatment_presented.\n\n"
+            "## Multi-file Merging\n"
+            "When merging with previously extracted data:\n"
+            "- Match providers by name (case-insensitive, ignore 'Dr.' prefix)\n"
+            "- Sum production/collections from different sources if they represent different data\n"
+            "- Do NOT duplicate providers — merge into existing entries\n"
+            "- Treatment plan data adds treatment_presented/accepted to existing provider entries\n"
+            "- Recalculate aggregate production.doctor/hygiene/total after merging"
         ),
-        "file_preview": file_text[:2000],
+        "file_preview": file_text[:3000],
     }
 
 
