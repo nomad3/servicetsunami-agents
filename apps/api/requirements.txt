@@ -9,6 +9,7 @@ SQLAlchemy
 psycopg2-binary
 python-multipart
 requests
+beautifulsoup4
 httpx
 pandas
 openpyxl
