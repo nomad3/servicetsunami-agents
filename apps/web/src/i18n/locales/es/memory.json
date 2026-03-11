@@ -1,0 +1,31 @@
+{
+  "title": "Memoria",
+  "subtitle": "Lo que Luna sabe, recuerda y ha aprendido de tus conversaciones",
+  "addEntity": "Agregar Entidad",
+  "tabs": {
+    "overview": "Resumen",
+    "entities": "Entidades",
+    "relations": "Relaciones",
+    "memories": "Memorias",
+    "activity": "Actividad",
+    "import": "Importar"
+  },
+  "entities": {
+    "searchPlaceholder": "Buscar entidades...",
+    "allCategories": "Todas las Categor\u00edas",
+    "allStatuses": "Todos los Estados",
+    "selectAll": "Seleccionar todo",
+    "deleteCount": "Eliminar {{count}}",
+    "loadMore": "Cargar M\u00e1s",
+    "empty": "No se encontraron entidades. Habla con tu asistente de IA para empezar a construir la base de conocimiento, o agrega entidades manualmente."
+  },
+  "import": {
+    "title": "Importar Historial de Chat",
+    "subtitle": "Sube exportaciones de chat de otros proveedores de LLM para construir tu base de conocimiento.",
+    "chatgpt": "Exportar ChatGPT",
+    "claude": "Exportar Claude",
+    "uploadYour": "Sube tu",
+    "upload": "Subir",
+    "importFailed": "No se pudo importar el historial de chat"
+  }
+}

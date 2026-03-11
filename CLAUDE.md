@@ -31,8 +31,11 @@ This is a **Turborepo monorepo** managed with `pnpm` workspaces:
   - Connects to MCP server for Databricks operations
 
 - **`apps/code-worker`**: Claude Code CLI Temporal worker (Python 3.11 + Node.js 20)
-  - Dedicated pod for autonomous coding tasks
-  - Runs Claude Code CLI, creates branches and PRs
+  - Dedicated pod for autonomous coding tasks via Claude Code CLI
+  - Authenticates using tenant's OAuth token via `CLAUDE_CODE_OAUTH_TOKEN` env var
+  - Token fetched at runtime from API's internal endpoint (`/api/v1/oauth/internal/token/claude_code`)
+  - Creates feature branches, commits changes, and opens PRs with full traceability
+  - PR body includes: task description, Claude Code output summary, commit log, files changed
   - Temporal worker on `servicetsunami-code` queue
 
 - **`apps/mcp-server`**: Model Context Protocol server for data integration (Python 3.11)
@@ -304,6 +307,30 @@ REACT_APP_API_BASE_URL=http://localhost:8001
 
 Uses `REACT_APP_` prefix (Create React App requirement).
 
+### Code Worker Configuration
+
+The code-worker authenticates to Claude Code CLI using per-tenant OAuth tokens (subscription-based, not API credits).
+
+```bash
+# Required (from GCP Secret Manager via ExternalSecret)
+GITHUB_TOKEN=ghp_xxxxx              # GitHub PAT for git operations and PR creation
+API_INTERNAL_KEY=xxxxx              # Key for internal API endpoints (token fetch)
+
+# Set by ConfigMap
+API_BASE_URL=http://servicetsunami-api  # Internal API service URL
+TEMPORAL_ADDRESS=temporal:7233          # Temporal server address
+
+# Set dynamically per-task (not in pod env)
+# CLAUDE_CODE_OAUTH_TOKEN is set per-subprocess from the tenant's stored credential
+```
+
+**Authentication flow:**
+1. ADK `code_agent` calls `start_code_task` tool → Temporal workflow starts on `servicetsunami-code` queue
+2. Code-worker activity fetches tenant's OAuth token: `GET /api/v1/oauth/internal/token/claude_code?tenant_id=<uuid>`
+3. Token passed as `CLAUDE_CODE_OAUTH_TOKEN` env var to `claude -p` subprocess
+4. Claude Code CLI runs with tenant's subscription (Pro/Max), not API credits
+5. Changes committed, pushed, PR created via `gh pr create` with full traceability
+
 ## Deployment
 
 ### Kubernetes (Production - GKE)
@@ -376,6 +403,16 @@ def get_agents(db: Session, tenant_id: uuid.UUID):
 ### Infrastructure Sync Rule
 
 When making manual changes, always replicate them to Helm, Git, and Terraform to prevent drift.
+
+### Code Agent PR Traceability
+
+PRs created by the code agent include structured body with full audit trail:
+- **Summary**: Auto-generated description
+- **Task**: Original task description from the user
+- **Claude Code Output**: Summary of what Claude Code did
+- **Commits**: Full commit log with short hashes
+- **Files Changed**: Bulleted list of modified files
+- **Footer**: ServiceTsunami Code Agent attribution
 
 ## Additional Documentation
 

@@ -87,6 +87,7 @@ const IntegrationsPanel = () => {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [oauthStatuses, setOauthStatuses] = useState({});
+  const [credentialStatuses, setCredentialStatuses] = useState({});
   const [connectingProvider, setConnectingProvider] = useState(null);
   const [monitorRunning, setMonitorRunning] = useState(false);
 
@@ -122,6 +123,24 @@ const IntegrationsPanel = () => {
         })
       );
       setOauthStatuses(statuses);
+
+      // Fetch credential status for manual (non-OAuth) integrations
+      const manualConfigs = (configsRes.data || []).filter(cfg => {
+        const reg = (registryRes.data || []).find(r => r.integration_name === cfg.integration_name);
+        return reg && reg.auth_type !== 'oauth' && cfg.enabled;
+      });
+      const credStatuses = {};
+      await Promise.all(
+        manualConfigs.map(async (cfg) => {
+          try {
+            const res = await integrationConfigService.getCredentialStatus(cfg.id);
+            credStatuses[cfg.integration_name] = res.data?.stored_keys || [];
+          } catch {
+            credStatuses[cfg.integration_name] = [];
+          }
+        })
+      );
+      setCredentialStatuses(credStatuses);
 
       // Check inbox monitor status if Google is connected
       if (statuses.google?.connected) {
@@ -288,6 +307,14 @@ const IntegrationsPanel = () => {
         ...prev,
         [skill.integration_name]: {},
       }));
+      // Refresh credential status to show "Saved" indicators
+      try {
+        const statusRes = await integrationConfigService.getCredentialStatus(existing.id);
+        setCredentialStatuses((prev) => ({
+          ...prev,
+          [skill.integration_name]: statusRes.data?.stored_keys || [],
+        }));
+      } catch { /* ignore */ }
       setSuccess(`Credentials saved for ${skill.display_name}`);
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
@@ -650,24 +677,35 @@ const IntegrationsPanel = () => {
                             </span>
                           </div>
 
-                          {skill.credentials.map((cred) => (
+                          {skill.credentials.map((cred) => {
+                            const storedKeys = credentialStatuses[skill.integration_name] || [];
+                            const isStored = storedKeys.includes(cred.key);
+                            return (
                             <Form.Group key={cred.key} className="mb-2">
                               <Form.Label
                                 style={{
                                   fontSize: '0.78rem',
                                   color: 'var(--color-muted)',
                                   marginBottom: '0.25rem',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 6,
                                 }}
                               >
                                 {cred.label}
                                 {cred.required && (
                                   <span className="text-danger ms-1">*</span>
                                 )}
+                                {isStored && (
+                                  <span style={{ color: '#28a745', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                    <FaCheckCircle size={10} /> Saved
+                                  </span>
+                                )}
                               </Form.Label>
                               <Form.Control
                                 type={cred.type === 'password' ? 'password' : 'text'}
                                 size="sm"
-                                placeholder={`Enter ${cred.label.toLowerCase()}`}
+                                placeholder={isStored ? '••••••••  (saved — enter new value to update)' : `Enter ${cred.label.toLowerCase()}`}
                                 value={formValues[cred.key] || ''}
                                 onChange={(e) =>
                                   handleCredentialChange(
@@ -684,7 +722,8 @@ const IntegrationsPanel = () => {
                                 }}
                               />
                             </Form.Group>
-                          ))}
+                            );
+                          })}
 
                           <div className="d-flex gap-2">
                             <Button

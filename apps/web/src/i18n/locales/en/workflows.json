@@ -1,0 +1,113 @@
+{
+  "title": "Workflows",
+  "subtitle": "Workflow architecture and execution audit",
+  "tabs": {
+    "designs": "Designs",
+    "executions": "Executions"
+  },
+  "designs": {
+    "description": "Visual structure of all Temporal workflows. Click a workflow to expand its step-by-step flowchart.",
+    "orchestrationQueue": "orchestration queue",
+    "databricksQueue": "databricks queue",
+    "codeQueue": "code queue",
+    "workflows": "{{count}} workflow",
+    "workflows_plural": "{{count}} workflows",
+    "steps": "{{count}} step",
+    "steps_plural": "{{count}} steps",
+    "categories": {
+      "platform": "Platform",
+      "data": "Data",
+      "sales": "Sales",
+      "marketing": "Marketing",
+      "healthpets": "Industry · HealthPets",
+      "remedia": "Industry · Remedia"
+    }
+  },
+  "executions": {
+    "tabs": {
+      "all": "All",
+      "agentTasks": "Agent Tasks",
+      "chat": "Chat",
+      "provisioning": "Provisioning",
+      "dataPipelines": "Data Pipelines",
+      "dataSync": "Data Sync"
+    },
+    "stats": {
+      "totalWorkflows": "Total Workflows",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "totalTokens": "Total Tokens",
+      "totalCost": "Total Cost"
+    },
+    "refresh": "Refresh",
+    "autoRefresh": "Auto-refresh",
+    "loading": "Loading workflows...",
+    "noWorkflows": "No workflows found",
+    "table": {
+      "workflow": "Workflow",
+      "type": "Type",
+      "status": "Status",
+      "tokens": "Tokens",
+      "cost": "Cost",
+      "duration": "Duration"
+    },
+    "filter": {
+      "searchPlaceholder": "Search by objective, workflow ID, or type...",
+      "allStatus": "All Status",
+      "queued": "Queued",
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "newest": "Newest",
+      "oldest": "Oldest",
+      "sortDuration": "Duration",
+      "sortCost": "Cost"
+    },
+    "runs": "{{count}} runs",
+    "latest": "Latest: {{time}}",
+    "runningCount": "{{count}} running",
+    "failedCount": "{{count}} failed",
+    "workflowsCount": "{{total}} workflows ({{filtered}} groups)",
+    "temporalOffline": "Temporal offline — showing DB data only",
+    "metadata": {
+      "started": "Started",
+      "completed": "Completed",
+      "duration": "Duration",
+      "type": "Type",
+      "priority": "Priority",
+      "confidence": "Confidence",
+      "traceSteps": "Trace Steps",
+      "tokens": "Tokens",
+      "cost": "Cost",
+      "error": "Error",
+      "source": "Source",
+      "temporalWorkflow": "Temporal Workflow",
+      "agentTask": "Agent Task"
+    },
+    "detail": {
+      "workflowDetail": "Workflow Detail",
+      "clickToCopyWorkflow": "Click to copy workflow ID",
+      "clickToCopyTask": "Click to copy task ID",
+      "task": "Task",
+      "approve": "Approve",
+      "reject": "Reject",
+      "pipelineRun": "Pipeline Run",
+      "executionTrace": "Execution Trace",
+      "stepsCount": "{{count}} steps",
+      "rawData": "Raw Data"
+    },
+    "status": {
+      "unknown": "Unknown",
+      "continued": "Continued"
+    },
+    "timeAgo": {
+      "seconds": "{{count}}s ago",
+      "minutes": "{{count}}m ago",
+      "hours": "{{count}}h ago",
+      "days": "{{count}}d ago"
+    },
+    "viewTrace": "View Trace",
+    "copyId": "Copy ID"
+  }
+}

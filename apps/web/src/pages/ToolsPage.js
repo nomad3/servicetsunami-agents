@@ -10,6 +10,7 @@ import {
   Col,
   InputGroup,
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   FaTools,
   FaPlus,
@@ -24,6 +25,7 @@ import toolService from '../services/tool';
 import '../pages/AgentsPage.css';
 
 const ToolsPage = () => {
+  const { t } = useTranslation('tools');
   const toast = useToast();
   const [tools, setTools] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -52,7 +54,7 @@ const ToolsPage = () => {
       setTools(response.data || []);
     } catch (err) {
       console.error('Error fetching tools:', err);
-      toast.error('Failed to load tools. Please try again.');
+      toast.error(t('errors.load'));
     } finally {
       setLoading(false);
     }
@@ -70,10 +72,10 @@ const ToolsPage = () => {
       setShowCreateModal(false);
       resetForm();
       fetchTools();
-      toast.success('Tool created successfully!');
+      toast.success(t('success.created'));
     } catch (err) {
       console.error('Error creating tool:', err);
-      toast.error('Failed to create tool. Please check your configuration JSON.');
+      toast.error(t('errors.create'));
     } finally {
       setSubmitting(false);
     }
@@ -91,10 +93,10 @@ const ToolsPage = () => {
       setShowEditModal(false);
       resetForm();
       fetchTools();
-      toast.success('Tool updated successfully!');
+      toast.success(t('success.updated'));
     } catch (err) {
       console.error('Error updating tool:', err);
-      toast.error('Failed to update tool. Please check your configuration JSON.');
+      toast.error(t('errors.update'));
     } finally {
       setSubmitting(false);
     }
@@ -107,10 +109,10 @@ const ToolsPage = () => {
       setShowDeleteModal(false);
       setSelectedTool(null);
       fetchTools();
-      toast.success('Tool deleted successfully!');
+      toast.success(t('success.deleted'));
     } catch (err) {
       console.error('Error deleting tool:', err);
-      toast.error('Failed to delete tool.');
+      toast.error(t('errors.delete'));
     } finally {
       setSubmitting(false);
     }
@@ -118,12 +120,12 @@ const ToolsPage = () => {
 
   const handleTestTool = async (tool) => {
     try {
-      toast.info('Testing tool connection...');
+      toast.info(t('testing'));
       await toolService.test(tool.id, {});
-      toast.success(`Tool "${tool.name}" tested successfully!`);
+      toast.success(t('success.tested', { name: tool.name }));
     } catch (err) {
       console.error('Error testing tool:', err);
-      toast.error(`Tool test failed: ${err.response?.data?.detail || 'Unknown error'}`);
+      toast.error(t('errors.test', { detail: err.response?.data?.detail || 'Unknown error' }));
     }
   };
 
@@ -178,10 +180,10 @@ const ToolsPage = () => {
         <div>
           <h2 className="page-title">
             <FaTools className="me-2" size={32} />
-            Tools
+            {t('title')}
           </h2>
           <p className="page-subtitle">
-            Configure and manage tools available to your AI agents
+            {t('subtitle')}
           </p>
         </div>
         <Button
@@ -191,7 +193,7 @@ const ToolsPage = () => {
           className="d-flex align-items-center gap-2"
         >
           <FaPlus size={20} />
-          Create Tool
+          {t('createTool')}
         </Button>
       </div>
 
@@ -203,7 +205,7 @@ const ToolsPage = () => {
             </InputGroup.Text>
             <Form.Control
               type="text"
-              placeholder="Search tools by name, description, or type..."
+              placeholder={t('searchPlaceholder')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="search-input"
@@ -213,15 +215,15 @@ const ToolsPage = () => {
       </Card>
 
       {loading ? (
-        <LoadingSpinner text="Loading tools..." />
+        <LoadingSpinner text={t('loading')} />
       ) : filteredTools.length === 0 ? (
         <EmptyState
           icon={FaTools}
-          title={searchTerm ? 'No tools found' : 'No tools yet'}
+          title={searchTerm ? t('noToolsFound') : t('noToolsYet')}
           description={
             searchTerm
-              ? 'Try adjusting your search terms'
-              : 'Get started by creating your first tool'
+              ? t('tryAdjusting')
+              : t('getStarted')
           }
           action={
             !searchTerm && (
@@ -230,7 +232,7 @@ const ToolsPage = () => {
                 onClick={() => setShowCreateModal(true)}
               >
                 <FaPlus className="me-2" />
-                Create Your First Tool
+                {t('createFirst')}
               </Button>
             )
           }
@@ -240,12 +242,12 @@ const ToolsPage = () => {
           <Table hover responsive className="agents-table mb-0">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Description</th>
-                <th>Type</th>
-                <th>Auth Required</th>
-                <th>Created</th>
-                <th className="text-end">Actions</th>
+                <th>{t('table.name')}</th>
+                <th>{t('table.description')}</th>
+                <th>{t('table.type')}</th>
+                <th>{t('table.authRequired')}</th>
+                <th>{t('table.created')}</th>
+                <th className="text-end">{t('table.actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -263,9 +265,9 @@ const ToolsPage = () => {
                   <td>{getToolTypeBadge(tool.tool_type)}</td>
                   <td>
                     {tool.authentication_required ? (
-                      <Badge bg="warning">Yes</Badge>
+                      <Badge bg="warning">{t('authValues.yes')}</Badge>
                     ) : (
-                      <Badge bg="secondary">No</Badge>
+                      <Badge bg="secondary">{t('authValues.no')}</Badge>
                     )}
                   </td>
                   <td className="text-muted">
@@ -320,7 +322,7 @@ const ToolsPage = () => {
       >
         <Modal.Header closeButton>
           <Modal.Title>
-            {showCreateModal ? 'Create New Tool' : 'Edit Tool'}
+            {showCreateModal ? t('modal.createTitle') : t('modal.editTitle')}
           </Modal.Title>
         </Modal.Header>
         <Form onSubmit={showCreateModal ? handleCreateTool : handleUpdateTool}>
@@ -328,10 +330,10 @@ const ToolsPage = () => {
             <Row>
               <Col md={8}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Name *</Form.Label>
+                  <Form.Label>{t('modal.name')}</Form.Label>
                   <Form.Control
                     type="text"
-                    placeholder="e.g., Weather API, Calculator"
+                    placeholder={t('modal.namePlaceholder')}
                     value={formData.name}
                     onChange={(e) =>
                       setFormData({ ...formData, name: e.target.value })
@@ -342,7 +344,7 @@ const ToolsPage = () => {
               </Col>
               <Col md={4}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Type *</Form.Label>
+                  <Form.Label>{t('modal.type')}</Form.Label>
                   <Form.Select
                     value={formData.tool_type}
                     onChange={(e) =>
@@ -359,11 +361,11 @@ const ToolsPage = () => {
             </Row>
 
             <Form.Group className="mb-3">
-              <Form.Label>Description</Form.Label>
+              <Form.Label>{t('modal.description')}</Form.Label>
               <Form.Control
                 as="textarea"
                 rows={2}
-                placeholder="Describe what this tool does..."
+                placeholder={t('modal.descriptionPlaceholder')}
                 value={formData.description}
                 onChange={(e) =>
                   setFormData({ ...formData, description: e.target.value })
@@ -372,7 +374,7 @@ const ToolsPage = () => {
             </Form.Group>
 
             <Form.Group className="mb-3">
-              <Form.Label>Configuration (JSON)</Form.Label>
+              <Form.Label>{t('modal.configuration')}</Form.Label>
               <Form.Control
                 as="textarea"
                 rows={6}
@@ -384,14 +386,14 @@ const ToolsPage = () => {
                 style={{ fontFamily: 'monospace', fontSize: '0.875rem' }}
               />
               <Form.Text className="text-muted">
-                Enter tool configuration as valid JSON
+                {t('modal.configurationHelp')}
               </Form.Text>
             </Form.Group>
 
             <Form.Group className="mb-3">
               <Form.Check
                 type="checkbox"
-                label="Authentication Required"
+                label={t('modal.authRequired')}
                 checked={formData.authentication_required}
                 onChange={(e) =>
                   setFormData({
@@ -411,14 +413,14 @@ const ToolsPage = () => {
                 resetForm();
               }}
             >
-              Cancel
+              {t('modal.cancel')}
             </Button>
             <Button variant="primary" type="submit" disabled={submitting}>
               {submitting
-                ? 'Saving...'
+                ? t('modal.saving')
                 : showCreateModal
-                ? 'Create Tool'
-                : 'Save Changes'}
+                ? t('modal.createTool')
+                : t('modal.saveChanges')}
             </Button>
           </Modal.Footer>
         </Form>
@@ -432,10 +434,10 @@ const ToolsPage = () => {
           setSelectedTool(null);
         }}
         onConfirm={handleDeleteTool}
-        title="Delete Tool"
-        message={`Are you sure you want to delete "${selectedTool?.name}"? This action cannot be undone.`}
-        confirmText="Delete"
-        cancelText="Cancel"
+        title={t('deleteModal.title')}
+        message={t('deleteModal.message', { name: selectedTool?.name })}
+        confirmText={t('deleteModal.confirm')}
+        cancelText={t('deleteModal.cancel')}
         variant="danger"
         confirmLoading={submitting}
       />

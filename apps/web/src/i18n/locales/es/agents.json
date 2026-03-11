@@ -1,0 +1,58 @@
+{
+  "title": "Flota de Agentes",
+  "subtitle": "{{count}} agente configurado",
+  "subtitle_plural": "{{count}} agentes configurados",
+  "agentWizard": "Asistente de Agentes",
+  "quickCreate": "Creaci\u00f3n R\u00e1pida",
+  "searchPlaceholder": "Buscar agentes...",
+  "loading": "Cargando...",
+  "noAgentsMatch": "Ning\u00fan agente coincide con tu b\u00fasqueda",
+  "noAgentsYet": "A\u00fan no hay agentes",
+  "tryDifferent": "Prueba con otros t\u00e9rminos de b\u00fasqueda",
+  "createFirst": "Crea tu primer agente para empezar",
+  "createAgent": "Crear Agente",
+  "table": {
+    "name": "Nombre",
+    "description": "Descripci\u00f3n",
+    "model": "Modelo",
+    "status": "Estado"
+  },
+  "actions": {
+    "edit": "Editar",
+    "delete": "Eliminar"
+  },
+  "modal": {
+    "createTitle": "Crear Agente",
+    "editTitle": "Editar Agente",
+    "name": "Nombre *",
+    "namePlaceholder": "ej. Agente de Soporte al Cliente",
+    "model": "Modelo *",
+    "description": "Descripci\u00f3n",
+    "descriptionPlaceholder": "\u00bfQu\u00e9 hace este agente?",
+    "systemPrompt": "Prompt de Sistema",
+    "systemPromptPlaceholder": "Instrucciones que definen el comportamiento del agente...",
+    "temperature": "Temperatura: {{value}}",
+    "temperatureHelp": "Mayor = m\u00e1s creativo",
+    "maxTokens": "Tokens M\u00e1ximos",
+    "cancel": "Cancelar",
+    "saving": "Guardando...",
+    "saveChanges": "Guardar Cambios"
+  },
+  "deleteModal": {
+    "title": "\u00bfEliminar \"{{name}}\"?",
+    "warning": "Esta acci\u00f3n no se puede deshacer.",
+    "cancel": "Cancelar",
+    "deleting": "Eliminando...",
+    "delete": "Eliminar"
+  },
+  "success": {
+    "created": "Agente creado",
+    "updated": "Agente actualizado",
+    "deleted": "\"{{name}}\" eliminado"
+  },
+  "errors": {
+    "load": "No se pudieron cargar los agentes.",
+    "save": "No se pudo guardar el agente.",
+    "delete": "No se pudo eliminar el agente."
+  }
+}

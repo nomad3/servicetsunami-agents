@@ -10,6 +10,7 @@ import {
   Row,
   Table
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   FaBalanceScale,
   FaBuilding,
@@ -173,6 +174,7 @@ const STATUS_COLORS = {
 };
 
 const NotebooksPage = () => {
+  const { t } = useTranslation('notebooks');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedReport, setSelectedReport] = useState(null);
 
@@ -194,14 +196,14 @@ const NotebooksPage = () => {
           <div>
             <h2 className="page-title">
               <FaFileInvoiceDollar className="me-2" size={32} />
-              Financial Reports
+              {t('title')}
             </h2>
             <p className="page-subtitle">
-              Pre-built financial report templates across your business units
+              {t('subtitle')}
             </p>
           </div>
           <Badge bg="primary" className="bg-opacity-25 text-primary border border-primary px-3 py-2">
-            Enterprise Suite
+            {t('enterpriseSuite')}
           </Badge>
         </div>
 
@@ -214,9 +216,9 @@ const NotebooksPage = () => {
                 </div>
                 <Badge bg="primary" className="bg-opacity-25 text-primary border border-primary">Reports</Badge>
               </div>
-              <h6 className="text-soft mb-1">Total Reports</h6>
+              <h6 className="text-soft mb-1">{t('stats.totalReports')}</h6>
               <div className="display-6 fw-bold text-primary">{REPORT_TEMPLATES.length}</div>
-              <div className="mt-2 small text-info">Financial templates</div>
+              <div className="mt-2 small text-info">{t('stats.financialTemplates')}</div>
             </PremiumCard>
           </Col>
           <Col md={3}>
@@ -227,9 +229,9 @@ const NotebooksPage = () => {
                 </div>
                 <Badge bg="success" className="bg-opacity-25 text-success border border-success">Coverage</Badge>
               </div>
-              <h6 className="text-soft mb-1">Coverage</h6>
+              <h6 className="text-soft mb-1">{t('stats.coverage')}</h6>
               <div className="display-6 fw-bold text-primary">All</div>
-              <div className="mt-2 small text-success">All business units covered</div>
+              <div className="mt-2 small text-success">{t('stats.allUnits')}</div>
             </PremiumCard>
           </Col>
           <Col md={3}>
@@ -240,9 +242,9 @@ const NotebooksPage = () => {
                 </div>
                 <Badge bg="warning" className="bg-opacity-25 text-warning border border-warning">Scheduled</Badge>
               </div>
-              <h6 className="text-soft mb-1">Automated</h6>
+              <h6 className="text-soft mb-1">{t('stats.automated')}</h6>
               <div className="display-6 fw-bold text-primary">{scheduledCount}</div>
-              <div className="mt-2 small text-warning">of {REPORT_TEMPLATES.length} scheduled</div>
+              <div className="mt-2 small text-warning">{t('stats.ofScheduled', { total: REPORT_TEMPLATES.length })}</div>
             </PremiumCard>
           </Col>
           <Col md={3}>
@@ -253,9 +255,9 @@ const NotebooksPage = () => {
                 </div>
                 <Badge bg="info" className="bg-opacity-25 text-info border border-info">Fresh</Badge>
               </div>
-              <h6 className="text-soft mb-1">Last Updated</h6>
-              <div className="display-6 fw-bold text-primary">Today</div>
-              <div className="mt-2 small text-info">All reports current</div>
+              <h6 className="text-soft mb-1">{t('stats.lastUpdated')}</h6>
+              <div className="display-6 fw-bold text-primary">{t('stats.today')}</div>
+              <div className="mt-2 small text-info">{t('stats.allCurrent')}</div>
             </PremiumCard>
           </Col>
         </Row>
@@ -268,7 +270,7 @@ const NotebooksPage = () => {
               </InputGroup.Text>
               <Form.Control
                 type="text"
-                placeholder="Search reports by name, category, or description..."
+                placeholder={t('searchPlaceholder')}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="search-input"
@@ -281,11 +283,11 @@ const NotebooksPage = () => {
           <Table hover responsive className="reports-table mb-0">
             <thead>
               <tr>
-                <th>Report Name</th>
-                <th>Category</th>
-                <th>Scope</th>
-                <th>Frequency</th>
-                <th>Status</th>
+                <th>{t('table.reportName')}</th>
+                <th>{t('table.category')}</th>
+                <th>{t('table.scope')}</th>
+                <th>{t('table.frequency')}</th>
+                <th>{t('table.status')}</th>
               </tr>
             </thead>
             <tbody>
@@ -332,7 +334,7 @@ const NotebooksPage = () => {
               {filteredReports.length === 0 && (
                 <tr>
                   <td colSpan={5} className="text-center text-muted py-4">
-                    No reports match your search.
+                    {t('noResults')}
                   </td>
                 </tr>
               )}
@@ -364,7 +366,7 @@ const NotebooksPage = () => {
                         {selectedReport.category}
                       </Badge>
                       <span className="text-muted small">
-                        {selectedReport.frequency} &middot; Last generated {selectedReport.lastGenerated}
+                        {selectedReport.frequency} &middot; {t('modal.lastGenerated', { date: selectedReport.lastGenerated })}
                       </span>
                     </div>
                   </div>
@@ -398,11 +400,11 @@ const NotebooksPage = () => {
               <Modal.Footer>
                 <Button variant="outline-secondary" onClick={() => setSelectedReport(null)}>
                   <FaFileExport className="me-1" />
-                  Export CSV
+                  {t('modal.exportCsv')}
                 </Button>
                 <Button variant="outline-primary">
                   <FaFilePdf className="me-1" />
-                  Export PDF
+                  {t('modal.exportPdf')}
                 </Button>
               </Modal.Footer>
             </>

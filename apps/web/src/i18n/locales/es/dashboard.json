@@ -1,0 +1,67 @@
+{
+  "title": "Dashboard",
+  "subtitle": "Estado de la plataforma y actividad reciente",
+  "loading": "Cargando...",
+  "error": "No se pudo cargar el dashboard.",
+  "systemStatus": "Estado del Sistema",
+  "quickAccess": "Acceso R\u00e1pido",
+  "recentConversations": "Conversaciones Recientes",
+  "agentFleet": "Flota de Agentes",
+  "datasets": "Datasets",
+  "system": {
+    "agents": "Agentes",
+    "integrations": "Integraciones",
+    "datasets": "Datasets",
+    "memory": "Memoria",
+    "deployed": "{{count}} desplegados",
+    "sources": "{{sources}} fuentes",
+    "pipelines": "{{pipelines}} pipelines",
+    "sourcesPipelines": "{{sources}} fuentes \u00b7 {{pipelines}} pipelines",
+    "rows": "{{count}} filas",
+    "vectorStores": "vector stores",
+    "operational": "operativo",
+    "idle": "inactivo"
+  },
+  "quick": {
+    "aiChat": "Chat IA",
+    "aiChatDesc": "Habla con tus agentes",
+    "agentFleet": "Flota de Agentes",
+    "agentFleetDesc": "Gestiona tus agentes",
+    "integrations": "Integraciones",
+    "integrationsDesc": "Administra apps conectadas",
+    "workflows": "Workflows",
+    "workflowsDesc": "Automatizaci\u00f3n y ejecuci\u00f3n"
+  },
+  "sessions": {
+    "messages": "{{count}} mensajes",
+    "noRecent": "No hay conversaciones recientes"
+  },
+  "agents": {
+    "active": "Activo",
+    "ready": "Listo",
+    "noAgents": "No hay agentes configurados"
+  },
+  "datasetsSection": {
+    "rows": "{{count}} filas",
+    "noDatasets": "No hay datasets"
+  },
+  "home": {
+    "welcomeBack": "\u00a1Bienvenido de vuelta!",
+    "whatToDo": "\u00bfQu\u00e9 te gustar\u00eda hacer hoy?",
+    "quickActions": "Acciones R\u00e1pidas",
+    "recentActivity": "Actividad Reciente",
+    "gettingStartedTips": "Consejos para Empezar",
+    "importData": "Importar Datos",
+    "importDataDesc": "Sube archivos o conecta un sistema ERP",
+    "aiCommand": "Comando IA",
+    "aiCommandDesc": "Comanda tu flota de agentes con lenguaje natural",
+    "analyticsOverview": "Resumen de Analytics",
+    "analyticsOverviewDesc": "M\u00e9tricas y KPIs de todos tus negocios",
+    "getStarted": "Comenzar",
+    "noActivity": "A\u00fan no hay actividad. \u00a1Empieza importando datos o comandando tu flota de IA!",
+    "tip1": "Importa tu primer dataset para consolidar datos de negocio",
+    "tip2": "Preg\u00fantale a tu flota de agentes en espa\u00f1ol sobre cualquier unidad de negocio",
+    "tip3": "Monitorea KPIs de todos tus negocios desde el Resumen de Analytics",
+    "tip4": "Despliega agentes para automatizar tareas de finanzas, cumplimiento y operaciones"
+  }
+}

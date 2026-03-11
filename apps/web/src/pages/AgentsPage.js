@@ -8,11 +8,13 @@ import {
   Row,
   Spinner
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import agentService from '../services/agent';
 
 const AgentsPage = () => {
+  const { t } = useTranslation('agents');
   const navigate = useNavigate();
   const location = useLocation();
   const [agents, setAgents] = useState([]);
@@ -57,7 +59,7 @@ const AgentsPage = () => {
       setError('');
     } catch (err) {
       console.error('Error fetching agents:', err);
-      setError('Failed to load agents.');
+      setError(t('errors.load'));
     } finally {
       setLoading(false);
     }
@@ -88,17 +90,17 @@ const AgentsPage = () => {
       setSubmitting(true);
       if (editingAgent) {
         await agentService.update(editingAgent.id, formData);
-        setSuccess('Agent updated');
+        setSuccess(t('success.updated'));
       } else {
         await agentService.create(formData);
-        setSuccess('Agent created');
+        setSuccess(t('success.created'));
       }
       setShowModal(false);
       fetchAgents();
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
       console.error('Error saving agent:', err);
-      setError('Failed to save agent.');
+      setError(t('errors.save'));
     } finally {
       setSubmitting(false);
     }
@@ -109,12 +111,12 @@ const AgentsPage = () => {
       setSubmitting(true);
       await agentService.delete(agent.id);
       setDeleteConfirm(null);
-      setSuccess(`"${agent.name}" deleted`);
+      setSuccess(t('success.deleted', { name: agent.name }));
       fetchAgents();
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
       console.error('Error deleting agent:', err);
-      setError('Failed to delete agent.');
+      setError(t('errors.delete'));
     } finally {
       setSubmitting(false);
     }
@@ -159,10 +161,10 @@ const AgentsPage = () => {
         <div className="d-flex justify-content-between align-items-start mb-4">
           <div>
             <h4 style={{ fontWeight: 600, marginBottom: 4, color: 'var(--color-foreground)' }}>
-              Agent Fleet
+              {t('title')}
             </h4>
             <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', margin: 0 }}>
-              {agents.length} agent{agents.length !== 1 ? 's' : ''} configured
+              {t('subtitle', { count: agents.length })}
             </p>
           </div>
           <div className="d-flex gap-2">
@@ -172,7 +174,7 @@ const AgentsPage = () => {
               onClick={() => navigate('/agents/wizard')}
               style={{ fontSize: '0.82rem' }}
             >
-              + Agent Wizard
+              + {t('agentWizard')}
             </Button>
             <Button
               variant="primary"
@@ -180,7 +182,7 @@ const AgentsPage = () => {
               onClick={openCreateModal}
               style={{ fontSize: '0.82rem' }}
             >
-              + Quick Create
+              + {t('quickCreate')}
             </Button>
           </div>
         </div>
@@ -193,7 +195,7 @@ const AgentsPage = () => {
           <Form.Control
             type="text"
             size="sm"
-            placeholder="Search agents..."
+            placeholder={t('searchPlaceholder')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             style={{ maxWidth: 300, fontSize: '0.82rem' }}
@@ -204,19 +206,19 @@ const AgentsPage = () => {
         {loading ? (
           <div className="text-center py-5">
             <Spinner animation="border" size="sm" variant="primary" />
-            <p className="mt-2 text-muted" style={{ fontSize: '0.82rem' }}>Loading...</p>
+            <p className="mt-2 text-muted" style={{ fontSize: '0.82rem' }}>{t('loading')}</p>
           </div>
         ) : filtered.length === 0 ? (
           <div style={{ ...cardStyle, textAlign: 'center', padding: '48px 24px' }}>
             <p style={{ fontSize: '0.88rem', color: 'var(--color-foreground)', fontWeight: 500, marginBottom: 4 }}>
-              {searchTerm ? 'No agents match your search' : 'No agents yet'}
+              {searchTerm ? t('noAgentsMatch') : t('noAgentsYet')}
             </p>
             <p style={{ fontSize: '0.78rem', color: 'var(--color-muted)', marginBottom: 16 }}>
-              {searchTerm ? 'Try different search terms' : 'Create your first agent to get started'}
+              {searchTerm ? t('tryDifferent') : t('createFirst')}
             </p>
             {!searchTerm && (
               <Button variant="primary" size="sm" onClick={openCreateModal}>
-                Create Agent
+                {t('createAgent')}
               </Button>
             )}
           </div>
@@ -232,7 +234,7 @@ const AgentsPage = () => {
                 gap: 12,
               }}
             >
-              {['Name', 'Description', 'Model', 'Status', ''].map((h) => (
+              {[t('table.name'), t('table.description'), t('table.model'), t('table.status'), ''].map((h) => (
                 <div key={h} style={{ ...sectionLabel, marginBottom: 0 }}>{h}</div>
               ))}
             </div>
@@ -254,7 +256,7 @@ const AgentsPage = () => {
                   {agent.name}
                 </div>
                 <div style={{ fontSize: '0.78rem', color: 'var(--color-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {agent.description || '—'}
+                  {agent.description || '\u2014'}
                 </div>
                 <div>
                   <span style={{
@@ -287,7 +289,7 @@ const AgentsPage = () => {
                       cursor: 'pointer',
                     }}
                   >
-                    Edit
+                    {t('actions.edit')}
                   </button>
                   <button
                     onClick={() => setDeleteConfirm(agent)}
@@ -301,7 +303,7 @@ const AgentsPage = () => {
                       cursor: 'pointer',
                     }}
                   >
-                    Delete
+                    {t('actions.delete')}
                   </button>
                 </div>
               </div>
@@ -319,7 +321,7 @@ const AgentsPage = () => {
       >
         <Modal.Header closeButton>
           <Modal.Title style={{ fontSize: '1rem', fontWeight: 600 }}>
-            {editingAgent ? 'Edit Agent' : 'Create Agent'}
+            {editingAgent ? t('modal.editTitle') : t('modal.createTitle')}
           </Modal.Title>
         </Modal.Header>
         <Form onSubmit={handleSubmit}>
@@ -327,11 +329,11 @@ const AgentsPage = () => {
             <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label className="small">Name *</Form.Label>
+                  <Form.Label className="small">{t('modal.name')}</Form.Label>
                   <Form.Control
                     size="sm"
                     type="text"
-                    placeholder="e.g., Customer Support Agent"
+                    placeholder={t('modal.namePlaceholder')}
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
@@ -340,7 +342,7 @@ const AgentsPage = () => {
               </Col>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label className="small">Model *</Form.Label>
+                  <Form.Label className="small">{t('modal.model')}</Form.Label>
                   <Form.Select
                     size="sm"
                     value={formData.model}
@@ -360,24 +362,24 @@ const AgentsPage = () => {
             </Row>
 
             <Form.Group className="mb-3">
-              <Form.Label className="small">Description</Form.Label>
+              <Form.Label className="small">{t('modal.description')}</Form.Label>
               <Form.Control
                 size="sm"
                 as="textarea"
                 rows={2}
-                placeholder="What does this agent do?"
+                placeholder={t('modal.descriptionPlaceholder')}
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               />
             </Form.Group>
 
             <Form.Group className="mb-3">
-              <Form.Label className="small">System Prompt</Form.Label>
+              <Form.Label className="small">{t('modal.systemPrompt')}</Form.Label>
               <Form.Control
                 size="sm"
                 as="textarea"
                 rows={4}
-                placeholder="Instructions that define the agent's behavior..."
+                placeholder={t('modal.systemPromptPlaceholder')}
                 value={formData.system_prompt}
                 onChange={(e) => setFormData({ ...formData, system_prompt: e.target.value })}
               />
@@ -386,20 +388,20 @@ const AgentsPage = () => {
             <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label className="small">Temperature: {formData.temperature}</Form.Label>
+                  <Form.Label className="small">{t('modal.temperature', { value: formData.temperature })}</Form.Label>
                   <Form.Range
                     min={0} max={1} step={0.1}
                     value={formData.temperature}
                     onChange={(e) => setFormData({ ...formData, temperature: parseFloat(e.target.value) })}
                   />
                   <Form.Text className="text-muted" style={{ fontSize: '0.72rem' }}>
-                    Higher = more creative
+                    {t('modal.temperatureHelp')}
                   </Form.Text>
                 </Form.Group>
               </Col>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label className="small">Max Tokens</Form.Label>
+                  <Form.Label className="small">{t('modal.maxTokens')}</Form.Label>
                   <Form.Control
                     size="sm"
                     type="number"
@@ -413,10 +415,10 @@ const AgentsPage = () => {
           </Modal.Body>
           <Modal.Footer>
             <Button variant="outline-secondary" size="sm" onClick={() => setShowModal(false)}>
-              Cancel
+              {t('modal.cancel')}
             </Button>
             <Button variant="primary" size="sm" type="submit" disabled={submitting}>
-              {submitting ? 'Saving...' : editingAgent ? 'Save Changes' : 'Create Agent'}
+              {submitting ? t('modal.saving') : editingAgent ? t('modal.saveChanges') : t('modal.createTitle')}
             </Button>
           </Modal.Footer>
         </Form>
@@ -426,14 +428,14 @@ const AgentsPage = () => {
       <Modal show={!!deleteConfirm} onHide={() => setDeleteConfirm(null)} centered size="sm">
         <Modal.Body className="text-center py-4">
           <p style={{ fontSize: '0.88rem', fontWeight: 500, marginBottom: 8 }}>
-            Delete "{deleteConfirm?.name}"?
+            {t('deleteModal.title', { name: deleteConfirm?.name })}
           </p>
           <p style={{ fontSize: '0.78rem', color: 'var(--color-muted)', marginBottom: 20 }}>
-            This action cannot be undone.
+            {t('deleteModal.warning')}
           </p>
           <div className="d-flex justify-content-center gap-2">
             <Button variant="outline-secondary" size="sm" onClick={() => setDeleteConfirm(null)}>
-              Cancel
+              {t('deleteModal.cancel')}
             </Button>
             <Button
               variant="danger"
@@ -441,7 +443,7 @@ const AgentsPage = () => {
               onClick={() => handleDelete(deleteConfirm)}
               disabled={submitting}
             >
-              {submitting ? 'Deleting...' : 'Delete'}
+              {submitting ? t('deleteModal.deleting') : t('deleteModal.delete')}
             </Button>
           </div>
         </Modal.Body>

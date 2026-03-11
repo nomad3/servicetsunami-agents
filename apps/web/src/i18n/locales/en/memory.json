@@ -1,0 +1,31 @@
+{
+  "title": "Memory",
+  "subtitle": "What Luna knows, remembers, and has learned from your conversations",
+  "addEntity": "Add Entity",
+  "tabs": {
+    "overview": "Overview",
+    "entities": "Entities",
+    "relations": "Relations",
+    "memories": "Memories",
+    "activity": "Activity",
+    "import": "Import"
+  },
+  "entities": {
+    "searchPlaceholder": "Search entities...",
+    "allCategories": "All Categories",
+    "allStatuses": "All Statuses",
+    "selectAll": "Select all",
+    "deleteCount": "Delete {{count}}",
+    "loadMore": "Load More",
+    "empty": "No entities found. Chat with your AI assistant to start building the knowledge base, or add entities manually."
+  },
+  "import": {
+    "title": "Import Chat History",
+    "subtitle": "Upload chat exports from other LLM providers to build your knowledge base.",
+    "chatgpt": "ChatGPT Export",
+    "claude": "Claude Export",
+    "uploadYour": "Upload your",
+    "upload": "Upload",
+    "importFailed": "Failed to import chat history"
+  }
+}

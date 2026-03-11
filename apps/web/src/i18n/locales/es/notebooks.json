@@ -1,0 +1,30 @@
+{
+  "title": "Reportes Financieros",
+  "subtitle": "Plantillas de reportes financieros pre-armadas para tus unidades de negocio",
+  "enterpriseSuite": "Suite Empresarial",
+  "stats": {
+    "totalReports": "Total de Reportes",
+    "financialTemplates": "Plantillas financieras",
+    "coverage": "Cobertura",
+    "allUnits": "Todas las unidades de negocio cubiertas",
+    "automated": "Automatizados",
+    "ofScheduled": "de {{total}} programados",
+    "lastUpdated": "\u00daltima Actualizaci\u00f3n",
+    "today": "Hoy",
+    "allCurrent": "Todos los reportes al d\u00eda"
+  },
+  "searchPlaceholder": "Buscar reportes por nombre, categor\u00eda o descripci\u00f3n...",
+  "table": {
+    "reportName": "Nombre del Reporte",
+    "category": "Categor\u00eda",
+    "scope": "Alcance",
+    "frequency": "Frecuencia",
+    "status": "Estado"
+  },
+  "noResults": "Ning\u00fan reporte coincide con tu b\u00fasqueda.",
+  "modal": {
+    "lastGenerated": "\u00daltima generaci\u00f3n {{date}}",
+    "exportCsv": "Exportar CSV",
+    "exportPdf": "Exportar PDF"
+  }
+}

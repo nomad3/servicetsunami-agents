@@ -1,0 +1,30 @@
+{
+  "title": "Financial Reports",
+  "subtitle": "Pre-built financial report templates across your business units",
+  "enterpriseSuite": "Enterprise Suite",
+  "stats": {
+    "totalReports": "Total Reports",
+    "financialTemplates": "Financial templates",
+    "coverage": "Coverage",
+    "allUnits": "All business units covered",
+    "automated": "Automated",
+    "ofScheduled": "of {{total}} scheduled",
+    "lastUpdated": "Last Updated",
+    "today": "Today",
+    "allCurrent": "All reports current"
+  },
+  "searchPlaceholder": "Search reports by name, category, or description...",
+  "table": {
+    "reportName": "Report Name",
+    "category": "Category",
+    "scope": "Scope",
+    "frequency": "Frequency",
+    "status": "Status"
+  },
+  "noResults": "No reports match your search.",
+  "modal": {
+    "lastGenerated": "Last generated {{date}}",
+    "exportCsv": "Export CSV",
+    "exportPdf": "Export PDF"
+  }
+}

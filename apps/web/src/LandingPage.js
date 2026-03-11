@@ -410,7 +410,7 @@ const LandingPage = () => {
                 <Row className="g-4">
                   {architecture.map(
                     ({ key, Icon, title, description }, index) => (
-                      <Col md={4} key={key}>
+                      <Col md={6} key={key}>
                         <AnimatedSection
                           animation="slide-up"
                           delay={index * 100}
@@ -436,31 +436,30 @@ const LandingPage = () => {
 
         <section id="ai" className="section-wrapper section-with-bg bg-ai">
           <Container>
-            <Row className="g-5">
-              <Col lg={5}>
-                <AnimatedSection animation="slide-left">
-                  <h2 className="display-5 fw-bold text-white">
-                    {t("landing:ai.heading")}
-                  </h2>
-                </AnimatedSection>
-              </Col>
-              <Col lg={7}>
-                <Row className="g-4">
-                  {aiItems.map(({ key, Icon, title, description }, index) => (
-                    <Col md={4} key={key}>
-                      <AnimatedSection animation="scale-up" delay={index * 100}>
-                        <div className="feature-card h-100 p-4">
-                          <div className="icon-pill">
-                            <Icon size={26} />
-                          </div>
-                          <h5 className="text-white fw-semibold">{title}</h5>
-                          <p className="text-soft">{description}</p>
-                        </div>
-                      </AnimatedSection>
-                    </Col>
-                  ))}
-                </Row>
-              </Col>
+            <AnimatedSection animation="fade-in">
+              <div className="text-center mb-5">
+                <h2 className="display-5 fw-bold text-white">
+                  {t("landing:ai.heading")}
+                </h2>
+                <p className="lead text-soft mt-3">
+                  {t("landing:ai.description")}
+                </p>
+              </div>
+            </AnimatedSection>
+            <Row className="g-4">
+              {aiItems.map(({ key, Icon, title, description }, index) => (
+                <Col md={6} lg={4} key={key}>
+                  <AnimatedSection animation="scale-up" delay={index * 100}>
+                    <div className="feature-card h-100 p-4">
+                      <div className="icon-pill">
+                        <Icon size={26} />
+                      </div>
+                      <h5 className="text-white fw-semibold">{title}</h5>
+                      <p className="text-soft">{description}</p>
+                    </div>
+                  </AnimatedSection>
+                </Col>
+              ))}
             </Row>
           </Container>
         </section>
@@ -536,44 +535,42 @@ const LandingPage = () => {
               <Row className="align-items-center g-5">
                 <Col lg={7} className="text-center text-lg-start">
                   <h2 className="display-5 fw-bold gradient-text">
-                    Memory That Gets Smarter Every Day
+                    {t("landing:memory.heading")}
                   </h2>
                   <p className="lead text-soft mt-3 mb-4">
-                    Every conversation teaches your agents. Luna automatically extracts
-                    people, companies, preferences, and decisions into a persistent knowledge
-                    graph. Next time you ask, she already knows the context.
+                    {t("landing:memory.description")}
                   </p>
                   <div className="d-flex flex-wrap gap-3 justify-content-center justify-content-lg-start">
-                    <span className="badge-glow">Entity Extraction</span>
-                    <span className="badge-glow">Relation Mapping</span>
-                    <span className="badge-glow">Contextual Recall</span>
-                    <span className="badge-glow">Activity Feed</span>
+                    <span className="badge-glow">{t("landing:memory.badges.entityExtraction")}</span>
+                    <span className="badge-glow">{t("landing:memory.badges.relationMapping")}</span>
+                    <span className="badge-glow">{t("landing:memory.badges.contextualRecall")}</span>
+                    <span className="badge-glow">{t("landing:memory.badges.activityFeed")}</span>
                   </div>
                 </Col>
                 <Col lg={5}>
                   <div className="glass-card p-4">
                     <div className="d-flex justify-content-between align-items-center mb-3">
-                      <h5 className="text-white fw-semibold mb-0">Memory Overview</h5>
-                      <span className="text-soft small">Live from your conversations</span>
+                      <h5 className="text-white fw-semibold mb-0">{t("landing:memory.overview.title")}</h5>
+                      <span className="text-soft small">{t("landing:memory.overview.subtitle")}</span>
                     </div>
                     <div className="d-flex gap-3 mb-3">
                       <div className="flex-fill text-center p-3" style={{background: 'rgba(43,125,233,0.1)', borderRadius: 12}}>
                         <div className="text-white fw-bold fs-4">21</div>
-                        <div className="text-soft small">Entities</div>
+                        <div className="text-soft small">{t("landing:memory.overview.entities")}</div>
                       </div>
                       <div className="flex-fill text-center p-3" style={{background: 'rgba(236,72,153,0.1)', borderRadius: 12}}>
                         <div className="text-white fw-bold fs-4">1</div>
-                        <div className="text-soft small">Memories</div>
+                        <div className="text-soft small">{t("landing:memory.overview.memories")}</div>
                       </div>
                       <div className="flex-fill text-center p-3" style={{background: 'rgba(94,197,176,0.1)', borderRadius: 12}}>
                         <div className="text-white fw-bold fs-4">9</div>
-                        <div className="text-soft small">Relations</div>
+                        <div className="text-soft small">{t("landing:memory.overview.relations")}</div>
                       </div>
                     </div>
                     <div className="text-soft small" style={{borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12}}>
-                      <div className="mb-1">+ Extracted "Carlos Rodriguez" (person)</div>
-                      <div className="mb-1">+ Extracted "Acme Technologies" (organization)</div>
-                      <div>+ Scheduled follow-up via email</div>
+                      <div className="mb-1">{t("landing:memory.overview.event1")}</div>
+                      <div className="mb-1">{t("landing:memory.overview.event2")}</div>
+                      <div>{t("landing:memory.overview.event3")}</div>
                     </div>
                   </div>
                 </Col>

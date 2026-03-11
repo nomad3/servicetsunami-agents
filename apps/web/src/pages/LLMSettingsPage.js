@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Col, Container, Form, InputGroup, Row, Spinner } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { FaCheckCircle, FaMicrochip, FaEye, FaEyeSlash, FaKey, FaTimesCircle } from 'react-icons/fa';
 import PremiumCard from '../components/common/PremiumCard';
 import Layout from '../components/Layout';
 import llmService from '../services/llm';
 
 const LLMSettingsPage = () => {
+  const { t } = useTranslation('settings');
   const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -24,7 +26,7 @@ const LLMSettingsPage = () => {
       const data = await llmService.getProviderStatus();
       setProviders(data);
     } catch (err) {
-      setError('Failed to load providers');
+      setError(t('llm.errors.load'));
     } finally {
       setLoading(false);
     }
@@ -46,7 +48,7 @@ const LLMSettingsPage = () => {
       setApiKeys(prev => ({ ...prev, [providerName]: '' }));
       await loadProviders();
     } catch (err) {
-      setError(`Failed to save ${providerName} key`);
+      setError(t('llm.errors.saveKey', { provider: providerName }));
     } finally {
       setSavingProvider(null);
     }
@@ -58,13 +60,13 @@ const LLMSettingsPage = () => {
 
   const getProviderIcon = (name) => {
     const icons = {
-      openai: '🤖',
-      anthropic: '🧠',
-      deepseek: '🔍',
-      google: '🌐',
-      mistral: '💨'
+      openai: '\uD83E\uDD16',
+      anthropic: '\uD83E\uDDE0',
+      deepseek: '\uD83D\uDD0D',
+      google: '\uD83C\uDF10',
+      mistral: '\uD83D\uDCA8'
     };
-    return icons[name] || '🔌';
+    return icons[name] || '\uD83D\uDD0C';
   };
 
   if (loading) {
@@ -72,7 +74,7 @@ const LLMSettingsPage = () => {
       <Layout>
         <Container className="py-4 text-center">
           <Spinner animation="border" variant="primary" />
-          <p className="mt-3 text-soft">Loading providers...</p>
+          <p className="mt-3 text-soft">{t('llm.loading')}</p>
         </Container>
       </Layout>
     );
@@ -86,8 +88,8 @@ const LLMSettingsPage = () => {
             <FaMicrochip size={24} />
           </div>
           <div>
-            <h2 className="mb-1 fw-bold">LLM Providers</h2>
-            <p className="text-soft mb-0">Configure API keys for each provider</p>
+            <h2 className="mb-1 fw-bold">{t('llm.title')}</h2>
+            <p className="text-soft mb-0">{t('llm.subtitle')}</p>
           </div>
         </div>
 
@@ -110,11 +112,11 @@ const LLMSettingsPage = () => {
                   </div>
                   {provider.configured ? (
                     <Badge bg="success" className="d-flex align-items-center bg-opacity-25 text-success border border-success">
-                      <FaCheckCircle className="me-1" /> Connected
+                      <FaCheckCircle className="me-1" /> {t('llm.connected')}
                     </Badge>
                   ) : (
                     <Badge bg="secondary" className="d-flex align-items-center bg-opacity-25 text-secondary border border-secondary">
-                      <FaTimesCircle className="me-1" /> Not configured
+                      <FaTimesCircle className="me-1" /> {t('llm.notConfigured')}
                     </Badge>
                   )}
                 </div>
@@ -122,12 +124,12 @@ const LLMSettingsPage = () => {
                 <div className="mb-3">
                   <Form.Label className="small text-soft">
                     <FaKey className="me-1" />
-                    API Key
+                    {t('llm.apiKey')}
                   </Form.Label>
                   <InputGroup>
                     <Form.Control
                       type={showKeys[provider.name] ? 'text' : 'password'}
-                      placeholder={provider.configured ? '••••••••••••' : 'Enter API key'}
+                      placeholder={provider.configured ? t('llm.apiKeyMasked') : t('llm.apiKeyPlaceholder')}
                       value={apiKeys[provider.name] || ''}
                       onChange={(e) => handleKeyChange(provider.name, e.target.value)}
                       disabled={savingProvider === provider.name}
@@ -145,7 +147,7 @@ const LLMSettingsPage = () => {
 
                 {saveSuccess[provider.name] && (
                   <small className="text-success mb-3 d-block">
-                    <FaCheckCircle className="me-1" /> Key saved successfully
+                    <FaCheckCircle className="me-1" /> {t('llm.keySaved')}
                   </small>
                 )}
 
@@ -159,14 +161,14 @@ const LLMSettingsPage = () => {
                     {savingProvider === provider.name ? (
                       <Spinner animation="border" size="sm" />
                     ) : (
-                      'Save Key'
+                      t('llm.saveKey')
                     )}
                   </Button>
                 </div>
 
                 <div className="mt-3 pt-3 border-top border-secondary border-opacity-25 text-center">
                   <small className="text-muted">
-                    {provider.is_openai_compatible ? 'OpenAI-compatible API' : 'Native API'}
+                    {provider.is_openai_compatible ? t('llm.openaiCompatible') : t('llm.nativeApi')}
                   </small>
                 </div>
               </PremiumCard>

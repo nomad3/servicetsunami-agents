@@ -71,6 +71,20 @@ def store_credential(
     vault = _get_vault()
     encrypted = vault.encrypt(plaintext_value)
 
+    # Deactivate any existing credential with the same key (upsert behavior)
+    existing = (
+        db.query(IntegrationCredential)
+        .filter(
+            IntegrationCredential.integration_config_id == integration_config_id,
+            IntegrationCredential.tenant_id == tenant_id,
+            IntegrationCredential.credential_key == credential_key,
+            IntegrationCredential.status == "active",
+        )
+        .all()
+    )
+    for old in existing:
+        old.status = "revoked"
+
     credential = IntegrationCredential(
         id=uuid.uuid4(),
         tenant_id=tenant_id,

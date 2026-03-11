@@ -1,0 +1,217 @@
+{
+  "title": "Integrations",
+  "subtitle": "Connected apps, connectors, data sources, and datasets in one place",
+  "tabs": {
+    "integrations": "Integrations",
+    "connectors": "Connectors",
+    "dataSources": "Data Sources",
+    "datasets": "Datasets",
+    "aiModels": "AI Models",
+    "skills": "Skills"
+  },
+  "connectors": {
+    "title": "Connectors",
+    "addConnector": "Add Connector",
+    "total": "Connectors",
+    "active": "Active",
+    "activeSyncs": "Active Syncs",
+    "needAttention": "Need Attention",
+    "loading": "Loading connectors...",
+    "noConnectors": "No connectors yet",
+    "noConnectorsDesc": "Connect your first system to start syncing data",
+    "connectFirst": "Connect Your First System",
+    "connectedSystems": "Connected Systems",
+    "dataSyncs": "Data Syncs",
+    "noSyncsScheduled": "No data syncs scheduled",
+    "lastTested": "Last Tested",
+    "never": "Never",
+    "source": "Source",
+    "status": {
+      "active": "Active",
+      "error": "Error",
+      "pending": "Pending"
+    },
+    "actions": {
+      "test": "Test",
+      "edit": "Edit",
+      "sync": "Sync",
+      "delete": "Delete"
+    },
+    "modal": {
+      "createTitle": "Add New Connector",
+      "editTitle": "Edit Connector",
+      "name": "Name",
+      "namePlaceholder": "e.g., Production Snowflake",
+      "type": "Type",
+      "description": "Description",
+      "descriptionPlaceholder": "Optional description...",
+      "connectionSettings": "Connection Settings",
+      "select": "Select...",
+      "testConnection": "Test Connection",
+      "testing": "Testing...",
+      "cancel": "Cancel",
+      "saving": "Saving...",
+      "update": "Update",
+      "create": "Create"
+    },
+    "sync": {
+      "title": "Schedule Data Sync",
+      "connector": "Connector",
+      "selectConnector": "Select a connector...",
+      "tableName": "Table/Query Name",
+      "tablePlaceholder": "e.g., customers, orders",
+      "frequency": "Frequency",
+      "frequencyHourly": "Hourly",
+      "frequencyDaily": "Daily",
+      "frequencyWeekly": "Weekly",
+      "mode": "Sync Mode",
+      "modeFull": "Full Refresh",
+      "modeIncremental": "Incremental",
+      "cancel": "Cancel",
+      "schedule": "Schedule Sync"
+    },
+    "success": {
+      "created": "Connector created",
+      "updated": "Connector updated",
+      "deleted": "Connector deleted",
+      "testPassed": "Connection successful!",
+      "syncCreated": "Sync schedule created",
+      "syncStarted": "Sync started!"
+    },
+    "errors": {
+      "save": "Failed to save connector",
+      "delete": "Failed to delete connector",
+      "test": "Connection test failed",
+      "syncCreate": "Failed to create sync",
+      "syncStart": "Failed to start sync",
+      "deleteConfirm": "Delete this connector? This will also remove any scheduled syncs."
+    }
+  },
+  "dataSources": {
+    "title": "Data Sources",
+    "subtitle": "External databases and APIs your AI agents can query",
+    "addSource": "Add Data Source",
+    "loading": "Loading data sources...",
+    "noSources": "No data sources yet",
+    "noSourcesDesc": "Add a data source so your AI agents can query external databases and APIs.",
+    "connected": "Connected",
+    "configured": "Configured",
+    "modal": {
+      "createTitle": "Add Data Source",
+      "editTitle": "Edit Data Source",
+      "name": "Name",
+      "namePlaceholder": "e.g., Production DB",
+      "type": "Type",
+      "connectionDetails": "Connection Details",
+      "cancel": "Cancel",
+      "update": "Update",
+      "connect": "Connect"
+    },
+    "fields": {
+      "databricksHost": "Databricks Host",
+      "accessToken": "Access Token",
+      "httpPath": "HTTP Path / Warehouse ID",
+      "host": "Host",
+      "port": "Port",
+      "database": "Database Name",
+      "username": "Username",
+      "password": "Password",
+      "configJson": "Configuration (JSON)"
+    },
+    "success": {
+      "created": "Data source created",
+      "updated": "Data source updated",
+      "deleted": "Data source deleted"
+    },
+    "errors": {
+      "save": "Failed to save data source",
+      "delete": "Failed to delete data source",
+      "deleteConfirm": "Are you sure you want to delete this data source?"
+    }
+  },
+  "datasets": {
+    "title": "Datasets",
+    "upload": "Upload Dataset",
+    "createGroup": "Create Group",
+    "subTabs": {
+      "datasets": "Datasets",
+      "groups": "Groups"
+    },
+    "table": {
+      "name": "Name",
+      "description": "Description",
+      "rows": "Rows",
+      "sync": "Sync",
+      "created": "Created",
+      "actions": "Actions"
+    },
+    "loading": "Loading datasets...",
+    "noDatasets": "No datasets uploaded yet.",
+    "noGroups": "No groups created yet.",
+    "noPreview": "No preview data available",
+    "noSummary": "No summary statistics",
+    "preview": "Preview",
+    "syncing": "Syncing...",
+    "sync": "Sync",
+    "syncError": "Failed to trigger sync",
+    "loadingPreview": "Loading preview...",
+    "loadingSummary": "Loading summary...",
+    "summaryStats": "Summary Statistics",
+    "loadingDatasets": "Loading datasets...",
+    "loadingGroups": "Loading groups...",
+    "noDatasets": "No datasets uploaded yet",
+    "noGroups": "No dataset groups",
+    "noPreview": "No preview data available",
+    "noSummary": "No summary statistics",
+    "noDatasetsAvailable": "No datasets available.",
+    "close": "Close",
+    "uploadModal": {
+      "title": "Upload Dataset",
+      "name": "Name",
+      "namePlaceholder": "Dataset name",
+      "description": "Description",
+      "descriptionPlaceholder": "Optional description",
+      "file": "File",
+      "fileHelp": "Supported: CSV, XLS, XLSX",
+      "cancel": "Cancel",
+      "uploading": "Uploading...",
+      "upload": "Upload"
+    },
+    "groupModal": {
+      "title": "Create Dataset Group",
+      "name": "Group Name",
+      "description": "Description",
+      "selectDatasets": "Select Datasets (min 2)",
+      "cancel": "Cancel",
+      "creating": "Creating...",
+      "create": "Create Group"
+    },
+    "success": {
+      "uploaded": "Dataset uploaded",
+      "groupCreated": "Group created"
+    },
+    "errors": {
+      "upload": "Failed to upload dataset",
+      "groupCreate": "Failed to create group",
+      "groupMin": "Select at least 2 datasets to group."
+    }
+  },
+  "aiModels": {
+    "title": "AI Models",
+    "subtitle": "Configure API keys for your AI model providers",
+    "loading": "Loading AI models...",
+    "connected": "Connected",
+    "notConfigured": "Not configured",
+    "apiKey": "API Key",
+    "apiKeyPlaceholder": "Enter API key",
+    "apiKeyMasked": "••••••••••••",
+    "saveKey": "Save Key",
+    "keySaved": "Key saved",
+    "openaiCompatible": "OpenAI-compatible",
+    "nativeApi": "Native API",
+    "errors": {
+      "load": "Failed to load providers",
+      "saveKey": "Failed to save {{provider}} key"
+    }
+  }
+}

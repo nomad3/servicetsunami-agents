@@ -1,0 +1,93 @@
+{
+  "title": "Herramientas",
+  "subtitle": "Configura y gestiona herramientas disponibles para tus agentes de IA",
+  "createTool": "Crear Herramienta",
+  "searchPlaceholder": "Buscar herramientas por nombre, descripci\u00f3n o tipo...",
+  "loading": "Cargando herramientas...",
+  "noToolsFound": "No se encontraron herramientas",
+  "noToolsYet": "A\u00fan no hay herramientas",
+  "tryAdjusting": "Prueba ajustando tus t\u00e9rminos de b\u00fasqueda",
+  "getStarted": "Crea tu primera herramienta para empezar",
+  "createFirst": "Crea Tu Primera Herramienta",
+  "table": {
+    "name": "Nombre",
+    "description": "Descripci\u00f3n",
+    "type": "Tipo",
+    "authRequired": "Auth Requerida",
+    "created": "Creado",
+    "actions": "Acciones"
+  },
+  "authValues": {
+    "yes": "S\u00ed",
+    "no": "No"
+  },
+  "modal": {
+    "createTitle": "Crear Nueva Herramienta",
+    "editTitle": "Editar Herramienta",
+    "name": "Nombre *",
+    "namePlaceholder": "ej. API del Clima, Calculadora",
+    "type": "Tipo *",
+    "types": {
+      "api": "API",
+      "function": "Funci\u00f3n",
+      "database": "Base de Datos",
+      "external": "Externo"
+    },
+    "description": "Descripci\u00f3n",
+    "descriptionPlaceholder": "Describe qu\u00e9 hace esta herramienta...",
+    "configuration": "Configuraci\u00f3n (JSON)",
+    "configurationHelp": "Ingresa la configuraci\u00f3n en formato JSON v\u00e1lido",
+    "authRequired": "Autenticaci\u00f3n Requerida",
+    "cancel": "Cancelar",
+    "saving": "Guardando...",
+    "createTool": "Crear Herramienta",
+    "saveChanges": "Guardar Cambios"
+  },
+  "deleteModal": {
+    "title": "Eliminar Herramienta",
+    "message": "\u00bfEst\u00e1s seguro de que deseas eliminar \"{{name}}\"? Esta acci\u00f3n no se puede deshacer.",
+    "confirm": "Eliminar",
+    "cancel": "Cancelar"
+  },
+  "success": {
+    "created": "\u00a1Herramienta creada exitosamente!",
+    "updated": "\u00a1Herramienta actualizada exitosamente!",
+    "deleted": "\u00a1Herramienta eliminada exitosamente!",
+    "tested": "\u00a1Herramienta \"{{name}}\" probada exitosamente!"
+  },
+  "errors": {
+    "load": "No se pudieron cargar las herramientas. Int\u00e9ntalo de nuevo.",
+    "create": "No se pudo crear la herramienta. Revisa tu configuraci\u00f3n JSON.",
+    "update": "No se pudo actualizar la herramienta. Revisa tu configuraci\u00f3n JSON.",
+    "delete": "No se pudo eliminar la herramienta.",
+    "test": "La prueba de la herramienta fall\u00f3: {{detail}}"
+  },
+  "testing": "Probando conexi\u00f3n de la herramienta...",
+  "vectorStores": {
+    "title": "Vector Stores",
+    "addStore": "Agregar Vector Store",
+    "table": {
+      "name": "Nombre",
+      "description": "Descripci\u00f3n",
+      "actions": "Acciones"
+    },
+    "actions": {
+      "edit": "Editar",
+      "delete": "Eliminar"
+    },
+    "modal": {
+      "addTitle": "Agregar Vector Store",
+      "editTitle": "Editar Vector Store",
+      "name": "Nombre",
+      "description": "Descripci\u00f3n",
+      "config": "Config (JSON)",
+      "save": "Guardar"
+    },
+    "deleteConfirm": "\u00bfEst\u00e1s seguro de que deseas eliminar este vector store?",
+    "errors": {
+      "fetch": "No se pudieron cargar los vector stores.",
+      "save": "No se pudo guardar el vector store. Revisa tu JSON de configuraci\u00f3n.",
+      "delete": "No se pudo eliminar el vector store."
+    }
+  }
+}

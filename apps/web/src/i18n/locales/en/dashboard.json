@@ -1,0 +1,67 @@
+{
+  "title": "Dashboard",
+  "subtitle": "Platform status and recent activity",
+  "loading": "Loading...",
+  "error": "Failed to load dashboard data.",
+  "systemStatus": "System Status",
+  "quickAccess": "Quick Access",
+  "recentConversations": "Recent Conversations",
+  "agentFleet": "Agent Fleet",
+  "datasets": "Datasets",
+  "system": {
+    "agents": "Agents",
+    "integrations": "Integrations",
+    "datasets": "Datasets",
+    "memory": "Memory",
+    "deployed": "{{count}} deployed",
+    "sources": "{{sources}} sources",
+    "pipelines": "{{pipelines}} pipelines",
+    "sourcesPipelines": "{{sources}} sources \u00b7 {{pipelines}} pipelines",
+    "rows": "{{count}} rows",
+    "vectorStores": "vector stores",
+    "operational": "operational",
+    "idle": "idle"
+  },
+  "quick": {
+    "aiChat": "AI Chat",
+    "aiChatDesc": "Chat with your agents",
+    "agentFleet": "Agent Fleet",
+    "agentFleetDesc": "View and manage agents",
+    "integrations": "Integrations",
+    "integrationsDesc": "Manage connected apps",
+    "workflows": "Workflows",
+    "workflowsDesc": "Automation & execution"
+  },
+  "sessions": {
+    "messages": "{{count}} messages",
+    "noRecent": "No recent conversations"
+  },
+  "agents": {
+    "active": "Active",
+    "ready": "Ready",
+    "noAgents": "No agents configured"
+  },
+  "datasetsSection": {
+    "rows": "{{count}} rows",
+    "noDatasets": "No datasets"
+  },
+  "home": {
+    "welcomeBack": "Welcome back!",
+    "whatToDo": "What would you like to do today?",
+    "quickActions": "Quick Actions",
+    "recentActivity": "Recent Activity",
+    "gettingStartedTips": "Getting Started Tips",
+    "importData": "Import Business Data",
+    "importDataDesc": "Upload files or connect an ERP system",
+    "aiCommand": "AI Command",
+    "aiCommandDesc": "Command your agent fleet with natural language",
+    "analyticsOverview": "Analytics Overview",
+    "analyticsOverviewDesc": "Cross-business metrics and KPIs",
+    "getStarted": "Get Started",
+    "noActivity": "No activity yet. Start by importing business data or commanding your AI fleet!",
+    "tip1": "Import your first dataset to consolidate business data",
+    "tip2": "Ask your AI agent fleet questions in plain English about any business unit",
+    "tip3": "Monitor cross-business KPIs from the Analytics Overview",
+    "tip4": "Deploy agents to automate finance, compliance, and operations tasks"
+  }
+}

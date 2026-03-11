@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Badge, Button, Card, Col, Container, Form, ListGroup, Modal, Row, Spinner } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../App';
 import Layout from '../components/Layout';
 import ReportVisualization from '../components/chat/ReportVisualization';
@@ -12,6 +13,7 @@ const initialSessionState = {
 };
 
 const ChatPage = () => {
+  const { t } = useTranslation('chat');
   const auth = useAuth();
   const [sessions, setSessions] = useState([]);
   const [agentKits, setAgentKits] = useState([]);
@@ -54,7 +56,7 @@ const ChatPage = () => {
       setAgentKits(agentKitsResp.data);
     } catch (err) {
       console.error(err);
-      setGlobalError('Failed to load agent kits.');
+      setGlobalError(t('errors.loadKits'));
     }
   };
 
@@ -69,7 +71,7 @@ const ChatPage = () => {
       }
     } catch (err) {
       console.error(err);
-      setGlobalError('Failed to fetch chat sessions.');
+      setGlobalError(t('errors.loadSessions'));
     } finally {
       setLoadingSessions(false);
     }
@@ -86,7 +88,7 @@ const ChatPage = () => {
       setMessages(response.data);
     } catch (err) {
       console.error(err);
-      setGlobalError('Failed to load messages.');
+      setGlobalError(t('errors.loadMessages'));
     } finally {
       setLoadingMessages(false);
     }
@@ -142,12 +144,12 @@ const ChatPage = () => {
       // Extract meaningful error from API response
       const detail = err?.response?.data?.detail || err?.response?.data?.error || err?.message || '';
       const userMsg = detail.includes('timeout') || detail.includes('timed out')
-        ? 'Luna is taking longer than expected. Please try again in a moment.'
+        ? t('errors.timeout')
         : detail.includes('connection') || detail.includes('Connection')
-        ? 'Luna is temporarily unavailable. Please try again in a couple of minutes.'
+        ? t('errors.connection')
         : detail
-        ? `Something went wrong: ${detail.slice(0, 150)}`
-        : 'Something went wrong sending your message. Please try again.';
+        ? t('errors.genericDetail', { detail: detail.slice(0, 150) })
+        : t('errors.generic');
       setGlobalError(userMsg);
       // Remove the temp user message on error so they can retry
       setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id));
@@ -189,7 +191,7 @@ const ChatPage = () => {
       loadMessages(response.data.id);
     } catch (err) {
       console.error(err);
-      setFormErrors('Unable to create chat session. Ensure the selected agent kit is valid.');
+      setFormErrors(t('errors.createSession'));
     }
   };
 
@@ -233,14 +235,14 @@ const ChatPage = () => {
         {message.role === 'assistant' && message.context?.entities_extracted > 0 && (
           <div className="mt-2">
             <Badge bg="info" style={{ fontSize: '0.7rem', fontWeight: 500 }}>
-              {message.context.entities_extracted} {message.context.entities_extracted === 1 ? 'entity' : 'entities'} extracted
+              {t('entitiesExtracted', { count: message.context.entities_extracted })}
             </Badge>
           </div>
         )}
 
         {message.context && message.context.summary && (
           <details className="mt-2">
-            <summary>View agent context</summary>
+            <summary>{t('viewContext')}</summary>
             <pre className="rounded p-2 mt-2" style={{ whiteSpace: 'pre-wrap', background: 'var(--surface-page)', color: 'var(--color-soft)', border: '1px solid var(--color-border)' }}>
               {JSON.stringify(message.context, null, 2)}
             </pre>
@@ -251,7 +253,7 @@ const ChatPage = () => {
   };
 
   const getSessionSubtitle = (session) => {
-    const kitName = (agentKitById[session.agent_kit_id] && agentKitById[session.agent_kit_id].name) || 'Agent Kit';
+    const kitName = (agentKitById[session.agent_kit_id] && agentKitById[session.agent_kit_id].name) || t('agentKit');
     return kitName;
   };
 
@@ -261,15 +263,15 @@ const ChatPage = () => {
         <Row className="g-4">
           <Col lg={4} xl={3}>
             <div className="d-flex justify-content-between align-items-center mb-3">
-              <h3 className="mb-0">Sessions</h3>
+              <h3 className="mb-0">{t('sessions')}</h3>
               <Button size="sm" variant="outline-primary" onClick={handleCreateSessionModal}>
-                New session
+                {t('newSession')}
               </Button>
             </div>
             {loadingSessions ? (
               <div className="d-flex align-items-center gap-2 text-muted">
                 <Spinner animation="border" size="sm" />
-                <span>Loading sessions…</span>
+                <span>{t('loadingSessions')}</span>
               </div>
             ) : (
               <ListGroup className="shadow-sm">
@@ -280,7 +282,7 @@ const ChatPage = () => {
                     active={selectedSession && session.id === selectedSession.id}
                     onClick={() => handleSelectSession(session)}
                   >
-                    <div className="fw-semibold">{session.title || 'Untitled session'}</div>
+                    <div className="fw-semibold">{session.title || t('untitledSession')}</div>
                     <div className="small text-muted">
                       {getSessionSubtitle(session)}
                     </div>
@@ -288,7 +290,7 @@ const ChatPage = () => {
                 ))}
                 {sessions.length === 0 && (
                   <ListGroup.Item className="text-muted text-center">
-                    No sessions yet. Create one to start chatting with your data.
+                    {t('noSessions')}
                   </ListGroup.Item>
                 )}
               </ListGroup>
@@ -302,7 +304,7 @@ const ChatPage = () => {
                 <Card.Header>
                   <div className="d-flex justify-content-between">
                     <div>
-                      <h5 className="mb-0">{selectedSession.title || 'Agent session'}</h5>
+                      <h5 className="mb-0">{selectedSession.title || t('agentSession')}</h5>
                       <small className="text-muted">
                         {getSessionSubtitle(selectedSession)}
                       </small>
@@ -314,7 +316,7 @@ const ChatPage = () => {
                     {loadingMessages ? (
                       <div className="d-flex align-items-center gap-2 text-muted">
                         <Spinner animation="border" size="sm" />
-                        <span>Loading conversation…</span>
+                        <span>{t('loadingConversation')}</span>
                       </div>
                     ) : (
                       <ListGroup variant="flush">
@@ -325,7 +327,7 @@ const ChatPage = () => {
                               <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px' }} />
                               <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.2s' }} />
                               <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.4s' }} />
-                              <span className="ms-1">Luna is thinking...</span>
+                              <span className="ms-1">{t('thinking')}</span>
                             </div>
                           </ListGroup.Item>
                         )}
@@ -333,17 +335,17 @@ const ChatPage = () => {
                         {messages.length === 0 && !postingMessage && (
                           <div className="py-4">
                             <div className="text-center text-muted mb-4">
-                              <h5>Get Started</h5>
-                              <p>Ask your AI assistant about your data. Try one of these:</p>
+                              <h5>{t('getStarted')}</h5>
+                              <p>{t('getStartedDesc')}</p>
                             </div>
                             <div className="row g-2 px-3">
                               {[
-                                { icon: '📊', text: 'What was our revenue last month?' },
-                                { icon: '📈', text: 'Show me the top trends in our data' },
-                                { icon: '🎯', text: 'What are the key insights from this dataset?' },
-                                { icon: '📋', text: 'Generate a summary report' },
-                                { icon: '🔮', text: 'What is the forecast for next quarter?' },
-                                { icon: '⚡', text: 'What anomalies or issues should I know about?' },
+                                { icon: '\uD83D\uDCCA', key: 'revenue' },
+                                { icon: '\uD83D\uDCC8', key: 'trends' },
+                                { icon: '\uD83C\uDFAF', key: 'insights' },
+                                { icon: '\uD83D\uDCCB', key: 'report' },
+                                { icon: '\uD83D\uDD2E', key: 'forecast' },
+                                { icon: '\u26A1', key: 'anomalies' },
                               ].map((prompt, idx) => (
                                 <div key={idx} className="col-md-6">
                                   <Button
@@ -351,12 +353,12 @@ const ChatPage = () => {
                                     className="w-100 text-start py-2 px-3"
                                     style={{ borderRadius: '12px', fontSize: '0.9rem' }}
                                     onClick={() => {
-                                      setMessageDraft(prompt.text);
+                                      setMessageDraft(t(`prompts.${prompt.key}`));
                                       document.getElementById('chatMessage')?.focus();
                                     }}
                                   >
                                     <span className="me-2">{prompt.icon}</span>
-                                    {prompt.text}
+                                    {t(`prompts.${prompt.key}`)}
                                   </Button>
                                 </div>
                               ))}
@@ -412,7 +414,7 @@ const ChatPage = () => {
                           <Form.Control
                             as="textarea"
                             rows={2}
-                            placeholder="Ask a question or request an action."
+                            placeholder={t('messagePlaceholder')}
                             value={messageDraft}
                             onChange={(event) => setMessageDraft(event.target.value)}
                             onKeyDown={(e) => {
@@ -429,7 +431,7 @@ const ChatPage = () => {
                           <Button
                             type="button"
                             variant="outline-secondary"
-                            title="Attach file"
+                            title={t('attachFile')}
                             onClick={() => fileInputRef.current?.click()}
                             style={{ flex: '0 0 auto' }}
                           >
@@ -441,7 +443,7 @@ const ChatPage = () => {
                             disabled={postingMessage || (!messageDraft.trim() && !attachedFile)}
                             style={{ flex: 1 }}
                           >
-                            {postingMessage ? 'Sending…' : 'Send'}
+                            {postingMessage ? t('sending') : t('send')}
                           </Button>
                         </div>
                       </Col>
@@ -452,7 +454,7 @@ const ChatPage = () => {
             ) : (
               <Card className="shadow-sm">
                 <Card.Body className="text-center text-muted">
-                  <p className="mb-0">Select a session or start a new one.</p>
+                  <p className="mb-0">{t('selectSession')}</p>
                 </Card.Body>
               </Card>
             )}
@@ -463,25 +465,25 @@ const ChatPage = () => {
       <Modal show={showCreateModal} onHide={() => setShowCreateModal(false)} centered>
         <Form onSubmit={handleCreateSession}>
           <Modal.Header closeButton>
-            <Modal.Title>Start new agent session</Modal.Title>
+            <Modal.Title>{t('createModal.title')}</Modal.Title>
           </Modal.Header>
           <Modal.Body>
             {formErrors && <Alert variant="danger">{formErrors}</Alert>}
             <Form.Group className="mb-3">
-              <Form.Label>Title</Form.Label>
+              <Form.Label>{t('createModal.titleLabel')}</Form.Label>
               <Form.Control
                 type="text"
                 name="title"
-                placeholder="Optional label (e.g. Q4 forecast review)"
+                placeholder={t('createModal.titlePlaceholder')}
                 value={sessionForm.title}
                 onChange={handleCreateSessionChange}
               />
             </Form.Group>
 
             <Form.Group className="mb-3">
-              <Form.Label>Agent Kit</Form.Label>
+              <Form.Label>{t('createModal.agentKit')}</Form.Label>
               <Form.Select name="agentKitId" value={sessionForm.agentKitId} onChange={handleCreateSessionChange}>
-                <option value="">Select agent kit…</option>
+                <option value="">{t('createModal.agentKitPlaceholder')}</option>
                 {agentKits.map((kit) => (
                   <option key={kit.id} value={kit.id}>
                     {kit.name} (v{kit.version || '1.0'})
@@ -492,10 +494,10 @@ const ChatPage = () => {
           </Modal.Body>
           <Modal.Footer>
             <Button variant="outline-secondary" onClick={() => setShowCreateModal(false)}>
-              Cancel
+              {t('createModal.cancel')}
             </Button>
             <Button type="submit" variant="primary">
-              Create session
+              {t('createModal.create')}
             </Button>
           </Modal.Footer>
         </Form>

@@ -34,7 +34,26 @@
     "connectors": "Connectors",
     "deployments": "Deployments",
     "vectorStores": "Vector Stores",
-    "agentKits": "Agent Kits"
+    "agentKits": "Agent Kits",
+    "workflows": "Workflows",
+    "memory": "Memory",
+    "integrations": "Integrations",
+    "organizations": "Organizations",
+    "settings": "Settings",
+    "aiOperations": "AI OPERATIONS",
+    "data": "DATA",
+    "admin": "ADMIN",
+    "administrator": "Administrator"
+  },
+  "sidebar_desc": {
+    "dashboard": "Operations overview",
+    "chat": "Chat with your AI agent fleet",
+    "agents": "Manage your AI agent fleet",
+    "workflows": "Workflow designs and execution audit",
+    "memory": "What Luna knows and remembers",
+    "integrations": "Connectors, data sources & datasets",
+    "organizations": "Manage organizations & business units",
+    "settings": "Platform settings"
   },
   "landing": {
     "trustedBy": "Powered by"

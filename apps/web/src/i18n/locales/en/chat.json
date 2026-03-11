@@ -1,0 +1,48 @@
+{
+  "sessions": "Sessions",
+  "newSession": "New session",
+  "loadingSessions": "Loading sessions\u2026",
+  "untitledSession": "Untitled session",
+  "agentSession": "Agent session",
+  "agentKit": "Agent Kit",
+  "noSessions": "No sessions yet. Create one to start chatting with your data.",
+  "selectSession": "Select a session or start a new one.",
+  "loadingConversation": "Loading conversation\u2026",
+  "thinking": "Luna is thinking...",
+  "getStarted": "Get Started",
+  "getStartedDesc": "Ask your AI assistant about your data. Try one of these:",
+  "prompts": {
+    "revenue": "What was our revenue last month?",
+    "trends": "Show me the top trends in our data",
+    "insights": "What are the key insights from this dataset?",
+    "report": "Generate a summary report",
+    "forecast": "What is the forecast for next quarter?",
+    "anomalies": "What anomalies or issues should I know about?"
+  },
+  "messagePlaceholder": "Ask a question or request an action.",
+  "attachFile": "Attach file",
+  "send": "Send",
+  "sending": "Sending\u2026",
+  "entitiesExtracted": "{{count}} entity extracted",
+  "entitiesExtracted_plural": "{{count}} entities extracted",
+  "viewContext": "View agent context",
+  "createModal": {
+    "title": "Start new agent session",
+    "titleLabel": "Title",
+    "titlePlaceholder": "Optional label (e.g. Q4 forecast review)",
+    "agentKit": "Agent Kit",
+    "agentKitPlaceholder": "Select agent kit\u2026",
+    "cancel": "Cancel",
+    "create": "Create session"
+  },
+  "errors": {
+    "loadKits": "Failed to load agent kits.",
+    "loadSessions": "Failed to fetch chat sessions.",
+    "loadMessages": "Failed to load messages.",
+    "createSession": "Unable to create chat session. Ensure the selected agent kit is valid.",
+    "timeout": "Luna is taking longer than expected. Please try again in a moment.",
+    "connection": "Luna is temporarily unavailable. Please try again in a couple of minutes.",
+    "genericDetail": "Something went wrong: {{detail}}",
+    "generic": "Something went wrong sending your message. Please try again."
+  }
+}

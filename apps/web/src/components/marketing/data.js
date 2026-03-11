@@ -12,6 +12,10 @@ import {
   FaEye,
   FaRegCalendarCheck,
   FaUsers,
+  FaBullhorn,
+  FaHeartbeat,
+  FaHandshake,
+  FaPlay,
 } from 'react-icons/fa';
 
 export const heroHighlights = [
@@ -42,6 +46,9 @@ export const aiHighlights = [
   { key: 'insightCopilots', icon: FaRegCalendarCheck },
   { key: 'composableSkills', icon: FaChartPie },
   { key: 'closedLoopActuators', icon: FaCodeBranch },
+  { key: 'marketingSales', icon: FaBullhorn },
+  { key: 'dealTeam', icon: FaHandshake },
+  { key: 'vetCardiology', icon: FaHeartbeat },
 ];
 
 export const roadmapItems = [
@@ -53,5 +60,6 @@ export const roadmapItems = [
 export const architectureLayers = [
   { key: 'dataIntegrationLayer', icon: FaGlobe },
   { key: 'semanticGovernanceLayer', icon: FaCogs },
+  { key: 'executionLayer', icon: FaPlay },
   { key: 'agenticExecutionLayer', icon: FaBrain },
 ];

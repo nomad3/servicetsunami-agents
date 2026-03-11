@@ -1,5 +1,6 @@
 import React from 'react';
 import { Card, Row, Col, Button } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   FaChartBar,
@@ -13,27 +14,28 @@ import Layout from '../components/Layout';
 import './HomePage.css';
 
 const HomePage = () => {
+  const { t } = useTranslation('dashboard');
   const navigate = useNavigate();
 
   const quickActions = [
     {
       icon: FaFileAlt,
-      title: 'Import Business Data',
-      description: 'Upload files or connect an ERP system',
+      title: t('home.importData'),
+      description: t('home.importDataDesc'),
       action: () => navigate('/datasets'),
       color: 'primary'
     },
     {
       icon: FaComments,
-      title: 'AI Command',
-      description: 'Command your agent fleet with natural language',
+      title: t('home.aiCommand'),
+      description: t('home.aiCommandDesc'),
       action: () => navigate('/chat'),
       color: 'success'
     },
     {
       icon: FaChartBar,
-      title: 'Analytics Overview',
-      description: 'Cross-business metrics and KPIs',
+      title: t('home.analyticsOverview'),
+      description: t('home.analyticsOverviewDesc'),
       action: () => navigate('/dashboard'),
       color: 'info'
     }
@@ -52,10 +54,10 @@ const HomePage = () => {
         <div className="welcome-section">
           <div className="welcome-content">
             <h1 className="welcome-title">
-              Welcome back! <span className="wave">👋</span>
+              {t('home.welcomeBack')} <span className="wave">{'\uD83D\uDC4B'}</span>
             </h1>
             <p className="welcome-subtitle">
-              What would you like to do today?
+              {t('home.whatToDo')}
             </p>
           </div>
         </div>
@@ -64,7 +66,7 @@ const HomePage = () => {
         <div className="quick-actions-section">
           <h2 className="section-title">
             <FaRocket className="section-icon" />
-            Quick Actions
+            {t('home.quickActions')}
           </h2>
           <Row className="g-4">
             {quickActions.map((action, index) => (
@@ -77,7 +79,7 @@ const HomePage = () => {
                     <h3 className="action-title">{action.title}</h3>
                     <p className="action-description">{action.description}</p>
                     <Button variant={action.color} size="sm" className="action-button">
-                      Get Started →
+                      {t('home.getStarted')} {'\u2192'}
                     </Button>
                   </Card.Body>
                 </Card>
@@ -90,7 +92,7 @@ const HomePage = () => {
         <div className="recent-activity-section">
           <h2 className="section-title">
             <FaHistory className="section-icon" />
-            Recent Activity
+            {t('home.recentActivity')}
           </h2>
           <Card className="activity-card">
             <Card.Body>
@@ -113,7 +115,7 @@ const HomePage = () => {
                 <div className="empty-activity">
                   <FaLightbulb size={48} className="empty-icon" />
                   <p className="empty-text">
-                    No activity yet. Start by importing business data or commanding your AI fleet!
+                    {t('home.noActivity')}
                   </p>
                 </div>
               )}
@@ -127,13 +129,13 @@ const HomePage = () => {
             <Card.Body>
               <h3 className="tips-title">
                 <FaLightbulb className="tips-icon" />
-                Getting Started Tips
+                {t('home.gettingStartedTips')}
               </h3>
               <ul className="tips-list">
-                <li>Import your first dataset to consolidate business data</li>
-                <li>Ask your AI agent fleet questions in plain English about any business unit</li>
-                <li>Monitor cross-business KPIs from the Analytics Overview</li>
-                <li>Deploy agents to automate finance, compliance, and operations tasks</li>
+                <li>{t('home.tip1')}</li>
+                <li>{t('home.tip2')}</li>
+                <li>{t('home.tip3')}</li>
+                <li>{t('home.tip4')}</li>
               </ul>
             </Card.Body>
           </Card>

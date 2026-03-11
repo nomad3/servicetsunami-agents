@@ -8,6 +8,7 @@ const integrationConfigService = {
   remove: (id) => api.delete(`/integration-configs/${id}`),
   addCredential: (id, data) => api.post(`/integration-configs/${id}/credentials`, data),
   revokeCredential: (id, key) => api.delete(`/integration-configs/${id}/credentials/${key}`),
+  getCredentialStatus: (id) => api.get(`/integration-configs/${id}/credentials/status`),
   // OAuth
   oauthAuthorize: (provider) => api.get(`/oauth/${provider}/authorize`),
   oauthDisconnect: (provider, accountEmail) =>

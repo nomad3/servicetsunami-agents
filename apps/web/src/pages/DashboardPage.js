@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Alert, Col, Row, Spinner } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../App';
 import Layout from '../components/Layout';
 import { getDashboardStats } from '../services/analytics';
 
 const DashboardPage = () => {
+  const { t } = useTranslation('dashboard');
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -21,7 +23,7 @@ const DashboardPage = () => {
         setDashboardData(response.data);
         setError(null);
       } catch (err) {
-        setError('Failed to load dashboard data.');
+        setError(t('error'));
         console.error('Error fetching dashboard stats:', err);
       } finally {
         setLoading(false);
@@ -35,7 +37,7 @@ const DashboardPage = () => {
       <Layout>
         <div className="text-center py-5">
           <Spinner animation="border" role="status" variant="primary" size="sm" />
-          <p className="mt-3 text-muted" style={{ fontSize: '0.85rem' }}>Loading...</p>
+          <p className="mt-3 text-muted" style={{ fontSize: '0.85rem' }}>{t('loading')}</p>
         </div>
       </Layout>
     );
@@ -54,27 +56,27 @@ const DashboardPage = () => {
   // System health items
   const systemItems = [
     {
-      label: 'Agents',
+      label: t('system.agents'),
       value: overview?.total_agents ?? 0,
-      sub: `${overview?.total_deployments ?? 0} deployed`,
+      sub: t('system.deployed', { count: overview?.total_deployments ?? 0 }),
       status: (overview?.total_deployments ?? 0) > 0 ? 'operational' : 'idle',
     },
     {
-      label: 'Integrations',
+      label: t('system.integrations'),
       value: (overview?.total_data_sources ?? 0) + (overview?.total_pipelines ?? 0),
-      sub: `${overview?.total_data_sources ?? 0} sources · ${overview?.total_pipelines ?? 0} pipelines`,
+      sub: t('system.sourcesPipelines', { sources: overview?.total_data_sources ?? 0, pipelines: overview?.total_pipelines ?? 0 }),
       status: (overview?.total_data_sources ?? 0) > 0 ? 'operational' : 'idle',
     },
     {
-      label: 'Datasets',
+      label: t('system.datasets'),
       value: overview?.total_datasets ?? 0,
-      sub: `${(activity?.dataset_rows_total ?? 0).toLocaleString()} rows`,
+      sub: t('system.rows', { count: (activity?.dataset_rows_total ?? 0).toLocaleString() }),
       status: (overview?.total_datasets ?? 0) > 0 ? 'operational' : 'idle',
     },
     {
-      label: 'Memory',
+      label: t('system.memory'),
       value: overview?.total_vector_stores ?? 0,
-      sub: 'vector stores',
+      sub: t('system.vectorStores'),
       status: (overview?.total_vector_stores ?? 0) > 0 ? 'operational' : 'idle',
     },
   ];
@@ -111,15 +113,15 @@ const DashboardPage = () => {
         {/* Header */}
         <div style={{ marginBottom: 28 }}>
           <h4 style={{ fontWeight: 600, marginBottom: 4, color: 'var(--color-foreground)' }}>
-            Dashboard
+            {t('title')}
           </h4>
           <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', margin: 0 }}>
-            Platform status and recent activity
+            {t('subtitle')}
           </p>
         </div>
 
         {/* System Status */}
-        <div style={sectionLabel}>System Status</div>
+        <div style={sectionLabel}>{t('systemStatus')}</div>
         <Row className="g-3 mb-4">
           {systemItems.map((item) => (
             <Col md={3} sm={6} key={item.label}>
@@ -142,13 +144,13 @@ const DashboardPage = () => {
         </Row>
 
         {/* Quick Navigation */}
-        <div style={sectionLabel}>Quick Access</div>
+        <div style={sectionLabel}>{t('quickAccess')}</div>
         <Row className="g-3 mb-4">
           {[
-            { label: 'AI Chat', desc: 'Chat with your agents', path: '/chat' },
-            { label: 'Agent Fleet', desc: 'View and manage agents', path: '/agents' },
-            { label: 'Integrations', desc: 'Manage connected apps', path: '/integrations' },
-            { label: 'Workflows', desc: 'Automation & execution', path: '/workflows' },
+            { label: t('quick.aiChat'), desc: t('quick.aiChatDesc'), path: '/chat' },
+            { label: t('quick.agentFleet'), desc: t('quick.agentFleetDesc'), path: '/agents' },
+            { label: t('quick.integrations'), desc: t('quick.integrationsDesc'), path: '/integrations' },
+            { label: t('quick.workflows'), desc: t('quick.workflowsDesc'), path: '/workflows' },
           ].map((item) => (
             <Col md={3} sm={6} key={item.label}>
               <div
@@ -175,7 +177,7 @@ const DashboardPage = () => {
         {/* Two-column layout: Recent Sessions + Agent Fleet */}
         <Row className="g-3">
           <Col lg={7}>
-            <div style={sectionLabel}>Recent Conversations</div>
+            <div style={sectionLabel}>{t('recentConversations')}</div>
             <div style={cardStyle}>
               {recent_sessions && recent_sessions.length > 0 ? (
                 <div>
@@ -197,7 +199,7 @@ const DashboardPage = () => {
                           {session.title}
                         </div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
-                          {session.message_count} messages
+                          {t('sessions.messages', { count: session.message_count })}
                         </div>
                       </div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', whiteSpace: 'nowrap' }}>
@@ -208,14 +210,14 @@ const DashboardPage = () => {
                 </div>
               ) : (
                 <p style={{ color: 'var(--color-muted)', fontSize: '0.82rem', textAlign: 'center', margin: '20px 0' }}>
-                  No recent conversations
+                  {t('sessions.noRecent')}
                 </p>
               )}
             </div>
           </Col>
 
           <Col lg={5}>
-            <div style={sectionLabel}>Agent Fleet</div>
+            <div style={sectionLabel}>{t('agentFleet')}</div>
             <div style={cardStyle}>
               {agents && agents.length > 0 ? (
                 <div>
@@ -236,7 +238,7 @@ const DashboardPage = () => {
                       <div className="d-flex align-items-center" style={{ gap: 4 }}>
                         <span style={statusDot(agent.deployment_count > 0 ? 'operational' : 'idle')} />
                         <span style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
-                          {agent.deployment_count > 0 ? 'Active' : 'Ready'}
+                          {agent.deployment_count > 0 ? t('agents.active') : t('agents.ready')}
                         </span>
                       </div>
                     </div>
@@ -244,13 +246,13 @@ const DashboardPage = () => {
                 </div>
               ) : (
                 <p style={{ color: 'var(--color-muted)', fontSize: '0.82rem', textAlign: 'center', margin: '20px 0' }}>
-                  No agents configured
+                  {t('agents.noAgents')}
                 </p>
               )}
             </div>
 
             {/* Datasets summary */}
-            <div style={{ ...sectionLabel, marginTop: 16 }}>Datasets</div>
+            <div style={{ ...sectionLabel, marginTop: 16 }}>{t('datasets')}</div>
             <div style={cardStyle}>
               {datasets && datasets.length > 0 ? (
                 <div>
@@ -269,14 +271,14 @@ const DashboardPage = () => {
                         {dataset.name}
                       </div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
-                        {dataset.rows?.toLocaleString()} rows
+                        {t('datasetsSection.rows', { count: dataset.rows?.toLocaleString() })}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
                 <p style={{ color: 'var(--color-muted)', fontSize: '0.82rem', textAlign: 'center', margin: '16px 0' }}>
-                  No datasets
+                  {t('datasetsSection.noDatasets')}
                 </p>
               )}
             </div>

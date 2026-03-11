@@ -309,3 +309,36 @@ def delete_credential(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revoke credential")
 
     return {"message": "Credential revoked successfully"}
+
+
+@router.get(
+    "/{integration_config_id}/credentials/status",
+)
+def get_credential_status(
+    *,
+    db: Session = Depends(deps.get_db),
+    integration_config_id: uuid.UUID,
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """
+    Return which credential keys have active values stored (without revealing the values).
+    Used by the frontend to show credential status indicators.
+    """
+    config = integration_config_service.get_integration_config(db, integration_config_id=integration_config_id)
+    if not config or str(config.tenant_id) != str(current_user.tenant_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Integration config not found")
+
+    credentials = (
+        db.query(IntegrationCredential.credential_key)
+        .filter(
+            IntegrationCredential.integration_config_id == integration_config_id,
+            IntegrationCredential.tenant_id == current_user.tenant_id,
+            IntegrationCredential.status == "active",
+        )
+        .distinct()
+        .all()
+    )
+
+    return {
+        "stored_keys": [c[0] for c in credentials],
+    }

@@ -1,178 +1,277 @@
 {
   "hero": {
-    "badge": "La Plataforma de Operaciones con IA",
-    "title": "Conecta. Automatiza. Escala. Repite.",
-    "lead": "ServiceTsunami es el centro de comando unificado para operaciones empresariales. Consolida ERP, finanzas, RRHH, cumplimiento e IA en cada unidad de negocio desde el primer dia.",
-    "subtext": "Deja de unir hojas de calculo y sistemas legados. Una plataforma para operar toda tu organizacion — desde el pipeline de crecimiento hasta la optimizacion.",
-    "subHighlight": "La plataforma de operaciones que escala con cada unidad de negocio.",
+    "badge": "Plataforma de Orquestacion de Agentes IA",
+    "title": "Equipos de IA que Piensan, Aprenden y Ejecutan",
+    "lead": "ServiceTsunami es la plataforma empresarial para operaciones autonomas con IA. Orquesta equipos de agentes que escriben codigo, monitorean competidores, gestionan campanas publicitarias, clasifican tu inbox y automatizan flujos de negocio — todo con memoria persistente.",
+    "subtext": "Deja de construir chatbots desechables. Despliega equipos de agentes que codean de forma autonoma, rastrean senales del mercado y ejecutan workflows reales en tu empresa.",
+    "subHighlight": "La plataforma de IA agentica que escala con tu ambicion.",
     "spotlight": {
-      "heading": "Construido para Operadores Empresariales",
-      "badge": "Listo desde el Dia Uno"
+      "heading": "Construido para Equipos AI-First",
+      "badge": "Listo para Produccion"
     },
     "highlights": {
       "governedDataProducts": {
-        "title": "Back Office Unificado entre Unidades de Negocio",
-        "description": "Consolida ERP, finanzas, banca y gestion de gastos en cada unidad de negocio. Un plan de cuentas, una fuente de verdad, un panel para toda la organizacion."
+        "title": "Orquestacion Multi-Agente",
+        "description": "Equipos jerarquicos de agentes con supervisores, especialistas y agentes hoja. Cada equipo maneja un dominio — asistente personal, coding autonomo, data science, marketing, ventas — coordinados por un supervisor raiz."
       },
       "unifiedLakehouseFabric": {
-        "title": "Agentes IA que Conocen tu Negocio",
-        "description": "Despliega agentes IA autonomos para campanas publicitarias hiperlocales, automatizacion de RCM de seguros, cumplimiento de RRHH y reportes financieros. Los agentes aprenden el contexto de cada unidad de negocio y operan 24/7."
+        "title": "Memoria Persistente y Grafo de Conocimiento",
+        "description": "Tus agentes recuerdan. Extraccion de entidades, mapeo de relaciones, lead scoring y recall contextual en cada conversacion. Luna aprende tus contactos, preferencias y contexto de negocio automaticamente."
       },
       "agenticAutomation": {
-        "title": "Del Pipeline de Crecimiento al Plan de Optimizacion",
-        "description": "Rastrea oportunidades, ejecuta evaluaciones, modela planes de integracion y gestiona preparacion operativa — todo en un solo lugar. Construido para operadores que manejan de 5 a 500 unidades de negocio."
+        "title": "Motor de Ejecucion Autonoma",
+        "description": "Workflows durables con Temporal en 4 colas: orquestacion, databricks, codigo y negocios. Desde deal pipelines hasta monitoreo de competidores y coding autonomo — ejecucion confiable con trazabilidad completa."
       }
     }
   },
   "logos": {
-    "heading": "Impulsado por Infraestructura Moderna",
-    "items": ["Claude AI", "React", "PostgreSQL", "DuckDB", "Temporal", "FastAPI"]
+    "heading": "Construido con",
+    "items": [
+      "Claude AI",
+      "Google ADK",
+      "Temporal",
+      "PostgreSQL",
+      "React",
+      "FastAPI"
+    ]
   },
   "metrics": {
     "items": [
       {
-        "label": "ERP y Finanzas",
-        "value": "Un Back Office, Muchas Unidades de Negocio",
-        "description": "Consolida libro mayor, cuentas por pagar/cobrar, nomina y banca en cada unidad de negocio. Elimina sistemas duplicados, reduce costos de personal y cierra libros en dias en vez de semanas."
+        "label": "Equipos de Agentes",
+        "value": "8 Equipos Especializados",
+        "description": "Asistente personal, code agent, equipo de datos, marketing y ventas, deal management, cardiologia veterinaria — cada uno con sus herramientas, memoria y expertise de dominio."
       },
       {
-        "label": "Publicidad con IA",
-        "value": "Campanas Hiperlocales a Escala",
-        "description": "Despliega campanas publicitarias impulsadas por IA adaptadas al mercado local de cada unidad de negocio. Optimiza automaticamente creativos, segmentacion y asignacion de presupuesto en cientos de ubicaciones."
+        "label": "Integraciones",
+        "value": "Gmail, Calendar, WhatsApp, Jira y Mas",
+        "description": "10+ integraciones conectadas via OAuth con refresh automatico de tokens. Tus agentes leen emails, gestionan eventos de calendario, rastrean issues en Jira y se comunican via WhatsApp de forma nativa."
       },
       {
-        "label": "Cumplimiento y RRHH",
-        "value": "Estandariza desde el Dia Uno",
-        "description": "Incorpora nuevas unidades de negocio a politicas unificadas de RRHH, beneficios y marcos de cumplimiento al instante. Automatiza el seguimiento regulatorio por estado y reduce los tiempos de integracion en un 80%."
+        "label": "Sistema de Conocimiento",
+        "value": "Entidades, Relaciones y Lead Scoring",
+        "description": "Extraccion automatica de cada conversacion. Las entidades se categorizan, relacionan y califican con rubrics configurables. Las memorias de agentes capturan preferencias y decisiones para recall contextual."
       }
     ]
   },
   "features": {
-    "heading": "Cada Modulo que tus Operaciones Necesitan",
-    "subtitle": "Desde la busqueda de oportunidades hasta la optimizacion — una plataforma, cero dolores de cabeza de integracion.",
+    "heading": "Todo lo que tus Agentes IA Necesitan",
+    "subtitle": "Desde orquestacion hasta memoria — una plataforma para construir sistemas de agentes IA de produccion.",
     "items": {
       "connectEverySource": {
-        "title": "Pipeline de Crecimiento y Evaluaciones",
-        "description": "Rastrea objetivos de crecimiento, gestiona oportunidades, ejecuta checklists automatizados de evaluacion y modela planes de integracion. Nunca mas pierdas un deal por desorganizacion."
+        "title": "Orquestacion Multi-Agente",
+        "description": "Disena equipos jerarquicos de agentes con un supervisor raiz que enruta a sub-equipos especializados. Cada agente tiene herramientas, instrucciones y expertise de dominio. Potenciado por Google ADK."
       },
       "semanticControlPlane": {
-        "title": "Banca y Gestion de Gastos",
-        "description": "Tesoreria centralizada, banca por unidad, politicas de gastos automatizadas y visibilidad de gastos en tiempo real. Controla el flujo de caja de toda tu organizacion desde un solo panel."
+        "title": "Grafo de Conocimiento y Memoria",
+        "description": "Extraccion automatica de entidades desde conversaciones. Entidades, relaciones y memorias de agentes forman un grafo de conocimiento persistente. Lead scoring con rubrics configurables. Inyeccion de recall da contexto en cada interaccion."
       },
       "agentAutomationStudio": {
-        "title": "Seguros y Automatizacion de RCM",
-        "description": "Automatiza la gestion del ciclo de ingresos, procesamiento de reclamos y flujos de trabajo de seguros con agentes IA. Reduce tasas de denegacion, acelera cobros y elimina seguimientos manuales."
+        "title": "Automatizacion de Workflows",
+        "description": "Workflows durables con Temporal para procesos complejos multi-paso. Deal pipelines, monitoreo de competidores, triage de inbox, extraccion de conocimiento y tareas programadas — todo con logica de reintentos y trazabilidad."
+      }
+    }
+  },
+  "featuresGrid": {
+    "heading": "Todo lo que necesitas para agentes IA en produccion",
+    "subtitle": "Desde orquestacion hasta memoria e integraciones — construido para sistemas agenticos del mundo real",
+    "items": {
+      "multiAgentTeams": {
+        "title": "Equipos Multi-Agente",
+        "description": "Orquestacion jerarquica de agentes con equipos especializados, supervisores y un coordinador raiz"
+      },
+      "persistentMemory": {
+        "title": "Memoria Persistente",
+        "description": "Grafo de conocimiento con extraccion de entidades, relaciones, lead scoring y recall contextual"
+      },
+      "aiChat": {
+        "title": "Chat IA con Luna",
+        "description": "Interfaz de lenguaje natural que aprende tus preferencias, contactos y contexto de negocio"
+      },
+      "oauthIntegrations": {
+        "title": "Integraciones OAuth",
+        "description": "Gmail, Calendar, WhatsApp, Jira, GitHub — los agentes acceden a tus herramientas reales con auto-refresh"
+      },
+      "durableWorkflows": {
+        "title": "Workflows Durables",
+        "description": "Automatizacion con Temporal en 4 colas de tareas con logica de reintentos y trazabilidad"
+      },
+      "enterpriseSecurity": {
+        "title": "Seguridad Empresarial",
+        "description": "Aislamiento multi-tenant, vault de credenciales encriptadas, auth JWT y deploy nativo en Kubernetes"
+      },
+      "autonomousCodeAgent": {
+        "title": "Code Agent Autonomo",
+        "description": "Claude Code CLI potencia el coding autonomo: crea branches, implementa features y abre PRs con trazabilidad completa"
+      },
+      "marketingIntelligence": {
+        "title": "Inteligencia de Marketing",
+        "description": "Monitorea competidores, gestiona campanas publicitarias en Meta/Google/TikTok y rastrea senales del mercado automaticamente"
+      },
+      "proactiveInboxMonitor": {
+        "title": "Monitor Proactivo de Inbox",
+        "description": "Monitoreo de Gmail y Calendar con auto-triage, extraccion de conocimiento de emails y notificaciones inteligentes"
       }
     }
   },
   "lakehouse": {
-    "heading": "Construido para Operadores que se Mueven Rapido",
-    "description": "Las operaciones fallan cuando la integracion se estanca. ServiceTsunami asegura que cada unidad de negocio sea operativa desde el dia uno.",
+    "heading": "Por que los Equipos de Agentes Superan a un Solo Chatbot",
+    "description": "Los sistemas de un solo agente se estancan. La orquestacion multi-agente rompe esa barrera.",
     "highlights": {
       "unifiedGovernance": {
-        "title": "El Problema de Integracion",
-        "description": "La mayoria de las organizaciones pasan 12-18 meses integrando cada nueva unidad de negocio en sistemas legados. ServiceTsunami reduce eso a semanas con playbooks pre-construidos y automatizacion impulsada por IA."
+        "title": "El Problema de Complejidad",
+        "description": "Las tareas reales de negocio abarcan multiples dominios — coding, analisis, marketing, comunicacion. Un solo agente no puede hacerlo todo bien. Los equipos especializados dividen y conquistan."
       },
       "programmablePipelines": {
-        "title": "El Problema de Visibilidad",
-        "description": "Operar 50+ unidades de negocio en diferentes sistemas significa que nadie tiene la imagen completa. Nuestra plataforma unificada te da P&L en tiempo real, flujo de caja y KPIs de cada unidad."
+        "title": "El Problema de Memoria",
+        "description": "Los chatbots olvidan todo entre sesiones. El grafo de conocimiento de ServiceTsunami persiste entidades, relaciones, scores de leads y preferencias en cada conversacion y canal."
       },
       "compliantCollaboration": {
-        "title": "El Problema de Escala",
-        "description": "Agregar personal por cada nueva unidad de negocio mata tus margenes. Los agentes IA manejan tareas rutinarias de finanzas, RRHH y cumplimiento para que puedas escalar operaciones sin escalar costos."
+        "title": "El Problema de Integracion",
+        "description": "Los agentes son inutiles sin acceso a tus herramientas. Integraciones OAuth con Gmail, Calendar, WhatsApp, Jira y mas le dan a tus agentes capacidades del mundo real."
       }
     },
     "secondary": {
-      "heading": "Valor Entregado",
-      "description": "Resultados tangibles para operadores empresariales.",
+      "heading": "Capacidades de la Plataforma",
+      "description": "Lo que obtienes desde el primer dia.",
       "items": {
         "adaptiveGuardrails": {
-          "title": "Integracion mas Rapida",
-          "description": "Reduce la integracion post-incorporacion de meses a semanas. Playbooks pre-construidos para migracion de ERP, incorporacion de RRHH y consolidacion financiera."
+          "title": "Luna — Tu Co-Piloto IA",
+          "description": "Una asistente personal que aprende de cada interaccion. Luna extrae contactos, recuerda preferencias, monitorea tu inbox, califica leads y se vuelve mas inteligente con el tiempo."
         },
         "explainableDecisions": {
-          "title": "Menor Overhead",
-          "description": "Los agentes IA reemplazan procesos manuales en finanzas, RRHH y cumplimiento. Escala de 10 a 100 unidades de negocio sin crecimiento proporcional de personal."
+          "title": "Code Agent Autonomo",
+          "description": "Claude Code CLI corre en un pod dedicado, creando branches, implementando features, ejecutando tests y abriendo PRs — de forma autonoma y con trazabilidad completa."
         },
         "lakehouseSignals": {
-          "title": "Preparacion Operativa",
-          "description": "Finanzas limpias, sistemas unificados y datos auditables desde el dia uno. Tus operaciones siempre estan en orden."
+          "title": "Seguridad de Nivel Empresarial",
+          "description": "Aislamiento multi-tenant, vault de credenciales con encriptacion Fernet, autenticacion JWT y trazabilidad completa. Despliega en tu propio cluster GKE con Helm charts."
         }
       }
     }
   },
   "architecture": {
     "heading": "Arquitectura de la Plataforma",
-    "description": "Infraestructura de grado empresarial para operaciones multi-unidad.",
+    "description": "Infraestructura de produccion para IA agentica.",
     "layers": {
       "dataIntegrationLayer": {
-        "title": "Capa de Datos e Integracion",
-        "description": "Conecta ERPs, bancos, sistemas de nomina y CRMs. Ingesta datos de cada unidad de negocio en un data lake unificado con reconciliacion automatizada."
+        "title": "Capa de Integracion",
+        "description": "Proveedores OAuth (Google, GitHub, Jira), WhatsApp Business API, servidor MCP para Databricks y vault de credenciales para gestion segura de tokens."
       },
       "semanticGovernanceLayer": {
         "title": "Capa de Orquestacion",
-        "description": "Flujos de trabajo impulsados por Temporal manejan procesos entre unidades: consolidacion financiera, verificaciones de cumplimiento, playbooks de integracion y reportes programados."
+        "description": "Patron de supervisor multi-agente con Google ADK y enrutamiento jerarquico. Despacho de tareas, validacion de entidades y lead scoring. Ejecucion confiable a escala."
+      },
+      "executionLayer": {
+        "title": "Capa de Ejecucion",
+        "description": "Workflows durables con Temporal en 4 colas: orquestacion, databricks, codigo y negocios. Monitoreo de inbox, rastreo de competidores, deal pipelines y tareas de codigo."
       },
       "agenticExecutionLayer": {
-        "title": "Capa de Agentes IA",
-        "description": "Agentes autonomos para optimizacion de publicidad, automatizacion de RCM, analisis financiero, cumplimiento de RRHH y mas. Cada agente entiende el contexto a nivel de unidad y opera continuamente."
+        "title": "Capa de Inteligencia",
+        "description": "Grafo de conocimiento con extraccion de entidades, mapeo de relaciones y recall contextual. Router multi-LLM compatible con Claude, GPT, DeepSeek y mas. Generacion de reportes en Excel/PDF."
       }
     }
   },
   "ai": {
-    "heading": "Agentes IA para Cada Funcion",
-    "description": "Despliega agentes especializados en toda tu organizacion.",
+    "heading": "Equipos de Agentes para Cada Dominio",
+    "description": "Despliega equipos de IA especializados en toda tu organizacion. Cada equipo tiene herramientas dedicadas, memoria y expertise de dominio.",
     "items": {
       "insightCopilots": {
-        "title": "Agentes de Inteligencia Financiera",
-        "description": "Consolida P&L entre unidades de negocio, detecta anomalias, pronostica flujo de caja y genera reportes listos para el directorio. Como tener un equipo de CFO que nunca duerme."
+        "title": "Asistente Personal (Luna)",
+        "description": "Gestion de email, coordinacion de calendario, comunicacion por WhatsApp, monitoreo de inbox, seguimiento en Jira y follow-ups proactivos. Tu asistente ejecutiva IA que aprende de cada interaccion."
       },
       "composableSkills": {
-        "title": "Agentes de Operaciones y Cumplimiento",
-        "description": "Monitorea cambios regulatorios, automatiza presentaciones de cumplimiento, gestiona incorporacion de RRHH y rastrea reclamos de seguros. Reduce riesgo mientras escalas mas rapido."
+        "title": "Equipo de Datos y Analytics",
+        "description": "Agentes de analisis de datos, generador de reportes y gestor de conocimiento. Queries SQL, analisis de datasets, reportes automatizados en Excel/PDF y gestion del grafo de conocimiento."
       },
       "closedLoopActuators": {
-        "title": "Agentes de Crecimiento e Ingresos",
-        "description": "Ejecuta campanas publicitarias hiperlocales, optimiza precios, gestiona adquisicion de clientes y automatiza la gestion del ciclo de ingresos en cada unidad de negocio."
+        "title": "Code Agent",
+        "description": "Coding autonomo potenciado por Claude Code CLI. Crea feature branches, implementa codigo, ejecuta tests y abre pull requests — todo en un pod aislado de Kubernetes."
+      },
+      "marketingSales": {
+        "title": "Equipo de Marketing y Ventas",
+        "description": "Gestion de campanas publicitarias en Meta, Google y TikTok. Monitoreo de competidores en ciclos de 24h. Lead scoring con rubrics configurables. Soporte al cliente y gestion de deals."
+      },
+      "dealTeam": {
+        "title": "Equipo de Deals",
+        "description": "Pipeline M&A completo: descubrir, calificar, investigar, contactar, avanzar y sincronizar. Workflows automatizados de deals con investigacion multi-paso y gestion de stakeholders."
+      },
+      "vetCardiology": {
+        "title": "Cardiologia Veterinaria (HealthPets)",
+        "description": "Analista cardiaco, agente de facturacion y supervisor veterinario para clinicas veterinarias. Workflows de facturacion mensual, seguimiento de uso y analisis medico especializado."
       }
     }
   },
   "roadmap": {
     "heading": "Lo que Estamos Construyendo",
-    "subtitle": "Funciones construidas a proposito para operadores empresariales.",
+    "subtitle": "Expandiendo las capacidades de los agentes e integraciones.",
     "items": {
       "marketplaceConnectors": {
-        "title": "Credito Privado y Prestamos",
-        "description": "Gestion integrada de deuda, seguimiento de covenants y reportes para prestamistas. Gestiona la estructura de capital en toda tu organizacion."
+        "title": "Agentes de SRE e Infraestructura",
+        "description": "Triage de alertas, deteccion de patrones, diseno de arquitectura cloud y troubleshooting de infraestructura. Integracion con Slack para monitoreo de canales de ops."
       },
       "adaptiveGovernanceAi": {
-        "title": "Hub de Optimizacion y Analitica",
-        "description": "Reportes automatizados, generacion de data room, soporte de calidad de ganancias y gestion de partes interesadas. Se operacionalmente excelente en todo momento."
+        "title": "Memoria y Recall Avanzado",
+        "description": "Sugerencias proactivas de memoria, threading de contexto entre sesiones y automatizaciones basadas en memoria. Tus agentes anticipan lo que necesitas."
       },
       "autonomousFinopsSuites": {
-        "title": "Playbooks por Industria",
-        "description": "Plantillas de integracion pre-construidas para salud, servicios del hogar, servicios profesionales y otras verticales operativas de alta frecuencia."
+        "title": "Marketplace y Plugins",
+        "description": "Skills de agentes construidos por la comunidad, integraciones de herramientas y templates de workflows. Extiende las capacidades de tus agentes sin escribir codigo."
       }
     }
   },
+  "memory": {
+    "heading": "Memoria que se Vuelve mas Inteligente Cada Dia",
+    "description": "Cada conversacion ensena a tus agentes. Luna extrae automaticamente personas, empresas, preferencias y decisiones en un grafo de conocimiento persistente. La proxima vez que preguntes, ya conoce el contexto.",
+    "badges": {
+      "entityExtraction": "Extraccion de Entidades",
+      "relationMapping": "Mapeo de Relaciones",
+      "contextualRecall": "Recall Contextual",
+      "activityFeed": "Feed de Actividad"
+    },
+    "overview": {
+      "title": "Resumen de Memoria",
+      "subtitle": "En vivo desde tus conversaciones",
+      "entities": "Entidades",
+      "memories": "Memorias",
+      "relations": "Relaciones",
+      "event1": "+ Extraido \"Carlos Rodriguez\" (persona)",
+      "event2": "+ Extraido \"Acme Technologies\" (organizacion)",
+      "event3": "+ Follow-up programado por email"
+    }
+  },
+  "ctaBanner": {
+    "heading": "Tu equipo de IA esta listo para desplegarse",
+    "description": "Crea tu cuenta y empieza a chatear con Luna en minutos. Ella aprendera tus contactos, preferencias y workflows desde el primer dia.",
+    "badges": {
+      "multiTenant": "Aislamiento Multi-Tenant",
+      "encryptedVault": "Vault de Credenciales Encriptadas",
+      "kubernetes": "Nativo en Kubernetes"
+    },
+    "stats": {
+      "agentTeams": "Equipos de Agentes",
+      "builtInTools": "Herramientas Integradas",
+      "integrations": "Integraciones"
+    }
+  },
   "testimonials": {
-    "heading": "Construido para Operadores Empresariales",
-    "subtitle": "Como operadores multi-unidad estan escalando con ServiceTsunami",
+    "heading": "Construido para Builders",
+    "subtitle": "Como equipos estan usando ServiceTsunami para desplegar agentes IA en produccion",
     "items": [
       {
-        "quote": "Nos estabamos ahogando en hojas de calculo tratando de consolidar finanzas de 30 unidades de negocio en 4 ERPs diferentes. ServiceTsunami nos dio una unica fuente de verdad y redujo nuestro cierre mensual de 3 semanas a 5 dias.",
-        "author": "CFO",
-        "role": "Organizacion de Servicios Multi-Ubicacion"
+        "quote": "Pasamos de un solo chatbot a una flota completa de agentes en dos semanas. Luna maneja las comunicaciones con clientes mientras el code agent implementa features de forma autonoma. El sistema de memoria hace que nada se pierda.",
+        "author": "Lider de Ingenieria IA",
+        "role": "Plataforma SaaS"
       },
       {
-        "quote": "Cada nueva unidad de negocio significaba contratar 2-3 personas mas solo para manejar la integracion. Ahora nuestros agentes IA manejan el 80% de la incorporacion automaticamente. Estamos escalando mas rapido con un equipo mas liviano.",
-        "author": "COO",
-        "role": "Plataforma de Servicios de Salud"
+        "quote": "El code agent autonomo es algo que nunca habia visto. Crea branches, implementa features y abre PRs por su cuenta. Combinado con la inteligencia de marketing y el grafo de conocimiento, es como tener un equipo IA que se vuelve mas inteligente cada dia.",
+        "author": "CTO",
+        "role": "Startup de Tecnologia"
       }
     ]
   },
   "cta": {
-    "heading": "Listo para Escalar tus Operaciones?",
-    "description": "Mira como ServiceTsunami consolida operaciones en cada unidad de negocio de tu organizacion. Agenda una demo y te mostraremos como se ve la integracion desde el dia uno."
+    "heading": "Listo para Desplegar tu Equipo de Agentes IA?",
+    "description": "Empieza a construir sistemas multi-agente hoy. Crea tu cuenta y ten a Luna, tu co-piloto IA, funcionando en minutos."
   }
 }

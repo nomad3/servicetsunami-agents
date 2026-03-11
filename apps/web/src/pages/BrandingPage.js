@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Col, Container, Form, Row } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import PremiumCard from '../components/common/PremiumCard';
 import Layout from '../components/Layout';
 import { brandingService } from '../services/branding';
 
 function BrandingPage() {
+  const { t } = useTranslation('settings');
   const [branding, setBranding] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -31,9 +33,9 @@ function BrandingPage() {
     setMessage(null);
     try {
       await brandingService.updateBranding(branding);
-      setMessage({ type: 'success', text: 'Branding saved successfully!' });
+      setMessage({ type: 'success', text: t('branding.success') });
     } catch (error) {
-      setMessage({ type: 'danger', text: 'Failed to save branding' });
+      setMessage({ type: 'danger', text: t('branding.error') });
     } finally {
       setSaving(false);
     }
@@ -46,7 +48,7 @@ function BrandingPage() {
   if (loading) {
     return (
       <Layout>
-        <Container className="py-5 text-center text-soft">Loading...</Container>
+        <Container className="py-5 text-center text-soft">{t('branding.loading')}</Container>
       </Layout>
     );
   }
@@ -56,8 +58,8 @@ function BrandingPage() {
       <Container fluid className="py-2">
         <Row className="mb-4">
           <Col>
-            <h2 className="fw-bold mb-1">Branding Settings</h2>
-            <p className="text-soft mb-0">Customize your platform's appearance</p>
+            <h2 className="fw-bold mb-1">{t('branding.title')}</h2>
+            <p className="text-soft mb-0">{t('branding.subtitle')}</p>
           </Col>
         </Row>
 
@@ -68,10 +70,10 @@ function BrandingPage() {
             <Col md={6}>
               <PremiumCard className="mb-4 h-100">
                 <div className="mb-4 border-bottom border-secondary border-opacity-25 pb-2">
-                  <h5 className="mb-0">Brand Identity</h5>
+                  <h5 className="mb-0">{t('branding.brandIdentity')}</h5>
                 </div>
                 <Form.Group className="mb-3">
-                  <Form.Label className="text-soft">Company Name</Form.Label>
+                  <Form.Label className="text-soft">{t('branding.companyName')}</Form.Label>
                   <Form.Control
                     type="text"
                     value={branding?.company_name || ''}
@@ -80,7 +82,7 @@ function BrandingPage() {
                   />
                 </Form.Group>
                 <Form.Group className="mb-3">
-                  <Form.Label className="text-soft">Logo URL</Form.Label>
+                  <Form.Label className="text-soft">{t('branding.logoUrl')}</Form.Label>
                   <Form.Control
                     type="url"
                     value={branding?.logo_url || ''}
@@ -89,7 +91,7 @@ function BrandingPage() {
                   />
                 </Form.Group>
                 <Form.Group className="mb-3">
-                  <Form.Label className="text-soft">Support Email</Form.Label>
+                  <Form.Label className="text-soft">{t('branding.supportEmail')}</Form.Label>
                   <Form.Control
                     type="email"
                     value={branding?.support_email || ''}
@@ -103,12 +105,12 @@ function BrandingPage() {
             <Col md={6}>
               <PremiumCard className="mb-4 h-100">
                 <div className="mb-4 border-bottom border-secondary border-opacity-25 pb-2">
-                  <h5 className="mb-0">Colors</h5>
+                  <h5 className="mb-0">{t('branding.colors')}</h5>
                 </div>
                 <Row>
                   <Col md={6}>
                     <Form.Group className="mb-3">
-                      <Form.Label className="text-soft">Primary Color</Form.Label>
+                      <Form.Label className="text-soft">{t('branding.primaryColor')}</Form.Label>
                       <Form.Control
                         type="color"
                         value={branding?.primary_color || '#2b7de9'}
@@ -120,7 +122,7 @@ function BrandingPage() {
                   </Col>
                   <Col md={6}>
                     <Form.Group className="mb-3">
-                      <Form.Label className="text-soft">Secondary Color</Form.Label>
+                      <Form.Label className="text-soft">{t('branding.secondaryColor')}</Form.Label>
                       <Form.Control
                         type="color"
                         value={branding?.secondary_color || '#5ec5b0'}
@@ -134,7 +136,7 @@ function BrandingPage() {
                 <Row>
                   <Col md={6}>
                     <Form.Group className="mb-3">
-                      <Form.Label className="text-soft">Accent Color</Form.Label>
+                      <Form.Label className="text-soft">{t('branding.accentColor')}</Form.Label>
                       <Form.Control
                         type="color"
                         value={branding?.accent_color || '#2b7de9'}
@@ -153,31 +155,31 @@ function BrandingPage() {
             <Col md={6}>
               <PremiumCard className="mb-4 h-100">
                 <div className="mb-4 border-bottom border-secondary border-opacity-25 pb-2">
-                  <h5 className="mb-0">AI Assistant</h5>
+                  <h5 className="mb-0">{t('branding.aiAssistant')}</h5>
                 </div>
                 <Form.Group className="mb-3">
-                  <Form.Label className="text-soft">Assistant Name</Form.Label>
+                  <Form.Label className="text-soft">{t('branding.assistantName')}</Form.Label>
                   <Form.Control
                     type="text"
                     value={branding?.ai_assistant_name || ''}
                     onChange={(e) => updateField('ai_assistant_name', e.target.value)}
-                    placeholder="AI Assistant"
+                    placeholder={t('branding.assistantNamePlaceholder')}
                     className="border-secondary border-opacity-50"
                   />
                 </Form.Group>
                 <Form.Group className="mb-3">
-                  <Form.Label className="text-soft">Industry</Form.Label>
+                  <Form.Label className="text-soft">{t('branding.industry')}</Form.Label>
                   <Form.Select
                     value={branding?.industry || ''}
                     onChange={(e) => updateField('industry', e.target.value)}
                     className="border-secondary border-opacity-50"
                   >
-                    <option value="">Select industry...</option>
-                    <option value="healthcare">Healthcare</option>
-                    <option value="finance">Finance</option>
-                    <option value="legal">Legal</option>
-                    <option value="retail">Retail</option>
-                    <option value="technology">Technology</option>
+                    <option value="">{t('branding.industryPlaceholder')}</option>
+                    <option value="healthcare">{t('branding.industries.healthcare')}</option>
+                    <option value="finance">{t('branding.industries.finance')}</option>
+                    <option value="legal">{t('branding.industries.legal')}</option>
+                    <option value="retail">{t('branding.industries.retail')}</option>
+                    <option value="technology">{t('branding.industries.technology')}</option>
                   </Form.Select>
                 </Form.Group>
               </PremiumCard>
@@ -186,22 +188,22 @@ function BrandingPage() {
             <Col md={6}>
               <PremiumCard className="mb-4 h-100">
                 <div className="mb-4 border-bottom border-secondary border-opacity-25 pb-2">
-                  <h5 className="mb-0">Custom Domain</h5>
+                  <h5 className="mb-0">{t('branding.customDomain')}</h5>
                 </div>
                 <Form.Group className="mb-3">
-                  <Form.Label className="text-soft">Domain</Form.Label>
+                  <Form.Label className="text-soft">{t('branding.domain')}</Form.Label>
                   <Form.Control
                     type="text"
                     value={branding?.custom_domain || ''}
                     onChange={(e) => updateField('custom_domain', e.target.value)}
-                    placeholder="app.yourcompany.com"
+                    placeholder={t('branding.domainPlaceholder')}
                     className="border-secondary border-opacity-50"
                   />
                 </Form.Group>
                 <p className="text-soft small">
                   {branding?.domain_verified
-                    ? '✅ Domain verified'
-                    : '⚠️ Domain not verified'}
+                    ? `\u2705 ${t('branding.domainVerified')}`
+                    : `\u26A0\uFE0F ${t('branding.domainNotVerified')}`}
                 </p>
               </PremiumCard>
             </Col>
@@ -209,7 +211,7 @@ function BrandingPage() {
 
           <div className="d-flex justify-content-end">
             <Button type="submit" variant="primary" disabled={saving} size="lg" className="px-5">
-              {saving ? 'Saving...' : 'Save Changes'}
+              {saving ? t('branding.saving') : t('branding.saveChanges')}
             </Button>
           </div>
         </Form>

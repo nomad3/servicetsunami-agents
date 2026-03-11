@@ -8,6 +8,7 @@ import {
   Nav,
   Spinner,
 } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import {
   FaBinoculars,
   FaBolt,
@@ -441,11 +442,13 @@ const WorkflowCard = ({ workflow }) => {
 // ===========================================================================
 // Designs Tab Content
 // ===========================================================================
-const DesignsTab = () => (
+const DesignsTab = () => {
+  const { t } = useTranslation('workflows');
+  return (
   <div>
     <div style={{ marginBottom: '1rem' }}>
       <p style={{ color: 'var(--color-muted)', fontSize: '0.82rem', margin: 0 }}>
-        Visual structure of all Temporal workflows. Click a workflow to expand its step-by-step flowchart.
+        {t('designs.description')}
       </p>
     </div>
 
@@ -461,7 +464,7 @@ const DesignsTab = () => (
         fontWeight: 600,
       }}>
         <FaServer size={10} style={{ marginRight: '0.3rem' }} />
-        orchestration queue — {WORKFLOW_DEFINITIONS.filter(w => w.queue === 'orchestration').length} workflows
+        {t('designs.orchestrationQueue')} — {WORKFLOW_DEFINITIONS.filter(w => w.queue === 'orchestration').length} workflows
       </div>
       <div style={{
         padding: '0.5rem 0.85rem',
@@ -473,7 +476,7 @@ const DesignsTab = () => (
         fontWeight: 600,
       }}>
         <FaServer size={10} style={{ marginRight: '0.3rem' }} />
-        databricks queue — {WORKFLOW_DEFINITIONS.filter(w => w.queue === 'databricks').length} workflows
+        {t('designs.databricksQueue')} — {WORKFLOW_DEFINITIONS.filter(w => w.queue === 'databricks').length} workflows
       </div>
       <div style={{
         padding: '0.5rem 0.85rem',
@@ -485,18 +488,18 @@ const DesignsTab = () => (
         fontWeight: 600,
       }}>
         <FaServer size={10} style={{ marginRight: '0.3rem' }} />
-        code queue — {WORKFLOW_DEFINITIONS.filter(w => w.queue === 'code').length} workflows
+        {t('designs.codeQueue')} — {WORKFLOW_DEFINITIONS.filter(w => w.queue === 'code').length} workflows
       </div>
     </div>
 
     {/* Grouped by category */}
     {[
-      { key: 'platform', label: 'Platform', color: '#60a5fa' },
-      { key: 'data', label: 'Data', color: '#34d399' },
-      { key: 'sales', label: 'Sales', color: '#f59e0b' },
-      { key: 'marketing', label: 'Marketing', color: '#f97316' },
-      { key: 'healthpets', label: 'Industry · HealthPets', color: '#f472b6' },
-      { key: 'remedia', label: 'Industry · Remedia', color: '#10b981' },
+      { key: 'platform', color: '#60a5fa' },
+      { key: 'data', color: '#34d399' },
+      { key: 'sales', color: '#f59e0b' },
+      { key: 'marketing', color: '#f97316' },
+      { key: 'healthpets', color: '#f472b6' },
+      { key: 'remedia', color: '#10b981' },
     ].map((cat) => {
       const catWorkflows = WORKFLOW_DEFINITIONS.filter(w => w.category === cat.key);
       if (catWorkflows.length === 0) return null;
@@ -512,7 +515,7 @@ const DesignsTab = () => (
             paddingBottom: '0.3rem',
             borderBottom: `1px solid ${cat.color}25`,
           }}>
-            {cat.label}
+            {t(`designs.categories.${cat.key}`)}
             <span style={{ fontWeight: 500, color: 'var(--color-muted)', marginLeft: '0.5rem', fontSize: '0.65rem' }}>
               {catWorkflows.length} workflow{catWorkflows.length !== 1 ? 's' : ''}
             </span>
@@ -526,7 +529,8 @@ const DesignsTab = () => (
       );
     })}
   </div>
-);
+  );
+};
 
 // ===========================================================================
 // EXECUTIONS TAB — Workflow Audit (from TaskConsolePage)
@@ -915,6 +919,7 @@ const WorkflowDetailModal = ({
 };
 
 const ExecutionsTab = () => {
+  const { t } = useTranslation('workflows');
   const [workflows, setWorkflows] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1116,18 +1121,18 @@ const ExecutionsTab = () => {
         </Form.Select>
         <Button variant="outline-secondary" size="sm" onClick={handleRefresh} disabled={loading}>
           <FaSyncAlt className={loading ? 'fa-spin' : ''} style={{ marginRight: '0.3rem' }} />
-          Refresh
+          {t('executions.refresh')}
         </Button>
       </div>
 
       {/* Stats */}
       <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', overflowX: 'auto' }}>
-        <StatCard icon={FaStream} label="Total Workflows" value={stats?.total_workflows ?? '-'} color="#60a5fa" />
-        <StatCard icon={FaPlay} label="Running" value={stats?.running_count ?? '-'} color="#fbbf24" />
-        <StatCard icon={FaCheckCircle} label="Completed" value={stats?.completed_count ?? '-'} color="#34d399" />
-        <StatCard icon={FaTimesCircle} label="Failed" value={stats?.failed_count ?? '-'} color="#f87171" />
-        <StatCard icon={FaCoins} label="Total Tokens" value={stats?.total_tokens ?? '-'} color="#a78bfa" />
-        <StatCard icon={FaDollarSign} label="Total Cost" value={stats?.total_cost != null ? `$${stats.total_cost.toFixed(2)}` : '-'} color="#f472b6" />
+        <StatCard icon={FaStream} label={t('executions.stats.totalWorkflows')} value={stats?.total_workflows ?? '-'} color="#60a5fa" />
+        <StatCard icon={FaPlay} label={t('executions.stats.running')} value={stats?.running_count ?? '-'} color="#fbbf24" />
+        <StatCard icon={FaCheckCircle} label={t('executions.stats.completed')} value={stats?.completed_count ?? '-'} color="#34d399" />
+        <StatCard icon={FaTimesCircle} label={t('executions.stats.failed')} value={stats?.failed_count ?? '-'} color="#f87171" />
+        <StatCard icon={FaCoins} label={t('executions.stats.totalTokens')} value={stats?.total_tokens ?? '-'} color="#a78bfa" />
+        <StatCard icon={FaDollarSign} label={t('executions.stats.totalCost')} value={stats?.total_cost != null ? `$${stats.total_cost.toFixed(2)}` : '-'} color="#f472b6" />
       </div>
 
       {/* Workflow Table */}
@@ -1176,7 +1181,7 @@ const ExecutionsTab = () => {
         }}>
           <Form.Control
             size="sm"
-            placeholder="Search by objective, workflow ID, or type..."
+            placeholder={t('executions.filter.searchPlaceholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
@@ -1199,11 +1204,11 @@ const ExecutionsTab = () => {
               fontSize: '0.75rem',
             }}
           >
-            <option value="">All Status</option>
-            <option value="queued">Queued</option>
-            <option value="executing">Running</option>
-            <option value="completed">Completed</option>
-            <option value="failed">Failed</option>
+            <option value="">{t('executions.filter.allStatus')}</option>
+            <option value="queued">{t('executions.filter.queued')}</option>
+            <option value="executing">{t('executions.filter.running')}</option>
+            <option value="completed">{t('executions.filter.completed')}</option>
+            <option value="failed">{t('executions.filter.failed')}</option>
           </Form.Select>
           <Form.Select
             size="sm"
@@ -1217,10 +1222,10 @@ const ExecutionsTab = () => {
               fontSize: '0.75rem',
             }}
           >
-            <option value="newest">Newest</option>
-            <option value="oldest">Oldest</option>
-            <option value="duration">Duration</option>
-            <option value="cost">Cost</option>
+            <option value="newest">{t('executions.filter.newest')}</option>
+            <option value="oldest">{t('executions.filter.oldest')}</option>
+            <option value="duration">{t('executions.filter.sortDuration')}</option>
+            <option value="cost">{t('executions.filter.sortCost')}</option>
           </Form.Select>
         </div>
 
@@ -1239,12 +1244,12 @@ const ExecutionsTab = () => {
           letterSpacing: '0.04em',
         }}>
           <span></span>
-          <span>Workflow</span>
-          <span>Type</span>
-          <span>Status</span>
-          <span style={{ textAlign: 'right' }}>Tokens</span>
-          <span style={{ textAlign: 'right' }}>Cost</span>
-          <span style={{ textAlign: 'right' }}>Duration</span>
+          <span>{t('executions.table.workflow')}</span>
+          <span>{t('executions.table.type')}</span>
+          <span>{t('executions.table.status')}</span>
+          <span style={{ textAlign: 'right' }}>{t('executions.table.tokens')}</span>
+          <span style={{ textAlign: 'right' }}>{t('executions.table.cost')}</span>
+          <span style={{ textAlign: 'right' }}>{t('executions.table.duration')}</span>
         </div>
 
         {/* Rows */}
@@ -1252,11 +1257,11 @@ const ExecutionsTab = () => {
           {loading && workflows.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--color-muted)' }}>
               <Spinner animation="border" size="sm" style={{ marginRight: '0.5rem' }} />
-              Loading workflows...
+              {t('executions.loading')}
             </div>
           ) : filteredWorkflows.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--color-muted)' }}>
-              No workflows found
+              {t('executions.noWorkflows')}
             </div>
           ) : (
             filteredWorkflows.map((entry, idx) => {
@@ -1481,11 +1486,11 @@ const ExecutionsTab = () => {
           display: 'flex',
           justifyContent: 'space-between',
         }}>
-          <span>{workflows.length} workflows ({filteredWorkflows.length} groups)</span>
+          <span>{t('executions.workflowsCount', { total: workflows.length, filtered: filteredWorkflows.length })}</span>
           {stats?.temporal_available === false && (
             <span style={{ color: '#fbbf24' }}>
               <FaExclamationTriangle size={10} style={{ marginRight: '0.2rem' }} />
-              Temporal offline — showing DB data only
+              {t('executions.temporalOffline')}
             </span>
           )}
         </div>
@@ -1509,6 +1514,7 @@ const ExecutionsTab = () => {
 // Main WorkflowsPage
 // ===========================================================================
 const WorkflowsPage = () => {
+  const { t } = useTranslation('workflows');
   const [searchParams, setSearchParams] = useSearchParams();
   const activeMainTab = searchParams.get('tab') || 'executions';
 
@@ -1521,10 +1527,10 @@ const WorkflowsPage = () => {
       <div style={{ padding: '1.5rem' }}>
         <div style={{ marginBottom: '0.5rem' }}>
           <h4 style={{ color: 'var(--color-foreground)', marginBottom: '0.25rem', fontWeight: 600 }}>
-            Workflows
+            {t('title')}
           </h4>
           <p style={{ color: 'var(--color-muted)', fontSize: '0.85rem', margin: 0 }}>
-            Workflow architecture and execution audit
+            {t('subtitle')}
           </p>
         </div>
 
@@ -1534,14 +1540,14 @@ const WorkflowsPage = () => {
             onClick={() => setTab('executions')}
           >
             <FaStream size={12} style={{ marginRight: '0.4rem' }} />
-            Executions
+            {t('tabs.executions')}
           </button>
           <button
             className={`workflows-tab-btn ${activeMainTab === 'designs' ? 'active' : ''}`}
             onClick={() => setTab('designs')}
           >
             <FaDraftingCompass size={12} style={{ marginRight: '0.4rem' }} />
-            Designs
+            {t('tabs.designs')}
           </button>
         </div>
 

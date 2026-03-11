@@ -1,0 +1,217 @@
+{
+  "title": "Integraciones",
+  "subtitle": "Apps conectadas, conectores, fuentes de datos y datasets en un solo lugar",
+  "tabs": {
+    "integrations": "Integraciones",
+    "connectors": "Conectores",
+    "dataSources": "Fuentes de Datos",
+    "datasets": "Datasets",
+    "aiModels": "Modelos de IA",
+    "skills": "Skills"
+  },
+  "connectors": {
+    "title": "Conectores",
+    "addConnector": "Agregar Conector",
+    "total": "Conectores",
+    "active": "Activos",
+    "activeSyncs": "Syncs Activos",
+    "needAttention": "Requieren Atención",
+    "loading": "Cargando conectores...",
+    "noConnectors": "Aún no hay conectores",
+    "noConnectorsDesc": "Conecta tu primer sistema para empezar a sincronizar datos",
+    "connectFirst": "Conecta Tu Primer Sistema",
+    "connectedSystems": "Sistemas Conectados",
+    "dataSyncs": "Syncs de Datos",
+    "noSyncsScheduled": "No hay syncs programados",
+    "lastTested": "Última prueba",
+    "never": "Nunca",
+    "source": "Origen",
+    "status": {
+      "active": "Activo",
+      "error": "Error",
+      "pending": "Pendiente"
+    },
+    "actions": {
+      "test": "Probar",
+      "edit": "Editar",
+      "sync": "Sincronizar",
+      "delete": "Eliminar"
+    },
+    "modal": {
+      "createTitle": "Agregar Nuevo Conector",
+      "editTitle": "Editar Conector",
+      "name": "Nombre",
+      "namePlaceholder": "ej. Snowflake Producción",
+      "type": "Tipo",
+      "description": "Descripción",
+      "descriptionPlaceholder": "Descripción opcional...",
+      "connectionSettings": "Configuración de Conexión",
+      "select": "Seleccionar...",
+      "testConnection": "Probar Conexión",
+      "testing": "Probando...",
+      "cancel": "Cancelar",
+      "saving": "Guardando...",
+      "update": "Actualizar",
+      "create": "Crear"
+    },
+    "sync": {
+      "title": "Programar Sync de Datos",
+      "connector": "Conector",
+      "selectConnector": "Selecciona un conector...",
+      "tableName": "Nombre de Tabla/Query",
+      "tablePlaceholder": "ej. customers, orders",
+      "frequency": "Frecuencia",
+      "frequencyHourly": "Cada hora",
+      "frequencyDaily": "Diario",
+      "frequencyWeekly": "Semanal",
+      "mode": "Modo de Sync",
+      "modeFull": "Refresh Completo",
+      "modeIncremental": "Incremental",
+      "cancel": "Cancelar",
+      "schedule": "Programar Sync"
+    },
+    "success": {
+      "created": "Conector creado",
+      "updated": "Conector actualizado",
+      "deleted": "Conector eliminado",
+      "testPassed": "¡Conexión exitosa!",
+      "syncCreated": "Sync programado",
+      "syncStarted": "¡Sync iniciado!"
+    },
+    "errors": {
+      "save": "No se pudo guardar el conector",
+      "delete": "No se pudo eliminar el conector",
+      "test": "La prueba de conexión falló",
+      "syncCreate": "No se pudo crear el sync",
+      "syncStart": "No se pudo iniciar el sync",
+      "deleteConfirm": "¿Eliminar este conector? También se eliminarán los syncs programados."
+    }
+  },
+  "dataSources": {
+    "title": "Fuentes de Datos",
+    "subtitle": "Bases de datos externas y APIs que tus agentes de IA pueden consultar",
+    "addSource": "Agregar Fuente de Datos",
+    "loading": "Cargando fuentes de datos...",
+    "noSources": "Aún no hay fuentes de datos",
+    "noSourcesDesc": "Agrega una fuente de datos para que tus agentes de IA puedan consultar bases de datos y APIs externas.",
+    "connected": "Conectado",
+    "configured": "Configurado",
+    "modal": {
+      "createTitle": "Agregar Fuente de Datos",
+      "editTitle": "Editar Fuente de Datos",
+      "name": "Nombre",
+      "namePlaceholder": "ej. BD de Producción",
+      "type": "Tipo",
+      "connectionDetails": "Detalles de Conexión",
+      "cancel": "Cancelar",
+      "update": "Actualizar",
+      "connect": "Conectar"
+    },
+    "fields": {
+      "databricksHost": "Databricks Host",
+      "accessToken": "Token de Acceso",
+      "httpPath": "HTTP Path / ID de Warehouse",
+      "host": "Host",
+      "port": "Puerto",
+      "database": "Nombre de Base de Datos",
+      "username": "Usuario",
+      "password": "Contraseña",
+      "configJson": "Configuración (JSON)"
+    },
+    "success": {
+      "created": "Fuente de datos creada",
+      "updated": "Fuente de datos actualizada",
+      "deleted": "Fuente de datos eliminada"
+    },
+    "errors": {
+      "save": "No se pudo guardar la fuente de datos",
+      "delete": "No se pudo eliminar la fuente de datos",
+      "deleteConfirm": "¿Estás seguro de que deseas eliminar esta fuente de datos?"
+    }
+  },
+  "datasets": {
+    "title": "Datasets",
+    "upload": "Subir Dataset",
+    "createGroup": "Crear Grupo",
+    "subTabs": {
+      "datasets": "Datasets",
+      "groups": "Grupos"
+    },
+    "table": {
+      "name": "Nombre",
+      "description": "Descripci\u00f3n",
+      "rows": "Filas",
+      "sync": "Sync",
+      "created": "Creado",
+      "actions": "Acciones"
+    },
+    "loading": "Cargando datasets...",
+    "noDatasets": "A\u00fan no se han subido datasets.",
+    "noGroups": "A\u00fan no se han creado grupos.",
+    "noPreview": "No hay vista previa disponible",
+    "noSummary": "No hay estad\u00edsticas de resumen",
+    "preview": "Vista previa",
+    "syncing": "Sincronizando...",
+    "sync": "Sync",
+    "syncError": "No se pudo iniciar el sync",
+    "loadingPreview": "Cargando vista previa...",
+    "loadingSummary": "Cargando resumen...",
+    "summaryStats": "Estadísticas de Resumen",
+    "loadingDatasets": "Cargando datasets...",
+    "loadingGroups": "Cargando grupos...",
+    "noDatasets": "Aún no se han subido datasets",
+    "noGroups": "No hay grupos de datasets",
+    "noPreview": "No hay vista previa disponible",
+    "noSummary": "No hay estadísticas de resumen",
+    "noDatasetsAvailable": "No hay datasets disponibles.",
+    "close": "Cerrar",
+    "uploadModal": {
+      "title": "Subir Dataset",
+      "name": "Nombre",
+      "namePlaceholder": "Nombre del dataset",
+      "description": "Descripción",
+      "descriptionPlaceholder": "Descripción opcional",
+      "file": "Archivo",
+      "fileHelp": "Formatos soportados: CSV, XLS, XLSX",
+      "cancel": "Cancelar",
+      "uploading": "Subiendo...",
+      "upload": "Subir"
+    },
+    "groupModal": {
+      "title": "Crear Grupo de Datasets",
+      "name": "Nombre del Grupo",
+      "description": "Descripci\u00f3n",
+      "selectDatasets": "Selecciona Datasets (m\u00edn 2)",
+      "cancel": "Cancelar",
+      "creating": "Creando...",
+      "create": "Crear Grupo"
+    },
+    "success": {
+      "uploaded": "Dataset subido",
+      "groupCreated": "Grupo creado"
+    },
+    "errors": {
+      "upload": "No se pudo subir el dataset",
+      "groupCreate": "No se pudo crear el grupo",
+      "groupMin": "Selecciona al menos 2 datasets para agrupar."
+    }
+  },
+  "aiModels": {
+    "title": "Modelos de IA",
+    "subtitle": "Configura las API keys de tus proveedores de modelos de IA",
+    "loading": "Cargando modelos de IA...",
+    "connected": "Conectado",
+    "notConfigured": "Sin configurar",
+    "apiKey": "API Key",
+    "apiKeyPlaceholder": "Ingresa la API key",
+    "apiKeyMasked": "••••••••••••",
+    "saveKey": "Guardar Key",
+    "keySaved": "Key guardada",
+    "openaiCompatible": "Compatible con OpenAI",
+    "nativeApi": "API nativa",
+    "errors": {
+      "load": "No se pudieron cargar los proveedores",
+      "saveKey": "No se pudo guardar la key de {{provider}}"
+    }
+  }
+}

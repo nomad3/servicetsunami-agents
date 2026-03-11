@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import uuid
@@ -77,7 +78,9 @@ def _fetch_claude_token(tenant_id: str) -> str:
 async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
     """Execute a code task using Claude Code CLI."""
     branch_id = uuid.uuid4().hex[:8]
-    branch_name = f"code/task-{branch_id}"
+    # Generate readable branch name: code/feat-add-user-auth-a1b2c3d4
+    slug = re.sub(r'[^a-z0-9]+', '-', task_input.task_description[:50].lower()).strip('-')[:40]
+    branch_name = f"code/feat-{slug}-{branch_id}"
 
     try:
         # 1. Fetch tenant's Claude Code session token

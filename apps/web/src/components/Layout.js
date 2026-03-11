@@ -51,29 +51,29 @@ const Layout = ({ children }) => {
     {
       title: null,  // No header for top-level dashboard
       items: [
-        { path: '/dashboard', icon: HouseDoorFill, label: 'Dashboard', description: 'Operations overview' },
+        { path: '/dashboard', icon: HouseDoorFill, label: t('sidebar.dashboard'), description: t('sidebar_desc.dashboard') },
       ]
     },
     {
-      title: 'AI OPERATIONS',
+      title: t('sidebar.aiOperations'),
       items: [
-        { path: '/chat', icon: ChatDotsFill, label: 'AI Chat', description: 'Chat with your AI agent fleet' },
-        { path: '/agents', icon: Robot, label: 'Agent Fleet', description: 'Manage your AI agent fleet' },
-        { path: '/workflows', icon: ProjectDiagramFill, label: 'Workflows', description: 'Workflow designs and execution audit' },
-        { path: '/memory', icon: DatabaseFill, label: 'Memory', description: 'What Luna knows and remembers' },
+        { path: '/chat', icon: ChatDotsFill, label: t('sidebar.chat'), description: t('sidebar_desc.chat') },
+        { path: '/agents', icon: Robot, label: t('sidebar.agents'), description: t('sidebar_desc.agents') },
+        { path: '/workflows', icon: ProjectDiagramFill, label: t('sidebar.workflows'), description: t('sidebar_desc.workflows') },
+        { path: '/memory', icon: DatabaseFill, label: t('sidebar.memory'), description: t('sidebar_desc.memory') },
       ]
     },
     {
-      title: 'DATA',
+      title: t('sidebar.data'),
       items: [
-        { path: '/integrations', icon: PlugFill, label: 'Integrations', description: 'Connectors, data sources & datasets' },
+        { path: '/integrations', icon: PlugFill, label: t('sidebar.integrations'), description: t('sidebar_desc.integrations') },
       ]
     },
     {
-      title: 'ADMIN',
+      title: t('sidebar.admin'),
       items: [
-        { path: '/tenants', icon: BuildingFill, label: 'Organizations', description: 'Manage organizations & business units' },
-        { path: '/settings', icon: GearFill, label: 'Settings', description: 'Platform settings' },
+        { path: '/tenants', icon: BuildingFill, label: t('sidebar.organizations'), description: t('sidebar_desc.organizations') },
+        { path: '/settings', icon: GearFill, label: t('sidebar.settings'), description: t('sidebar_desc.settings') },
       ]
     }
   ];
@@ -147,13 +147,13 @@ const Layout = ({ children }) => {
               <div className="d-flex align-items-center gap-2">
                 <PersonCircle size={32} className="text-primary" />
                 <div className="flex-grow-1 text-start">
-                  <div className="user-email">{auth.user?.email || 'Guest'}</div>
-                  <div className="user-role">Administrator</div>
+                  <div className="user-email">{auth.user?.email || t('layout.guest')}</div>
+                  <div className="user-role">{t('sidebar.administrator')}</div>
                 </div>
               </div>
             </Dropdown.Toggle>
             <Dropdown.Menu className="w-100">
-              <Dropdown.Header>Language</Dropdown.Header>
+              <Dropdown.Header>{t('language.label')}</Dropdown.Header>
               {languageOptions.map(({ code, label }) => (
                 <Dropdown.Item
                   key={code}

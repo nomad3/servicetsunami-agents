@@ -116,7 +116,7 @@ const TAB_KEYS = ['integrations', 'connectors', 'data-sources', 'datasets', 'ai-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 const IntegrationsPage = () => {
-  const { t } = useTranslation('datasets');
+  const { t } = useTranslation('integrations');
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = TAB_KEYS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'integrations';
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -234,16 +234,16 @@ const IntegrationsPage = () => {
       setSaving(true);
       if (editingConnector) {
         await connectorService.update(editingConnector.id, connectorForm);
-        setSuccess('Connector updated');
+        setSuccess(t('connectors.success.updated'));
       } else {
         await connectorService.create(connectorForm);
-        setSuccess('Connector created');
+        setSuccess(t('connectors.success.created'));
       }
       setShowConnectorModal(false);
       fetchConnectors();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
-      setError('Failed to save connector');
+      setError(t('connectors.errors.save'));
     } finally {
       setSaving(false);
     }
@@ -254,7 +254,7 @@ const IntegrationsPage = () => {
       if (connectorId) {
         setTesting(connectorId);
         await connectorService.testExisting(connectorId);
-        setSuccess('Connection successful!');
+        setSuccess(t('connectors.success.testPassed'));
         fetchConnectors();
       } else {
         setTesting(true);
@@ -263,7 +263,7 @@ const IntegrationsPage = () => {
       }
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
-      setError('Connection test failed');
+      setError(t('connectors.errors.test'));
       if (!connectorId) setTestResult({ success: false, message: err.response?.data?.detail || 'Connection failed' });
     } finally {
       setTesting(null);
@@ -271,14 +271,14 @@ const IntegrationsPage = () => {
   };
 
   const handleDeleteConnector = async (id) => {
-    if (window.confirm('Delete this connector? This will also remove any scheduled syncs.')) {
+    if (window.confirm(t('connectors.errors.deleteConfirm'))) {
       try {
         await connectorService.delete(id);
-        setSuccess('Connector deleted');
+        setSuccess(t('connectors.success.deleted'));
         fetchConnectors();
         setTimeout(() => setSuccess(null), 3000);
       } catch (err) {
-        setError('Failed to delete connector');
+        setError(t('connectors.errors.delete'));
       }
     }
   };
@@ -296,12 +296,12 @@ const IntegrationsPage = () => {
         name: `Sync: ${connector?.name || 'Unknown'} - ${syncForm.table_name}`,
         config: { type: 'connector_sync', connector_id: syncForm.connector_id, table_name: syncForm.table_name, frequency: syncForm.frequency, mode: syncForm.mode }
       });
-      setSuccess('Sync schedule created');
+      setSuccess(t('connectors.success.syncCreated'));
       setShowSyncModal(false);
       fetchConnectors();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
-      setError('Failed to create sync');
+      setError(t('connectors.errors.syncCreate'));
     } finally {
       setSaving(false);
     }
@@ -311,10 +311,10 @@ const IntegrationsPage = () => {
     try {
       setSyncing(syncId);
       await dataPipelineService.execute(syncId);
-      setSuccess('Sync started!');
+      setSuccess(t('connectors.success.syncStarted'));
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
-      setError('Failed to start sync');
+      setError(t('connectors.errors.syncStart'));
     } finally {
       setSyncing(null);
     }
@@ -322,9 +322,9 @@ const IntegrationsPage = () => {
 
   const getStatusBadge = (status) => {
     const configs = {
-      active: { bg: 'success', icon: FaCheckCircle, text: 'Active' },
-      error: { bg: 'danger', icon: FaTimesCircle, text: 'Error' },
-      pending: { bg: 'warning', icon: FaExclamationTriangle, text: 'Pending' }
+      active: { bg: 'success', icon: FaCheckCircle, text: t('connectors.status.active') },
+      error: { bg: 'danger', icon: FaTimesCircle, text: t('connectors.status.error') },
+      pending: { bg: 'warning', icon: FaExclamationTriangle, text: t('connectors.status.pending') }
     };
     const config = configs[status] || configs.pending;
     return <Badge bg={config.bg}><config.icon className="me-1" size={10} />{config.text}</Badge>;
@@ -367,31 +367,31 @@ const IntegrationsPage = () => {
       setDsSubmitting(true);
       if (editingDsId) {
         await dataSourceService.update(editingDsId, dsForm);
-        setSuccess('Data source updated');
+        setSuccess(t('dataSources.success.updated'));
       } else {
         await dataSourceService.create(dsForm);
-        setSuccess('Data source created');
+        setSuccess(t('dataSources.success.created'));
       }
       fetchDataSources();
       setShowDsModal(false);
       setEditingDsId(null);
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
-      setError('Failed to save data source');
+      setError(t('dataSources.errors.save'));
     } finally {
       setDsSubmitting(false);
     }
   };
 
   const handleDeleteDs = async (id) => {
-    if (window.confirm('Are you sure you want to delete this data source?')) {
+    if (window.confirm(t('dataSources.errors.deleteConfirm'))) {
       try {
         await dataSourceService.remove(id);
-        setSuccess('Data source deleted');
+        setSuccess(t('dataSources.success.deleted'));
         fetchDataSources();
         setTimeout(() => setSuccess(null), 3000);
       } catch (err) {
-        setError('Failed to delete data source');
+        setError(t('dataSources.errors.delete'));
       }
     }
   };
@@ -411,15 +411,15 @@ const IntegrationsPage = () => {
         return (
           <>
             <Form.Group className="mb-3">
-              <Form.Label>Databricks Host</Form.Label>
+              <Form.Label>{t('dataSources.fields.databricksHost')}</Form.Label>
               <Form.Control type="text" placeholder="https://adb-xxxx.xx.azuredatabricks.net" value={dsForm.config.host || ''} onChange={(e) => handleDsConfigChange('host', e.target.value)} required />
             </Form.Group>
             <Form.Group className="mb-3">
-              <Form.Label>Access Token</Form.Label>
+              <Form.Label>{t('dataSources.fields.accessToken')}</Form.Label>
               <Form.Control type="password" placeholder="dapi..." value={dsForm.config.token || ''} onChange={(e) => handleDsConfigChange('token', e.target.value)} required />
             </Form.Group>
             <Form.Group className="mb-3">
-              <Form.Label>HTTP Path / Warehouse ID</Form.Label>
+              <Form.Label>{t('dataSources.fields.httpPath')}</Form.Label>
               <Form.Control type="text" placeholder="/sql/1.0/warehouses/..." value={dsForm.config.http_path || ''} onChange={(e) => handleDsConfigChange('http_path', e.target.value)} />
             </Form.Group>
           </>
@@ -430,31 +430,31 @@ const IntegrationsPage = () => {
             <Row>
               <Col md={8}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Host</Form.Label>
+                  <Form.Label>{t('dataSources.fields.host')}</Form.Label>
                   <Form.Control type="text" placeholder="localhost" value={dsForm.config.host || ''} onChange={(e) => handleDsConfigChange('host', e.target.value)} required />
                 </Form.Group>
               </Col>
               <Col md={4}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Port</Form.Label>
+                  <Form.Label>{t('dataSources.fields.port')}</Form.Label>
                   <Form.Control type="number" placeholder="5432" value={dsForm.config.port || ''} onChange={(e) => handleDsConfigChange('port', e.target.value)} required />
                 </Form.Group>
               </Col>
             </Row>
             <Form.Group className="mb-3">
-              <Form.Label>Database Name</Form.Label>
+              <Form.Label>{t('dataSources.fields.database')}</Form.Label>
               <Form.Control type="text" value={dsForm.config.database || ''} onChange={(e) => handleDsConfigChange('database', e.target.value)} required />
             </Form.Group>
             <Row>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Username</Form.Label>
+                  <Form.Label>{t('dataSources.fields.username')}</Form.Label>
                   <Form.Control type="text" value={dsForm.config.username || ''} onChange={(e) => handleDsConfigChange('username', e.target.value)} required />
                 </Form.Group>
               </Col>
               <Col md={6}>
                 <Form.Group className="mb-3">
-                  <Form.Label>Password</Form.Label>
+                  <Form.Label>{t('dataSources.fields.password')}</Form.Label>
                   <Form.Control type="password" value={dsForm.config.password || ''} onChange={(e) => handleDsConfigChange('password', e.target.value)} required />
                 </Form.Group>
               </Col>
@@ -464,7 +464,7 @@ const IntegrationsPage = () => {
       default:
         return (
           <Form.Group className="mb-3">
-            <Form.Label>Configuration (JSON)</Form.Label>
+            <Form.Label>{t('dataSources.fields.configJson')}</Form.Label>
             <Form.Control
               as="textarea"
               rows={5}
@@ -539,11 +539,11 @@ const IntegrationsPage = () => {
       await datasetService.upload(formData);
       setShowUpload(false);
       setUploadState({ name: '', description: '', file: null });
-      setSuccess('Dataset uploaded');
+      setSuccess(t('datasets.success.uploaded'));
       await fetchDatasets();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
-      setError('Failed to upload dataset');
+      setError(t('datasets.errors.upload'));
     } finally {
       setUploadLoading(false);
     }
@@ -551,24 +551,24 @@ const IntegrationsPage = () => {
 
   const handleGroupSubmit = async (event) => {
     event.preventDefault();
-    if (groupState.dataset_ids.length < 2) { setError('Select at least 2 datasets to group.'); return; }
+    if (groupState.dataset_ids.length < 2) { setError(t('datasets.errors.groupMin')); return; }
     setGroupSubmitLoading(true);
     try {
       await datasetGroupService.create(groupState);
       setShowGroupModal(false);
       setGroupState({ name: '', description: '', dataset_ids: [] });
-      setSuccess('Group created');
+      setSuccess(t('datasets.success.groupCreated'));
       await fetchGroups();
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
-      setError('Failed to create group');
+      setError(t('datasets.errors.groupCreate'));
     } finally {
       setGroupSubmitLoading(false);
     }
   };
 
   const renderPreviewTable = useMemo(() => {
-    if (!previewData?.sample_rows?.length) return <p className="text-muted">No preview data available</p>;
+    if (!previewData?.sample_rows?.length) return <p className="text-muted">{t('datasets.noPreview')}</p>;
     const columns = Object.keys(previewData.sample_rows[0]);
     return (
       <Table striped bordered hover responsive size="sm" className="mt-3">
@@ -579,7 +579,7 @@ const IntegrationsPage = () => {
   }, [previewData]);
 
   const renderSummaryCards = useMemo(() => {
-    if (!summaryData?.numeric_columns?.length) return <p className="text-muted">No summary statistics</p>;
+    if (!summaryData?.numeric_columns?.length) return <p className="text-muted">{t('datasets.noSummary')}</p>;
     return (
       <Row className="g-3 mt-1">
         {summaryData.numeric_columns.map(metric => (
@@ -659,7 +659,7 @@ const IntegrationsPage = () => {
       setLlmApiKeys(prev => ({ ...prev, [providerName]: '' }));
       await fetchLlmProviders();
     } catch (err) {
-      setError(`Failed to save ${providerName} key`);
+      setError(t('aiModels.errors.saveKey', { provider: providerName }));
     } finally {
       setLlmSaving(null);
     }
@@ -689,7 +689,7 @@ const IntegrationsPage = () => {
               <div className="stat-icon"><FaDatabase size={24} /></div>
               <div className="stat-content">
                 <div className="stat-value">{connectorStats.total}</div>
-                <div className="stat-label">Connectors</div>
+                <div className="stat-label">{t('connectors.total')}</div>
               </div>
             </Card.Body>
           </Card>
@@ -700,7 +700,7 @@ const IntegrationsPage = () => {
               <div className="stat-icon"><FaCheckCircle size={24} /></div>
               <div className="stat-content">
                 <div className="stat-value">{connectorStats.active}</div>
-                <div className="stat-label">Active</div>
+                <div className="stat-label">{t('connectors.active')}</div>
               </div>
             </Card.Body>
           </Card>
@@ -711,7 +711,7 @@ const IntegrationsPage = () => {
               <div className="stat-icon"><FaSyncAlt size={24} /></div>
               <div className="stat-content">
                 <div className="stat-value">{connectorStats.syncsActive}</div>
-                <div className="stat-label">Active Syncs</div>
+                <div className="stat-label">{t('connectors.activeSyncs')}</div>
               </div>
             </Card.Body>
           </Card>
@@ -722,7 +722,7 @@ const IntegrationsPage = () => {
               <div className="stat-icon"><FaExclamationTriangle size={24} /></div>
               <div className="stat-content">
                 <div className="stat-value">{connectorStats.error}</div>
-                <div className="stat-label">Need Attention</div>
+                <div className="stat-label">{t('connectors.needAttention')}</div>
               </div>
             </Card.Body>
           </Card>
@@ -736,24 +736,24 @@ const IntegrationsPage = () => {
           <Col lg={8}>
             <Card className="activity-card">
               <Card.Header className="d-flex justify-content-between align-items-center">
-                <h5 className="mb-0"><FaBolt className="me-2" />Connected Systems</h5>
+                <h5 className="mb-0"><FaBolt className="me-2" />{t('connectors.connectedSystems')}</h5>
                 <Button variant="primary" size="sm" onClick={() => handleOpenConnectorModal()}>
-                  <FaPlus className="me-2" />Add Connector
+                  <FaPlus className="me-2" />{t('connectors.addConnector')}
                 </Button>
               </Card.Header>
               <Card.Body className="p-0">
                 {connectors.length === 0 ? (
                   <div className="text-center py-5">
                     <FaCloudUploadAlt size={48} className="text-muted mb-3" />
-                    <h5>No connectors yet</h5>
-                    <p className="text-muted">Connect your first system to start syncing data</p>
+                    <h5>{t('connectors.noConnectors')}</h5>
+                    <p className="text-muted">{t('connectors.noConnectorsDesc')}</p>
                     <Button variant="primary" onClick={() => handleOpenConnectorModal()}>
-                      <FaPlus className="me-2" />Connect Your First System
+                      <FaPlus className="me-2" />{t('connectors.connectFirst')}
                     </Button>
                   </div>
                 ) : (
                   <Table hover className="mb-0 connectors-table">
-                    <thead><tr><th>Source</th><th>Status</th><th>Last Tested</th><th className="text-end">Actions</th></tr></thead>
+                    <thead><tr><th>{t('connectors.source')}</th><th>Status</th><th>{t('connectors.lastTested')}</th><th className="text-end">Actions</th></tr></thead>
                     <tbody>
                       {connectors.map(connector => (
                         <tr key={connector.id}>
@@ -767,7 +767,7 @@ const IntegrationsPage = () => {
                             </div>
                           </td>
                           <td>{getStatusBadge(connector.status)}</td>
-                          <td><small className="text-muted">{connector.last_test_at ? new Date(connector.last_test_at).toLocaleDateString() : 'Never'}</small></td>
+                          <td><small className="text-muted">{connector.last_test_at ? new Date(connector.last_test_at).toLocaleDateString() : t('connectors.never')}</small></td>
                           <td className="text-end">
                             <Button variant="outline-success" size="sm" className="me-1" onClick={() => handleTestConnector(connector.id)} disabled={testing === connector.id}>
                               {testing === connector.id ? <Spinner size="sm" /> : <FaPlay />}
@@ -792,12 +792,12 @@ const IntegrationsPage = () => {
           </Col>
           <Col lg={4}>
             <Card className="syncs-card">
-              <Card.Header><h5 className="mb-0"><FaCalendarAlt className="me-2" />Data Syncs</h5></Card.Header>
+              <Card.Header><h5 className="mb-0"><FaCalendarAlt className="me-2" />{t('connectors.dataSyncs')}</h5></Card.Header>
               <Card.Body className="p-0">
                 {syncs.length === 0 ? (
                   <div className="text-center py-4">
                     <FaSyncAlt size={32} className="text-muted mb-2" />
-                    <p className="text-muted mb-0 small">No data syncs scheduled</p>
+                    <p className="text-muted mb-0 small">{t('connectors.noSyncsScheduled')}</p>
                   </div>
                 ) : (
                   <div className="syncs-list">
@@ -829,9 +829,9 @@ const IntegrationsPage = () => {
   const renderDataSourcesTab = () => (
     <div className="tab-content-inner">
       <div className="d-flex justify-content-between align-items-center mb-4">
-        <p className="text-muted mb-0">External databases and APIs your AI agents can query</p>
+        <p className="text-muted mb-0">{t('dataSources.subtitle')}</p>
         <Button variant="primary" onClick={() => handleShowDsModal()}>
-          <FaPlusCircle className="me-2" />Add Data Source
+          <FaPlusCircle className="me-2" />{t('dataSources.addSource')}
         </Button>
       </div>
 
@@ -863,7 +863,7 @@ const IntegrationsPage = () => {
                   </Card.Text>
                   <div className="mt-3 pt-3 border-top">
                     <div className="d-flex align-items-center text-success small">
-                      <FaCheckCircle className="me-1" />Connected
+                      <FaCheckCircle className="me-1" />{t('dataSources.connected')}
                     </div>
                   </div>
                 </Card.Body>
@@ -874,8 +874,8 @@ const IntegrationsPage = () => {
             <Col xs={12}>
               <div className="text-center py-5 text-muted">
                 <FaDatabase size={48} className="mb-3 opacity-50" />
-                <h5>No data sources yet</h5>
-                <p>Add a data source so your AI agents can query external databases and APIs.</p>
+                <h5>{t('dataSources.noSources')}</h5>
+                <p>{t('dataSources.noSourcesDesc')}</p>
               </div>
             </Col>
           )}
@@ -892,18 +892,18 @@ const IntegrationsPage = () => {
     <div className="tab-content-inner">
       <div className="d-flex justify-content-between align-items-center mb-4">
         <Nav variant="pills" activeKey={datasetSubTab} onSelect={setDatasetSubTab}>
-          <Nav.Item><Nav.Link eventKey="datasets">Datasets</Nav.Link></Nav.Item>
-          <Nav.Item><Nav.Link eventKey="groups">Dataset Groups</Nav.Link></Nav.Item>
+          <Nav.Item><Nav.Link eventKey="datasets">{t('datasets.subTabs.datasets')}</Nav.Link></Nav.Item>
+          <Nav.Item><Nav.Link eventKey="groups">{t('datasets.subTabs.groups')}</Nav.Link></Nav.Item>
         </Nav>
         <div>
           {datasetSubTab === 'datasets' && (
             <Button variant="primary" onClick={() => setShowUpload(true)}>
-              <FaFileUpload className="me-2" />Upload Dataset
+              <FaFileUpload className="me-2" />{t('datasets.upload')}
             </Button>
           )}
           {datasetSubTab === 'groups' && (
             <Button variant="primary" onClick={() => setShowGroupModal(true)}>
-              <FaPlus className="me-2" />Create Group
+              <FaPlus className="me-2" />{t('datasets.createGroup')}
             </Button>
           )}
         </div>
@@ -912,17 +912,17 @@ const IntegrationsPage = () => {
       {datasetSubTab === 'datasets' && (
         <>
           {datasetsLoading ? (
-            <div className="text-center py-4"><Spinner animation="border" size="sm" /> Loading datasets...</div>
+            <div className="text-center py-4"><Spinner animation="border" size="sm" /> {t('datasets.loadingDatasets')}</div>
           ) : (
             <Table striped bordered hover responsive>
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Description</th>
-                  <th>Rows</th>
-                  <th>Sync Status</th>
-                  <th>Created</th>
-                  <th>Actions</th>
+                  <th>{t('datasets.table.name')}</th>
+                  <th>{t('datasets.table.description')}</th>
+                  <th>{t('datasets.table.rows')}</th>
+                  <th>{t('datasets.table.sync')}</th>
+                  <th>{t('datasets.table.created')}</th>
+                  <th>{t('datasets.table.actions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -934,22 +934,22 @@ const IntegrationsPage = () => {
                     <td><SyncStatusBadge status={dataset.metadata?.sync_status} /></td>
                     <td>{dataset.created_at ? new Date(dataset.created_at).toLocaleString() : '...'}</td>
                     <td>
-                      <Button variant="info" size="sm" onClick={() => openPreview(dataset)} className="me-2">Preview</Button>
+                      <Button variant="info" size="sm" onClick={() => openPreview(dataset)} className="me-2">{t('datasets.preview')}</Button>
                       <Button
                         variant="outline-primary"
                         size="sm"
                         onClick={async () => {
-                          try { await datasetService.sync(dataset.id); fetchDatasets(); } catch (e) { setError('Failed to trigger sync'); }
+                          try { await datasetService.sync(dataset.id); fetchDatasets(); } catch (e) { setError(t('datasets.syncError')); }
                         }}
                         disabled={dataset.metadata?.sync_status === 'syncing'}
                       >
-                        {dataset.metadata?.sync_status === 'syncing' ? 'Syncing...' : 'Sync'}
+                        {dataset.metadata?.sync_status === 'syncing' ? t('datasets.syncing') : t('datasets.sync')}
                       </Button>
                     </td>
                   </tr>
                 ))}
                 {datasets.length === 0 && !datasetsLoading && (
-                  <tr><td colSpan={6} className="text-center text-muted">No datasets uploaded yet</td></tr>
+                  <tr><td colSpan={6} className="text-center text-muted">{t('datasets.noDatasets')}</td></tr>
                 )}
               </tbody>
             </Table>
@@ -960,7 +960,7 @@ const IntegrationsPage = () => {
       {datasetSubTab === 'groups' && (
         <>
           {groupsLoading ? (
-            <div className="text-center py-4"><Spinner animation="border" size="sm" /> Loading groups...</div>
+            <div className="text-center py-4"><Spinner animation="border" size="sm" /> {t('datasets.loadingGroups')}</div>
           ) : (
             <Table striped bordered hover responsive>
               <thead><tr><th>Name</th><th>Description</th><th>Datasets</th><th>Created</th></tr></thead>
@@ -974,7 +974,7 @@ const IntegrationsPage = () => {
                   </tr>
                 ))}
                 {groups.length === 0 && !groupsLoading && (
-                  <tr><td colSpan={4} className="text-center text-muted">No dataset groups</td></tr>
+                  <tr><td colSpan={4} className="text-center text-muted">{t('datasets.noGroups')}</td></tr>
                 )}
               </tbody>
             </Table>
@@ -995,10 +995,10 @@ const IntegrationsPage = () => {
           <div>
             <h1 className="page-title">
               <FaPlug className="me-2" />
-              Integrations
+              {t('title')}
             </h1>
             <p className="page-subtitle text-muted">
-              Connected apps, connectors, data sources, and datasets in one place
+              {t('subtitle')}
             </p>
           </div>
         </div>
@@ -1009,22 +1009,22 @@ const IntegrationsPage = () => {
         {/* Tab Navigation */}
         <Nav variant="tabs" activeKey={activeTab} onSelect={handleTabChange} className="mb-4 integrations-tabs">
           <Nav.Item>
-            <Nav.Link eventKey="integrations"><FaPlug className="me-2" />Integrations</Nav.Link>
+            <Nav.Link eventKey="integrations"><FaPlug className="me-2" />{t('tabs.integrations')}</Nav.Link>
           </Nav.Item>
           <Nav.Item>
-            <Nav.Link eventKey="connectors"><FaBolt className="me-2" />Connectors</Nav.Link>
+            <Nav.Link eventKey="connectors"><FaBolt className="me-2" />{t('tabs.connectors')}</Nav.Link>
           </Nav.Item>
           <Nav.Item>
-            <Nav.Link eventKey="data-sources"><FaDatabase className="me-2" />Data Sources</Nav.Link>
+            <Nav.Link eventKey="data-sources"><FaDatabase className="me-2" />{t('tabs.dataSources')}</Nav.Link>
           </Nav.Item>
           <Nav.Item>
-            <Nav.Link eventKey="datasets"><FaFileUpload className="me-2" />Datasets</Nav.Link>
+            <Nav.Link eventKey="datasets"><FaFileUpload className="me-2" />{t('tabs.datasets')}</Nav.Link>
           </Nav.Item>
           <Nav.Item>
-            <Nav.Link eventKey="ai-models"><FaMicrochip className="me-2" />AI Models</Nav.Link>
+            <Nav.Link eventKey="ai-models"><FaMicrochip className="me-2" />{t('tabs.aiModels')}</Nav.Link>
           </Nav.Item>
           <Nav.Item>
-            <Nav.Link eventKey="skills"><FaCog className="me-2" />Skills</Nav.Link>
+            <Nav.Link eventKey="skills"><FaCog className="me-2" />{t('tabs.skills')}</Nav.Link>
           </Nav.Item>
         </Nav>
 
@@ -1039,7 +1039,7 @@ const IntegrationsPage = () => {
         {activeTab === 'datasets' && renderDatasetsTab()}
         {activeTab === 'ai-models' && (
           <div className="tab-content-inner">
-            <p className="text-muted mb-4">Configure API keys for your AI model providers</p>
+            <p className="text-muted mb-4">{t('aiModels.subtitle')}</p>
             {llmLoading ? (
               <div className="text-center py-5"><Spinner animation="border" variant="primary" /></div>
             ) : (
@@ -1052,20 +1052,20 @@ const IntegrationsPage = () => {
                           <strong>{provider.display_name}</strong>
                           {provider.configured ? (
                             <Badge bg="success" className="bg-opacity-25 text-success border border-success">
-                              <FaCheckCircle className="me-1" size={10} /> Connected
+                              <FaCheckCircle className="me-1" size={10} /> {t('aiModels.connected')}
                             </Badge>
                           ) : (
                             <Badge bg="secondary" className="bg-opacity-25 text-secondary border border-secondary">
-                              Not configured
+                              {t('aiModels.notConfigured')}
                             </Badge>
                           )}
                         </div>
-                        <Form.Label className="small text-muted"><FaKey className="me-1" size={10} />API Key</Form.Label>
+                        <Form.Label className="small text-muted"><FaKey className="me-1" size={10} />{t('aiModels.apiKey')}</Form.Label>
                         <div className="d-flex gap-1 mb-2">
                           <Form.Control
                             size="sm"
                             type={llmShowKeys[provider.name] ? 'text' : 'password'}
-                            placeholder={provider.configured ? '••••••••••••' : 'Enter API key'}
+                            placeholder={provider.configured ? t('aiModels.apiKeyMasked') : t('aiModels.apiKeyPlaceholder')}
                             value={llmApiKeys[provider.name] || ''}
                             onChange={(e) => handleLlmKeyChange(provider.name, e.target.value)}
                             disabled={llmSaving === provider.name}
@@ -1079,7 +1079,7 @@ const IntegrationsPage = () => {
                           </Button>
                         </div>
                         {llmSaveSuccess[provider.name] && (
-                          <small className="text-success d-block mb-2"><FaCheckCircle className="me-1" size={10} />Key saved</small>
+                          <small className="text-success d-block mb-2"><FaCheckCircle className="me-1" size={10} />{t('aiModels.keySaved')}</small>
                         )}
                         <Button
                           variant="primary"
@@ -1088,10 +1088,10 @@ const IntegrationsPage = () => {
                           onClick={() => handleLlmSaveKey(provider.name)}
                           disabled={!llmApiKeys[provider.name] || llmSaving === provider.name}
                         >
-                          {llmSaving === provider.name ? <Spinner animation="border" size="sm" /> : 'Save Key'}
+                          {llmSaving === provider.name ? <Spinner animation="border" size="sm" /> : t('aiModels.saveKey')}
                         </Button>
                         <div className="text-center mt-2">
-                          <small className="text-muted">{provider.is_openai_compatible ? 'OpenAI-compatible' : 'Native API'}</small>
+                          <small className="text-muted">{provider.is_openai_compatible ? t('aiModels.openaiCompatible') : t('aiModels.nativeApi')}</small>
                         </div>
                       </Card.Body>
                     </Card>
@@ -1106,20 +1106,20 @@ const IntegrationsPage = () => {
         {/* ── Connector Modal ── */}
         <Modal show={showConnectorModal} onHide={() => setShowConnectorModal(false)} size="lg">
           <Modal.Header closeButton>
-            <Modal.Title>{editingConnector ? 'Edit Connector' : 'Add New Connector'}</Modal.Title>
+            <Modal.Title>{editingConnector ? t('connectors.modal.editTitle') : t('connectors.modal.createTitle')}</Modal.Title>
           </Modal.Header>
           <Modal.Body>
             <Form>
               <Row>
                 <Col md={6}>
                   <Form.Group className="mb-3">
-                    <Form.Label>Name<span className="text-danger">*</span></Form.Label>
-                    <Form.Control type="text" placeholder="e.g., Production Snowflake" value={connectorForm.name} onChange={(e) => setConnectorForm({ ...connectorForm, name: e.target.value })} required />
+                    <Form.Label>{t('connectors.modal.name')}<span className="text-danger">*</span></Form.Label>
+                    <Form.Control type="text" placeholder={t('connectors.modal.namePlaceholder')} value={connectorForm.name} onChange={(e) => setConnectorForm({ ...connectorForm, name: e.target.value })} required />
                   </Form.Group>
                 </Col>
                 <Col md={6}>
                   <Form.Group className="mb-3">
-                    <Form.Label>Type<span className="text-danger">*</span></Form.Label>
+                    <Form.Label>{t('connectors.modal.type')}<span className="text-danger">*</span></Form.Label>
                     <Form.Select value={connectorForm.type} onChange={(e) => setConnectorForm({ ...connectorForm, type: e.target.value, config: {} })} disabled={!!editingConnector}>
                       {Object.entries(CONNECTOR_TYPES).map(([key, cfg]) => (
                         <option key={key} value={key}>{cfg.icon} {cfg.label}</option>
@@ -1129,11 +1129,11 @@ const IntegrationsPage = () => {
                 </Col>
               </Row>
               <Form.Group className="mb-3">
-                <Form.Label>Description</Form.Label>
-                <Form.Control as="textarea" rows={2} placeholder="Optional description..." value={connectorForm.description} onChange={(e) => setConnectorForm({ ...connectorForm, description: e.target.value })} />
+                <Form.Label>{t('connectors.modal.description')}</Form.Label>
+                <Form.Control as="textarea" rows={2} placeholder={t('connectors.modal.descriptionPlaceholder')} value={connectorForm.description} onChange={(e) => setConnectorForm({ ...connectorForm, description: e.target.value })} />
               </Form.Group>
               <hr />
-              <h6 className="mb-3">Connection Settings</h6>
+              <h6 className="mb-3">{t('connectors.modal.connectionSettings')}</h6>
               {renderConnectorForm()}
               {testResult && (
                 <Alert variant={testResult.success ? 'success' : 'danger'} className="mt-3">
@@ -1145,50 +1145,50 @@ const IntegrationsPage = () => {
           </Modal.Body>
           <Modal.Footer>
             <Button variant="outline-secondary" onClick={() => handleTestConnector()} disabled={testing}>
-              {testing ? <Spinner size="sm" className="me-2" /> : <FaPlay className="me-2" />}Test Connection
+              {testing ? <Spinner size="sm" className="me-2" /> : <FaPlay className="me-2" />}{t('connectors.modal.testConnection')}
             </Button>
-            <Button variant="secondary" onClick={() => setShowConnectorModal(false)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => setShowConnectorModal(false)}>{t('connectors.modal.cancel')}</Button>
             <Button variant="primary" onClick={handleSaveConnector} disabled={saving || !connectorForm.name}>
-              {saving ? <Spinner size="sm" /> : (editingConnector ? 'Update' : 'Create')}
+              {saving ? <Spinner size="sm" /> : (editingConnector ? t('connectors.modal.update') : t('connectors.modal.create'))}
             </Button>
           </Modal.Footer>
         </Modal>
 
         {/* ── Sync Modal ── */}
         <Modal show={showSyncModal} onHide={() => setShowSyncModal(false)}>
-          <Modal.Header closeButton><Modal.Title>Schedule Data Sync</Modal.Title></Modal.Header>
+          <Modal.Header closeButton><Modal.Title>{t('connectors.sync.title')}</Modal.Title></Modal.Header>
           <Modal.Body>
             <Form>
               <Form.Group className="mb-3">
-                <Form.Label>Connector<span className="text-danger">*</span></Form.Label>
+                <Form.Label>{t('connectors.sync.connector')}<span className="text-danger">*</span></Form.Label>
                 <Form.Select value={syncForm.connector_id} onChange={(e) => setSyncForm({ ...syncForm, connector_id: e.target.value })} required>
-                  <option value="">Select a connector...</option>
+                  <option value="">{t('connectors.sync.selectConnector')}</option>
                   {connectors.filter(c => c.status === 'active').map(c => (
                     <option key={c.id} value={c.id}>{CONNECTOR_TYPES[c.type]?.icon} {c.name}</option>
                   ))}
                 </Form.Select>
               </Form.Group>
               <Form.Group className="mb-3">
-                <Form.Label>Table/Query Name<span className="text-danger">*</span></Form.Label>
-                <Form.Control type="text" placeholder="e.g., customers, orders" value={syncForm.table_name} onChange={(e) => setSyncForm({ ...syncForm, table_name: e.target.value })} required />
+                <Form.Label>{t('connectors.sync.tableName')}<span className="text-danger">*</span></Form.Label>
+                <Form.Control type="text" placeholder={t('connectors.sync.tablePlaceholder')} value={syncForm.table_name} onChange={(e) => setSyncForm({ ...syncForm, table_name: e.target.value })} required />
               </Form.Group>
               <Row>
                 <Col>
                   <Form.Group className="mb-3">
-                    <Form.Label>Frequency</Form.Label>
+                    <Form.Label>{t('connectors.sync.frequency')}</Form.Label>
                     <Form.Select value={syncForm.frequency} onChange={(e) => setSyncForm({ ...syncForm, frequency: e.target.value })}>
-                      <option value="hourly">Hourly</option>
-                      <option value="daily">Daily</option>
-                      <option value="weekly">Weekly</option>
+                      <option value="hourly">{t('connectors.sync.frequencyHourly')}</option>
+                      <option value="daily">{t('connectors.sync.frequencyDaily')}</option>
+                      <option value="weekly">{t('connectors.sync.frequencyWeekly')}</option>
                     </Form.Select>
                   </Form.Group>
                 </Col>
                 <Col>
                   <Form.Group className="mb-3">
-                    <Form.Label>Sync Mode</Form.Label>
+                    <Form.Label>{t('connectors.sync.mode')}</Form.Label>
                     <Form.Select value={syncForm.mode} onChange={(e) => setSyncForm({ ...syncForm, mode: e.target.value })}>
-                      <option value="full">Full Refresh</option>
-                      <option value="incremental">Incremental</option>
+                      <option value="full">{t('connectors.sync.modeFull')}</option>
+                      <option value="incremental">{t('connectors.sync.modeIncremental')}</option>
                     </Form.Select>
                   </Form.Group>
                 </Col>
@@ -1196,9 +1196,9 @@ const IntegrationsPage = () => {
             </Form>
           </Modal.Body>
           <Modal.Footer>
-            <Button variant="secondary" onClick={() => setShowSyncModal(false)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => setShowSyncModal(false)}>{t('connectors.sync.cancel')}</Button>
             <Button variant="primary" onClick={handleCreateSync} disabled={saving || !syncForm.connector_id || !syncForm.table_name}>
-              {saving ? <Spinner size="sm" /> : 'Schedule Sync'}
+              {saving ? <Spinner size="sm" /> : t('connectors.sync.schedule')}
             </Button>
           </Modal.Footer>
         </Modal>
@@ -1206,20 +1206,20 @@ const IntegrationsPage = () => {
         {/* ── Data Source Modal ── */}
         <Modal show={showDsModal} onHide={() => { setShowDsModal(false); setEditingDsId(null); }} size="lg">
           <Modal.Header closeButton>
-            <Modal.Title>{editingDsId ? 'Edit' : 'Add'} Data Source</Modal.Title>
+            <Modal.Title>{editingDsId ? t('dataSources.modal.editTitle') : t('dataSources.modal.createTitle')}</Modal.Title>
           </Modal.Header>
           <Form onSubmit={handleDsSubmit}>
             <Modal.Body>
               <Row>
                 <Col md={6}>
                   <Form.Group className="mb-3">
-                    <Form.Label>Name</Form.Label>
-                    <Form.Control type="text" placeholder="e.g., Production DB" value={dsForm.name} onChange={(e) => setDsForm({ ...dsForm, name: e.target.value })} required />
+                    <Form.Label>{t('dataSources.modal.name')}</Form.Label>
+                    <Form.Control type="text" placeholder={t('dataSources.modal.namePlaceholder')} value={dsForm.name} onChange={(e) => setDsForm({ ...dsForm, name: e.target.value })} required />
                   </Form.Group>
                 </Col>
                 <Col md={6}>
                   <Form.Group className="mb-3">
-                    <Form.Label>Type</Form.Label>
+                    <Form.Label>{t('dataSources.modal.type')}</Form.Label>
                     <Form.Select value={dsForm.type} onChange={(e) => setDsForm({ ...dsForm, type: e.target.value, config: {} })}>
                       <option value="databricks">Databricks</option>
                       <option value="postgres">PostgreSQL</option>
@@ -1230,14 +1230,14 @@ const IntegrationsPage = () => {
                 </Col>
               </Row>
               <div className="config-section p-3 rounded mb-3" style={{ background: 'var(--surface-contrast)', border: '1px solid var(--color-border)' }}>
-                <h6 className="mb-3 text-muted">Connection Details</h6>
+                <h6 className="mb-3 text-muted">{t('dataSources.modal.connectionDetails')}</h6>
                 {renderDsConfigFields()}
               </div>
             </Modal.Body>
             <Modal.Footer>
-              <Button variant="secondary" onClick={() => { setShowDsModal(false); setEditingDsId(null); }}>Cancel</Button>
+              <Button variant="secondary" onClick={() => { setShowDsModal(false); setEditingDsId(null); }}>{t('dataSources.modal.cancel')}</Button>
               <Button variant="primary" type="submit" disabled={dsSubmitting}>
-                {dsSubmitting ? <Spinner size="sm" animation="border" /> : (editingDsId ? 'Update' : 'Connect')}
+                {dsSubmitting ? <Spinner size="sm" animation="border" /> : (editingDsId ? t('dataSources.modal.update') : t('dataSources.modal.connect'))}
               </Button>
             </Modal.Footer>
           </Form>
@@ -1246,26 +1246,26 @@ const IntegrationsPage = () => {
         {/* ── Upload Dataset Modal ── */}
         <Modal show={showUpload} onHide={() => { setShowUpload(false); setUploadState({ name: '', description: '', file: null }); }} centered>
           <Form onSubmit={handleUploadSubmit}>
-            <Modal.Header closeButton><Modal.Title>Upload Dataset</Modal.Title></Modal.Header>
+            <Modal.Header closeButton><Modal.Title>{t('datasets.uploadModal.title')}</Modal.Title></Modal.Header>
             <Modal.Body>
               <Form.Group className="mb-3">
-                <Form.Label>Name</Form.Label>
-                <Form.Control type="text" name="name" placeholder="Dataset name" value={uploadState.name} onChange={(e) => setUploadState(prev => ({ ...prev, name: e.target.value }))} />
+                <Form.Label>{t('datasets.uploadModal.name')}</Form.Label>
+                <Form.Control type="text" name="name" placeholder={t('datasets.uploadModal.namePlaceholder')} value={uploadState.name} onChange={(e) => setUploadState(prev => ({ ...prev, name: e.target.value }))} />
               </Form.Group>
               <Form.Group className="mb-3">
-                <Form.Label>Description</Form.Label>
-                <Form.Control as="textarea" rows={2} name="description" placeholder="Optional description" value={uploadState.description} onChange={(e) => setUploadState(prev => ({ ...prev, description: e.target.value }))} />
+                <Form.Label>{t('datasets.uploadModal.description')}</Form.Label>
+                <Form.Control as="textarea" rows={2} name="description" placeholder={t('datasets.uploadModal.descriptionPlaceholder')} value={uploadState.description} onChange={(e) => setUploadState(prev => ({ ...prev, description: e.target.value }))} />
               </Form.Group>
               <Form.Group className="mb-3">
-                <Form.Label>File</Form.Label>
+                <Form.Label>{t('datasets.uploadModal.file')}</Form.Label>
                 <Form.Control type="file" accept=".xlsx,.xls,.csv" onChange={(e) => setUploadState(prev => ({ ...prev, file: e.target.files[0] || null }))} required />
-                <Form.Text className="text-muted">Supported: CSV, XLS, XLSX</Form.Text>
+                <Form.Text className="text-muted">{t('datasets.uploadModal.fileHelp')}</Form.Text>
               </Form.Group>
             </Modal.Body>
             <Modal.Footer>
-              <Button variant="secondary" onClick={() => { setShowUpload(false); setUploadState({ name: '', description: '', file: null }); }}>Cancel</Button>
+              <Button variant="secondary" onClick={() => { setShowUpload(false); setUploadState({ name: '', description: '', file: null }); }}>{t('datasets.uploadModal.cancel')}</Button>
               <Button variant="primary" type="submit" disabled={uploadLoading}>
-                {uploadLoading ? 'Uploading...' : 'Upload'}
+                {uploadLoading ? t('datasets.uploadModal.uploading') : t('datasets.uploadModal.upload')}
               </Button>
             </Modal.Footer>
           </Form>
@@ -1274,18 +1274,18 @@ const IntegrationsPage = () => {
         {/* ── Create Group Modal ── */}
         <Modal show={showGroupModal} onHide={() => { setShowGroupModal(false); setGroupState({ name: '', description: '', dataset_ids: [] }); }} centered size="lg">
           <Form onSubmit={handleGroupSubmit}>
-            <Modal.Header closeButton><Modal.Title>Create Dataset Group</Modal.Title></Modal.Header>
+            <Modal.Header closeButton><Modal.Title>{t('datasets.groupModal.title')}</Modal.Title></Modal.Header>
             <Modal.Body>
               <Form.Group className="mb-3">
-                <Form.Label>Group Name</Form.Label>
+                <Form.Label>{t('datasets.groupModal.name')}</Form.Label>
                 <Form.Control type="text" placeholder="e.g., Q1 Financials" value={groupState.name} onChange={(e) => setGroupState(prev => ({ ...prev, name: e.target.value }))} required />
               </Form.Group>
               <Form.Group className="mb-3">
-                <Form.Label>Description</Form.Label>
-                <Form.Control as="textarea" rows={2} placeholder="Optional" value={groupState.description} onChange={(e) => setGroupState(prev => ({ ...prev, description: e.target.value }))} />
+                <Form.Label>{t('datasets.groupModal.description')}</Form.Label>
+                <Form.Control as="textarea" rows={2} placeholder="" value={groupState.description} onChange={(e) => setGroupState(prev => ({ ...prev, description: e.target.value }))} />
               </Form.Group>
               <Form.Group className="mb-3">
-                <Form.Label>Select Datasets (min 2)</Form.Label>
+                <Form.Label>{t('datasets.groupModal.selectDatasets')}</Form.Label>
                 <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid var(--color-border)', padding: '10px', borderRadius: '4px' }}>
                   {datasets.map(ds => (
                     <Form.Check
@@ -1303,14 +1303,14 @@ const IntegrationsPage = () => {
                       className="mb-2"
                     />
                   ))}
-                  {datasets.length === 0 && <p className="text-muted">No datasets available.</p>}
+                  {datasets.length === 0 && <p className="text-muted">{t('datasets.noDatasetsAvailable')}</p>}
                 </div>
               </Form.Group>
             </Modal.Body>
             <Modal.Footer>
-              <Button variant="secondary" onClick={() => { setShowGroupModal(false); setGroupState({ name: '', description: '', dataset_ids: [] }); }}>Cancel</Button>
+              <Button variant="secondary" onClick={() => { setShowGroupModal(false); setGroupState({ name: '', description: '', dataset_ids: [] }); }}>{t('datasets.groupModal.cancel')}</Button>
               <Button variant="primary" type="submit" disabled={groupSubmitLoading}>
-                {groupSubmitLoading ? 'Creating...' : 'Create Group'}
+                {groupSubmitLoading ? t('datasets.groupModal.creating') : t('datasets.groupModal.create')}
               </Button>
             </Modal.Footer>
           </Form>
@@ -1323,16 +1323,16 @@ const IntegrationsPage = () => {
           </Modal.Header>
           <Modal.Body>
             {previewLoading ? (
-              <div className="text-center py-3"><Spinner animation="border" size="sm" /> Loading preview...</div>
+              <div className="text-center py-3"><Spinner animation="border" size="sm" /> {t('datasets.loadingPreview')}</div>
             ) : renderPreviewTable}
             <hr />
-            <h6 className="text-uppercase text-muted">Summary Statistics</h6>
+            <h6 className="text-uppercase text-muted">{t('datasets.summaryStats')}</h6>
             {summaryLoading ? (
-              <div className="text-center py-3"><Spinner animation="border" size="sm" /> Loading summary...</div>
+              <div className="text-center py-3"><Spinner animation="border" size="sm" /> {t('datasets.loadingSummary')}</div>
             ) : renderSummaryCards}
           </Modal.Body>
           <Modal.Footer>
-            <Button variant="primary" onClick={() => { setPreviewDataset(null); setPreviewData(null); setSummaryData(null); }}>Close</Button>
+            <Button variant="primary" onClick={() => { setPreviewDataset(null); setPreviewData(null); setSummaryData(null); }}>{t('datasets.close')}</Button>
           </Modal.Footer>
         </Modal>
       </div>

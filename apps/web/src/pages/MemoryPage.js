@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Button, Container, Spinner } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import { FaCloudUploadAlt, FaFileAlt, FaLightbulb, FaPlus, FaSearch, FaTrash } from 'react-icons/fa';
 import EntityCard from '../components/memory/EntityCard';
 import EntityCreateModal from '../components/memory/EntityCreateModal';
@@ -17,6 +18,8 @@ import './MemoryPage.css';
 const PAGE_SIZE = 50;
 
 function MemoryPage() {
+  const { t } = useTranslation('memory');
+
   // ── State ────────────────────────────────────────────────────
   const [entities, setEntities] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -178,12 +181,22 @@ function MemoryPage() {
     } catch (error) {
       setImportMessage({
         type: 'danger',
-        text: error.response?.data?.detail || 'Failed to import chat history',
+        text: error.response?.data?.detail || t('import.importFailed'),
       });
     } finally {
       setImporting(false);
       event.target.value = null;
     }
+  };
+
+  // Tab labels
+  const tabLabels = {
+    overview: t('tabs.overview'),
+    entities: t('tabs.entities'),
+    relations: t('tabs.relations'),
+    memories: t('tabs.memories'),
+    activity: t('tabs.activity'),
+    import: t('tabs.import'),
   };
 
   // ── Render ───────────────────────────────────────────────────
@@ -193,11 +206,11 @@ function MemoryPage() {
         {/* Page Header */}
         <div className="memory-page-header">
           <div>
-            <h2 className="page-title">Memory</h2>
-            <p className="page-subtitle">What Luna knows, remembers, and has learned from your conversations</p>
+            <h2 className="page-title">{t('title')}</h2>
+            <p className="page-subtitle">{t('subtitle')}</p>
           </div>
           <Button variant="primary" size="sm" onClick={() => setShowCreateModal(true)}>
-            <FaPlus size={11} className="me-1" /> Add Entity
+            <FaPlus size={11} className="me-1" /> {t('addEntity')}
           </Button>
         </div>
 
@@ -209,7 +222,7 @@ function MemoryPage() {
               className={`memory-tab-btn ${activeTab === tab ? 'active' : ''}`}
               onClick={() => setActiveTab(tab)}
             >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tabLabels[tab]}
             </button>
           ))}
         </div>
@@ -229,7 +242,7 @@ function MemoryPage() {
                 <FaSearch className="search-icon" />
                 <input
                   className="search-input"
-                  placeholder="Search entities..."
+                  placeholder={t('entities.searchPlaceholder')}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -240,7 +253,7 @@ function MemoryPage() {
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
               >
-                <option value="">All Categories</option>
+                <option value="">{t('entities.allCategories')}</option>
                 {ALL_CATEGORIES.map(c => {
                   const cfg = getCategoryConfig(c);
                   return <option key={c} value={c}>{cfg.label}</option>;
@@ -251,7 +264,7 @@ function MemoryPage() {
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
-                <option value="">All Statuses</option>
+                <option value="">{t('entities.allStatuses')}</option>
                 {ALL_STATUSES.map(s => (
                   <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
                 ))}
@@ -265,12 +278,12 @@ function MemoryPage() {
                     onChange={toggleSelectAll}
                     className="entity-checkbox"
                   />
-                  Select all
+                  {t('entities.selectAll')}
                 </label>
                 {selectedIds.size > 0 && (
                   <Button variant="outline-danger" size="sm" onClick={handleBulkDelete}>
                     <FaTrash size={11} className="me-1" />
-                    Delete {selectedIds.size}
+                    {t('entities.deleteCount', { count: selectedIds.size })}
                   </Button>
                 )}
               </div>
@@ -284,7 +297,7 @@ function MemoryPage() {
             ) : entities.length === 0 ? (
               <div className="memory-empty">
                 <div className="memory-empty-icon"><FaLightbulb /></div>
-                <p>No entities found. Chat with your AI assistant to start building the knowledge base, or add entities manually.</p>
+                <p>{t('entities.empty')}</p>
               </div>
             ) : (
               <>
@@ -313,7 +326,7 @@ function MemoryPage() {
                       onClick={() => loadEntities(false)}
                       disabled={loading}
                     >
-                      {loading ? <Spinner size="sm" animation="border" /> : 'Load More'}
+                      {loading ? <Spinner size="sm" animation="border" /> : t('entities.loadMore')}
                     </Button>
                   </div>
                 )}
@@ -330,8 +343,8 @@ function MemoryPage() {
 
         {activeTab === 'import' && (
           <div style={{ maxWidth: 700 }}>
-            <h5 className="mb-1" style={{ color: 'var(--color-foreground)' }}>Import Chat History</h5>
-            <p className="text-muted small mb-3">Upload chat exports from other LLM providers to build your knowledge base.</p>
+            <h5 className="mb-1" style={{ color: 'var(--color-foreground)' }}>{t('import.title')}</h5>
+            <p className="text-muted small mb-3">{t('import.subtitle')}</p>
 
             {importMessage && (
               <Alert variant={importMessage.type} dismissible onClose={() => setImportMessage(null)}>
@@ -341,8 +354,8 @@ function MemoryPage() {
 
             <div className="d-flex gap-3 flex-wrap">
               {[
-                { id: 'chatgpt', label: 'ChatGPT Export', file: 'conversations.json', color: '#34d399', provider: 'chatgpt' },
-                { id: 'claude', label: 'Claude Export', file: 'conversations.json', color: '#fbbf24', provider: 'claude' },
+                { id: 'chatgpt', label: t('import.chatgpt'), file: 'conversations.json', color: '#34d399', provider: 'chatgpt' },
+                { id: 'claude', label: t('import.claude'), file: 'conversations.json', color: '#fbbf24', provider: 'claude' },
               ].map(imp => (
                 <div
                   key={imp.id}
@@ -358,7 +371,7 @@ function MemoryPage() {
                 >
                   <FaFileAlt size={36} style={{ color: imp.color, marginBottom: '0.75rem' }} />
                   <h6 style={{ color: 'var(--color-foreground)' }}>{imp.label}</h6>
-                  <p className="text-muted small mb-3">Upload your <code>{imp.file}</code></p>
+                  <p className="text-muted small mb-3">{t('import.uploadYour')} <code>{imp.file}</code></p>
                   <input
                     type="file"
                     id={`${imp.id}-upload`}
@@ -373,7 +386,7 @@ function MemoryPage() {
                     onClick={() => document.getElementById(`${imp.id}-upload`).click()}
                     disabled={importing}
                   >
-                    {importing ? <Spinner animation="border" size="sm" /> : <><FaCloudUploadAlt className="me-1" /> Upload</>}
+                    {importing ? <Spinner animation="border" size="sm" /> : <><FaCloudUploadAlt className="me-1" /> {t('import.upload')}</>}
                   </Button>
                 </div>
               ))}

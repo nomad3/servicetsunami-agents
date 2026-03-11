@@ -1,0 +1,58 @@
+{
+  "title": "Agent Fleet",
+  "subtitle": "{{count}} agent configured",
+  "subtitle_plural": "{{count}} agents configured",
+  "agentWizard": "Agent Wizard",
+  "quickCreate": "Quick Create",
+  "searchPlaceholder": "Search agents...",
+  "loading": "Loading...",
+  "noAgentsMatch": "No agents match your search",
+  "noAgentsYet": "No agents yet",
+  "tryDifferent": "Try different search terms",
+  "createFirst": "Create your first agent to get started",
+  "createAgent": "Create Agent",
+  "table": {
+    "name": "Name",
+    "description": "Description",
+    "model": "Model",
+    "status": "Status"
+  },
+  "actions": {
+    "edit": "Edit",
+    "delete": "Delete"
+  },
+  "modal": {
+    "createTitle": "Create Agent",
+    "editTitle": "Edit Agent",
+    "name": "Name *",
+    "namePlaceholder": "e.g., Customer Support Agent",
+    "model": "Model *",
+    "description": "Description",
+    "descriptionPlaceholder": "What does this agent do?",
+    "systemPrompt": "System Prompt",
+    "systemPromptPlaceholder": "Instructions that define the agent's behavior...",
+    "temperature": "Temperature: {{value}}",
+    "temperatureHelp": "Higher = more creative",
+    "maxTokens": "Max Tokens",
+    "cancel": "Cancel",
+    "saving": "Saving...",
+    "saveChanges": "Save Changes"
+  },
+  "deleteModal": {
+    "title": "Delete \"{{name}}\"?",
+    "warning": "This action cannot be undone.",
+    "cancel": "Cancel",
+    "deleting": "Deleting...",
+    "delete": "Delete"
+  },
+  "success": {
+    "created": "Agent created",
+    "updated": "Agent updated",
+    "deleted": "\"{{name}}\" deleted"
+  },
+  "errors": {
+    "load": "Failed to load agents.",
+    "save": "Failed to save agent.",
+    "delete": "Failed to delete agent."
+  }
+}

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Container, Button, Table, Modal, Form, Alert } from 'react-bootstrap';
+import { useTranslation } from 'react-i18next';
 import Layout from '../components/Layout';
 import vectorStoreService from '../services/vectorStore';
 
 const VectorStoresPage = () => {
+  const { t } = useTranslation('tools');
   const [vectorStores, setVectorStores] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingVectorStore, setEditingVectorStore] = useState(null);
@@ -19,7 +21,7 @@ const VectorStoresPage = () => {
       const response = await vectorStoreService.getAll();
       setVectorStores(response.data);
     } catch (err) {
-      setError('Failed to fetch vector stores.');
+      setError(t('vectorStores.errors.fetch'));
       console.error(err);
     }
   };
@@ -61,18 +63,18 @@ const VectorStoresPage = () => {
       fetchVectorStores();
       handleCloseModal();
     } catch (err) {
-      setError('Failed to save vector store. Please check your config JSON.');
+      setError(t('vectorStores.errors.save'));
       console.error(err);
     }
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this vector store?')) {
+    if (window.confirm(t('vectorStores.deleteConfirm'))) {
       try {
         await vectorStoreService.remove(id);
         fetchVectorStores();
       } catch (err) {
-        setError('Failed to delete vector store.');
+        setError(t('vectorStores.errors.delete'));
         console.error(err);
       }
     }
@@ -81,8 +83,8 @@ const VectorStoresPage = () => {
   return (
     <Layout>
       <div className="d-flex justify-content-between align-items-center mb-4">
-        <h2>Vector Stores</h2>
-        <Button variant="primary" onClick={() => handleShowModal()}>Add Vector Store</Button>
+        <h2>{t('vectorStores.title')}</h2>
+        <Button variant="primary" onClick={() => handleShowModal()}>{t('vectorStores.addStore')}</Button>
       </div>
 
       {error && <Alert variant="danger">{error}</Alert>}
@@ -90,9 +92,9 @@ const VectorStoresPage = () => {
       <Table striped bordered hover responsive>
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Description</th>
-            <th>Actions</th>
+            <th>{t('vectorStores.table.name')}</th>
+            <th>{t('vectorStores.table.description')}</th>
+            <th>{t('vectorStores.table.actions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -101,8 +103,8 @@ const VectorStoresPage = () => {
               <td>{vs.name}</td>
               <td>{vs.description}</td>
               <td>
-                <Button variant="info" size="sm" onClick={() => handleShowModal(vs)}>Edit</Button>{' '}
-                <Button variant="danger" size="sm" onClick={() => handleDelete(vs.id)}>Delete</Button>
+                <Button variant="info" size="sm" onClick={() => handleShowModal(vs)}>{t('vectorStores.actions.edit')}</Button>{' '}
+                <Button variant="danger" size="sm" onClick={() => handleDelete(vs.id)}>{t('vectorStores.actions.delete')}</Button>
               </td>
             </tr>
           ))}
@@ -111,23 +113,23 @@ const VectorStoresPage = () => {
 
       <Modal show={showModal} onHide={handleCloseModal}>
         <Modal.Header closeButton>
-          <Modal.Title>{editingVectorStore ? 'Edit' : 'Add'} Vector Store</Modal.Title>
+          <Modal.Title>{editingVectorStore ? t('vectorStores.modal.editTitle') : t('vectorStores.modal.addTitle')}</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <Form onSubmit={handleSubmit}>
             <Form.Group className="mb-3">
-              <Form.Label>Name</Form.Label>
+              <Form.Label>{t('vectorStores.modal.name')}</Form.Label>
               <Form.Control type="text" name="name" value={formData.name} onChange={handleChange} required />
             </Form.Group>
             <Form.Group className="mb-3">
-              <Form.Label>Description</Form.Label>
+              <Form.Label>{t('vectorStores.modal.description')}</Form.Label>
               <Form.Control type="text" name="description" value={formData.description} onChange={handleChange} />
             </Form.Group>
             <Form.Group className="mb-3">
-              <Form.Label>Config (JSON)</Form.Label>
+              <Form.Label>{t('vectorStores.modal.config')}</Form.Label>
               <Form.Control as="textarea" rows={5} name="config" value={formData.config} onChange={handleChange} required />
             </Form.Group>
-            <Button variant="primary" type="submit">Save</Button>
+            <Button variant="primary" type="submit">{t('vectorStores.modal.save')}</Button>
           </Form>
         </Modal.Body>
       </Modal>

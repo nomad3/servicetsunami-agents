@@ -1,0 +1,93 @@
+{
+  "title": "Tools",
+  "subtitle": "Configure and manage tools available to your AI agents",
+  "createTool": "Create Tool",
+  "searchPlaceholder": "Search tools by name, description, or type...",
+  "loading": "Loading tools...",
+  "noToolsFound": "No tools found",
+  "noToolsYet": "No tools yet",
+  "tryAdjusting": "Try adjusting your search terms",
+  "getStarted": "Get started by creating your first tool",
+  "createFirst": "Create Your First Tool",
+  "table": {
+    "name": "Name",
+    "description": "Description",
+    "type": "Type",
+    "authRequired": "Auth Required",
+    "created": "Created",
+    "actions": "Actions"
+  },
+  "authValues": {
+    "yes": "Yes",
+    "no": "No"
+  },
+  "modal": {
+    "createTitle": "Create New Tool",
+    "editTitle": "Edit Tool",
+    "name": "Name *",
+    "namePlaceholder": "e.g., Weather API, Calculator",
+    "type": "Type *",
+    "types": {
+      "api": "API",
+      "function": "Function",
+      "database": "Database",
+      "external": "External"
+    },
+    "description": "Description",
+    "descriptionPlaceholder": "Describe what this tool does...",
+    "configuration": "Configuration (JSON)",
+    "configurationHelp": "Enter tool configuration as valid JSON",
+    "authRequired": "Authentication Required",
+    "cancel": "Cancel",
+    "saving": "Saving...",
+    "createTool": "Create Tool",
+    "saveChanges": "Save Changes"
+  },
+  "deleteModal": {
+    "title": "Delete Tool",
+    "message": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
+    "confirm": "Delete",
+    "cancel": "Cancel"
+  },
+  "success": {
+    "created": "Tool created successfully!",
+    "updated": "Tool updated successfully!",
+    "deleted": "Tool deleted successfully!",
+    "tested": "Tool \"{{name}}\" tested successfully!"
+  },
+  "errors": {
+    "load": "Failed to load tools. Please try again.",
+    "create": "Failed to create tool. Please check your configuration JSON.",
+    "update": "Failed to update tool. Please check your configuration JSON.",
+    "delete": "Failed to delete tool.",
+    "test": "Tool test failed: {{detail}}"
+  },
+  "testing": "Testing tool connection...",
+  "vectorStores": {
+    "title": "Vector Stores",
+    "addStore": "Add Vector Store",
+    "table": {
+      "name": "Name",
+      "description": "Description",
+      "actions": "Actions"
+    },
+    "actions": {
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "modal": {
+      "addTitle": "Add Vector Store",
+      "editTitle": "Edit Vector Store",
+      "name": "Name",
+      "description": "Description",
+      "config": "Config (JSON)",
+      "save": "Save"
+    },
+    "deleteConfirm": "Are you sure you want to delete this vector store?",
+    "errors": {
+      "fetch": "Failed to fetch vector stores.",
+      "save": "Failed to save vector store. Please check your config JSON.",
+      "delete": "Failed to delete vector store."
+    }
+  }
+}
