@@ -46,6 +46,13 @@ app.include_router(v1_routes.router, prefix="/api/v1")
 
 
 @app.on_event("startup")
+async def startup_skill_manager():
+    """Scan and load all file-based skill definitions."""
+    from app.services.skill_manager import skill_manager
+    skill_manager.scan()
+
+
+@app.on_event("startup")
 async def startup_whatsapp():
     """Reconnect all enabled WhatsApp channel_accounts on startup."""
     from app.services.whatsapp_service import whatsapp_service

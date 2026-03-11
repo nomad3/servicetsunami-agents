@@ -37,6 +37,7 @@
     "agentKits": "Agent Kits",
     "workflows": "Workflows",
     "memory": "Memory",
+    "skills": "Skills",
     "integrations": "Integrations",
     "organizations": "Organizations",
     "settings": "Settings",
@@ -51,6 +52,7 @@
     "agents": "Manage your AI agent fleet",
     "workflows": "Workflow designs and execution audit",
     "memory": "What Luna knows and remembers",
+    "skills": "Browse the file-based skills library",
     "integrations": "Connectors, data sources & datasets",
     "organizations": "Manage organizations & business units",
     "settings": "Platform settings"

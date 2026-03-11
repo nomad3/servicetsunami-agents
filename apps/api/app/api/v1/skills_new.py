@@ -8,9 +8,19 @@ from app.api.deps import get_db, get_current_user
 from app.models.user import User
 from app.schemas.skill import SkillInDB, SkillCreate, SkillUpdate
 from app.schemas.skill_execution import SkillExecutionInDB, SkillExecuteRequest
+from app.schemas.file_skill import FileSkill
 from app.services import skills as service
+from app.services.skill_manager import skill_manager
 
 router = APIRouter()
+
+
+@router.get("/library", response_model=List[FileSkill])
+def list_file_skills(
+    current_user: User = Depends(get_current_user),
+):
+    """List all file-based skills loaded from the skills directory."""
+    return skill_manager.list_skills()
 
 
 @router.get("/", response_model=List[SkillInDB])

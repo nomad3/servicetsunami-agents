@@ -1,0 +1,14 @@
+{
+  "title": "Skills Library",
+  "subtitle": "Browse available skills that agents can use to perform tasks",
+  "loading": "Loading skills...",
+  "noSkills": "No skills found",
+  "noSkillsDesc": "No skills are currently available in the library.",
+  "engine": "Engine",
+  "inputs": "Inputs",
+  "required": "required",
+  "optional": "optional",
+  "errors": {
+    "load": "Failed to load skills. Please try again."
+  }
+}

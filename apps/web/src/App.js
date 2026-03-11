@@ -22,6 +22,7 @@ import TeamsPage from './pages/TeamsPage';
 import TenantsPage from './pages/TenantsPage';
 import ToolsPage from './pages/ToolsPage';
 import VectorStoresPage from './pages/VectorStoresPage';
+import SkillsPage from './pages/SkillsPage';
 import WorkflowsPage from './pages/WorkflowsPage';
 import authService from './services/auth';
 
@@ -82,6 +83,7 @@ function App() {
               <Route path="/tenants" element={<ProtectedRoute><TenantsPage /></ProtectedRoute>} />
               <Route path="/teams" element={<ProtectedRoute><TeamsPage /></ProtectedRoute>} />
               <Route path="/memory" element={<ProtectedRoute><MemoryPage /></ProtectedRoute>} />
+              <Route path="/skills" element={<ProtectedRoute><SkillsPage /></ProtectedRoute>} />
               <Route path="/workflows" element={<ProtectedRoute><WorkflowsPage /></ProtectedRoute>} />
               <Route path="/task-console" element={<Navigate to="/workflows?tab=executions" replace />} />
               <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />

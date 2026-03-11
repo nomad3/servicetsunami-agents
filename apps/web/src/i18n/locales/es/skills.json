@@ -1,0 +1,14 @@
+{
+  "title": "Biblioteca de Skills",
+  "subtitle": "Explora los skills disponibles que los agentes pueden usar para realizar tareas",
+  "loading": "Cargando skills...",
+  "noSkills": "No se encontraron skills",
+  "noSkillsDesc": "No hay skills disponibles en la biblioteca.",
+  "engine": "Motor",
+  "inputs": "Entradas",
+  "required": "requerido",
+  "optional": "opcional",
+  "errors": {
+    "load": "Error al cargar los skills. Por favor, intenta de nuevo."
+  }
+}
