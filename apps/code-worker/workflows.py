@@ -39,11 +39,14 @@ class CodeTaskResult:
     error: Optional[str] = None
 
 
-def _run(cmd: str, cwd: str = WORKSPACE, timeout: int = 600) -> str:
+def _run(cmd: str, cwd: str = WORKSPACE, timeout: int = 600, extra_env: dict | None = None) -> str:
     """Run a shell command and return stdout. Raises on failure."""
     logger.info("Running: %s", cmd)
+    env = None
+    if extra_env:
+        env = {**os.environ, **extra_env}
     result = subprocess.run(
-        cmd, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout
+        cmd, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env
     )
     if result.returncode != 0:
         logger.error("Command failed: %s\nstderr: %s", cmd, result.stderr)
@@ -78,32 +81,30 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         # 1. Fetch tenant's Claude Code session token
         activity.heartbeat("Fetching Claude token...")
         token = _fetch_claude_token(task_input.tenant_id)
+        claude_env = {"ANTHROPIC_API_KEY": token}
 
-        # 2. Set up Claude authentication
-        activity.heartbeat("Setting up Claude authentication...")
-        _run(f'echo "{token}" | claude setup-token', timeout=30)
-
-        # 3. Pull latest code
+        # 2. Pull latest code
         activity.heartbeat("Pulling latest code...")
         _run("git fetch origin && git checkout main && git pull origin main")
 
-        # 4. Create feature branch
+        # 3. Create feature branch
         activity.heartbeat("Creating feature branch...")
         _run(f"git checkout -b {branch_name}")
 
-        # 5. Build the prompt
+        # 4. Build the prompt
         prompt = task_input.task_description
         if task_input.context:
             prompt = f"{task_input.context}\n\n{prompt}"
 
-        # 6. Run Claude Code
+        # 5. Run Claude Code (auth via ANTHROPIC_API_KEY env var)
         activity.heartbeat("Running Claude Code...")
+        prompt_escaped = prompt.replace("'", "'\\''")
         claude_cmd = (
-            f'claude -p "{prompt}" '
-            f'--output-format json '
+            f"claude -p '{prompt_escaped}' "
+            f"--output-format json "
             f'--allowedTools "Edit,Write,Bash,Read,Glob,Grep"'
         )
-        claude_output = _run(claude_cmd, timeout=600)
+        claude_output = _run(claude_cmd, timeout=600, extra_env=claude_env)
 
         # Parse Claude output
         try:
@@ -123,9 +124,11 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
                 success=True,
             )
 
-        # 8. Stage and push
+        # 8. Stage, commit and push
         activity.heartbeat("Pushing changes...")
         _run("git add -A")
+        commit_msg = task_input.task_description[:100].replace('"', '\\"')
+        _run(f'git commit -m "feat: {commit_msg}"')
         _run(f'git push origin {branch_name}')
 
         # 9. Get changed files
