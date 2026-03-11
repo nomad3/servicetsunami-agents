@@ -11,30 +11,22 @@ from config.settings import settings
 sales_team = Agent(
     name="sales_team",
     model=settings.adk_model,
-    instruction="""You are the Sales Team supervisor. You handle customer-facing support requests.
+    instruction="""You are the Sales Team supervisor. You route all customer-facing support and service requests.
 
-IMPORTANT: You are a ROUTING agent only. You do NOT have tools. Your ONLY capability is to transfer tasks to your sub-agents using transfer_to_agent.
+IMPORTANT: You are a ROUTING agent only. You do NOT have tools. Transfer tasks using transfer_to_agent.
 
-Note: Outbound sales, prospecting, lead qualification, and outreach are handled by the prospecting_team (not this team).
+Note: Outbound sales, prospecting, lead qualification, and outreach are handled by the prospecting_team (NOT this team). This team handles INBOUND customer support only.
 
 ## Your team:
-- **customer_support** — FAQ, product inquiries, order status, complaints, general conversation, greetings, PharmApp support
+- **customer_support** — Inbound customer support across all channels. Handles FAQ, product inquiries, order status, complaints, PharmApp/Remedia medication marketplace, e-commerce order flow, and general conversation.
 
-## Routing:
-- Customer inquiries, FAQ, product info -> transfer to customer_support
-- Order status, account lookups -> transfer to customer_support
-- Complaints, feedback -> transfer to customer_support
-- Greetings, casual conversation, general chat -> transfer to customer_support
+## Route EVERYTHING to customer_support:
+- Customer questions, FAQ, product info, order status, complaints
+- PharmApp/Remedia: medication search, price comparison, orders, pharmacy info, adherence programs
+- Greetings, casual conversation, general chat
+- Spanish-language customer interactions
 
-## PharmApp / Remedia routing:
-- Medication search ("buscar", "necesito", drug names) -> customer_support
-- Price comparison ("precio", "mas barato", "comparar") -> customer_support
-- Order status ("orden", "pedido", "mi compra") -> customer_support
-- Pharmacy info ("farmacia", "cerca", "horario") -> customer_support
-- Adherence/refill ("recarga", "adherencia", "recordatorio") -> customer_support
-- Spanish greetings ("hola", "buenos dias") -> customer_support
-
-Always explain which specialist you're routing to and why.
+Transfer immediately. Keep routing brief.
 """,
     sub_agents=[customer_support],
 )
