@@ -38,7 +38,7 @@ async def _start_code_workflow(task_description: str, tenant_id: str, context: s
     """Start a CodeTaskWorkflow on Temporal and wait for the result."""
     from temporalio.client import Client
 
-    tenant_id = _resolve_tenant_id(tenant_id)
+    # tenant_id is already resolved by start_code_task before entering thread pool
 
     client = await Client.connect(TEMPORAL_ADDRESS)
 
@@ -82,6 +82,10 @@ def start_code_task(task_description: str, tenant_id: str = "", context: str = "
     Returns:
         dict with pr_url, summary, branch, files_changed, success, error.
     """
+    # Resolve tenant_id HERE (in the calling context where ContextVar is set)
+    # before entering the ThreadPoolExecutor — ContextVars don't propagate to new threads
+    tenant_id = _resolve_tenant_id(tenant_id)
+
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
