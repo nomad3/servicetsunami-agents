@@ -27,3 +27,4 @@ class FileSkill(BaseModel):
     tier: str = "native"
     slug: str = ""
     source_repo: Optional[str] = None
+    tool_class: Optional[str] = None

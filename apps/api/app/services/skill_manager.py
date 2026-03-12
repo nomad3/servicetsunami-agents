@@ -76,6 +76,7 @@ def _parse_skill_md(skill_dir: Path, tier: str = "native", tenant_id: str = None
             tier=tier,
             slug=skill_dir.name,
             source_repo=metadata.get("source_repo"),
+            tool_class=metadata.get("tool_class"),
         )
     except Exception as exc:
         logger.error("Error loading skill from %s: %s", skill_dir, exc)
@@ -370,6 +371,8 @@ class SkillManager:
                 return self._execute_shell(skill.name, script_path, inputs)
             elif skill.engine == "markdown":
                 return self._execute_markdown(skill, inputs)
+            elif skill.engine == "tool":
+                return self._execute_tool(skill, inputs)
             else:
                 return {"error": f"Unsupported engine: {skill.engine}"}
         except Exception as e:
@@ -417,6 +420,39 @@ class SkillManager:
             content = content.replace(f"{{{{{k}}}}}", str(v))
 
         return {"success": True, "skill": skill.name, "result": {"prompt": content}}
+
+    def _execute_tool(self, skill: FileSkill, inputs: dict) -> dict:
+        """Execute a tool-backed skill via tool_executor."""
+        tool_class_name = skill.tool_class
+        if not tool_class_name:
+            # Fallback: re-parse from skill.md frontmatter
+            skill_dir = Path(skill.skill_dir)
+            skill_file = skill_dir / "skill.md"
+            if skill_file.exists():
+                content = skill_file.read_text(encoding="utf-8")
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    meta = yaml.safe_load(parts[1].strip())
+                    tool_class_name = meta.get("tool_class") if isinstance(meta, dict) else None
+
+        if not tool_class_name:
+            return {"error": f"No tool_class defined for skill {skill.name}"}
+
+        from app.services.tool_executor import TOOL_CLASS_REGISTRY
+        tool_cls = TOOL_CLASS_REGISTRY.get(tool_class_name)
+        if not tool_cls:
+            return {"error": f"Unknown tool class: {tool_class_name}"}
+
+        return {
+            "success": True,
+            "skill": skill.name,
+            "result": {
+                "tool_class": tool_class_name,
+                "description": skill.description,
+                "inputs": [{"name": i.name, "type": i.type, "required": i.required} for i in (skill.inputs or [])],
+                "message": f"Tool '{skill.name}' is available. Use the corresponding agent tool to execute it.",
+            },
+        }
 
     def execute_chain(self, name: str, inputs: dict, tenant_id: str = None, depth: int = 0) -> dict:
         """Execute a skill and its chain_to skills sequentially."""

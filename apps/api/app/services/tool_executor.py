@@ -757,3 +757,15 @@ def get_tool_registry() -> ToolRegistry:
     if _tool_registry is None:
         _tool_registry = ToolRegistry()
     return _tool_registry
+
+
+# Tool class registry — maps class name to class for skill manager lookup
+TOOL_CLASS_REGISTRY = {
+    "SQLQueryTool": SQLQueryTool,
+    "DataSummaryTool": DataSummaryTool,
+    "CalculatorTool": CalculatorTool,
+    "EntityExtractionTool": EntityExtractionTool,
+    "KnowledgeSearchTool": KnowledgeSearchTool,
+    "LeadScoringTool": LeadScoringTool,
+    "ReportGenerationTool": ReportGenerationTool,
+}
