@@ -1,5 +1,8 @@
 from pydantic import BaseModel
+from typing import List
 import uuid
+
+from app.schemas.agent_skill import AgentSkill as AgentSkillSchema
 
 class AgentBase(BaseModel):
     name: str
@@ -21,6 +24,7 @@ class AgentUpdate(AgentBase):
 class Agent(AgentBase):
     id: uuid.UUID
     tenant_id: uuid.UUID
+    skills: List[AgentSkillSchema] = []
 
     class Config:
         from_attributes = True
