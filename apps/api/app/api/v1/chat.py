@@ -13,6 +13,7 @@ from app.schemas import chat as chat_schema
 from app.schemas import knowledge_entity as ke_schema
 from app.services import chat as chat_service
 from app.services import knowledge as knowledge_service
+from app.services.embedding_service import embed_and_store as _embed
 from app.services.enhanced_chat import get_enhanced_chat_service
 
 router = APIRouter()
@@ -187,6 +188,20 @@ async def post_message_with_file(
         media_parts=parts,
         attachment_meta=attachment_meta,
     )
+
+    # Embed attachment text for semantic search
+    try:
+        embed_text = f"{file.filename or 'attachment'}: {(attachment_meta or {}).get('extracted_text', content)[:2000]}"
+        _embed(
+            db,
+            tenant_id=current_user.tenant_id,
+            content_type="attachment",
+            content_id=str(user_msg.id),
+            text_content=embed_text,
+        )
+    except Exception:
+        pass  # Never break uploads for embedding failures
+
     return chat_schema.ChatTurn(
         user_message=chat_schema.ChatMessage.model_validate(user_msg),
         assistant_message=chat_schema.ChatMessage.model_validate(assistant_msg),
