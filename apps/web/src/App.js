@@ -25,6 +25,7 @@ import ToolsPage from './pages/ToolsPage';
 import VectorStoresPage from './pages/VectorStoresPage';
 import SkillsPage from './pages/SkillsPage';
 import WorkflowsPage from './pages/WorkflowsPage';
+import LearningPage from './pages/LearningPage';
 import authService from './services/auth';
 
 // Create an Auth Context
@@ -86,6 +87,7 @@ function App() {
               <Route path="/teams" element={<ProtectedRoute><TeamsPage /></ProtectedRoute>} />
               <Route path="/memory" element={<ProtectedRoute><MemoryPage /></ProtectedRoute>} />
               <Route path="/skills" element={<ProtectedRoute><SkillsPage /></ProtectedRoute>} />
+              <Route path="/learning" element={<ProtectedRoute><LearningPage /></ProtectedRoute>} />
               <Route path="/workflows" element={<ProtectedRoute><WorkflowsPage /></ProtectedRoute>} />
               <Route path="/task-console" element={<Navigate to="/workflows?tab=executions" replace />} />
               <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />

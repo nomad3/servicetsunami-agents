@@ -14,7 +14,8 @@ import {
   FaProjectDiagram as ProjectDiagramFill,
   FaRobot as Robot,
   FaSun as SunFill,
-  FaPuzzlePiece as PuzzlePiece
+  FaPuzzlePiece as PuzzlePiece,
+  FaChartLine as ChartLine
 } from 'react-icons/fa';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../App';
@@ -63,6 +64,7 @@ const Layout = ({ children }) => {
         { path: '/workflows', icon: ProjectDiagramFill, label: t('sidebar.workflows'), description: t('sidebar_desc.workflows') },
         { path: '/memory', icon: DatabaseFill, label: t('sidebar.memory'), description: t('sidebar_desc.memory') },
         { path: '/skills', icon: PuzzlePiece, label: t('sidebar.skills'), description: t('sidebar_desc.skills') },
+        { path: '/learning', icon: ChartLine, label: t('sidebar.learning'), description: t('sidebar_desc.learning') },
       ]
     },
     {
