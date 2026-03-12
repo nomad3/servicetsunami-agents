@@ -1,129 +1,115 @@
-import React, { useState } from 'react';
-import { Card, Form, Alert } from 'react-bootstrap';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Card, Form, Badge, Spinner, Alert } from 'react-bootstrap';
+import { getFileSkills } from '../../services/skills';
 
-const TOOLS = [
-  {
-    id: 'sql_query',
-    name: 'Data Analysis',
-    description: 'Let your agent answer questions about your data',
-    requiresDataset: true,
-    helpText: 'Enable this if you want your agent to query and analyze datasets',
-  },
-  {
-    id: 'data_summary',
-    name: 'Quick Statistics',
-    description: 'Generate summaries and statistics automatically',
-    requiresDataset: false,
-    helpText: 'Your agent can provide statistical overviews of data',
-  },
-  {
-    id: 'calculator',
-    name: 'Math & Calculations',
-    description: 'Perform calculations and number crunching',
-    requiresDataset: false,
-    helpText: 'Enable this for pricing, conversions, or any math needs',
-  },
-  {
-    id: 'entity_extraction',
-    name: 'Entity Extraction',
-    description: 'Extract people, companies, and concepts from text',
-    requiresDataset: false,
-    helpText: 'Your agent can identify and store entities from conversations and documents into the knowledge graph',
-  },
-  {
-    id: 'knowledge_search',
-    name: 'Knowledge Search',
-    description: 'Search and browse the knowledge graph',
-    requiresDataset: false,
-    helpText: 'Your agent can look up people, companies, and concepts previously extracted into the knowledge graph',
-  },
-  {
-    id: 'lead_scoring',
-    name: 'Lead Scoring',
-    description: 'Score entities 0-100 using configurable rubrics (AI leads, M&A deals, marketing signals)',
-    requiresDataset: false,
-    helpText: 'Your agent can compute composite lead scores using AI analysis of entity data',
-  },
-  {
-    id: 'report_generation',
-    name: 'Report Generation',
-    description: 'Generate structured reports with charts and visualizations',
-    requiresDataset: false,
-    helpText: 'Your agent can create reports with bar charts, line charts, pie charts, tables, and metric visualizations',
-  },
-];
-
-const ToolCard = ({ tool, isChecked, onToggle }) => {
-  const [showHelp, setShowHelp] = useState(false);
-
-  return (
-    <Card key={tool.id} className="mb-2">
-      <Card.Body className="py-3">
-        <div className="d-flex align-items-start justify-content-between">
-          <div className="flex-grow-1">
-            <div className="d-flex align-items-center gap-2 mb-1">
-              <strong>{tool.name}</strong>
-              <button
-                className="btn btn-link btn-sm p-0"
-                onClick={() => setShowHelp(!showHelp)}
-                style={{ textDecoration: 'none', fontSize: '0.85rem' }}
-              >
-                {showHelp ? 'Hide' : 'Learn more'}
-              </button>
-            </div>
-            <small className="text-muted">{tool.description}</small>
-            {showHelp && (
-              <div className="alert alert-info mt-2 mb-0 p-2">
-                <small>{tool.helpText}</small>
-              </div>
-            )}
-          </div>
-          <Form.Check
-            type="switch"
-            id={`tool-${tool.id}`}
-            label=""
-            checked={isChecked}
-            onChange={onToggle}
-            aria-label={tool.name}
-          />
-        </div>
-      </Card.Body>
-    </Card>
-  );
+const CATEGORY_COLORS = {
+  sales: '#28a745', marketing: '#17a2b8', data: '#6f42c1',
+  coding: '#fd7e14', communication: '#e83e8c', automation: '#20c997',
+  general: '#6c757d',
 };
 
+const SkillCard = ({ skill, isSelected, onToggle }) => (
+  <Card className="mb-2" style={{
+    border: isSelected ? '2px solid #4dabf7' : '1px solid rgba(255,255,255,0.1)',
+    background: isSelected ? 'rgba(77,171,247,0.08)' : 'rgba(255,255,255,0.03)',
+    cursor: 'pointer',
+  }} onClick={onToggle}>
+    <Card.Body className="py-2 px-3">
+      <div className="d-flex align-items-center justify-content-between">
+        <div className="flex-grow-1">
+          <div className="d-flex align-items-center gap-2">
+            <Form.Check type="checkbox" checked={isSelected} onChange={onToggle}
+              onClick={e => e.stopPropagation()} aria-label={skill.name} />
+            <strong style={{ fontSize: '0.95rem' }}>{skill.name}</strong>
+            <Badge bg="none" style={{
+              backgroundColor: CATEGORY_COLORS[skill.category] || '#6c757d',
+              fontSize: '0.7rem',
+            }}>{skill.category}</Badge>
+          </div>
+          <small className="text-muted d-block mt-1" style={{ marginLeft: '2rem' }}>
+            {skill.description?.substring(0, 120)}
+          </small>
+        </div>
+        <small className="text-muted">{skill.engine}</small>
+      </div>
+    </Card.Body>
+  </Card>
+);
+
 const SkillsDataStep = ({ data, onChange, templateName }) => {
-  const handleToolToggle = (toolId) => {
-    const updatedSkills = { ...data.skills, [toolId]: !data.skills[toolId] };
-    onChange({ ...data, skills: updatedSkills });
+  const [allSkills, setAllSkills] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+
+  useEffect(() => {
+    getFileSkills({ tier: 'native' })
+      .then(res => setAllSkills(res.data?.skills || res.data || []))
+      .catch(() => setAllSkills([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const selectedSlugs = useMemo(() => new Set(
+    Object.entries(data.skills || {}).filter(([, v]) => v).map(([k]) => k)
+  ), [data.skills]);
+
+  const filtered = useMemo(() => {
+    let list = allSkills;
+    if (categoryFilter !== 'all') list = list.filter(s => s.category === categoryFilter);
+    if (search) list = list.filter(s =>
+      s.name.toLowerCase().includes(search.toLowerCase()) ||
+      (s.description || '').toLowerCase().includes(search.toLowerCase())
+    );
+    return list;
+  }, [allSkills, categoryFilter, search]);
+
+  const categories = useMemo(() =>
+    [...new Set(allSkills.map(s => s.category))].sort(), [allSkills]);
+
+  const handleToggle = (slug) => {
+    const updated = { ...data.skills, [slug]: !data.skills?.[slug] };
+    onChange({ ...data, skills: updated });
   };
+
+  if (loading) return <div className="text-center py-5"><Spinner animation="border" /></div>;
 
   return (
     <div className="skills-data-step">
       <h3 className="mb-2">What can your agent do?</h3>
-      <p className="text-muted mb-4">Configure your agent's capabilities</p>
+      <p className="text-muted mb-3">Select skills from the marketplace</p>
 
-      <Card>
-        <Card.Body>
-          <h5 className="mb-3">Skills</h5>
-          {templateName && (
-            <Alert variant="success" className="mb-3">
-              <small>
-                ✓ Based on your <strong>{templateName}</strong> template, we've pre-selected the recommended tools below. You can enable or disable any of them.
-              </small>
-            </Alert>
-          )}
+      {templateName && (
+        <Alert variant="success" className="mb-3">
+          <small>Based on your <strong>{templateName}</strong> template, we've pre-selected recommended skills.</small>
+        </Alert>
+      )}
 
-          {TOOLS.map((tool) => (
-            <ToolCard
-              key={tool.id}
-              tool={tool}
-              isChecked={data.skills[tool.id]}
-              onToggle={() => handleToolToggle(tool.id)}
-            />
-          ))}
-        </Card.Body>
-      </Card>
+      <Form.Control type="text" placeholder="Search skills..." value={search}
+        onChange={e => setSearch(e.target.value)} className="mb-3"
+        style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff' }} />
+
+      <div className="d-flex gap-2 flex-wrap mb-3">
+        <Badge bg={categoryFilter === 'all' ? 'primary' : 'secondary'} role="button"
+          onClick={() => setCategoryFilter('all')}>All</Badge>
+        {categories.map(c => (
+          <Badge key={c} bg={categoryFilter === c ? 'primary' : 'secondary'} role="button"
+            onClick={() => setCategoryFilter(c)} style={{ textTransform: 'capitalize' }}>{c}</Badge>
+        ))}
+      </div>
+
+      <small className="text-muted mb-2 d-block">
+        {selectedSlugs.size} skill{selectedSlugs.size !== 1 ? 's' : ''} selected
+      </small>
+
+      {filtered.map(skill => (
+        <SkillCard key={skill.slug || skill.name} skill={skill}
+          isSelected={!!selectedSlugs.has(skill.slug || skill.name)}
+          onToggle={() => handleToggle(skill.slug || skill.name)} />
+      ))}
+
+      {filtered.length === 0 && (
+        <p className="text-muted text-center py-4">No skills match your search.</p>
+      )}
     </div>
   );
 };
