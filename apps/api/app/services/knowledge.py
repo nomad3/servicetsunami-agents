@@ -1,11 +1,38 @@
 """Service for managing knowledge graph entities and relations"""
-from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
+import json as _json
+import logging
 import uuid
+from typing import List, Optional, Dict, Any
+
+from sqlalchemy.orm import Session
 
 from app.models.knowledge_entity import KnowledgeEntity
 from app.models.knowledge_relation import KnowledgeRelation
 from app.schemas.knowledge_entity import KnowledgeEntityCreate, KnowledgeEntityUpdate
+from app.services import embedding_service
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def _entity_embed_text(entity: KnowledgeEntity) -> str:
+    """Build the text blob used for embedding an entity."""
+    text = f"{entity.name} {entity.category or ''} {entity.description or ''}"
+    if entity.attributes:
+        props_str = _json.dumps(entity.attributes) if isinstance(entity.attributes, dict) else str(entity.attributes)
+        text += f" {props_str[:500]}"
+    return text.strip()
+
+
+def _safe_embed_entity(db: Session, entity: KnowledgeEntity) -> None:
+    """Embed an entity, silently catching errors so CRUD is never blocked."""
+    try:
+        embed_text = _entity_embed_text(entity)
+        embedding_service.embed_and_store(
+            db, entity.tenant_id, "entity", str(entity.id), embed_text,
+        )
+    except Exception:
+        logger.exception("Failed to embed entity %s — skipping", entity.id)
 
 
 # Entity operations
@@ -26,6 +53,11 @@ def create_entity(db: Session, entity_in: KnowledgeEntityCreate, tenant_id: uuid
         enrichment_data=entity_in.enrichment_data,
     )
     db.add(entity)
+    db.flush()
+
+    # Embed entity for semantic search
+    _safe_embed_entity(db, entity)
+
     db.commit()
     db.refresh(entity)
     return entity
@@ -68,8 +100,35 @@ def search_entities(
     name_query: str,
     entity_type: str = None,
     category: str = None,
+    limit: int = 50,
 ) -> List[KnowledgeEntity]:
-    """Search entities by name."""
+    """Search entities by name — uses vector similarity when available, ILIKE fallback."""
+
+    # Vector search path (preferred when GOOGLE_API_KEY is configured)
+    if name_query and settings.GOOGLE_API_KEY:
+        try:
+            results = embedding_service.search_similar(
+                db, tenant_id, ["entity"], name_query, limit=limit,
+            )
+            if results:
+                entity_ids = [r["content_id"] for r in results]
+                entities = db.query(KnowledgeEntity).filter(
+                    KnowledgeEntity.id.in_(entity_ids),
+                    KnowledgeEntity.tenant_id == tenant_id,
+                ).all()
+                # Apply optional filters
+                if entity_type:
+                    entities = [e for e in entities if e.entity_type == entity_type]
+                if category:
+                    entities = [e for e in entities if e.category == category]
+                # Preserve similarity ranking order
+                id_order = {eid: i for i, eid in enumerate(entity_ids)}
+                entities.sort(key=lambda e: id_order.get(str(e.id), 999))
+                return entities
+        except Exception:
+            logger.exception("Vector search failed — falling back to ILIKE")
+
+    # ILIKE fallback
     query = db.query(KnowledgeEntity).filter(
         KnowledgeEntity.tenant_id == tenant_id,
         KnowledgeEntity.name.ilike(f"%{name_query}%")
@@ -78,7 +137,7 @@ def search_entities(
         query = query.filter(KnowledgeEntity.entity_type == entity_type)
     if category:
         query = query.filter(KnowledgeEntity.category == category)
-    return query.limit(50).all()
+    return query.limit(limit).all()
 
 
 def update_entity(
@@ -96,6 +155,11 @@ def update_entity(
     for field, value in update_data.items():
         setattr(entity, field, value)
 
+    db.flush()
+
+    # Re-embed entity with updated content
+    _safe_embed_entity(db, entity)
+
     db.commit()
     db.refresh(entity)
     return entity
@@ -112,6 +176,12 @@ def delete_entity(db: Session, entity_id: uuid.UUID, tenant_id: uuid.UUID) -> bo
         (KnowledgeRelation.from_entity_id == entity_id) |
         (KnowledgeRelation.to_entity_id == entity_id)
     ).delete(synchronize_session=False)
+
+    # Remove embedding
+    try:
+        embedding_service.delete_embedding(db, "entity", str(entity.id))
+    except Exception:
+        logger.exception("Failed to delete embedding for entity %s — continuing", entity.id)
 
     db.delete(entity)
     db.commit()
@@ -152,6 +222,11 @@ def bulk_create_entities(
             enrichment_data=entity_in.enrichment_data,
         )
         db.add(entity)
+        db.flush()
+
+        # Embed entity for semantic search
+        _safe_embed_entity(db, entity)
+
         created.append(entity)
 
     db.commit()
