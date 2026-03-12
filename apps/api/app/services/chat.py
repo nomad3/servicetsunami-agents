@@ -20,6 +20,7 @@ from app.services import agent_kits as agent_kit_service
 from app.services import datasets as dataset_service
 from app.services.adk_client import ADKError, ADKNotConfiguredError, get_adk_client
 from app.services.knowledge_extraction import knowledge_extraction_service
+from app.services.embedding_service import embed_and_store as _embed
 from app.services.memory_recall import build_memory_context
 
 logger = logging.getLogger(__name__)
@@ -163,6 +164,16 @@ def _append_message(
     db.add(message)
     db.commit()
     db.refresh(message)
+    try:
+        _embed(
+            db,
+            tenant_id=session.tenant_id,
+            content_type="chat_message",
+            content_id=str(message.id),
+            text_content=f"[{role}]: {content[:2000]}",
+        )
+    except Exception:
+        logger.debug("Chat message embedding skipped", exc_info=True)
     return message
 
 
