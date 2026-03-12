@@ -4,6 +4,8 @@ import uuid
 
 from app.models.agent import Agent
 from app.models.agent_relationship import AgentRelationship
+from app.models.tenant_features import TenantFeatures
+from app.services import rl_policy_engine
 
 
 class TaskDispatcher:
@@ -54,7 +56,31 @@ class TaskDispatcher:
             Agent.tenant_id == tenant_id
         ).all()
 
-        # Score agents based on capability match
+        # Check if RL is enabled for this tenant
+        features = self.db.query(TenantFeatures).filter(TenantFeatures.tenant_id == tenant_id).first()
+        rl_enabled = features.rl_enabled if features else False
+
+        if rl_enabled:
+            candidates = [
+                {"id": str(a.id), "name": a.name, "capabilities": a.capabilities or []}
+                for a in agents
+            ]
+            state = {
+                "task_type": "agent_task",
+                "required_capabilities": required_capabilities or [],
+                "agent_count": len(agents),
+            }
+            try:
+                chosen, _explanation = rl_policy_engine.select_action(
+                    self.db, tenant_id, "agent_selection", state, candidates
+                )
+                for agent in agents:
+                    if str(agent.id) == chosen.get("id"):
+                        return agent
+            except Exception:
+                pass  # Fall through to heuristic scoring
+
+        # Heuristic fallback (Layer 0) — score agents based on capability match
         best_agent = None
         best_score = -1
 
