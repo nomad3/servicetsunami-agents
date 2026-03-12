@@ -23,6 +23,7 @@ from app.models.execution_trace import ExecutionTrace
 from app.services.orchestration.task_dispatcher import TaskDispatcher
 from app.services.knowledge_extraction import KnowledgeExtractionService
 from app.services.orchestration.entity_validator import ValidationPolicy
+from app.services import rl_experience_service
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -320,6 +321,21 @@ async def evaluate_task(task_id: str, tenant_id: str, agent_id: str, execute_res
                     / (skill.times_used or 1)
                 )
                 db.commit()
+
+        # Log RL experience (Phase 1: dual-write — both old +0.02 and RL experience)
+        try:
+            rl_experience_service.log_experience(
+                db=db,
+                tenant_id=task.tenant_id,
+                trajectory_id=task.id,  # use task ID as trajectory
+                step_index=0,
+                decision_point="skill_routing",
+                state={"task_type": task.task_type, "agent_id": str(task.agent_id)},
+                action={"skill_name": task.task_type},
+                state_text=f"Task: {task.task_type}, agent: {task.agent_id}",
+            )
+        except Exception:
+            pass  # RL logging should never break task execution
 
         duration_ms = int((time.time() - start) * 1000)
         _log_trace(
