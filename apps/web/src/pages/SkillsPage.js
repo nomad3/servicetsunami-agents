@@ -13,6 +13,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import {
   FaCode,
+  FaGithub,
   FaPlay,
   FaPlus,
   FaPuzzlePiece,
@@ -38,6 +39,11 @@ const SkillsPage = () => {
   // Create modal state
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+
+  // GitHub import state
+  const [showImport, setShowImport] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importUrl, setImportUrl] = useState('');
   const ENGINE_DEFAULTS = {
     python: 'def execute(inputs):\n    # Your skill logic here\n    return {"result": "done"}',
     shell: '#!/bin/bash\n# Inputs are available as SKILL_INPUT_<NAME> env vars\necho "Hello from skill"\n',
@@ -148,6 +154,30 @@ const SkillsPage = () => {
     }
   };
 
+  // ── GitHub import ──
+  const handleImportGithub = async () => {
+    if (!importUrl.trim()) return;
+    try {
+      setImporting(true);
+      const response = await api.post('/skills/library/import-github', {
+        repo_url: importUrl.trim(),
+      });
+      const data = response.data;
+      const imported = data.imported || (data.skill ? [data.skill.name] : []);
+      setSuccess(`Imported ${imported.length} skill(s): ${imported.join(', ')}`);
+      setTimeout(() => setSuccess(null), 5000);
+      setShowImport(false);
+      setImportUrl('');
+      await fetchSkills();
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Import failed';
+      setError(detail);
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <Layout>
       <div className="py-4 px-3" style={{ maxWidth: 1200, margin: '0 auto' }}>
@@ -174,14 +204,24 @@ const SkillsPage = () => {
               <p className="text-muted mb-0 small">{t('subtitle')}</p>
             </div>
           </div>
-          <Button
-            variant="primary"
-            onClick={() => setShowCreate(true)}
-            style={{ borderRadius: 8 }}
-          >
-            <FaPlus className="me-2" size={12} />
-            {t('createSkill')}
-          </Button>
+          <div className="d-flex gap-2">
+            <Button
+              variant="outline-secondary"
+              onClick={() => setShowImport(true)}
+              style={{ borderRadius: 8 }}
+            >
+              <FaGithub className="me-2" size={14} />
+              Import from GitHub
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => setShowCreate(true)}
+              style={{ borderRadius: 8 }}
+            >
+              <FaPlus className="me-2" size={12} />
+              {t('createSkill')}
+            </Button>
+          </div>
         </div>
 
         {/* Stats */}
@@ -714,6 +754,70 @@ const SkillsPage = () => {
                 <>
                   <FaPlus className="me-2" size={10} />
                   {t('create')}
+                </>
+              )}
+            </Button>
+          </Modal.Footer>
+        </Modal>
+
+        {/* ── GitHub Import Modal ── */}
+        <Modal show={showImport} onHide={() => setShowImport(false)} centered>
+          <Modal.Header
+            closeButton
+            style={{
+              background: 'var(--surface-elevated)',
+              borderBottom: '1px solid var(--color-border)',
+            }}
+          >
+            <Modal.Title style={{ fontSize: '1.1rem' }}>
+              <FaGithub className="me-2" size={18} />
+              Import from GitHub
+            </Modal.Title>
+          </Modal.Header>
+          <Modal.Body style={{ background: 'var(--surface-elevated)' }}>
+            <p className="text-muted small mb-3">
+              Paste a GitHub repo URL containing skill directories (each with a <code>skill.md</code> file).
+            </p>
+            <Form.Group>
+              <Form.Label style={{ fontSize: '0.85rem', color: 'var(--color-foreground)' }}>
+                Repository URL
+              </Form.Label>
+              <Form.Control
+                type="text"
+                placeholder="https://github.com/owner/repo or owner/repo/path/to/skills"
+                value={importUrl}
+                onChange={(e) => setImportUrl(e.target.value)}
+                style={{
+                  background: 'var(--surface-contrast, rgba(0,0,0,0.2))',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-foreground)',
+                  borderRadius: 8,
+                }}
+              />
+              <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>
+                Supports: full URLs, <code>owner/repo</code>, or <code>owner/repo/path/to/skill</code>
+              </Form.Text>
+            </Form.Group>
+          </Modal.Body>
+          <Modal.Footer style={{ background: 'var(--surface-elevated)', borderTop: '1px solid var(--color-border)' }}>
+            <Button variant="outline-secondary" onClick={() => setShowImport(false)} style={{ borderRadius: 8 }}>
+              {t('cancel')}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleImportGithub}
+              disabled={importing || !importUrl.trim()}
+              style={{ borderRadius: 8 }}
+            >
+              {importing ? (
+                <>
+                  <Spinner animation="border" size="sm" className="me-2" style={{ width: 14, height: 14, borderWidth: 1.5 }} />
+                  Importing...
+                </>
+              ) : (
+                <>
+                  <FaGithub className="me-2" size={14} />
+                  Import
                 </>
               )}
             </Button>

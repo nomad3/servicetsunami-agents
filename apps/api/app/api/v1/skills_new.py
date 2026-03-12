@@ -98,6 +98,60 @@ def create_file_skill(
     return result["skill"]
 
 
+class GitHubImportRequest(BaseModel):
+    repo_url: str
+
+
+@router.post("/library/import-github")
+def import_from_github(
+    payload: GitHubImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Import skill(s) from a GitHub repository."""
+    # Try to get user's GitHub OAuth token
+    from app.models.integration_config import IntegrationConfig
+    from app.models.integration_credential import IntegrationCredential
+    from app.services.orchestration.credential_vault import retrieve_credentials_for_skill
+
+    github_token = None
+    try:
+        config = db.query(IntegrationConfig).filter(
+            IntegrationConfig.tenant_id == current_user.tenant_id,
+            IntegrationConfig.integration_name == "github",
+        ).first()
+        if config:
+            creds = retrieve_credentials_for_skill(db, config.id, current_user.tenant_id)
+            github_token = creds.get("access_token")
+    except Exception:
+        pass  # Proceed without token (public repos still work)
+
+    result = skill_manager.import_from_github(payload.repo_url, github_token=github_token)
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    # Log to memory
+    imported = result.get("imported", [])
+    skill_obj = result.get("skill")
+    if skill_obj:
+        imported = [skill_obj.name]
+
+    log_activity(
+        db,
+        tenant_id=current_user.tenant_id,
+        event_type="action_triggered",
+        description=f"Skills imported from GitHub: {', '.join(imported)}",
+        source="skills",
+        event_metadata={
+            "action": "skill_imported",
+            "repo_url": payload.repo_url,
+            "imported": imported,
+        },
+    )
+    return result
+
+
 @router.post("/library/execute")
 def execute_file_skill(
     skill_name: str = Body(...),
