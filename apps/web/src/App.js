@@ -5,6 +5,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { ThemeProvider } from './context/ThemeContext';
 import LandingPage from './LandingPage';
 // Agent Kits removed - using ADK for agent configuration
+import AgentDetailPage from './pages/AgentDetailPage';
 import AgentsPage from './pages/AgentsPage';
 import AgentWizardPage from './pages/AgentWizardPage';
 import BrandingPage from './pages/BrandingPage';
@@ -74,6 +75,7 @@ function App() {
               <Route path="/notebooks" element={<ProtectedRoute><NotebooksPage /></ProtectedRoute>} />
               <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
               <Route path="/agents/wizard" element={<ProtectedRoute><AgentWizardPage /></ProtectedRoute>} />
+              <Route path="/agents/:id" element={<ProtectedRoute><AgentDetailPage /></ProtectedRoute>} />
               <Route path="/datasets" element={<Navigate to="/integrations?tab=datasets" replace />} />
               <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
               <Route path="/tools" element={<ProtectedRoute><ToolsPage /></ProtectedRoute>} />
