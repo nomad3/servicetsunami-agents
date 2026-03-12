@@ -29,8 +29,7 @@ const AgentWizard = () => {
     template: null,
     basicInfo: { name: '', description: '', avatar: '' },
     personality: { preset: 'friendly', temperature: 0.7, max_tokens: 2000, system_prompt: '' },
-    skills: { sql_query: false, data_summary: false, calculator: false, entity_extraction: false, knowledge_search: false, lead_scoring: false },
-    scoring_rubric: null,
+    skills: {},
   });
   const [creating, setCreating] = useState(false);
   const [validationState, setValidationState] = useState({
@@ -141,11 +140,10 @@ const AgentWizard = () => {
           personality_preset: wizardData.personality.preset,
           template_used: wizardData.template?.id,
           avatar: wizardData.basicInfo.avatar,
-          tools: Object.entries(wizardData.skills)
-            .filter(([_, enabled]) => enabled)
-            .map(([tool, _]) => tool),
+          skills: Object.entries(wizardData.skills)
+            .filter(([, enabled]) => enabled)
+            .map(([slug]) => slug),
           entity_schema: wizardData.template?.config?.entity_schema || null,
-          scoring_rubric: wizardData.scoring_rubric || null,
         },
       };
 
@@ -217,11 +215,10 @@ const AgentWizard = () => {
                       max_tokens: template.config.max_tokens,
                       system_prompt: template.config.system_prompt,
                     },
-                    skills: template.config.tools.reduce((acc, tool) => {
-                      acc[tool] = true;
+                    skills: (template.config.skills || []).reduce((acc, slug) => {
+                      acc[slug] = true;
                       return acc;
-                    }, { sql_query: false, data_summary: false, calculator: false, entity_extraction: false, knowledge_search: false, lead_scoring: false }),
-                    scoring_rubric: template.config.scoring_rubric || null,
+                    }, {}),
                   });
                   setValidationState({ ...validationState, step1: true });
                 }}
