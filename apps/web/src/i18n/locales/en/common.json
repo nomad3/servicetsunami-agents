@@ -38,6 +38,7 @@
     "workflows": "Workflows",
     "memory": "Memory",
     "skills": "Skills",
+    "learning": "Learning",
     "integrations": "Integrations",
     "organizations": "Organizations",
     "settings": "Settings",
@@ -53,6 +54,7 @@
     "workflows": "Workflow designs and execution audit",
     "memory": "What Luna knows and remembers",
     "skills": "Browse the file-based skills library",
+    "learning": "RL insights & settings",
     "integrations": "Connectors, data sources & datasets",
     "organizations": "Manage organizations & business units",
     "settings": "Platform settings"

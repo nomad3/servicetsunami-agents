@@ -1,0 +1,48 @@
+{
+  "title": "Aprendizaje",
+  "overview": {
+    "title": "Resumen",
+    "totalExperiences": "Experiencias Totales",
+    "avgReward": "Recompensa Prom. (30d)",
+    "explorationRate": "Tasa de Exploración",
+    "policyVersion": "Versión de Política"
+  },
+  "decisionPoints": {
+    "title": "Puntos de Decisión",
+    "name": "Punto de Decisión",
+    "score": "Puntuación",
+    "experiences": "Experiencias",
+    "explorationRatio": "% Exploración"
+  },
+  "experiments": {
+    "title": "Experimentos"
+  },
+  "reviews": {
+    "title": "Revisiones",
+    "pending": "Revisiones Pendientes",
+    "good": "Buena",
+    "acceptable": "Aceptable",
+    "poor": "Mala"
+  },
+  "settings": {
+    "title": "Configuración",
+    "explorationRate": "Tasa de Exploración",
+    "globalBaseline": "Usar Línea Base Global",
+    "optInGlobal": "Contribuir al Aprendizaje Global",
+    "rewardWeights": "Pesos de Recompensa",
+    "implicit": "Implícito",
+    "explicit": "Explícito",
+    "admin": "Administrador",
+    "save": "Guardar Configuración"
+  },
+  "feedback": {
+    "thumbsUp": "Útil",
+    "thumbsDown": "No útil",
+    "wrongAgent": "Agente incorrecto",
+    "irrelevantMemory": "Memoria irrelevante",
+    "incorrectInfo": "Información incorrecta",
+    "tooSlow": "Muy lento",
+    "flagIssue": "Reportar problema",
+    "submitted": "Enviado"
+  }
+}

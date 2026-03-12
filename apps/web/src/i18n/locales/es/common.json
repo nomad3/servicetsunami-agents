@@ -38,6 +38,7 @@
     "workflows": "Workflows",
     "memory": "Memoria",
     "skills": "Skills",
+    "learning": "Aprendizaje",
     "integrations": "Integraciones",
     "organizations": "Organizaciones",
     "settings": "Configuraci\u00f3n",
@@ -53,6 +54,7 @@
     "workflows": "Dise\u00f1os de workflows y auditor\u00eda de ejecuci\u00f3n",
     "memory": "Lo que Luna sabe y recuerda",
     "skills": "Explorar la biblioteca de skills",
+    "learning": "Información y ajustes de RL",
     "integrations": "Conectores, fuentes de datos y datasets",
     "organizations": "Administra organizaciones y unidades de negocio",
     "settings": "Configuraci\u00f3n de la plataforma"

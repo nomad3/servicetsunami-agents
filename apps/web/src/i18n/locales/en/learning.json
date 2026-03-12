@@ -1,0 +1,48 @@
+{
+  "title": "Learning",
+  "overview": {
+    "title": "Overview",
+    "totalExperiences": "Total Experiences",
+    "avgReward": "Avg Reward (30d)",
+    "explorationRate": "Exploration Rate",
+    "policyVersion": "Policy Version"
+  },
+  "decisionPoints": {
+    "title": "Decision Points",
+    "name": "Decision Point",
+    "score": "Score",
+    "experiences": "Experiences",
+    "explorationRatio": "Exploration %"
+  },
+  "experiments": {
+    "title": "Experiments"
+  },
+  "reviews": {
+    "title": "Reviews",
+    "pending": "Pending Reviews",
+    "good": "Good",
+    "acceptable": "Acceptable",
+    "poor": "Poor"
+  },
+  "settings": {
+    "title": "Settings",
+    "explorationRate": "Exploration Rate",
+    "globalBaseline": "Use Global Baseline",
+    "optInGlobal": "Contribute to Global Learning",
+    "rewardWeights": "Reward Weights",
+    "implicit": "Implicit",
+    "explicit": "Explicit",
+    "admin": "Admin",
+    "save": "Save Settings"
+  },
+  "feedback": {
+    "thumbsUp": "Helpful",
+    "thumbsDown": "Not helpful",
+    "wrongAgent": "Wrong agent",
+    "irrelevantMemory": "Irrelevant memory",
+    "incorrectInfo": "Incorrect info",
+    "tooSlow": "Too slow",
+    "flagIssue": "Flag issue",
+    "submitted": "Submitted"
+  }
+}
