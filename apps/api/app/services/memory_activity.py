@@ -15,6 +15,7 @@ from app.models.memory_activity import MemoryActivity
 from app.models.knowledge_entity import KnowledgeEntity
 from app.models.knowledge_relation import KnowledgeRelation
 from app.models.agent_memory import AgentMemory
+from app.services import embedding_service
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,21 @@ def log_activity(
         workflow_run_id=workflow_run_id,
     )
     db.add(activity)
+    db.flush()
+
+    # Embed activity for semantic memory recall
+    try:
+        embed_text = f"{event_type}: {description or ''}"
+        if event_metadata:
+            import json as _json
+            meta_str = _json.dumps(event_metadata) if isinstance(event_metadata, dict) else str(event_metadata)
+            embed_text += f" {meta_str[:500]}"
+        embedding_service.embed_and_store(
+            db, tenant_id, "memory_activity", str(activity.id), embed_text.strip()
+        )
+    except Exception:
+        pass  # Don't break activity logging if embedding fails
+
     db.commit()
     db.refresh(activity)
     return activity
@@ -108,3 +124,8 @@ def get_memory_stats(
         "learned_today": learned_today,
         "pending_actions": max(0, pending_actions - completed_actions),
     }
+
+
+def search_memory(db: Session, tenant_id, query: str, content_types: list = None, limit: int = 20):
+    """Semantic search across memory — skills, entities, activities, chat."""
+    return embedding_service.search_similar(db, str(tenant_id), content_types, query, limit)

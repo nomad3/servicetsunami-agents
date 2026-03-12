@@ -1,5 +1,5 @@
 """API routes for agent memories"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import uuid
@@ -87,6 +87,40 @@ def get_memory_stats_endpoint(
     """Get memory overview stats for the current tenant."""
     from app.services.memory_activity import get_memory_stats
     return get_memory_stats(db, current_user.tenant_id)
+
+
+@router.get("/search")
+def search_memory_endpoint(
+    q: str,
+    types: Optional[str] = None,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Unified semantic search across all memory content types."""
+    from app.services.memory_activity import search_memory
+    content_types = types.split(",") if types else None
+    results = search_memory(db, str(current_user.tenant_id), q, content_types, limit)
+    return {"results": results, "query": q}
+
+
+@router.get("/search/internal")
+def search_memory_internal(
+    q: str,
+    types: Optional[str] = None,
+    limit: int = 20,
+    tenant_id: Optional[str] = None,
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+    db: Session = Depends(get_db),
+):
+    """Unified semantic search (internal — for ADK server)."""
+    from app.core.config import settings
+    if x_internal_key not in (getattr(settings, 'API_INTERNAL_KEY', ''), getattr(settings, 'MCP_API_KEY', '')):
+        raise HTTPException(status_code=401, detail="Invalid internal key")
+    from app.services.memory_activity import search_memory
+    content_types = types.split(",") if types else None
+    results = search_memory(db, tenant_id, q, content_types, limit)
+    return {"results": results, "query": q}
 
 
 @router.get("/{memory_id}", response_model=AgentMemoryInDB)
