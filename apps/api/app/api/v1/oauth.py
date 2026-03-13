@@ -1,4 +1,4 @@
-"""OAuth2 Authorization Code flow for Google, GitHub, and LinkedIn.
+"""OAuth2 Authorization Code flow for Google, Microsoft, GitHub, and LinkedIn.
 
 Supports multiple connected accounts per provider per tenant.
 
@@ -14,7 +14,7 @@ import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Dict, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -55,6 +55,21 @@ OAUTH_PROVIDERS = {
         ],
         "integration_names": ["gmail", "google_calendar"],
     },
+    "microsoft": {
+        "authorize_url": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        "userinfo_url": "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName",
+        "scopes": [
+            "offline_access",
+            "openid",
+            "profile",
+            "email",
+            "User.Read",
+            "Mail.Read",
+            "Mail.Send",
+        ],
+        "integration_names": ["outlook"],
+    },
     "github": {
         "authorize_url": "https://github.com/login/oauth/authorize",
         "token_url": "https://github.com/login/oauth/access_token",
@@ -76,6 +91,12 @@ def _get_provider_credentials(provider: str):
     """Return (client_id, client_secret, redirect_uri) for a provider."""
     if provider == "google":
         return settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET, settings.GOOGLE_REDIRECT_URI
+    elif provider == "microsoft":
+        return (
+            settings.MICROSOFT_CLIENT_ID,
+            settings.MICROSOFT_CLIENT_SECRET,
+            settings.MICROSOFT_REDIRECT_URI,
+        )
     elif provider == "github":
         return settings.GITHUB_CLIENT_ID, settings.GITHUB_CLIENT_SECRET, settings.GITHUB_REDIRECT_URI
     elif provider == "linkedin":
@@ -89,6 +110,10 @@ def _validate_provider(provider: str):
     client_id, client_secret, _ = _get_provider_credentials(provider)
     if not client_id or not client_secret:
         raise HTTPException(status_code=501, detail=f"OAuth not configured for {provider}")
+
+
+def _get_provider_scope_string(provider: str) -> str:
+    return " ".join(OAUTH_PROVIDERS[provider]["scopes"])
 
 
 def _fetch_account_email(provider: str, access_token: str) -> Optional[str]:
@@ -110,6 +135,8 @@ def _fetch_account_email(provider: str, access_token: str) -> Optional[str]:
 
         if provider == "google":
             return data.get("email")
+        elif provider == "microsoft":
+            return data.get("mail") or data.get("userPrincipalName")
         elif provider == "github":
             email = data.get("email")
             if not email:
@@ -133,24 +160,33 @@ def _fetch_account_email(provider: str, access_token: str) -> Optional[str]:
     return None
 
 
-def _refresh_access_token(provider: str, refresh_token: str) -> Optional[str]:
-    """Use a refresh token to get a fresh access token."""
+def _refresh_access_token(provider: str, refresh_token: str) -> Optional[Dict[str, str]]:
+    """Use a refresh token to get fresh OAuth tokens."""
     config = OAUTH_PROVIDERS[provider]
     client_id, client_secret, _ = _get_provider_credentials(provider)
 
-    if provider != "google":
-        return None  # Only Google supports refresh tokens this way
-
     try:
+        token_data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        }
+        if provider == "microsoft":
+            token_data["scope"] = _get_provider_scope_string(provider)
+
         with httpx.Client(timeout=10.0) as client:
-            resp = client.post(config["token_url"], data={
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "refresh_token": refresh_token,
-                "grant_type": "refresh_token",
-            })
+            resp = client.post(config["token_url"], data=token_data)
             resp.raise_for_status()
-            return resp.json().get("access_token")
+            tokens = resp.json()
+            access_token = tokens.get("access_token")
+            if not access_token:
+                return None
+
+            refreshed_tokens = {"access_token": access_token}
+            if tokens.get("refresh_token"):
+                refreshed_tokens["refresh_token"] = tokens["refresh_token"]
+            return refreshed_tokens
     except Exception as e:
         logger.warning("Failed to refresh token for %s: %s", provider, e)
         return None
@@ -164,20 +200,26 @@ def _integration_to_provider(integration_name: str) -> Optional[str]:
     return None
 
 
-def _update_stored_token(db: Session, integration_config_id: uuid.UUID, tenant_id: uuid.UUID, new_token: str):
-    """Replace the stored oauth_token credential with a fresh one."""
+def _update_stored_tokens(
+    db: Session,
+    integration_config_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    access_token: str,
+    refresh_token: Optional[str] = None,
+):
+    """Replace stored OAuth credentials with fresh values."""
     try:
-        old_cred = (
+        old_creds = (
             db.query(IntegrationCredential)
             .filter(
                 IntegrationCredential.integration_config_id == integration_config_id,
                 IntegrationCredential.tenant_id == tenant_id,
-                IntegrationCredential.credential_key == "oauth_token",
+                IntegrationCredential.credential_key.in_(["oauth_token", "refresh_token"]),
                 IntegrationCredential.status == "active",
             )
-            .first()
+            .all()
         )
-        if old_cred:
+        for old_cred in old_creds:
             revoke_credential(db, credential_id=old_cred.id, tenant_id=tenant_id)
 
         store_credential(
@@ -185,11 +227,20 @@ def _update_stored_token(db: Session, integration_config_id: uuid.UUID, tenant_i
             integration_config_id=integration_config_id,
             tenant_id=tenant_id,
             credential_key="oauth_token",
-            plaintext_value=new_token,
+            plaintext_value=access_token,
             credential_type="oauth_token",
         )
+        if refresh_token:
+            store_credential(
+                db,
+                integration_config_id=integration_config_id,
+                tenant_id=tenant_id,
+                credential_key="refresh_token",
+                plaintext_value=refresh_token,
+                credential_type="oauth_token",
+            )
     except Exception:
-        logger.exception("Failed to update stored token for config=%s", integration_config_id)
+        logger.exception("Failed to update stored tokens for config=%s", integration_config_id)
 
 
 def _lazy_backfill_email(
@@ -208,11 +259,11 @@ def _lazy_backfill_email(
         if not refresh_tok:
             return None
 
-        access_token = _refresh_access_token(provider, refresh_tok)
-        if not access_token:
+        refreshed_tokens = _refresh_access_token(provider, refresh_tok)
+        if not refreshed_tokens:
             return None
 
-        email = _fetch_account_email(provider, access_token)
+        email = _fetch_account_email(provider, refreshed_tokens["access_token"])
         if email:
             config.account_email = email
             db.commit()
@@ -250,12 +301,11 @@ def oauth_authorize(
     state_token = jwt.encode(state_payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
     # Build authorization URL
-    scopes = " ".join(config["scopes"])
     params = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "scope": scopes,
+        "scope": _get_provider_scope_string(provider),
         "state": state_token,
     }
 
@@ -263,6 +313,9 @@ def oauth_authorize(
     if provider == "google":
         params["access_type"] = "offline"
         params["prompt"] = "consent select_account"
+    elif provider == "microsoft":
+        params["prompt"] = "select_account"
+        params["response_mode"] = "query"
 
     query = "&".join(f"{k}={httpx.QueryParams({k: v})[k]}" for k, v in params.items())
     auth_url = f"{config['authorize_url']}?{query}"
@@ -341,6 +394,8 @@ def oauth_callback(
     }
 
     if provider == "google":
+        token_data["grant_type"] = "authorization_code"
+    elif provider == "microsoft":
         token_data["grant_type"] = "authorization_code"
     elif provider == "github":
         pass  # GitHub doesn't require grant_type
@@ -680,8 +735,8 @@ def get_integration_token(
     If account_email is provided, returns credentials for that specific account.
     Otherwise returns credentials for the first active account.
 
-    For Google OAuth: automatically refreshes the access token using the stored
-    refresh_token, since Google access tokens expire after ~1 hour.
+    For Google and Microsoft OAuth: automatically refreshes the access token
+    using the stored refresh_token when available.
     """
     try:
         tid = uuid.UUID(tenant_id)
@@ -712,15 +767,23 @@ def get_integration_token(
     elif not provider and not creds:
         raise HTTPException(status_code=404, detail=f"No active credentials for '{integration_name}'")
 
-    # Auto-refresh Google tokens (they expire after ~1 hour)
+    # Auto-refresh provider tokens that support refresh_token rotation.
     refresh_token = creds.get("refresh_token")
-    if provider == "google" and refresh_token:
-        new_access_token = _refresh_access_token("google", refresh_token)
-        if new_access_token:
-            # Update stored credential with fresh token
-            _update_stored_token(db, config.id, tid, new_access_token)
-            creds["oauth_token"] = new_access_token
-            logger.debug("Refreshed Google token for integration=%s tenant=%s", integration_name, tid)
+    if provider in {"google", "microsoft"} and refresh_token:
+        refreshed_tokens = _refresh_access_token(provider, refresh_token)
+        if refreshed_tokens:
+            # Update stored credential with fresh token(s)
+            _update_stored_tokens(
+                db,
+                config.id,
+                tid,
+                refreshed_tokens["access_token"],
+                refreshed_tokens.get("refresh_token"),
+            )
+            creds["oauth_token"] = refreshed_tokens["access_token"]
+            if refreshed_tokens.get("refresh_token"):
+                creds["refresh_token"] = refreshed_tokens["refresh_token"]
+            logger.debug("Refreshed %s token for integration=%s tenant=%s", provider, integration_name, tid)
         else:
             logger.warning("Token refresh failed for integration=%s tenant=%s, returning stored token", integration_name, tid)
 

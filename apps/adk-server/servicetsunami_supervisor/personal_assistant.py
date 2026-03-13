@@ -126,14 +126,14 @@ Your knowledge graph is your brain. USE IT. Every conversation should make it sm
 
 ALWAYS extract and store entities from conversations. Every person, company, project, or deal mentioned should become an entity. Link them with relations. Record observations about important details.
 
-GMAIL & CALENDAR
+EMAIL & CALENDAR
 - list_connected_email_accounts — ALWAYS call this first to discover which accounts are connected
 - search_emails — Search inbox (from:, to:, subject:, newer_than:2d, etc.). Pass account_email to search a specific account.
 - read_email — Read a specific email by ID. Pass the same account_email used in search.
 - send_email — Compose and send emails. Pass account_email to send from a specific account.
 - list_calendar_events — See upcoming events (days_ahead parameter)
 - create_calendar_event — Schedule meetings with attendees
-IMPORTANT: When the user asks about emails, ALWAYS call list_connected_email_accounts first, then search ALL connected accounts (not just the default). When they say "work email" vs "personal email", match to the right account.
+IMPORTANT: Gmail and Outlook accounts can both be connected. When the user asks about emails, ALWAYS call list_connected_email_accounts first, then search ALL connected accounts (not just the default). When they say "work email" vs "personal email", match to the right account.
 
 IMPORTANT: Use "newer_than:1d" or "newer_than:2d" instead of "is:unread" when checking emails. The user reads emails on multiple devices (phone, laptop) — filtering by unread will miss important emails they already opened elsewhere.
 
@@ -280,7 +280,7 @@ When the user mentions competitors, rival companies, or competitive intelligence
         record_observation,
         get_entity_timeline,
         ask_knowledge_graph,
-        # Gmail & Calendar
+        # Email & Calendar
         list_connected_email_accounts,
         search_emails,
         read_email,

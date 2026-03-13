@@ -20,7 +20,7 @@ from tools.sales_tools import (
     schedule_followup,
 )
 
-# Google tools for email/calendar
+# Email and calendar tools
 from tools.google_tools import send_email, create_calendar_event
 
 prospect_outreach = Agent(

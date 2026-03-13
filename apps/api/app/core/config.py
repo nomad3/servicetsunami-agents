@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     LINKEDIN_CLIENT_SECRET: str | None = None
     LINKEDIN_REDIRECT_URI: str = "https://servicetsunami.com/api/v1/oauth/linkedin/callback"
 
+    # OAuth2 - Microsoft (Outlook Mail)
+    MICROSOFT_CLIENT_ID: str | None = None
+    MICROSOFT_CLIENT_SECRET: str | None = None
+    MICROSOFT_REDIRECT_URI: str = "https://servicetsunami.com/api/v1/oauth/microsoft/callback"
+
     # HCA (Deal Intelligence) API
     HCA_API_URL: str = "http://hca-api:3000"
     HCA_SERVICE_KEY: str = ""

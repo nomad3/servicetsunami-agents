@@ -20,6 +20,7 @@ import {
   FaKey,
   FaLink,
   FaLinkedin,
+  FaMicrosoft,
   FaPlay,
   FaPlug,
   FaPlus,
@@ -52,6 +53,7 @@ const ICON_MAP = {
   FaCalendar: FaCalendar,
   FaProjectDiagram: FaProjectDiagram,
   FaLinkedin: FaLinkedin,
+  FaMicrosoft: FaMicrosoft,
   FaTerminal: FaTerminal,
 };
 
@@ -64,6 +66,7 @@ const SKILL_COLORS = {
   notion: '#000000',
   jira: '#0052CC',
   google_calendar: '#4285F4',
+  outlook: '#0078D4',
   linear: '#5E6AD2',
   linkedin: '#0A66C2',
   claude_code: '#D97706',
@@ -72,6 +75,7 @@ const SKILL_COLORS = {
 // Provider brand colors and icons for OAuth buttons
 const OAUTH_BRAND = {
   google: { label: 'Google', icon: FaGoogle, color: '#4285F4', bg: '#fff', textColor: '#333' },
+  microsoft: { label: 'Microsoft', icon: FaMicrosoft, color: '#0078D4', bg: '#0078D4', textColor: '#fff' },
   github: { label: 'GitHub', icon: FaGithub, color: '#24292e', bg: '#24292e', textColor: '#fff' },
   linkedin: { label: 'LinkedIn', icon: FaLinkedin, color: '#0A66C2', bg: '#0A66C2', textColor: '#fff' },
 };

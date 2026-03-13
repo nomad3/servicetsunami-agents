@@ -1,10 +1,12 @@
-"""Gmail and Google Calendar tools for the personal assistant.
+"""Email and Google Calendar tools for the personal assistant.
 
-Uses stored OAuth tokens (via credential vault) to call Google APIs
-on behalf of the authenticated user.
+Uses stored OAuth tokens (via credential vault) to call Gmail, Outlook,
+and Google Calendar APIs on behalf of the authenticated user.
 """
 import base64
+import html
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from typing import Optional
@@ -17,7 +19,8 @@ from tools.knowledge_tools import _resolve_tenant_id
 logger = logging.getLogger(__name__)
 
 _api_client: Optional[httpx.AsyncClient] = None
-_google_client: Optional[httpx.AsyncClient] = None
+_provider_client: Optional[httpx.AsyncClient] = None
+EMAIL_INTEGRATIONS = ("gmail", "outlook")
 
 
 def _get_api_client() -> httpx.AsyncClient:
@@ -30,14 +33,14 @@ def _get_api_client() -> httpx.AsyncClient:
     return _api_client
 
 
-def _get_google_client() -> httpx.AsyncClient:
-    global _google_client
-    if _google_client is None:
-        _google_client = httpx.AsyncClient(timeout=30.0)
-    return _google_client
+def _get_provider_client() -> httpx.AsyncClient:
+    global _provider_client
+    if _provider_client is None:
+        _provider_client = httpx.AsyncClient(timeout=30.0)
+    return _provider_client
 
 
-async def _get_google_token(
+async def _get_oauth_token(
     tenant_id: str, integration_name: str, account_email: Optional[str] = None,
 ) -> Optional[str]:
     """Retrieve decrypted OAuth access token from the API credential vault."""
@@ -59,14 +62,133 @@ async def _get_google_token(
     return None
 
 
+async def _get_connected_accounts_for_integration(
+    tenant_id: str, integration_name: str,
+) -> list[dict]:
+    client = _get_api_client()
+    try:
+        resp = await client.get(
+            f"/api/v1/oauth/internal/connected-accounts/{integration_name}",
+            headers={"X-Internal-Key": settings.mcp_api_key},
+            params={"tenant_id": tenant_id},
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "Connected accounts lookup for %s returned %s",
+                integration_name,
+                resp.status_code,
+            )
+            return []
+
+        accounts = resp.json().get("accounts", [])
+        normalized = []
+        for account in accounts:
+            email = account.get("account_email")
+            normalized.append({
+                "email": email,
+                "account_email": email,
+                "integration_name": integration_name,
+                "provider": "google" if integration_name == "gmail" else "microsoft",
+                "enabled": account.get("enabled", True),
+            })
+        return normalized
+    except Exception:
+        logger.exception("Failed to list accounts for %s", integration_name)
+        return []
+
+
+async def _get_all_connected_email_accounts(tenant_id: str) -> list[dict]:
+    accounts: list[dict] = []
+    for integration_name in EMAIL_INTEGRATIONS:
+        accounts.extend(await _get_connected_accounts_for_integration(tenant_id, integration_name))
+    return accounts
+
+
+async def _resolve_email_account(
+    tenant_id: str, account_email: str = "",
+) -> tuple[Optional[dict], Optional[str]]:
+    accounts = await _get_all_connected_email_accounts(tenant_id)
+    if not accounts:
+        return None, "No email accounts connected. Ask the user to connect Gmail or Outlook in Connected Apps."
+
+    if account_email:
+        account = next((a for a in accounts if a.get("email") == account_email), None)
+        if not account:
+            return None, f"No connected email account found for {account_email}."
+        return account, None
+
+    return accounts[0], None
+
+
+def _escape_odata_string(value: str) -> str:
+    return value.replace("'", "''")
+
+
+def _strip_html(content: str) -> str:
+    text = re.sub(r"<br\s*/?>", "\n", content, flags=re.IGNORECASE)
+    text = re.sub(r"</p\s*>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return html.unescape(re.sub(r"\s+\n", "\n", re.sub(r"[ \t]+", " ", text))).strip()
+
+
+def _build_outlook_search(query: str, max_results: int) -> tuple[dict, dict]:
+    params = {
+        "$top": min(max_results, 20),
+        "$orderby": "receivedDateTime DESC",
+        "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead",
+    }
+    headers = {"Prefer": 'outlook.body-content-type="text"'}
+    if not query:
+        return params, headers
+
+    filters = []
+    search_terms = []
+    tokens = re.findall(r'(?:[^\s"]+|"[^"]*")+', query)
+
+    for token in tokens:
+        raw = token.strip()
+        cleaned = raw.strip('"')
+        lower = cleaned.lower()
+
+        if lower.startswith("from:"):
+            email = _escape_odata_string(cleaned[5:])
+            filters.append(f"from/emailAddress/address eq '{email}'")
+        elif lower.startswith("to:"):
+            email = _escape_odata_string(cleaned[3:])
+            filters.append(f"toRecipients/any(r:r/emailAddress/address eq '{email}')")
+        elif lower.startswith("subject:"):
+            subject = _escape_odata_string(cleaned[8:])
+            filters.append(f"contains(subject,'{subject}')")
+        elif lower.startswith("newer_than:"):
+            match = re.fullmatch(r"newer_than:(\d+)([dh])", lower)
+            if match:
+                amount = int(match.group(1))
+                unit = match.group(2)
+                delta = timedelta(days=amount) if unit == "d" else timedelta(hours=amount)
+                cutoff = (datetime.now(timezone.utc) - delta).strftime("%Y-%m-%dT%H:%M:%SZ")
+                filters.append(f"receivedDateTime ge {cutoff}")
+        elif lower == "is:unread":
+            filters.append("isRead eq false")
+        elif ":" not in cleaned:
+            search_terms.append(cleaned)
+
+    if filters:
+        params["$filter"] = " and ".join(filters)
+    if search_terms:
+        params["$search"] = f"\"{' '.join(search_terms)}\""
+        headers["ConsistencyLevel"] = "eventual"
+        params.pop("$orderby", None)
+    return params, headers
+
+
 # ---------------------------------------------------------------------------
-# Gmail tools
+# Email tools (Gmail + Outlook)
 # ---------------------------------------------------------------------------
 
 async def list_connected_email_accounts(
     tenant_id: str = "auto",
 ) -> dict:
-    """List all Gmail accounts connected for this tenant.
+    """List all email accounts connected for this tenant.
 
     Use this to discover which email accounts are available before searching.
     When the user asks about "work email" or "personal email", use this to find
@@ -79,16 +201,9 @@ async def list_connected_email_accounts(
         Dict with list of connected email accounts.
     """
     tenant_id = _resolve_tenant_id(tenant_id)
-    client = _get_api_client()
     try:
-        resp = await client.get(
-            "/api/v1/oauth/internal/connected-accounts/gmail",
-            headers={"X-Internal-Key": settings.mcp_api_key},
-            params={"tenant_id": tenant_id},
-        )
-        if resp.status_code == 200:
-            return resp.json()
-        return {"error": f"Failed to list accounts: {resp.status_code}"}
+        accounts = await _get_all_connected_email_accounts(tenant_id)
+        return {"accounts": accounts, "count": len(accounts)}
     except Exception as e:
         logger.exception("list_connected_email_accounts failed")
         return {"error": str(e)}
@@ -100,14 +215,15 @@ async def search_emails(
     max_results: int = 10,
     account_email: str = "",
 ) -> dict:
-    """Search Gmail for emails matching a query.
+    """Search Gmail or Outlook for emails matching a query.
 
     Args:
         tenant_id: Tenant context. Use "auto" if unknown.
-        query: Gmail search query (e.g. "from:alice@example.com", "subject:invoice",
-               "is:unread", "newer_than:2d"). Leave empty for recent inbox messages.
+        query: Gmail-style search query (e.g. "from:alice@example.com",
+               "subject:invoice", "is:unread", "newer_than:2d"). For Outlook,
+               the common filters are translated to Microsoft Graph.
         max_results: Maximum number of emails to return (1-20).
-        account_email: Specific Gmail account to search (e.g. "user@company.com").
+        account_email: Specific email account to search (e.g. "user@company.com").
                        If empty, searches the default (first) connected account.
                        Use list_connected_email_accounts to discover available accounts.
 
@@ -115,63 +231,93 @@ async def search_emails(
         Dict with list of email summaries (subject, from, date, snippet).
     """
     tenant_id = _resolve_tenant_id(tenant_id)
-    token = await _get_google_token(tenant_id, "gmail", account_email or None)
-    if not token:
-        return {"error": "Gmail not connected. Ask the user to connect Gmail in Connected Apps."}
+    account, error = await _resolve_email_account(tenant_id, account_email)
+    if error:
+        return {"error": error}
 
-    google = _get_google_client()
+    integration_name = account["integration_name"]
+    token = await _get_oauth_token(tenant_id, integration_name, account.get("email"))
+    if not token:
+        return {"error": f"{integration_name.title()} not connected. Ask the user to reconnect it in Connected Apps."}
+
+    provider_client = _get_provider_client()
     auth = {"Authorization": f"Bearer {token}"}
 
     try:
-        # List message IDs
-        params = {"maxResults": min(max_results, 20)}
-        if query:
-            params["q"] = query
-        resp = await google.get(
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-            headers=auth,
+        if integration_name == "gmail":
+            params = {"maxResults": min(max_results, 20)}
+            if query:
+                params["q"] = query
+            resp = await provider_client.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+                headers=auth,
+                params=params,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            messages = data.get("messages", [])
+
+            if not messages:
+                return {"status": "success", "emails": [], "message": "No emails found."}
+
+            emails = []
+            for msg in messages:
+                detail = await provider_client.get(
+                    f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg['id']}",
+                    headers=auth,
+                    params=[
+                        ("format", "metadata"),
+                        ("metadataHeaders", "Subject"),
+                        ("metadataHeaders", "From"),
+                        ("metadataHeaders", "Date"),
+                    ],
+                )
+                if detail.status_code != 200:
+                    continue
+                md = detail.json()
+                headers = {h["name"]: h["value"] for h in md.get("payload", {}).get("headers", [])}
+                labels = md.get("labelIds", [])
+                emails.append({
+                    "id": msg["id"],
+                    "subject": headers.get("Subject", "(no subject)"),
+                    "from": headers.get("From", ""),
+                    "date": headers.get("Date", ""),
+                    "snippet": md.get("snippet", ""),
+                    "is_read": "UNREAD" not in labels,
+                    "provider": "google",
+                    "account_email": account.get("email"),
+                })
+
+            return {"status": "success", "emails": emails, "total": data.get("resultSizeEstimate", len(emails))}
+
+        params, extra_headers = _build_outlook_search(query, max_results)
+        resp = await provider_client.get(
+            "https://graph.microsoft.com/v1.0/me/messages",
+            headers={**auth, **extra_headers},
             params=params,
         )
         resp.raise_for_status()
         data = resp.json()
-        messages = data.get("messages", [])
+        emails = [{
+            "id": item.get("id"),
+            "subject": item.get("subject") or "(no subject)",
+            "from": (item.get("from") or {}).get("emailAddress", {}).get("address", ""),
+            "date": item.get("receivedDateTime", ""),
+            "snippet": item.get("bodyPreview", ""),
+            "is_read": item.get("isRead", False),
+            "provider": "microsoft",
+            "account_email": account.get("email"),
+        } for item in data.get("value", [])]
 
-        if not messages:
+        if not emails:
             return {"status": "success", "emails": [], "message": "No emails found."}
 
-        # Fetch details for each message
-        emails = []
-        for msg in messages:
-            detail = await google.get(
-                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg['id']}",
-                headers=auth,
-                params=[
-                    ("format", "metadata"),
-                    ("metadataHeaders", "Subject"),
-                    ("metadataHeaders", "From"),
-                    ("metadataHeaders", "Date"),
-                ],
-            )
-            if detail.status_code != 200:
-                continue
-            md = detail.json()
-            headers = {h["name"]: h["value"] for h in md.get("payload", {}).get("headers", [])}
-            labels = md.get("labelIds", [])
-            emails.append({
-                "id": msg["id"],
-                "subject": headers.get("Subject", "(no subject)"),
-                "from": headers.get("From", ""),
-                "date": headers.get("Date", ""),
-                "snippet": md.get("snippet", ""),
-                "is_read": "UNREAD" not in labels,
-            })
-
-        return {"status": "success", "emails": emails, "total": data.get("resultSizeEstimate", len(emails))}
+        return {"status": "success", "emails": emails, "total": len(emails)}
 
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 401:
-            return {"error": "Gmail token expired. Ask user to reconnect Gmail in Connected Apps."}
-        return {"error": f"Gmail API error: {e.response.status_code}"}
+            return {"error": f"{integration_name.title()} token expired. Ask user to reconnect it in Connected Apps."}
+        return {"error": f"{integration_name.title()} API error: {e.response.status_code}"}
     except Exception as e:
         logger.exception("search_emails failed")
         return {"error": f"Failed to search emails: {str(e)}"}
@@ -186,8 +332,8 @@ async def read_email(
 
     Args:
         tenant_id: Tenant context. Use "auto" if unknown.
-        message_id: Gmail message ID (from search_emails results).
-        account_email: Specific Gmail account to read from. Use the same account
+        message_id: Message ID from search_emails results.
+        account_email: Specific email account to read from. Use the same account
                        that was used in search_emails to find this message.
 
     Returns:
@@ -197,42 +343,77 @@ async def read_email(
     if not message_id:
         return {"error": "message_id is required. Use search_emails first to get message IDs."}
 
-    token = await _get_google_token(tenant_id, "gmail", account_email or None)
-    if not token:
-        return {"error": "Gmail not connected. Ask the user to connect Gmail in Connected Apps."}
+    account, error = await _resolve_email_account(tenant_id, account_email)
+    if error:
+        return {"error": error}
 
-    google = _get_google_client()
+    integration_name = account["integration_name"]
+    token = await _get_oauth_token(tenant_id, integration_name, account.get("email"))
+    if not token:
+        return {"error": f"{integration_name.title()} not connected. Ask the user to reconnect it in Connected Apps."}
+
+    provider_client = _get_provider_client()
     auth = {"Authorization": f"Bearer {token}"}
 
     try:
-        resp = await google.get(
-            f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
-            headers=auth,
-            params={"format": "full"},
+        if integration_name == "gmail":
+            resp = await provider_client.get(
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
+                headers=auth,
+                params={"format": "full"},
+            )
+            resp.raise_for_status()
+            msg = resp.json()
+
+            headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
+            body = _extract_body(msg.get("payload", {}))
+
+            return {
+                "status": "success",
+                "id": message_id,
+                "subject": headers.get("Subject", "(no subject)"),
+                "from": headers.get("From", ""),
+                "to": headers.get("To", ""),
+                "date": headers.get("Date", ""),
+                "body": body[:5000],
+                "labels": msg.get("labelIds", []),
+                "provider": "google",
+                "account_email": account.get("email"),
+            }
+
+        resp = await provider_client.get(
+            f"https://graph.microsoft.com/v1.0/me/messages/{message_id}",
+            headers={**auth, "Prefer": 'outlook.body-content-type="text"'},
+            params={
+                "$select": "subject,from,toRecipients,receivedDateTime,body,bodyPreview,internetMessageHeaders",
+            },
         )
         resp.raise_for_status()
         msg = resp.json()
-
-        headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
-
-        # Extract body text
-        body = _extract_body(msg.get("payload", {}))
+        body = (msg.get("body") or {}).get("content") or msg.get("bodyPreview", "")
+        if (msg.get("body") or {}).get("contentType", "").lower() == "html":
+            body = _strip_html(body)
 
         return {
             "status": "success",
             "id": message_id,
-            "subject": headers.get("Subject", "(no subject)"),
-            "from": headers.get("From", ""),
-            "to": headers.get("To", ""),
-            "date": headers.get("Date", ""),
-            "body": body[:5000],  # Limit body size
-            "labels": msg.get("labelIds", []),
+            "subject": msg.get("subject") or "(no subject)",
+            "from": (msg.get("from") or {}).get("emailAddress", {}).get("address", ""),
+            "to": ", ".join(
+                recipient.get("emailAddress", {}).get("address", "")
+                for recipient in msg.get("toRecipients", [])
+            ),
+            "date": msg.get("receivedDateTime", ""),
+            "body": body[:5000],
+            "labels": [],
+            "provider": "microsoft",
+            "account_email": account.get("email"),
         }
 
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 401:
-            return {"error": "Gmail token expired. Ask user to reconnect Gmail."}
-        return {"error": f"Gmail API error: {e.response.status_code}"}
+            return {"error": f"{integration_name.title()} token expired. Ask user to reconnect it."}
+        return {"error": f"{integration_name.title()} API error: {e.response.status_code}"}
     except Exception as e:
         logger.exception("read_email failed")
         return {"error": f"Failed to read email: {str(e)}"}
@@ -264,14 +445,14 @@ async def send_email(
     body: str = "",
     account_email: str = "",
 ) -> dict:
-    """Send an email via Gmail.
+    """Send an email via Gmail or Outlook.
 
     Args:
         tenant_id: Tenant context. Use "auto" if unknown.
         to: Recipient email address.
         subject: Email subject line.
         body: Email body text (plain text).
-        account_email: Specific Gmail account to send from. If empty, uses default account.
+        account_email: Specific email account to send from. If empty, uses default account.
 
     Returns:
         Dict with send status and message ID.
@@ -280,37 +461,71 @@ async def send_email(
     if not to or not subject:
         return {"error": "Both 'to' and 'subject' are required."}
 
-    token = await _get_google_token(tenant_id, "gmail", account_email or None)
-    if not token:
-        return {"error": "Gmail not connected. Ask the user to connect Gmail in Connected Apps."}
+    account, error = await _resolve_email_account(tenant_id, account_email)
+    if error:
+        return {"error": error}
 
-    google = _get_google_client()
+    integration_name = account["integration_name"]
+    token = await _get_oauth_token(tenant_id, integration_name, account.get("email"))
+    if not token:
+        return {"error": f"{integration_name.title()} not connected. Ask the user to reconnect it in Connected Apps."}
+
+    provider_client = _get_provider_client()
     auth = {"Authorization": f"Bearer {token}"}
 
     try:
-        message = MIMEText(body)
-        message["to"] = to
-        message["subject"] = subject
-        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+        if integration_name == "gmail":
+            message = MIMEText(body)
+            message["to"] = to
+            message["subject"] = subject
+            raw = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
 
-        resp = await google.post(
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-            headers=auth,
-            json={"raw": raw},
+            resp = await provider_client.post(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+                headers=auth,
+                json={"raw": raw},
+            )
+            resp.raise_for_status()
+            result = resp.json()
+
+            return {
+                "status": "success",
+                "message_id": result.get("id"),
+                "message": f"Email sent to {to}.",
+                "provider": "google",
+                "account_email": account.get("email"),
+            }
+
+        resp = await provider_client.post(
+            "https://graph.microsoft.com/v1.0/me/sendMail",
+            headers={**auth, "Content-Type": "application/json"},
+            json={
+                "message": {
+                    "subject": subject,
+                    "body": {
+                        "contentType": "Text",
+                        "content": body,
+                    },
+                    "toRecipients": [
+                        {"emailAddress": {"address": to}},
+                    ],
+                },
+                "saveToSentItems": True,
+            },
         )
         resp.raise_for_status()
-        result = resp.json()
-
         return {
             "status": "success",
-            "message_id": result.get("id"),
+            "message_id": None,
             "message": f"Email sent to {to}.",
+            "provider": "microsoft",
+            "account_email": account.get("email"),
         }
 
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 401:
-            return {"error": "Gmail token expired. Ask user to reconnect Gmail."}
-        return {"error": f"Gmail send failed: {e.response.status_code}"}
+            return {"error": f"{integration_name.title()} token expired. Ask user to reconnect it."}
+        return {"error": f"{integration_name.title()} send failed: {e.response.status_code}"}
     except Exception as e:
         logger.exception("send_email failed")
         return {"error": f"Failed to send email: {str(e)}"}
@@ -338,11 +553,11 @@ async def list_calendar_events(
         Dict with list of calendar events (summary, start, end, location).
     """
     tenant_id = _resolve_tenant_id(tenant_id)
-    token = await _get_google_token(tenant_id, "google_calendar", account_email or None)
+    token = await _get_oauth_token(tenant_id, "google_calendar", account_email or None)
     if not token:
         return {"error": "Google Calendar not connected. Ask user to connect Google in Connected Apps."}
 
-    google = _get_google_client()
+    google = _get_provider_client()
     auth = {"Authorization": f"Bearer {token}"}
 
     now = datetime.now(timezone.utc)
@@ -416,11 +631,11 @@ async def create_calendar_event(
     if not summary or not start_time or not end_time:
         return {"error": "summary, start_time, and end_time are required."}
 
-    token = await _get_google_token(tenant_id, "google_calendar", account_email or None)
+    token = await _get_oauth_token(tenant_id, "google_calendar", account_email or None)
     if not token:
         return {"error": "Google Calendar not connected. Ask user to connect Google in Connected Apps."}
 
-    google = _get_google_client()
+    google = _get_provider_client()
     auth = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     event_body = {

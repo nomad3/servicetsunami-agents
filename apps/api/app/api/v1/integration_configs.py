@@ -34,6 +34,14 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
         "auth_type": "oauth",
         "oauth_provider": "google",
     },
+    "outlook": {
+        "display_name": "Outlook",
+        "description": "Send and read Microsoft 365 and Outlook emails",
+        "icon": "FaMicrosoft",
+        "credentials": [],
+        "auth_type": "oauth",
+        "oauth_provider": "microsoft",
+    },
     "github": {
         "display_name": "GitHub",
         "description": "Manage repositories, issues, pull requests",
