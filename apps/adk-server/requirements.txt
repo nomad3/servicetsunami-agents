@@ -1,5 +1,6 @@
 # Google ADK
 google-adk>=1.21.0
+litellm>=1.0.0
 
 # Gemini Embedding 2 via google-genai SDK
 google-genai>=1.0.0
