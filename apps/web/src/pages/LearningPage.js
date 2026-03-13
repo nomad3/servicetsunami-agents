@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Col, Container, Form, Row, Spinner, Table } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import Layout from '../components/Layout';
-import { learningService } from '../services/learningService';
+import learningService from '../services/learningService';
 
 // ── Shared styles (Ocean Theme) ──────────────────────────────────
 
