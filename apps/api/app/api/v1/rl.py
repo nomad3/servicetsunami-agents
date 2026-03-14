@@ -47,11 +47,31 @@ def get_overview(
         .first()
     )
 
+    # 30-day rolling average
+    from datetime import timedelta
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    rewarded_30d = [e for e in rewarded if e.rewarded_at and e.rewarded_at >= thirty_days_ago]
+    avg_reward_30d = sum(e.reward for e in rewarded_30d) / len(rewarded_30d) if rewarded_30d else None
+
+    # Top decision points by experience count
+    from sqlalchemy import func
+    top_dp = (
+        db.query(RLExperience.decision_point, func.count(RLExperience.id).label("count"))
+        .filter(RLExperience.tenant_id == tid, RLExperience.archived_at.is_(None))
+        .group_by(RLExperience.decision_point)
+        .order_by(func.count(RLExperience.id).desc())
+        .limit(5)
+        .all()
+    )
+
     return {
         "total_experiences": total,
         "avg_reward": round(avg_reward, 3),
+        "avg_reward_30d": round(avg_reward_30d, 3) if avg_reward_30d is not None else None,
         "exploration_rate": exploration_rate,
         "policy_version": latest_policy.version if latest_policy else "v0",
+        "policy_updated_at": latest_policy.last_updated_at.isoformat() if latest_policy and latest_policy.last_updated_at else None,
+        "top_decision_points": [{"name": dp, "count": count} for dp, count in top_dp],
     }
 
 

@@ -236,8 +236,8 @@ const ChatPage = () => {
         {message.role === 'assistant' && (
           <div className="mt-2">
             <FeedbackActions
-              trajectoryId={message.trajectory_id}
-              stepIndex={message.step_index}
+              trajectoryId={message.id}
+              stepIndex={0}
             />
           </div>
         )}

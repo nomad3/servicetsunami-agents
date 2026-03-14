@@ -29,7 +29,7 @@ class TenantFeatures(Base):
     ai_anomaly_detection = Column(Boolean, default=True)
 
     # Reinforcement Learning Features
-    rl_enabled = Column(Boolean, default=False)
+    rl_enabled = Column(Boolean, default=True)
     rl_settings = Column(JSONB, nullable=False, default=lambda: {
         "exploration_rate": 0.1,
         "opt_in_global_learning": True,

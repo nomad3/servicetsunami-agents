@@ -25,6 +25,7 @@ from app.services.knowledge_extraction import knowledge_extraction_service
 from app.services.embedding_service import embed_and_store as _embed
 from app.services.memory_recall import build_memory_context
 from app.services.orchestration.credential_vault import retrieve_credentials_for_skill
+from app.services import rl_experience_service
 
 logger = logging.getLogger(__name__)
 
@@ -429,6 +430,16 @@ def _generate_agentic_response(
             assistant_msg.task_id = bridge_task_id
             assistant_msg.agent_id = bridge_agent_id
             db.commit()
+
+        # Log RL experiences from this interaction (best-effort)
+        try:
+            _log_rl_experiences(
+                db, session.tenant_id, session.id, assistant_msg.id,
+                user_message, response_text, context,
+            )
+        except Exception:
+            logger.debug("RL experience logging failed", exc_info=True)
+
         return assistant_msg
 
     except Exception as exc:
@@ -701,6 +712,106 @@ def _run_entity_extraction(
 
     except Exception:
         logger.warning("Entity extraction failed for session %s", session.id, exc_info=True)
+
+
+def _log_rl_experiences(
+    db: Session,
+    tenant_id: uuid.UUID,
+    session_id: uuid.UUID,
+    message_id: uuid.UUID,
+    user_message: str,
+    response_text: str,
+    context: Dict[str, Any] | None,
+) -> None:
+    """Log RL experiences from a chat interaction.
+
+    Extracts decision points from ADK events:
+    - agent_selection: which agent handled the request
+    - tool_selection: which tools were called
+    - response_generation: the overall response (linked to user feedback)
+    """
+    adk_events = (context or {}).get("adk_events", [])
+    if not adk_events:
+        return
+
+    trajectory_id = message_id  # Use message ID as trajectory
+    step = 0
+
+    # Extract agents that handled this request
+    agents_involved = []
+    tools_called = []
+    model_used = None
+
+    for event in adk_events:
+        author = event.get("author", "")
+        content = event.get("content", {})
+        parts = content.get("parts", []) if isinstance(content, dict) else []
+
+        if author and author not in agents_involved:
+            agents_involved.append(author)
+
+        if not model_used and event.get("modelVersion"):
+            model_used = event.get("modelVersion")
+
+        for part in parts:
+            if isinstance(part, dict):
+                fc = part.get("functionCall") or part.get("function_call")
+                if fc and fc.get("name"):
+                    tool_name = fc["name"]
+                    if tool_name != "transfer_to_agent" and tool_name not in tools_called:
+                        tools_called.append(tool_name)
+
+    # Log agent_selection experience
+    if len(agents_involved) > 1:
+        # First agent is root supervisor, last is the one that actually responded
+        responding_agent = agents_involved[-1]
+        rl_experience_service.log_experience(
+            db=db,
+            tenant_id=tenant_id,
+            trajectory_id=trajectory_id,
+            step_index=step,
+            decision_point="agent_selection",
+            state={"user_message": user_message[:500], "agents_available": agents_involved},
+            action={"selected_agent": responding_agent},
+            state_text=f"User asked: {user_message[:200]} → Routed to {responding_agent}",
+        )
+        step += 1
+
+    # Log tool_selection experiences
+    if tools_called:
+        rl_experience_service.log_experience(
+            db=db,
+            tenant_id=tenant_id,
+            trajectory_id=trajectory_id,
+            step_index=step,
+            decision_point="tool_selection",
+            state={"user_message": user_message[:500], "agent": agents_involved[-1] if agents_involved else "unknown"},
+            action={"tools_used": tools_called},
+            state_text=f"Agent used tools: {', '.join(tools_called)} for: {user_message[:200]}",
+        )
+        step += 1
+
+    # Log response_generation experience (always — this is what feedback buttons rate)
+    tokens = (context or {}).get("tokens_used", 0)
+    rl_experience_service.log_experience(
+        db=db,
+        tenant_id=tenant_id,
+        trajectory_id=trajectory_id,
+        step_index=step,
+        decision_point="response_generation",
+        state={
+            "user_message": user_message[:500],
+            "agent": agents_involved[-1] if agents_involved else "unknown",
+            "model": model_used,
+            "tools_used": tools_called,
+            "tokens": tokens,
+        },
+        action={
+            "response_length": len(response_text),
+            "response_preview": response_text[:200],
+        },
+        state_text=f"Generated {len(response_text)} char response using {model_used or 'unknown'} for: {user_message[:200]}",
+    )
 
 
 def _dispatch_action_triggers(
