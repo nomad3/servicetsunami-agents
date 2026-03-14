@@ -108,6 +108,7 @@ services:
       - GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI:-false}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - ADK_MODEL=${ADK_MODEL:-gemini-3.1-pro-preview}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     volumes:
       - ./apps/adk-server:/app
     depends_on:
