@@ -5,6 +5,7 @@ and Google Calendar APIs on behalf of the authenticated user.
 """
 import base64
 import html
+import json
 import logging
 import re
 import uuid as _uuid
@@ -436,7 +437,41 @@ async def read_email(
             # Extract attachment metadata
             attachments = _extract_attachments(msg.get("payload", {}))
 
-            return {
+            # Auto-extract entities from this email (Python, no LLM)
+            entities_created = 0
+            try:
+                entities = _extract_email_entities(headers, body, account.get("email", ""))
+                if entities:
+                    from services.knowledge_graph import get_knowledge_service
+                    from memory.vertex_vector import get_embedding_service
+                    from sqlalchemy import text as sa_text
+
+                    kg = get_knowledge_service()
+                    emb_svc = get_embedding_service()
+                    with kg.Session() as db_session:
+                        for ent in entities:
+                            existing = db_session.execute(
+                                sa_text("SELECT id FROM knowledge_entities WHERE tenant_id = :tid AND name = :name AND entity_type = :etype LIMIT 1"),
+                                {"tid": tenant_id, "name": ent["name"], "etype": ent["entity_type"]},
+                            ).fetchone()
+                            if not existing:
+                                ent_id = str(_uuid.uuid4())
+                                embedding = await emb_svc.get_embedding(f"{ent['name']} {ent.get('description', '')}")
+                                db_session.execute(
+                                    sa_text("""
+                                        INSERT INTO knowledge_entities (id, tenant_id, name, entity_type, category, description, properties, confidence, embedding, created_at, updated_at)
+                                        VALUES (:id, :tid, :name, :etype, :cat, :desc, :props, 0.7, :embedding, NOW(), NOW())
+                                    """),
+                                    {"id": ent_id, "tid": tenant_id, "name": ent["name"], "etype": ent["entity_type"],
+                                     "cat": ent.get("category", "contact"), "desc": ent.get("description", ""),
+                                     "props": json.dumps(ent.get("properties", {})), "embedding": embedding},
+                                )
+                                entities_created += 1
+                        db_session.commit()
+            except Exception:
+                logger.debug("Auto entity extraction from read_email failed", exc_info=True)
+
+            result = {
                 "status": "success",
                 "id": message_id,
                 "subject": headers.get("Subject", "(no subject)"),
@@ -449,6 +484,9 @@ async def read_email(
                 "provider": "google",
                 "account_email": account.get("email"),
             }
+            if entities_created:
+                result["entities_auto_extracted"] = entities_created
+            return result
 
         resp = await provider_client.get(
             f"https://graph.microsoft.com/v1.0/me/messages/{message_id}",
@@ -876,3 +914,273 @@ async def create_calendar_event(
     except Exception as e:
         logger.exception("create_calendar_event failed")
         return {"error": f"Failed to create event: {str(e)}"}
+
+
+# ---------------------------------------------------------------------------
+# Bulk email scan — heavy lifting in Python, zero LLM per email
+# ---------------------------------------------------------------------------
+
+def _extract_email_entities(headers: dict, body: str, account_email: str) -> list[dict]:
+    """Extract entities from a single email using Python heuristics (no LLM).
+
+    Returns list of entity dicts ready for knowledge graph insertion.
+    """
+    import re as _re
+
+    entities = []
+    seen_emails = set()
+
+    def _parse_address(addr_str: str) -> list[tuple[str, str]]:
+        """Parse 'Name <email>' patterns."""
+        results = []
+        for match in _re.finditer(r'([^<,;]+?)\s*<([^>]+)>', addr_str):
+            name = match.group(1).strip().strip('"\'')
+            email = match.group(2).strip().lower()
+            if email and email != account_email.lower() and '@' in email:
+                results.append((name, email))
+        # Bare emails without names
+        for match in _re.finditer(r'[\w.+-]+@[\w-]+\.[\w.-]+', addr_str):
+            email = match.group(0).lower()
+            if email not in {e for _, e in results} and email != account_email.lower():
+                results.append(("", email))
+        return results
+
+    # Extract from headers
+    for field in ["From", "To", "Cc", "Reply-To"]:
+        value = headers.get(field, "")
+        for name, email in _parse_address(value):
+            if email in seen_emails:
+                continue
+            seen_emails.add(email)
+            # Derive name from email if not provided
+            if not name:
+                name = email.split("@")[0].replace(".", " ").replace("-", " ").title()
+            domain = email.split("@")[1] if "@" in email else ""
+            entities.append({
+                "name": name,
+                "entity_type": "person",
+                "category": "contact",
+                "description": f"Email contact: {email}",
+                "properties": {"email": email, "domain": domain, "source": "email_scan"},
+            })
+            # Create organization from domain (skip common providers)
+            common_domains = {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com", "live.com", "me.com", "aol.com", "protonmail.com"}
+            if domain and domain not in common_domains and domain not in seen_emails:
+                seen_emails.add(domain)
+                org_name = domain.split(".")[0].title()
+                entities.append({
+                    "name": org_name,
+                    "entity_type": "organization",
+                    "category": "company",
+                    "description": f"Organization from email domain: {domain}",
+                    "properties": {"domain": domain, "source": "email_scan"},
+                })
+
+    return entities
+
+
+async def deep_scan_emails(
+    tenant_id: str,
+    days: int = 60,
+    max_emails: int = 100,
+    account_email: Optional[str] = None,
+) -> dict:
+    """Bulk scan emails and extract entities WITHOUT using LLM per email.
+
+    This tool does all heavy lifting in Python:
+    1. Fetches emails in batches via Gmail API
+    2. Extracts people + organizations from headers using regex (no LLM)
+    3. Stores entities in the knowledge graph via direct DB operations
+    4. Embeds entity descriptions for semantic search
+    5. Returns a summary
+
+    Much faster and cheaper than reading emails one by one through the LLM.
+
+    Args:
+        tenant_id: Tenant identifier.
+        days: How many days back to scan (default 60).
+        max_emails: Maximum emails to process (default 100).
+        account_email: Specific account to scan. If empty, scans all connected accounts.
+
+    Returns:
+        Dict with counts of emails scanned, entities created, and relations created.
+    """
+    tenant_id = _resolve_tenant_id(tenant_id)
+
+    # Discover connected accounts
+    if account_email:
+        account, error = await _resolve_email_account(tenant_id, account_email)
+        if error:
+            return {"error": error}
+        accounts = [account]
+    else:
+        accounts = await _get_all_connected_email_accounts(tenant_id)
+        if not accounts:
+            return {"error": "No email accounts connected. Ask user to connect Gmail in Connected Apps."}
+
+    provider_client = _get_provider_client()
+    total_scanned = 0
+    total_entities_created = 0
+    total_relations_created = 0
+    all_entity_names = []
+
+    for account in accounts:
+        if account["integration_name"] != "gmail":
+            continue
+
+        token = await _get_oauth_token(tenant_id, account["integration_name"], account.get("email"))
+        if not token:
+            continue
+
+        auth = {"Authorization": f"Bearer {token}"}
+        acct_email = account.get("email", "")
+
+        try:
+            # Search emails from the last N days
+            resp = await provider_client.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+                headers=auth,
+                params={"maxResults": min(max_emails, 100), "q": f"newer_than:{days}d"},
+            )
+            if resp.status_code != 200:
+                continue
+            messages = resp.json().get("messages", [])
+
+            # Fetch metadata for each email (batch, minimal format)
+            all_entities = []
+            for msg in messages:
+                try:
+                    detail = await provider_client.get(
+                        f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg['id']}",
+                        headers=auth,
+                        params=[
+                            ("format", "metadata"),
+                            ("metadataHeaders", "From"),
+                            ("metadataHeaders", "To"),
+                            ("metadataHeaders", "Cc"),
+                            ("metadataHeaders", "Reply-To"),
+                            ("metadataHeaders", "Subject"),
+                            ("metadataHeaders", "Date"),
+                        ],
+                    )
+                    if detail.status_code != 200:
+                        continue
+
+                    md = detail.json()
+                    hdrs = {h["name"]: h["value"] for h in md.get("payload", {}).get("headers", [])}
+                    entities = _extract_email_entities(hdrs, md.get("snippet", ""), acct_email)
+                    all_entities.extend(entities)
+                    total_scanned += 1
+                except Exception:
+                    continue
+
+            # Deduplicate by email/domain
+            seen = set()
+            unique_entities = []
+            for ent in all_entities:
+                key = ent["properties"].get("email") or ent["properties"].get("domain", ent["name"])
+                if key not in seen:
+                    seen.add(key)
+                    unique_entities.append(ent)
+
+            # Store entities in knowledge graph via DB
+            if unique_entities:
+                try:
+                    from services.knowledge_graph import get_knowledge_service
+                    from memory.vertex_vector import get_embedding_service
+
+                    kg = get_knowledge_service()
+                    emb_svc = get_embedding_service()
+
+                    from sqlalchemy import text as sa_text
+
+                    with kg.Session() as session:
+                        for ent in unique_entities:
+                            # Check if entity already exists (by name + type + tenant)
+                            existing = session.execute(
+                                sa_text("""
+                                    SELECT id FROM knowledge_entities
+                                    WHERE tenant_id = :tid AND name = :name AND entity_type = :etype
+                                    LIMIT 1
+                                """),
+                                {"tid": tenant_id, "name": ent["name"], "etype": ent["entity_type"]},
+                            ).fetchone()
+
+                            if existing:
+                                # Update properties with new data
+                                session.execute(
+                                    sa_text("""
+                                        UPDATE knowledge_entities
+                                        SET properties = properties || :props, updated_at = NOW()
+                                        WHERE id = :eid
+                                    """),
+                                    {"eid": str(existing[0]), "props": json.dumps(ent.get("properties", {}))},
+                                )
+                                continue
+
+                            # Create new entity
+                            ent_id = str(_uuid.uuid4())
+                            embed_text = f"{ent['name']} {ent.get('description', '')}"
+                            embedding = await emb_svc.get_embedding(embed_text)
+
+                            session.execute(
+                                sa_text("""
+                                    INSERT INTO knowledge_entities
+                                    (id, tenant_id, name, entity_type, category, description, properties, confidence, embedding, created_at, updated_at)
+                                    VALUES (:id, :tid, :name, :etype, :cat, :desc, :props, 0.7, :embedding, NOW(), NOW())
+                                """),
+                                {
+                                    "id": ent_id,
+                                    "tid": tenant_id,
+                                    "name": ent["name"],
+                                    "etype": ent["entity_type"],
+                                    "cat": ent.get("category", "contact"),
+                                    "desc": ent.get("description", ""),
+                                    "props": json.dumps(ent.get("properties", {})),
+                                    "embedding": embedding,
+                                },
+                            )
+                            total_entities_created += 1
+                            all_entity_names.append(ent["name"])
+
+                            # Create "works_at" relation for people with organizations
+                            if ent["entity_type"] == "person" and ent["properties"].get("domain"):
+                                domain = ent["properties"]["domain"]
+                                org = session.execute(
+                                    sa_text("""
+                                        SELECT id FROM knowledge_entities
+                                        WHERE tenant_id = :tid AND entity_type = 'organization'
+                                        AND properties->>'domain' = :domain LIMIT 1
+                                    """),
+                                    {"tid": tenant_id, "domain": domain},
+                                ).fetchone()
+                                if org:
+                                    rel_id = str(_uuid.uuid4())
+                                    session.execute(
+                                        sa_text("""
+                                            INSERT INTO knowledge_relations
+                                            (id, tenant_id, from_entity_id, to_entity_id, relation_type, confidence, created_at)
+                                            VALUES (:id, :tid, :fid, :toid, 'works_at', 0.8, NOW())
+                                            ON CONFLICT DO NOTHING
+                                        """),
+                                        {"id": rel_id, "tid": tenant_id, "fid": ent_id, "toid": str(org[0])},
+                                    )
+                                    total_relations_created += 1
+
+                        session.commit()
+
+                except Exception:
+                    logger.exception("Failed to store entities from email scan")
+
+        except Exception:
+            logger.exception("Email scan failed for %s", acct_email)
+
+    import json
+    return {
+        "status": "success",
+        "emails_scanned": total_scanned,
+        "entities_created": total_entities_created,
+        "relations_created": total_relations_created,
+        "sample_entities": all_entity_names[:20],
+        "accounts_scanned": len(accounts),
+    }

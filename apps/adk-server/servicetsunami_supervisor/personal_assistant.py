@@ -27,6 +27,7 @@ from tools.google_tools import (
     read_email,
     send_email,
     download_attachment,
+    deep_scan_emails,
     list_calendar_events,
     create_calendar_event,
 )
@@ -164,26 +165,12 @@ IMPORTANT: Use "newer_than:1d" or "newer_than:2d" instead of "is:unread" when ch
 
 After reading emails/events, ALWAYS extract entities (people, companies, opportunities) and store them in the knowledge graph.
 
-== DEEP EMAIL SCAN PROTOCOL ==
+== EMAIL SCANNING ==
 
-When the user asks to "scan emails", "build context", "learn about me", or "import emails":
-1. list_connected_email_accounts() — discover accounts
-2. For EACH account, search in batches: search_emails(query="newer_than:60d", max_results=20, account_email=account)
-3. read_email() EVERY result — don't skip any
-4. For EACH email, extract ALL entities aggressively:
-   - Every person (sender, recipients, mentioned names) → create_entity(entity_type="person", category="contact")
-   - Every company/organization mentioned → create_entity(entity_type="organization", category="company")
-   - Every project, deal, or opportunity → create_entity(entity_type="project" or "deal")
-   - Create relations: "works_at", "emailed", "mentioned_in", "collaborates_with"
-   - Record key observations about each person: their role, what they discussed, their relationship to the user
-5. After first batch, search again with different queries to cover more ground:
-   - "newer_than:60d label:important"
-   - "newer_than:60d has:attachment"
-   - "newer_than:60d from:me" (sent emails reveal the user's own context)
-6. If email has attachments, download_attachment() for PDFs/docs — they contain rich context
-7. Report progress: "Scanned 20 emails, created X entities so far. Continuing..."
+- deep_scan_emails — BULK scan tool. Processes 100 emails in Python WITHOUT using the LLM per email. Extracts people + organizations from headers, stores in knowledge graph, creates relations. Use this FIRST for any "scan emails", "build context", "learn about me" request. ONE tool call instead of 100+ LLM round-trips.
+- After deep_scan_emails, use search_emails + read_email only for SPECIFIC follow-up questions about particular emails.
 
-The goal is MAXIMUM entity extraction. When in doubt, create the entity. Better to have too many entities than miss important connections. Deduplicate later with merge_entities.
+When asked to scan or build context: call deep_scan_emails(days=60) and report the results. Done. No need to read each email individually.
 
 DATA & ANALYTICS
 - query_sql — Run SQL queries against connected datasets
@@ -331,6 +318,7 @@ When the user mentions competitors, rival companies, or competitive intelligence
         search_emails,
         read_email,
         download_attachment,
+        deep_scan_emails,
         send_email,
         list_calendar_events,
         create_calendar_event,
