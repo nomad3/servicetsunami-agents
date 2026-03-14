@@ -18,6 +18,35 @@ from app.services import rl_experience_service, rl_reward_service
 router = APIRouter()
 
 
+DP_DESCRIPTIONS = {
+    "agent_selection": "Which agent team handles each user request (supervisor routing)",
+    "tool_selection": "Which tools the agent chooses for a given task",
+    "response_generation": "Quality and relevance of the agent's response to the user",
+    "skill_routing": "Which skill is selected for task execution",
+    "memory_recall": "What memories are recalled for context",
+    "triage_classification": "How incoming items are prioritized and classified",
+    "orchestration_routing": "How tasks are routed across the orchestration engine",
+}
+
+
+def _get_dp_description(name: str) -> str:
+    return DP_DESCRIPTIONS.get(name, f"Decision point: {name}")
+
+
+def _format_action(action: dict) -> str:
+    """Format an RL action dict into a human-readable string."""
+    if not action:
+        return ""
+    if "selected_agent" in action:
+        return f"Routed to {action['selected_agent']}"
+    if "tools_used" in action:
+        tools = action["tools_used"]
+        return f"Used {', '.join(tools[:3])}" + (f" +{len(tools)-3} more" if len(tools) > 3 else "")
+    if "response_preview" in action:
+        return action["response_preview"][:80]
+    return str(action)[:80]
+
+
 @router.get("/overview")
 def get_overview(
     db: Session = Depends(deps.get_db),
@@ -53,14 +82,27 @@ def get_overview(
     rewarded_30d = [e for e in rewarded if e.rewarded_at and e.rewarded_at >= thirty_days_ago]
     avg_reward_30d = sum(e.reward for e in rewarded_30d) / len(rewarded_30d) if rewarded_30d else None
 
-    # Top decision points by experience count
+    # Top decision points with avg reward and count
     from sqlalchemy import func
     top_dp = (
-        db.query(RLExperience.decision_point, func.count(RLExperience.id).label("count"))
+        db.query(
+            RLExperience.decision_point,
+            func.count(RLExperience.id).label("count"),
+            func.avg(RLExperience.reward).label("avg_reward"),
+        )
         .filter(RLExperience.tenant_id == tid, RLExperience.archived_at.is_(None))
         .group_by(RLExperience.decision_point)
         .order_by(func.count(RLExperience.id).desc())
         .limit(5)
+        .all()
+    )
+
+    # Recent experiences for activity feed
+    recent = (
+        db.query(RLExperience)
+        .filter(RLExperience.tenant_id == tid, RLExperience.archived_at.is_(None))
+        .order_by(RLExperience.created_at.desc())
+        .limit(10)
         .all()
     )
 
@@ -71,7 +113,26 @@ def get_overview(
         "exploration_rate": exploration_rate,
         "policy_version": latest_policy.version if latest_policy else "v0",
         "policy_updated_at": latest_policy.last_updated_at.isoformat() if latest_policy and latest_policy.last_updated_at else None,
-        "top_decision_points": [{"name": dp, "count": count} for dp, count in top_dp],
+        "top_decision_points": [
+            {
+                "name": dp,
+                "experience_count": count,
+                "avg_reward": round(float(ar), 3) if ar is not None else None,
+            }
+            for dp, count, ar in top_dp
+        ],
+        "recent_activity": [
+            {
+                "id": str(e.id),
+                "decision_point": e.decision_point,
+                "state_preview": (e.state or {}).get("user_message", "")[:100] if e.state else "",
+                "action_preview": _format_action(e.action),
+                "reward": e.reward,
+                "reward_source": e.reward_source,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in recent
+        ],
     }
 
 
@@ -124,10 +185,52 @@ def list_decision_points(
     db: Session = Depends(deps.get_db),
     current_user=Depends(deps.get_current_active_user),
 ):
-    """List all decision points with current scores and experience counts."""
+    """List all decision points derived from actual experiences."""
+    from sqlalchemy import func
+
     tid = current_user.tenant_id
-    policies = db.query(RLPolicyState).filter(RLPolicyState.tenant_id == tid).all()
-    return [RLPolicyStateInDB.model_validate(p) for p in policies]
+
+    # Derive decision points from experience data (not the empty policy table)
+    dp_stats = (
+        db.query(
+            RLExperience.decision_point,
+            func.count(RLExperience.id).label("experience_count"),
+            func.avg(RLExperience.reward).label("avg_reward"),
+            func.min(RLExperience.created_at).label("first_seen"),
+            func.max(RLExperience.created_at).label("last_seen"),
+        )
+        .filter(RLExperience.tenant_id == tid, RLExperience.archived_at.is_(None))
+        .group_by(RLExperience.decision_point)
+        .order_by(func.count(RLExperience.id).desc())
+        .all()
+    )
+
+    # Check if there's a policy state for each
+    policies = {
+        p.decision_point: p
+        for p in db.query(RLPolicyState).filter(RLPolicyState.tenant_id == tid).all()
+    }
+
+    features = db.query(TenantFeatures).filter(TenantFeatures.tenant_id == tid).first()
+    default_exploration = features.rl_settings.get("exploration_rate", 0.1) if features and features.rl_settings else 0.1
+
+    results = []
+    for dp_name, exp_count, avg_rwd, first_seen, last_seen in dp_stats:
+        policy = policies.get(dp_name)
+        results.append({
+            "id": str(policy.id) if policy else dp_name,
+            "name": dp_name,
+            "decision_point": dp_name,
+            "experience_count": exp_count,
+            "avg_reward": round(float(avg_rwd), 3) if avg_rwd is not None else None,
+            "version": policy.version if policy else "v0",
+            "exploration_rate": policy.exploration_rate if policy else default_exploration,
+            "first_seen": first_seen.isoformat() if first_seen else None,
+            "last_seen": last_seen.isoformat() if last_seen else None,
+            "description": _get_dp_description(dp_name),
+        })
+
+    return results
 
 
 @router.get("/decision-points/{name}")
@@ -169,7 +272,20 @@ def get_pending_reviews(
     if decision_point:
         q = q.filter(RLExperience.decision_point == decision_point)
     experiences = q.order_by(RLExperience.created_at.desc()).offset(skip).limit(per_page).all()
-    return [RLExperienceInDB.model_validate(e) for e in experiences]
+    return [
+        {
+            "id": str(e.id),
+            "decision_point": e.decision_point,
+            "decision_point_name": e.decision_point,
+            "action": _format_action(e.action),
+            "context": (e.state or {}).get("user_message", "")[:150] if e.state else "",
+            "outcome": _format_action(e.action),
+            "reward": e.reward,
+            "reward_source": e.reward_source,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in experiences
+    ]
 
 
 @router.post("/reviews/{experience_id}/rate")

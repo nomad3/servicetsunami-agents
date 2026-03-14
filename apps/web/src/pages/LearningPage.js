@@ -162,45 +162,95 @@ function OverviewTab({ t }) {
         ))}
       </Row>
 
-      {data?.top_decision_points?.length > 0 && (
-        <>
-          <div style={sectionLabel}>{t('overview.topDecisionPoints')}</div>
-          <div style={cardStyle}>
-            {data.top_decision_points.map((dp, idx) => (
-              <div
-                key={dp.id ?? idx}
-                style={{
-                  padding: '10px 0',
-                  borderBottom:
-                    idx < data.top_decision_points.length - 1
-                      ? '1px solid var(--color-border)'
-                      : 'none',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--color-foreground)' }}>
-                    {dp.name}
+      <Row className="g-3 mb-4">
+        {data?.top_decision_points?.length > 0 && (
+          <Col md={6}>
+            <div style={sectionLabel}>{t('overview.topDecisionPoints', 'Top Decision Points')}</div>
+            <div style={cardStyle}>
+              {data.top_decision_points.map((dp, idx) => (
+                <div
+                  key={dp.id ?? idx}
+                  style={{
+                    padding: '10px 0',
+                    borderBottom:
+                      idx < data.top_decision_points.length - 1
+                        ? '1px solid var(--color-border)'
+                        : 'none',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--color-foreground)' }}>
+                      {dp.name?.replace(/_/g, ' ')}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
+                      {dp.experience_count ?? dp.count ?? 0} experiences
+                    </div>
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
-                    {t('overview.experienceCount', { count: dp.experience_count ?? 0 })}
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: dp.avg_reward > 0 ? '#34d399' : dp.avg_reward < 0 ? '#f87171' : '#60a5fa' }}>
+                      {dp.avg_reward != null ? (dp.avg_reward > 0 ? `+${dp.avg_reward.toFixed(2)}` : dp.avg_reward.toFixed(2)) : 'unrated'}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
+                      avg reward
+                    </div>
                   </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#60a5fa' }}>
-                    {dp.avg_reward != null ? dp.avg_reward.toFixed(3) : '—'}
+              ))}
+            </div>
+          </Col>
+        )}
+
+        {data?.recent_activity?.length > 0 && (
+          <Col md={6}>
+            <div style={sectionLabel}>Recent Activity</div>
+            <div style={cardStyle}>
+              {data.recent_activity.slice(0, 8).map((act, idx) => (
+                <div
+                  key={act.id ?? idx}
+                  style={{
+                    padding: '8px 0',
+                    borderBottom:
+                      idx < Math.min(data.recent_activity.length, 8) - 1
+                        ? '1px solid var(--color-border)'
+                        : 'none',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Badge
+                        bg={act.decision_point === 'agent_selection' ? 'primary' : act.decision_point === 'tool_selection' ? 'info' : 'secondary'}
+                        style={{ fontSize: '0.65rem', fontWeight: 500, marginRight: 6 }}
+                      >
+                        {act.decision_point?.replace(/_/g, ' ')}
+                      </Badge>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--color-foreground)' }}>
+                        {act.action_preview || act.state_preview?.substring(0, 60) || '—'}
+                      </span>
+                    </div>
+                    <div style={{ flexShrink: 0, marginLeft: 8 }}>
+                      {act.reward != null ? (
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: act.reward > 0 ? '#34d399' : '#f87171' }}>
+                          {act.reward > 0 ? '+' : ''}{act.reward.toFixed(1)}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--color-muted)' }}>unrated</span>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
-                    {t('overview.avgRewardLabel')}
-                  </div>
+                  {act.state_preview && (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {act.state_preview}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+              ))}
+            </div>
+          </Col>
+        )}
+      </Row>
     </>
   );
 }
