@@ -56,6 +56,8 @@ services:
       - POSTGRES_DB=servicetsunami
     ports:
       - "${DB_PORT:-8003}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
 
   databricks-worker:
     build:
@@ -124,3 +126,6 @@ services:
       - POSTGRES_DB=testdb
     ports:
       - "8004:5432"
+
+volumes:
+  db_data:
