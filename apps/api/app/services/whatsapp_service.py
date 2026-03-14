@@ -504,45 +504,61 @@ class WhatsAppService:
             extra_data={"chat_jid": chat_jid, "is_group": is_group},
         )
 
-        # Show "typing..." indicator while processing
-        try:
-            reply_jid = build_jid(sender_phone)
-            await client.send_chat_presence(
-                reply_jid,
-                ChatPresence.CHAT_PRESENCE_COMPOSING,
-                ChatPresenceMedia.CHAT_PRESENCE_MEDIA_TEXT,
-            )
-        except Exception:
-            logger.debug(f"Failed to send composing presence for {sender_phone}")
+        # Show "typing..." indicator while processing.
+        # WhatsApp auto-dismisses composing presence after ~5s, so we refresh
+        # it every 4s in a background task until the response is ready.
+        reply_jid = build_jid(sender_phone)
+        typing_done = asyncio.Event()
+
+        async def _keep_typing():
+            while not typing_done.is_set():
+                try:
+                    await client.send_chat_presence(
+                        reply_jid,
+                        ChatPresence.CHAT_PRESENCE_COMPOSING,
+                        ChatPresenceMedia.CHAT_PRESENCE_MEDIA_TEXT,
+                    )
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(typing_done.wait(), timeout=4.0)
+                    break
+                except asyncio.TimeoutError:
+                    continue
+
+        typing_task = asyncio.create_task(_keep_typing())
 
         # Process through agent — use phone number (not LID) as session key
-        media_parts = None
-        if media_bytes:
-            try:
-                from app.services.media_utils import build_media_parts
-                media_filename = ""
-                if media_type == "document" and msg.documentMessage:
-                    media_filename = msg.documentMessage.fileName or msg.documentMessage.title or ""
-                media_parts, _ = build_media_parts(
-                    media_bytes=media_bytes,
-                    mime_type=media_mime,
-                    caption=media_caption or "",
-                    filename=media_filename,
-                )
-            except ValueError as e:
-                logger.warning(f"Media processing failed for {sender_phone}: {e}")
+        try:
+            media_parts = None
+            if media_bytes:
+                try:
+                    from app.services.media_utils import build_media_parts
+                    media_filename = ""
+                    if media_type == "document" and msg.documentMessage:
+                        media_filename = msg.documentMessage.fileName or msg.documentMessage.title or ""
+                    media_parts, _ = build_media_parts(
+                        media_bytes=media_bytes,
+                        mime_type=media_mime,
+                        caption=media_caption or "",
+                        filename=media_filename,
+                    )
+                except ValueError as e:
+                    logger.warning(f"Media processing failed for {sender_phone}: {e}")
 
-        agent_text = media_caption or text or f"[Sent {media_type}]"
-        response_text = await self._process_through_agent(
-            tenant_id, sender_phone, agent_text, media_parts=media_parts,
-        )
+            agent_text = media_caption or text or f"[Sent {media_type}]"
+            response_text = await self._process_through_agent(
+                tenant_id, sender_phone, agent_text, media_parts=media_parts,
+            )
+        finally:
+            # Stop the typing indicator loop
+            typing_done.set()
+            await typing_task
+
         if not response_text:
             logger.warning(f"Empty response from agent for {sender_phone}, not sending reply")
         if response_text:
             try:
-                # Build clean JID without device part — neonize requires user-only JID for sending
-                reply_jid = build_jid(sender_phone)
-
                 # Split long messages — WhatsApp limits to ~4096 chars
                 chunks = [response_text] if len(response_text) <= 4000 else [
                     response_text[i:i + 4000] for i in range(0, len(response_text), 4000)
