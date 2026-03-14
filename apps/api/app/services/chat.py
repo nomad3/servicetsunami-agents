@@ -34,23 +34,28 @@ ADK_UNCONFIGURED_MESSAGE = (
 )
 ADK_FAILURE_MESSAGE = "The ADK service is temporarily unavailable. Please retry in a moment."
 
-# Rough per-token pricing (USD per token) for cost estimation.
-# Gemini 2.5 Flash: ~$0.15/1M input, ~$0.60/1M output
-_COST_PER_INPUT_TOKEN = 0.15 / 1_000_000
-_COST_PER_OUTPUT_TOKEN = 0.60 / 1_000_000
+# Per-token pricing (USD per token) by provider for cost estimation.
+_MODEL_PRICING = {
+    # Anthropic
+    "anthropic_llm": {"input": 3.00 / 1_000_000, "output": 15.00 / 1_000_000},   # Claude Sonnet 4.5
+    # Gemini (default)
+    "gemini_llm": {"input": 0.15 / 1_000_000, "output": 0.60 / 1_000_000},       # Gemini 2.5 Flash
+}
+_DEFAULT_PRICING = _MODEL_PRICING["gemini_llm"]
 
 
-def _estimate_cost(total_tokens: int, context: Dict[str, Any] | None = None) -> float:
+def _estimate_cost(total_tokens: int, context: Dict[str, Any] | None = None, provider: str = None) -> float:
     """Estimate USD cost from token counts in the ADK response context."""
     if not total_tokens:
         return 0.0
+    pricing = _MODEL_PRICING.get(provider, _DEFAULT_PRICING) if provider else _DEFAULT_PRICING
     ctx = context or {}
     prompt = ctx.get("prompt_tokens", 0)
     completion = ctx.get("completion_tokens", 0)
     if prompt or completion:
-        return round(prompt * _COST_PER_INPUT_TOKEN + completion * _COST_PER_OUTPUT_TOKEN, 6)
-    # Fallback: use blended rate
-    return round(total_tokens * _COST_PER_INPUT_TOKEN, 6)
+        return round(prompt * pricing["input"] + completion * pricing["output"], 6)
+    # Fallback: use blended input rate
+    return round(total_tokens * pricing["input"], 6)
 
 
 def list_sessions(db: Session, *, tenant_id: uuid.UUID) -> List[ChatSessionModel]:
@@ -408,7 +413,7 @@ def _generate_agentic_response(
 
         # --- Bridge: mark task completed ---
         _tokens = context.get("tokens_used", 0) if context else 0
-        _cost = _estimate_cost(_tokens, context)
+        _cost = _estimate_cost(_tokens, context, provider=llm_config.get("provider") if llm_config else None)
         if bridge_task_id:
             duration_ms = int((time.time() - bridge_start) * 1000)
             _bridge_complete_task(
@@ -523,7 +528,7 @@ def _generate_agentic_response(
 
                 # --- Bridge: mark task completed after retry ---
                 _tokens = context.get("tokens_used", 0) if context else 0
-                _cost = _estimate_cost(_tokens, context)
+                _cost = _estimate_cost(_tokens, context, provider=llm_config.get("provider") if llm_config else None)
                 if bridge_task_id:
                     duration_ms = int((time.time() - bridge_start) * 1000)
                     _bridge_complete_task(
