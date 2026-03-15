@@ -56,6 +56,10 @@ def _extract_error_detail(response: httpx.Response) -> str:
             return "PERMISSION_DENIED: API key may be invalid or missing"
         if "NOT_FOUND" in body:
             return "NOT_FOUND: Model or session not found"
+        if "too long" in body or "ContextWindow" in body or "prompt is too long" in body:
+            return "CONTEXT_OVERFLOW: prompt is too long"
+        if "RateLimitError" in body or "rate_limit" in body:
+            return "RATE_LIMIT: API rate limit exceeded"
         # Generic: return last non-empty line of the traceback
         lines = [l.strip() for l in body.strip().split("\n") if l.strip()]
         if lines:

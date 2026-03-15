@@ -518,10 +518,14 @@ def _generate_agentic_response(
         return assistant_msg
 
     except Exception as exc:
-        # Context window overflow — force-rotate and retry with fresh session
+        # Context window overflow or persistent ADK 500 — force-rotate and retry
+        exc_str = str(exc)
         is_context_overflow = (
-            "too long" in str(exc) or "ContextWindow" in str(exc)
-            or "prompt is too long" in str(exc)
+            "too long" in exc_str or "ContextWindow" in exc_str
+            or "prompt is too long" in exc_str or "CONTEXT_OVERFLOW" in exc_str
+            or (isinstance(exc, ADKError) and "CONTEXT_OVERFLOW" in exc.detail)
+            # Any ADK 500 after all retries likely means the session context is corrupted
+            or (isinstance(exc, ADKError) and exc.status_code == 500 and "Internal Server Error" in exc.detail)
         )
         if is_context_overflow:
             logger.warning("Context window overflow on session %s, force-rotating", session.id)
