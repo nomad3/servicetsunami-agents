@@ -158,8 +158,10 @@ class ADKClient:
             # Try to extract a meaningful error detail from the response body
             detail = _extract_error_detail(response)
 
-            # Don't retry on quota exhaustion — it won't help
+            # Don't retry on quota exhaustion or context window overflow — it won't help
             if "RESOURCE_EXHAUSTED" in detail or "quota" in detail.lower():
+                raise ADKError(response.status_code, detail)
+            if "too long" in detail or "ContextWindow" in detail or "prompt is too long" in detail:
                 raise ADKError(response.status_code, detail)
 
             # Retry on other 500s (transient failures)

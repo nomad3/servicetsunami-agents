@@ -465,14 +465,22 @@ def _generate_agentic_response(
         # --- Track cumulative tokens for context window guard ---
         _tokens = context.get("tokens_used", 0) if context else 0
         prompt_tokens = context.get("prompt_tokens", 0) if context else 0
+        # Use prompt_tokens if available, otherwise estimate from total (80% is typically prompt)
+        _token_increment = prompt_tokens if prompt_tokens > 0 else int(_tokens * 0.8)
         try:
             _mem_update = dict(session.memory_context or {})
-            _mem_update["cumulative_prompt_tokens"] = _mem_update.get("cumulative_prompt_tokens", 0) + prompt_tokens
+            _prev = _mem_update.get("cumulative_prompt_tokens", 0)
+            _mem_update["cumulative_prompt_tokens"] = _prev + _token_increment
             session.memory_context = _mem_update
             flag_modified(session, "memory_context")
             db.commit()
+            if _token_increment > 0:
+                logger.debug(
+                    "Session %s: +%d tokens (cumulative: %d)",
+                    session.id, _token_increment, _mem_update["cumulative_prompt_tokens"],
+                )
         except Exception:
-            pass  # Never break chat for tracking
+            logger.debug("Token tracking commit failed", exc_info=True)
 
         # --- Bridge: mark task completed ---
         _cost = _estimate_cost(_tokens, context, provider=llm_config.get("provider") if llm_config else None)
@@ -510,6 +518,78 @@ def _generate_agentic_response(
         return assistant_msg
 
     except Exception as exc:
+        # Context window overflow — force-rotate and retry with fresh session
+        is_context_overflow = (
+            "too long" in str(exc) or "ContextWindow" in str(exc)
+            or "prompt is too long" in str(exc)
+        )
+        if is_context_overflow:
+            logger.warning("Context window overflow on session %s, force-rotating", session.id)
+            try:
+                # Force rotation
+                _mem_rot = dict(session.memory_context or {})
+                _mem_rot.pop("adk_session_id", None)
+                _mem_rot["cumulative_prompt_tokens"] = 0
+
+                recent_msgs = (
+                    db.query(ChatMessage)
+                    .filter(ChatMessage.session_id == session.id)
+                    .order_by(ChatMessage.created_at.desc())
+                    .limit(4)
+                    .all()
+                )
+                summary = "\n".join(
+                    f"{'User' if m.role == 'user' else 'Luna'}: {m.content[:150]}"
+                    for m in reversed(recent_msgs)
+                )
+                _mem_rot["conversation_summary"] = summary
+
+                session.memory_context = _mem_rot
+                flag_modified(session, "memory_context")
+                if session.source not in ("whatsapp",):
+                    session.external_id = None
+                db.commit()
+                db.refresh(session)
+
+                # Create fresh ADK session
+                adk_state = _build_adk_state(
+                    tenant_id=session.tenant_id, agent_kit=agent_kit,
+                    dataset=dataset, dataset_group=dataset_group,
+                    sender_phone=sender_phone,
+                )
+                new_session = client.create_session(user_id=user_id, state=adk_state)
+                new_adk_id = new_session.get("id")
+
+                _mem2 = dict(session.memory_context or {})
+                _mem2["adk_session_id"] = new_adk_id
+                session.memory_context = _mem2
+                flag_modified(session, "memory_context")
+                db.commit()
+
+                # Retry with fresh session
+                retry_delta = {"tenant_id": str(session.tenant_id)}
+                if llm_config:
+                    retry_delta["llm_config"] = llm_config
+                if summary:
+                    retry_delta["conversation_summary"] = summary
+
+                events = client.run(
+                    user_id=user_id, session_id=new_adk_id,
+                    message=user_message, state_delta=retry_delta,
+                )
+                response_text, context = _extract_adk_response(events)
+                return _append_message(
+                    db, session=session, role="assistant",
+                    content=response_text, context=context,
+                )
+            except Exception as retry_exc:
+                logger.exception("Context overflow retry also failed")
+                return _append_message(
+                    db, session=session, role="assistant",
+                    content="I had to reset my memory due to a long conversation. Please try your message again.",
+                    context={"error": "context_overflow_retry_failed"},
+                )
+
         # ADK sessions are in-memory; if the pod restarted the session is gone.
         # Detect 404 "Session not found" and transparently re-create.
         is_session_lost = (
