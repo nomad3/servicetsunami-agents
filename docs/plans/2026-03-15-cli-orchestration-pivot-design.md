@@ -79,7 +79,71 @@ Pure Python routing — zero LLM cost. Replaces ADK root supervisor.
 - Learning page shows platform-level performance comparison
 - Router converges to best platform per task type over time
 
-### 2. Unified MCP Server (Anthropic Convention)
+### 2. Unified MCP Server as Tool Marketplace (Anthropic Convention)
+
+The MCP server follows the same three-tier marketplace pattern as skills. Tools are markdown definition files — importable from GitHub, community-shareable, and user-customizable.
+
+**Three tiers:**
+```
+tools/
+├── native/              # Built-in, ship with container (read-only)
+│   ├── email/tool.md
+│   ├── calendar/tool.md
+│   ├── knowledge/tool.md
+│   ├── data/tool.md
+│   └── ...
+├── community/           # Imported from GitHub / MCP Registry
+│   ├── slack/tool.md
+│   ├── notion/tool.md
+│   ├── stripe/tool.md
+│   └── ...
+└── tenant_{id}/         # Per-tenant custom tools
+    ├── internal_api/tool.md
+    └── ...
+```
+
+**Tool definition format** (same YAML frontmatter + markdown as skills):
+```yaml
+# tools/native/email/tool.md
+---
+name: search_emails
+engine: mcp_tool
+category: communication
+auth_type: oauth
+integration: gmail
+input_schema:
+  query: { type: string, required: true, description: "Gmail search query" }
+  max_results: { type: integer, default: 10 }
+  account_email: { type: string, default: "" }
+output_schema:
+  emails: { type: array }
+  total: { type: integer }
+---
+Search Gmail or Outlook inbox using standard search operators.
+Requires OAuth token from credential vault.
+```
+
+**Import from GitHub** (same endpoint as skills):
+- `POST /tools/import-github {"repo_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/slack"}`
+- Supports MCP Registry at `registry.modelcontextprotocol.io`
+- Auto-adapter normalizes external MCP server formats to our tool.md schema
+
+**Create custom tools in UI:**
+- Tenant defines tool name, description, input/output schema, auth type
+- Saved as `tools/tenant_{id}/{slug}/tool.md`
+- Live immediately — MCP server hot-reloads
+
+**Shared backend with skills:**
+- `SkillManager` extended to handle `engine: mcp_tool`
+- Same version, fork, edit, CHANGELOG flow
+- Same pgvector embedding for semantic auto-trigger matching
+- Tools page in frontend already exists — extended with import/create
+
+**Dynamic MCP server:**
+- On startup, scans tool marketplace directories
+- Registers `@mcp.tool()` for each tool.md definition
+- Per-tenant: tenant sees native + community + their custom tools
+- New tools added at runtime without restart
 
 Single MCP server using `mcp` Python SDK (`FastMCP`), Streamable HTTP transport.
 
