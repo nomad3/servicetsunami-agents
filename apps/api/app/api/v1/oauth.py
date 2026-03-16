@@ -810,6 +810,27 @@ def get_integration_token(
 
     # Auto-refresh provider tokens that support refresh_token rotation.
     refresh_token = creds.get("refresh_token")
+
+    # If this config doesn't have a refresh_token, check sibling configs
+    # for the same account (e.g., gmail might not have it but google_calendar does)
+    if provider in {"google", "microsoft"} and not refresh_token and config.account_email:
+        sibling_configs = (
+            db.query(IntegrationConfig)
+            .filter(
+                IntegrationConfig.tenant_id == tid,
+                IntegrationConfig.account_email == config.account_email,
+                IntegrationConfig.enabled.is_(True),
+                IntegrationConfig.id != config.id,
+            )
+            .all()
+        )
+        for sib in sibling_configs:
+            sib_creds = retrieve_credentials_for_skill(db, sib.id, tid)
+            if sib_creds.get("refresh_token"):
+                refresh_token = sib_creds["refresh_token"]
+                logger.info("Found refresh_token from sibling %s for %s", sib.integration_name, config.account_email)
+                break
+
     if provider in {"google", "microsoft"} and refresh_token:
         refreshed_tokens = _refresh_access_token(provider, refresh_token)
         if refreshed_tokens:
