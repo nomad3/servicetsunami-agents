@@ -370,7 +370,7 @@ async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
 
         result = subprocess.run(
             cmd, capture_output=True, text=True,
-            timeout=1500, env=env, cwd=session_dir,  # 25 min — below Temporal's 30 min
+            timeout=1500, env=env, cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
         )
 
         # If --resume failed (session not found), retry without it
