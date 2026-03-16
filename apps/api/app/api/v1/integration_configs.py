@@ -106,7 +106,6 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
         "credentials": [
             {"key": "session_token", "label": "OAuth Token", "type": "password", "required": True,
              "help": "Run 'claude setup-token' in your terminal and paste the token (valid 1 year)"},
-             "help": "Run 'claude setup-token' in your terminal, then paste the token here"},
         ],
     },
     "meta_ads": {
