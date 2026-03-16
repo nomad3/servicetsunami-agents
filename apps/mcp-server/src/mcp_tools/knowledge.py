@@ -265,10 +265,13 @@ async def update_entity(
     if not db_url:
         return {"error": "DATABASE_URL not configured"}
 
+    tid = resolve_tenant_id(ctx)
+
     conn = await asyncpg.connect(db_url)
     try:
         current = await conn.fetchrow(
-            "SELECT properties FROM knowledge_entities WHERE id = $1", entity_id
+            "SELECT properties FROM knowledge_entities WHERE id = $1 AND tenant_id = $2",
+            entity_id, tid,
         )
         if current:
             props = current["properties"]
@@ -288,18 +291,18 @@ async def update_entity(
             """
             UPDATE knowledge_entities
             SET properties = $1, updated_at = NOW()
-            WHERE id = $2
+            WHERE id = $2 AND tenant_id = $3
             """,
-            json.dumps(updates_dict), entity_id,
+            json.dumps(updates_dict), entity_id, tid,
         )
 
         updated = await conn.fetchrow(
             """
             SELECT id, tenant_id, name, entity_type, category, description,
                    properties, aliases, confidence, created_at, updated_at
-            FROM knowledge_entities WHERE id = $1
+            FROM knowledge_entities WHERE id = $1 AND tenant_id = $2
             """,
-            entity_id,
+            entity_id, tid,
         )
         if not updated:
             return {"error": "Entity not found"}
@@ -327,6 +330,7 @@ async def merge_entities(
         The surviving (primary) entity with all relations.
     """
     dup_ids = _parse_json(duplicate_entity_ids, [])
+    tid = resolve_tenant_id(ctx)
 
     db_url = _get_db_url()
     if not db_url:
@@ -345,7 +349,8 @@ async def merge_entities(
                     primary_entity_id, dup_id,
                 )
                 await conn.execute(
-                    "DELETE FROM knowledge_entities WHERE id = $1", dup_id
+                    "DELETE FROM knowledge_entities WHERE id = $1 AND tenant_id = $2",
+                    dup_id, tid,
                 )
 
         # Return primary with relations
@@ -353,9 +358,9 @@ async def merge_entities(
             """
             SELECT id, tenant_id, name, entity_type, category, description,
                    properties, aliases, confidence, created_at, updated_at
-            FROM knowledge_entities WHERE id = $1
+            FROM knowledge_entities WHERE id = $1 AND tenant_id = $2
             """,
-            primary_entity_id,
+            primary_entity_id, tid,
         )
         if not entity:
             return {"error": "Primary entity not found"}
@@ -539,6 +544,7 @@ async def get_neighborhood(
     """
     rel_types = _parse_json(relation_types, [])
     ent_types = _parse_json(entity_types, [])
+    tid = resolve_tenant_id(ctx)
 
     db_url = _get_db_url()
     if not db_url:
@@ -557,9 +563,9 @@ async def get_neighborhood(
                 """
                 SELECT id, tenant_id, name, entity_type, category, description,
                        confidence, created_at, updated_at
-                FROM knowledge_entities WHERE id = $1
+                FROM knowledge_entities WHERE id = $1 AND tenant_id = $2
                 """,
-                eid,
+                eid, tid,
             )
             if not entity:
                 return
@@ -685,12 +691,22 @@ async def get_entity_timeline(
     Returns:
         List of timeline events ordered by most recent first.
     """
+    tid = resolve_tenant_id(ctx)
+
     db_url = _get_db_url()
     if not db_url:
         return [{"error": "DATABASE_URL not configured"}]
 
     conn = await asyncpg.connect(db_url)
     try:
+        # Verify the entity belongs to the tenant before returning its history
+        owner = await conn.fetchrow(
+            "SELECT id FROM knowledge_entities WHERE id = $1 AND tenant_id = $2",
+            entity_id, tid,
+        )
+        if not owner:
+            return [{"error": "Entity not found"}]
+
         rows = await conn.fetch(
             """
             SELECT version, properties_snapshot, change_reason, changed_at
