@@ -119,6 +119,21 @@ services:
       - mcp-server
     restart: unless-stopped
 
+  code-worker:
+    build:
+      context: ./apps/code-worker
+      dockerfile: Dockerfile
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - API_BASE_URL=http://api:8000
+      - API_INTERNAL_KEY=dev_mcp_key
+      - MCP_API_KEY=dev_mcp_key
+    volumes:
+      - ./apps/code-worker:/app
+    depends_on:
+      - temporal
+    restart: unless-stopped
+
   test-db:
     image: postgres:13
     environment:
