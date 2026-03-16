@@ -19,6 +19,7 @@ from src.clients.databricks_client import DatabricksClient
 from src.tools import databricks_tools, ingestion
 from src.services.browser_service import get_browser_service
 from src.tools.web_scraper import scrape_webpage, scrape_structured_data, search_and_scrape
+from src.mcp_app import mcp as mcp_server
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ app = FastAPI(
     openapi_url="/openapi.json",
     lifespan=lifespan,
 )
+app.mount("/mcp", mcp_server.streamable_http_app())
 databricks = DatabricksClient()
 
 # ==================== Models ====================
