@@ -344,7 +344,7 @@ async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
 
             result = subprocess.run(
                 cmd, capture_output=True, text=True,
-                timeout=120, env=env, cwd=session_dir,
+                timeout=300, env=env, cwd=session_dir,
             )
 
             if result.returncode != 0:
@@ -404,8 +404,8 @@ class ChatCliWorkflow:
         return await workflow.execute_activity(
             execute_chat_cli,
             task_input,
-            start_to_close_timeout=timedelta(minutes=3),
-            heartbeat_timeout=timedelta(seconds=60),
+            start_to_close_timeout=timedelta(minutes=10),
+            heartbeat_timeout=timedelta(seconds=120),
             retry_policy=RetryPolicy(maximum_attempts=1),
         )
 

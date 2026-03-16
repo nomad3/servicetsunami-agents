@@ -408,7 +408,7 @@ def run_agent_session(
                 task_input,
                 id=f"chat-cli-{uuid.uuid4()}",
                 task_queue="servicetsunami-code",
-                execution_timeout=timedelta(minutes=3),
+                execution_timeout=timedelta(minutes=10),
             )
             return result
 
