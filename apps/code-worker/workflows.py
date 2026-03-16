@@ -277,6 +277,127 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         )
 
 
+# ---------------------------------------------------------------------------
+# Chat CLI — lightweight activity for conversational agent sessions
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ChatCliInput:
+    message: str
+    tenant_id: str
+    claude_md_content: str = ""
+    mcp_config: str = ""  # JSON string
+
+
+@dataclass
+class ChatCliResult:
+    response_text: str
+    success: bool
+    error: Optional[str] = None
+    metadata: Optional[dict] = None
+
+
+@activity.defn
+async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
+    """Run claude -p for a single chat message. No git, no PRs — just conversation."""
+    try:
+        # Fetch tenant's OAuth token
+        token = _fetch_claude_token(task_input.tenant_id)
+        if not token:
+            return ChatCliResult(response_text="", success=False, error="Claude Code not connected")
+
+        # Create temp session directory
+        session_dir = tempfile.mkdtemp(prefix="st_chat_")
+        try:
+            # Write CLAUDE.md if provided
+            if task_input.claude_md_content:
+                with open(os.path.join(session_dir, "CLAUDE.md"), "w") as f:
+                    f.write(task_input.claude_md_content)
+
+            # Write MCP config if provided
+            if task_input.mcp_config:
+                with open(os.path.join(session_dir, "mcp.json"), "w") as f:
+                    f.write(task_input.mcp_config)
+
+            # Build command
+            cmd = ["claude", "-p", task_input.message, "--output-format", "json"]
+            cmd.extend(["--project-dir", session_dir])
+
+            mcp_path = os.path.join(session_dir, "mcp.json")
+            if os.path.exists(mcp_path):
+                cmd.extend(["--mcp-config", mcp_path])
+
+            env = os.environ.copy()
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+
+            result = subprocess.run(
+                cmd, capture_output=True, text=True,
+                timeout=120, env=env, cwd=session_dir,
+            )
+
+            if result.returncode != 0:
+                err = (result.stderr or result.stdout or "")[:1000]
+                return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
+
+            raw = result.stdout.strip()
+            if not raw:
+                return ChatCliResult(response_text="", success=False, error="CLI produced no output")
+
+            # Parse JSON output
+            try:
+                data = json.loads(raw)
+                text = data.get("result") or data.get("response") or data.get("content") or data.get("text") or raw
+                meta = {
+                    "input_tokens": (data.get("usage") or {}).get("input_tokens", 0),
+                    "output_tokens": (data.get("usage") or {}).get("output_tokens", 0),
+                    "model": data.get("model"),
+                }
+                return ChatCliResult(response_text=text, success=True, metadata=meta)
+            except json.JSONDecodeError:
+                return ChatCliResult(response_text=raw, success=True)
+
+        finally:
+            import shutil
+            shutil.rmtree(session_dir, ignore_errors=True)
+
+    except subprocess.TimeoutExpired:
+        return ChatCliResult(response_text="", success=False, error="CLI timed out after 120s")
+    except Exception as e:
+        return ChatCliResult(response_text="", success=False, error=str(e))
+
+
+def _fetch_claude_token(tenant_id: str) -> Optional[str]:
+    """Fetch Claude Code OAuth token from API credential vault."""
+    try:
+        resp = httpx.get(
+            f"{API_BASE_URL}/api/v1/oauth/internal/token/claude_code",
+            params={"tenant_id": tenant_id},
+            headers={"X-Internal-Key": API_INTERNAL_KEY or "dev_mcp_key"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("session_token") or data.get("oauth_token")
+    except Exception as e:
+        logger.error("Failed to fetch claude token: %s", e)
+    return None
+
+
+@workflow.defn
+class ChatCliWorkflow:
+    """Lightweight Temporal workflow for chat CLI sessions."""
+
+    @workflow.run
+    async def run(self, task_input: ChatCliInput) -> ChatCliResult:
+        return await workflow.execute_activity(
+            execute_chat_cli,
+            task_input,
+            start_to_close_timeout=timedelta(minutes=3),
+            heartbeat_timeout=timedelta(seconds=60),
+            retry_policy=RetryPolicy(maximum_attempts=1),
+        )
+
+
 @workflow.defn
 class CodeTaskWorkflow:
     """Temporal workflow for executing a code task via Claude Code CLI."""

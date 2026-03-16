@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+from datetime import timedelta
 from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -355,53 +356,87 @@ def run_agent_session(
         logger.warning("Memory recall failed for tenant %s: %s", tenant_id, exc)
         memory_context = {}
 
-    # Derive display names for context — use IDs as fallback if not available
+    # 4. Build CLAUDE.md content and MCP config (strings, not files)
     tenant_name = str(tenant_id)
-    user_name = str(user_id)
-    if sender_phone:
-        user_name = sender_phone
+    user_name = sender_phone or str(user_id)
 
-    # 4. Create temp directory and write session files
-    session_dir = tempfile.mkdtemp(prefix="cli_session_")
+    claude_md_content = generate_claude_md(
+        skill_body=skill_body,
+        tenant_name=tenant_name,
+        user_name=user_name,
+        channel=channel,
+        conversation_summary=conversation_summary,
+        memory_context=memory_context,
+    )
+
+    internal_key = settings.MCP_API_KEY or "dev_mcp_key"
+    mcp_config = generate_mcp_config(str(tenant_id), internal_key)
+
+    logger.info(
+        "Dispatching ChatCliWorkflow: skill=%s tenant=%s channel=%s",
+        agent_slug, str(tenant_id)[:8], channel,
+    )
+
+    # 5. Dispatch to code-worker via Temporal
+    import asyncio
+    from temporalio.client import Client as TemporalClient
+
     try:
-        # Write CLAUDE.md
-        claude_md_content = generate_claude_md(
-            skill_body=skill_body,
-            tenant_name=tenant_name,
-            user_name=user_name,
-            channel=channel,
-            conversation_summary=conversation_summary,
-            memory_context=memory_context,
-        )
-        claude_md_path = os.path.join(session_dir, "CLAUDE.md")
-        with open(claude_md_path, "w", encoding="utf-8") as f:
-            f.write(claude_md_content)
+        temporal_address = os.environ.get("TEMPORAL_ADDRESS", "temporal:7233")
 
-        # Write mcp.json
-        internal_key = settings.MCP_API_KEY or "dev_mcp_key"
-        mcp_config = generate_mcp_config(str(tenant_id), internal_key)
-        mcp_json_path = os.path.join(session_dir, "mcp.json")
-        with open(mcp_json_path, "w", encoding="utf-8") as f:
-            json.dump(mcp_config, f, indent=2)
+        async def _run_workflow():
+            client = await TemporalClient.connect(temporal_address)
+            # Import workflow types for type-safe dispatch
+            from dataclasses import dataclass as _dc
 
-        logger.info(
-            "CLI session dir=%s skill=%s tenant=%s channel=%s",
-            session_dir, agent_slug, tenant_id, channel,
-        )
+            @_dc
+            class _ChatCliInput:
+                message: str
+                tenant_id: str
+                claude_md_content: str = ""
+                mcp_config: str = ""
 
-        # 5. Invoke CLI
-        response_text, cli_metadata = invoke_claude_cli(
-            message=message,
-            session_dir=session_dir,
-            oauth_token=oauth_token,
-        )
+            task_input = _ChatCliInput(
+                message=message,
+                tenant_id=str(tenant_id),
+                claude_md_content=claude_md_content,
+                mcp_config=json.dumps(mcp_config),
+            )
 
-        # Merge CLI metadata into our metadata dict
-        metadata.update(cli_metadata)
-        return response_text, metadata
+            result = await client.execute_workflow(
+                "ChatCliWorkflow",
+                task_input,
+                id=f"chat-cli-{uuid.uuid4()}",
+                task_queue="servicetsunami-code",
+                execution_timeout=timedelta(minutes=3),
+            )
+            return result
 
-    finally:
-        # 6. Always cleanup temp directory
+        # Run the async workflow dispatch from sync context
+        loop = asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(_run_workflow())
+        finally:
+            loop.close()
+
+        if hasattr(result, 'success') and result.success:
+            metadata["platform"] = "claude_code"
+            if hasattr(result, 'metadata') and result.metadata:
+                metadata.update(result.metadata)
+            return result.response_text, metadata
+        else:
+            err = getattr(result, 'error', None) or "CLI workflow failed"
+            metadata["error"] = err
+            return None, metadata
+
+    except Exception as e:
+        logger.exception("ChatCliWorkflow dispatch failed")
+        metadata["error"] = str(e)
+        return None, metadata
+
+
+    # NOTE: cleanup not needed — code-worker handles its own temp dirs
+    if False:  # dead code, kept for reference
         try:
             shutil.rmtree(session_dir, ignore_errors=True)
         except Exception as exc:
