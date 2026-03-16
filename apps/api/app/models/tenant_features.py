@@ -56,6 +56,10 @@ class TenantFeatures(Base):
     # LLM Provider Selection
     active_llm_provider = Column(String(50), default="gemini_llm")
 
+    # CLI Orchestrator
+    cli_orchestrator_enabled = Column(Boolean, default=False)
+    default_cli_platform = Column(String(50), default="claude_code")
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

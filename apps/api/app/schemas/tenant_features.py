@@ -27,6 +27,9 @@ class TenantFeaturesBase(BaseModel):
     plan_type: str = "starter"
     # LLM Provider Selection
     active_llm_provider: Optional[str] = "gemini_llm"
+    # CLI Orchestrator
+    cli_orchestrator_enabled: Optional[bool] = False
+    default_cli_platform: Optional[str] = "claude_code"
     # Reinforcement Learning
     rl_enabled: bool = False
     rl_settings: Optional[Dict[str, Any]] = None
@@ -53,6 +56,8 @@ class TenantFeaturesUpdate(BaseModel):
     hide_servicetsunami_branding: Optional[bool] = None
     plan_type: Optional[str] = None
     active_llm_provider: Optional[str] = None
+    cli_orchestrator_enabled: Optional[bool] = None
+    default_cli_platform: Optional[str] = None
     rl_enabled: Optional[bool] = None
     rl_settings: Optional[Dict[str, Any]] = None
 
