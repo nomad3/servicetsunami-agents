@@ -52,9 +52,14 @@ def generate_claude_md(
     # Tenant context section
     lines.append("## Session Context")
     lines.append("")
-    lines.append(f"- **Tenant:** {tenant_name}")
+    lines.append(f"- **Tenant ID:** {tenant_name}")
     lines.append(f"- **User:** {user_name}")
     lines.append(f"- **Channel:** {channel}")
+    lines.append("")
+    lines.append("## CRITICAL: MCP Tool Usage")
+    lines.append("")
+    lines.append(f"When calling ANY MCP tool, you MUST pass `tenant_id=\"{tenant_name}\"` as a parameter.")
+    lines.append("Never use the default 'auto' value. Always pass the exact tenant ID above.")
     lines.append("")
 
     if conversation_summary:
