@@ -21,7 +21,7 @@ DOMAIN_BRANDING = {
 DEFAULT_BRANDING = DOMAIN_BRANDING["servicetsunami.com"]
 
 
-@router.get("/branding")
+@router.get("/domain-branding")
 def get_branding(request: Request):
     """Return branding config for the current domain. No auth required."""
     host = (
