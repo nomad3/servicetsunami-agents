@@ -366,7 +366,7 @@ async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
 
         result = subprocess.run(
             cmd, capture_output=True, text=True,
-            timeout=300, env=env, cwd=session_dir,
+            timeout=1500, env=env, cwd=session_dir,  # 25 min — below Temporal's 30 min
         )
 
         if result.returncode != 0:
@@ -417,16 +417,22 @@ def _fetch_claude_token(tenant_id: str) -> Optional[str]:
 
 @workflow.defn
 class ChatCliWorkflow:
-    """Lightweight Temporal workflow for chat CLI sessions."""
+    """Temporal workflow for chat CLI sessions.
+
+    Flexible timeout: Claude CLI may do complex multi-tool work
+    (email scanning, calendar creation, code analysis). Allow up to
+    30 minutes with heartbeat to keep Temporal informed.
+    """
 
     @workflow.run
     async def run(self, task_input: ChatCliInput) -> ChatCliResult:
         return await workflow.execute_activity(
             execute_chat_cli,
             task_input,
-            start_to_close_timeout=timedelta(minutes=10),
-            heartbeat_timeout=timedelta(seconds=120),
-            retry_policy=RetryPolicy(maximum_attempts=1),
+            start_to_close_timeout=timedelta(minutes=30),
+            schedule_to_close_timeout=timedelta(minutes=45),
+            heartbeat_timeout=timedelta(seconds=300),
+            retry_policy=RetryPolicy(maximum_attempts=2),
         )
 
 
