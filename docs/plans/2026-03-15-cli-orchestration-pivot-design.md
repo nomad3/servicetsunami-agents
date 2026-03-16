@@ -130,26 +130,45 @@ async def search_emails(query: str, max_results: int = 10, account_email: str = 
 
 ### 3. CLI Session Lifecycle
 
-**New conversation:**
+Two execution modes: **fast path** (conversational) and **async path** (heavy tasks).
+
+**Fast path (chat messages — WhatsApp, web):**
 1. User sends message (WhatsApp/Web)
 2. Chat Service → Agent Router (Python, no LLM)
-3. Session Manager creates session record, loads agent skill, generates platform-specific config file (CLAUDE.md/GEMINI.md/CODEX.md) + MCP config
-4. Dispatches `AgentSessionWorkflow` to Temporal
-5. Temporal activity runs CLI subprocess:
+3. Session Manager loads agent skill, generates platform-specific config
+4. **Direct subprocess** from API process (no Temporal):
    ```bash
    claude -p "user message" \
      --output-format json \
      --mcp-config /tmp/sessions/{id}/mcp.json \
      --project-dir /tmp/sessions/{id}/
    ```
-6. CLI connects to MCP server, uses tools, returns response
-7. Activity returns response text → Chat Service saves, embeds, logs RL
+5. CLI connects to MCP server, uses tools, returns response
+6. Chat Service saves response, embeds it, logs RL experience
+7. Latency target: <15s for WhatsApp, <10s for web chat
 
-**Continuing conversation:** Same CLI invoked with `--resume {session_id}`. CLI handles conversation history natively.
+**Async path (heavy tasks — code, deep scan, reports):**
+1. Agent Router detects heavy task (code generation, bulk email scan, report)
+2. Dispatches `AgentSessionWorkflow` to Temporal (same code-worker pattern)
+3. Temporal activity runs CLI with longer timeout (15 min)
+4. Result returned via webhook/poll to chat service
+5. WhatsApp typing indicator stays active until completion
 
-**Session rotation:** When CLI returns context overflow error or token threshold exceeded, Session Manager archives old session, creates new one with `conversation_summary` injected into the instruction file.
+**Stateless CLI invocations (each call is independent):**
+- CLI does NOT manage conversation history across calls
+- ServiceTsunami injects context into each prompt:
+  ```
+  [Conversation summary from last 6 messages]
+  [Relevant knowledge graph entities recalled via embeddings]
+  [Current user message]
+  ```
+- This is the same pattern as the existing context rotation in `chat.py`
+- No dependency on `--resume` or persistent CLI sessions
+- Pod restarts, scaling events, and CLI updates have zero impact
 
-**Key principle:** CLI handles context windows, memory, and tool calling. We only manage routing, tools (MCP), instructions (skills), tenant isolation, and observability.
+**Session rotation:** When injected context exceeds 80% of CLI's context window, summarize and trim. Same cumulative token tracking as current implementation.
+
+**Key principle:** CLIs are stateless tools invoked per-message. ServiceTsunami owns conversation history, memory, and context injection. CLIs own the LLM call, tool execution, and response generation.
 
 ### 4. Agent Skill → Platform File Generation
 
@@ -258,6 +277,41 @@ Incremental per agent. ADK stays as fallback throughout. Feature flag `cli_orche
 - Production deploy to GKE.
 
 **Rollback:** At every phase, `cli_orchestrator_enabled = false` reverts to ADK. Knowledge graph, RL, skills, credentials all in PostgreSQL — independent of agent executor.
+
+## Existing Code Worker
+
+The existing `apps/code-worker/` stays and becomes the blueprint for all CLI activities. It already proves the pattern:
+- Temporal workflow + activity for CLI subprocess execution
+- Per-tenant OAuth token fetched at runtime from credential vault
+- `claude -p` invocation with `--output-format json`
+- Git worktree isolation, PR creation, full audit trail
+
+The pivot extends this by adding:
+- `GeminiCliActivity` — same pattern, different CLI binary + auth env var
+- `CodexCliActivity` — same pattern, different CLI binary + auth env var
+- Fast-path direct subprocess for conversational messages (skip Temporal)
+- MCP config generation per session
+
+## Platform MCP Compatibility
+
+Before adding a CLI platform, validate MCP support:
+- **Claude Code CLI**: Full MCP support via `--mcp-config`. Confirmed.
+- **Gemini CLI**: Validate `--mcp-config` support. If not available, use Gemini's native function calling with a shim that translates MCP tool definitions.
+- **Codex CLI**: Validate MCP support. If not available, same shim approach.
+
+Phase 1 ships with Claude Code CLI only. Gemini and Codex are added after MCP support is confirmed. If a platform lacks MCP, build a lightweight adapter that translates MCP tools to the platform's native tool format.
+
+## Design Decisions (from spec review)
+
+**Stateless CLI invocations over persistent sessions:** Each CLI call is independent. No `--resume`, no session persistence, no pod affinity. ServiceTsunami owns history and injects context per-call. Simplest, most resilient pattern.
+
+**Fast path + async path over Temporal-only:** Conversational messages use direct subprocess (<15s). Heavy tasks use Temporal workflows (up to 15min). Avoids Temporal dispatch overhead for chat.
+
+**Incremental MCP migration over big-bang rewrite:** Phase 1 adds FastMCP tools alongside existing MCP server. Tools are ported one group at a time. Existing Databricks tools stay untouched.
+
+**Deterministic routing before RL routing:** Phase 1-2 use tenant default + agent affinity. RL exploration added in Phase 3 once baseline metrics exist per platform.
+
+**3-platform cost catalog over 329-model catalog:** Start with pricing for Claude, Gemini, Codex models only. Expand later.
 
 ## What Stays vs What Goes
 
