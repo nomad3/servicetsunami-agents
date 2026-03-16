@@ -319,8 +319,12 @@ async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
                 with open(os.path.join(session_dir, "mcp.json"), "w") as f:
                     f.write(task_input.mcp_config)
 
-            # Build command
-            cmd = ["claude", "-p", task_input.message, "--output-format", "json"]
+            # Build command — allow all MCP tools without permission prompts
+            cmd = [
+                "claude", "-p", task_input.message,
+                "--output-format", "json",
+                "--allowedTools", "mcp__servicetsunami__*",
+            ]
 
             # Inject agent instructions as system prompt
             claude_md_path = os.path.join(session_dir, "CLAUDE.md")
