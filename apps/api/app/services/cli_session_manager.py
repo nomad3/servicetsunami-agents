@@ -419,14 +419,27 @@ def run_agent_session(
         finally:
             loop.close()
 
-        if hasattr(result, 'success') and result.success:
-            metadata["platform"] = "claude_code"
-            if hasattr(result, 'metadata') and result.metadata:
-                metadata.update(result.metadata)
-            return result.response_text, metadata
+        # Temporal may return a dataclass, dict, or other type
+        if isinstance(result, dict):
+            success = result.get("success", False)
+            response_text = result.get("response_text", "")
+            error = result.get("error")
+            meta = result.get("metadata") or {}
         else:
-            err = getattr(result, 'error', None) or "CLI workflow failed"
-            metadata["error"] = err
+            success = getattr(result, "success", False)
+            response_text = getattr(result, "response_text", "")
+            error = getattr(result, "error", None)
+            meta = getattr(result, "metadata", None) or {}
+
+        if success and response_text:
+            metadata["platform"] = "claude_code"
+            if isinstance(meta, dict):
+                metadata.update(meta)
+            return response_text, metadata
+        else:
+            metadata["error"] = error or "CLI workflow returned empty response"
+            logger.warning("ChatCliWorkflow result: success=%s error=%s response_len=%s",
+                          success, error, len(response_text) if response_text else 0)
             return None, metadata
 
     except Exception as e:
