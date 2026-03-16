@@ -1,6 +1,7 @@
 """Tests for MCP server"""
 import pytest
-from src.server import mcp
+import src.mcp_tools  # noqa: F401 — registers @mcp.tool() decorators
+from src.mcp_app import mcp
 
 
 def test_server_has_tools():
