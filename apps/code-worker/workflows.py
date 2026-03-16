@@ -302,94 +302,58 @@ class ChatCliResult:
 
 @activity.defn
 async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
-    """Run claude -p for a single chat message. No git, no PRs — just conversation."""
+    """Send a message to a persistent Claude session.
+
+    Uses the SessionManager to maintain long-lived Claude processes per tenant.
+    Sessions persist across messages — native Claude context, tool state, memory.
+    """
+    from session_manager import get_session_manager, SessionConfig
+
     try:
         # Fetch tenant's OAuth token
         token = _fetch_claude_token(task_input.tenant_id)
         if not token:
             return ChatCliResult(response_text="", success=False, error="Claude Code not connected")
 
-        # Stateless: each message gets its own temp dir.
-        # Conversation history is injected via --append-system-prompt.
-        # No --resume needed — the API passes full context each time.
-        session_dir = tempfile.mkdtemp(prefix="st_chat_")
-        try:
-            # Write CLAUDE.md if provided
-            if task_input.claude_md_content:
-                with open(os.path.join(session_dir, "CLAUDE.md"), "w") as f:
-                    f.write(task_input.claude_md_content)
+        manager = get_session_manager()
 
-            # Write MCP config if provided
-            if task_input.mcp_config:
-                with open(os.path.join(session_dir, "mcp.json"), "w") as f:
-                    f.write(task_input.mcp_config)
+        # Build session config (used only when creating a new session)
+        config = SessionConfig(
+            claude_md_content=task_input.claude_md_content,
+            mcp_config=task_input.mcp_config,
+            oauth_token=token,
+        )
 
-            # Save image to session directory if provided
-            if task_input.image_b64 and task_input.image_mime:
-                import base64 as b64
-                ext = task_input.image_mime.split("/")[-1].replace("jpeg", "jpg")
-                img_path = os.path.join(session_dir, f"user_image.{ext}")
-                with open(img_path, "wb") as f:
-                    f.write(b64.b64decode(task_input.image_b64))
+        # Save image to tenant session dir if provided
+        if task_input.image_b64 and task_input.image_mime:
+            import base64 as b64
+            session_dir = os.path.join("/tmp", "st_sessions", task_input.tenant_id)
+            os.makedirs(session_dir, exist_ok=True)
+            ext = task_input.image_mime.split("/")[-1].replace("jpeg", "jpg")
+            img_path = os.path.join(session_dir, f"user_image.{ext}")
+            with open(img_path, "wb") as f:
+                f.write(b64.b64decode(task_input.image_b64))
 
-            # Build command — allow all MCP tools + Read for images
-            cmd = [
-                "claude", "-p", task_input.message,
-                "--output-format", "json",
-                "--allowedTools", "mcp__servicetsunami__*,Read",
-                "--add-dir", session_dir,
-            ]
+        # Send message to persistent session
+        result = await manager.send_message(
+            tenant_id=task_input.tenant_id,
+            message=task_input.message,
+            config=config,
+        )
 
-            # Inject agent instructions + conversation history as system prompt
-            # (stateless: each call gets full context from DB-backed chat history)
-            claude_md_path = os.path.join(session_dir, "CLAUDE.md")
-            if os.path.exists(claude_md_path):
-                with open(claude_md_path) as f:
-                    system_prompt = f.read()
-                if system_prompt.strip():
-                    cmd.extend(["--append-system-prompt", system_prompt[:16000]])
-
-            # Connect to MCP server for tools
-            mcp_path = os.path.join(session_dir, "mcp.json")
-            if os.path.exists(mcp_path):
-                cmd.extend(["--mcp-config", mcp_path])
-
-            env = os.environ.copy()
-            env["CLAUDE_CODE_OAUTH_TOKEN"] = token
-
-            result = subprocess.run(
-                cmd, capture_output=True, text=True,
-                timeout=300, env=env, cwd=session_dir,
+        if result.get("success"):
+            return ChatCliResult(
+                response_text=result.get("response_text", ""),
+                success=True,
+                metadata=result.get("metadata"),
+            )
+        else:
+            return ChatCliResult(
+                response_text="",
+                success=False,
+                error=result.get("error", "Unknown error"),
             )
 
-            if result.returncode != 0:
-                err = (result.stderr or result.stdout or "")[:1000]
-                return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
-
-            raw = result.stdout.strip()
-            if not raw:
-                return ChatCliResult(response_text="", success=False, error="CLI produced no output")
-
-            # Parse JSON output
-            try:
-                data = json.loads(raw)
-                text = data.get("result") or data.get("response") or data.get("content") or data.get("text") or raw
-                meta = {
-                    "input_tokens": (data.get("usage") or {}).get("input_tokens", 0),
-                    "output_tokens": (data.get("usage") or {}).get("output_tokens", 0),
-                    "model": data.get("model"),
-                    "claude_session_id": data.get("session_id", ""),
-                }
-                return ChatCliResult(response_text=text, success=True, metadata=meta)
-            except json.JSONDecodeError:
-                return ChatCliResult(response_text=raw, success=True)
-
-        finally:
-            import shutil
-            shutil.rmtree(session_dir, ignore_errors=True)
-
-    except subprocess.TimeoutExpired:
-        return ChatCliResult(response_text="", success=False, error="CLI timed out after 120s")
     except Exception as e:
         return ChatCliResult(response_text="", success=False, error=str(e))
 

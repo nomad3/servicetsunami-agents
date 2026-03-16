@@ -12,6 +12,7 @@ from temporalio.worker.workflow_sandbox import (
 )
 
 from workflows import CodeTaskWorkflow, execute_code_task, ChatCliWorkflow, execute_chat_cli
+from session_manager import get_session_manager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,6 +22,10 @@ TASK_QUEUE = "servicetsunami-code"
 
 
 async def main():
+    # Start the persistent session manager
+    manager = get_session_manager()
+    await manager.start()
+
     logger.info("Connecting to Temporal at %s", TEMPORAL_ADDRESS)
     client = await Client.connect(TEMPORAL_ADDRESS)
 
