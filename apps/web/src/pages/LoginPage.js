@@ -34,12 +34,6 @@ const LoginPage = () => {
     await handleLogin(email, password);
   };
 
-  const handleDemoLogin = async (demoEmail, demoPassword) => {
-    setEmail(demoEmail);
-    setPassword(demoPassword);
-    await handleLogin(demoEmail, demoPassword);
-  };
-
   return (
     <Container className="d-flex justify-content-center align-items-center" style={{ minHeight: '100vh' }}>
       <Card style={{ width: '400px' }} className="shadow-lg p-4">
@@ -71,15 +65,6 @@ const LoginPage = () => {
 
             <Button variant="primary" type="submit" className="w-100 mb-2" disabled={loading}>
               {loading ? t('login.loggingIn') : t('login.submit')}
-            </Button>
-            <Button
-              variant="outline-secondary"
-              className="w-100 mb-2"
-              type="button"
-              onClick={() => handleDemoLogin('test@example.com', 'password')}
-              disabled={loading}
-            >
-              {t('login.demoLogin')}
             </Button>
             <div className="text-center mt-3">
               {t('login.noAccount')} <Link to="/register">{t('login.registerLink')}</Link>
