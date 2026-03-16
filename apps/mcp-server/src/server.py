@@ -42,7 +42,7 @@ app = FastAPI(
     openapi_url="/openapi.json",
     lifespan=lifespan,
 )
-app.mount("/mcp", mcp_server.streamable_http_app())
+app.mount("/", mcp_server.streamable_http_app())
 databricks = DatabricksClient()
 
 # ==================== Models ====================
