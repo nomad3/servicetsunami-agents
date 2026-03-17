@@ -398,9 +398,24 @@ async def search_emails(
     tenant_id: str = "",
     max_results: int = 10,
     account_email: str = "",
+    person_name: str = "",
+    company_name: str = "",
+    fuzzy: bool = False,
     ctx: Context = None,
 ) -> dict:
     """Search Gmail or Outlook for emails matching a query.
+
+    Supports two modes:
+    1. **Direct query**: Pass a Gmail-style query string (from:, subject:, is:unread, etc.)
+    2. **Fuzzy/smart search**: Set fuzzy=True and pass person_name and/or company_name.
+       This generates multiple search queries with name variations, partial matches,
+       domain guesses, and email pattern guesses -- then tries each until results are found.
+
+    Fuzzy search handles common failure cases:
+    - Misspelled names (e.g. "Santora" finds "Santoro")
+    - Partial names (e.g. "Sol" finds "Sol Santoro")
+    - Company name variations (e.g. "Intuitive Machines" finds "Intuition Machines")
+    - Email pattern guessing (e.g. first.last@domain.com)
 
     Args:
         query: Gmail-style search query e.g. 'from:alice@example.com', 'subject:invoice',
@@ -410,12 +425,59 @@ async def search_emails(
         account_email: Specific email account to search e.g. 'user@company.com'.
                        If empty, searches the default (first) connected account.
                        Use list_connected_email_accounts to discover available accounts.
+        person_name: Person's name for fuzzy search (e.g. 'Sol Santoro'). Used with fuzzy=True.
+        company_name: Company name for fuzzy search (e.g. 'Intuition Machines'). Used with fuzzy=True.
+        fuzzy: Enable fuzzy/smart search mode. When True, generates multiple query variations
+               from person_name and company_name and tries each until results are found.
         ctx: MCP request context (injected automatically).
 
     Returns:
         Dict with list of email summaries (subject, from, date, snippet).
     """
     tid = resolve_tenant_id(ctx) or tenant_id
+
+    # Fuzzy search mode: generate multiple query variations and try each
+    if fuzzy and (person_name or company_name):
+        from src.utils.fuzzy_search import build_email_search_queries
+
+        search_queries = build_email_search_queries(
+            person_name=person_name or None,
+            company_name=company_name or None,
+            email_address=query if "@" in query else None,
+        )
+        if query and query not in search_queries:
+            search_queries.insert(0, query)
+
+        all_results: list = []
+        queries_tried: list = []
+        for sq in search_queries:
+            result = await search_emails(
+                query=sq, tenant_id=tid, max_results=max_results,
+                account_email=account_email, fuzzy=False, ctx=ctx,
+            )
+            queries_tried.append(sq)
+            found_emails = result.get("emails", [])
+            if found_emails:
+                seen_ids = {e["id"] for e in all_results}
+                for email in found_emails:
+                    if email["id"] not in seen_ids:
+                        all_results.append(email)
+                        seen_ids.add(email["id"])
+                if len(all_results) >= max_results:
+                    break
+
+        return {
+            "status": "success",
+            "emails": all_results[:max_results],
+            "total": len(all_results),
+            "fuzzy_search": True,
+            "queries_tried": queries_tried,
+            "message": f"Fuzzy search tried {len(queries_tried)} query variations."
+            if all_results else
+            f"No emails found after trying {len(queries_tried)} query variations: {queries_tried}",
+        }
+
+    # Standard (direct) search mode
     account, error = await _resolve_email_account(tid, account_email)
     if error:
         return {"error": error}

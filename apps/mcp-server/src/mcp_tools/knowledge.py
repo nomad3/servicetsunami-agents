@@ -222,7 +222,7 @@ async def find_entities(
                 rows = await conn.fetch(sql, *args)
                 return [_serialize_row(r) for r in rows]
 
-        # Text fallback
+        # Text fallback -- try ILIKE first, then fuzzy matching on name variations
         sql = f"""
             SELECT id, name, entity_type, category, description, confidence,
                    1.0 as similarity
@@ -236,6 +236,71 @@ async def find_entities(
         """
         args = [tid, min_confidence, f"%{query}%"] + (types if types else [])
         rows = await conn.fetch(sql, *args)
+
+        if rows:
+            return [_serialize_row(r) for r in rows]
+
+        # Fuzzy fallback: generate name variations and try each
+        try:
+            from src.utils.fuzzy_search import generate_name_variations, match_contact
+
+            variations = generate_name_variations(query)
+            for var in variations[1:]:  # skip first (original, already tried)
+                var_sql = f"""
+                    SELECT id, name, entity_type, category, description, confidence,
+                           1.0 as similarity
+                    FROM knowledge_entities
+                    WHERE tenant_id = $1
+                    AND confidence >= $2
+                    AND (name ILIKE $3 OR description ILIKE $3)
+                    {type_filter}
+                    ORDER BY confidence DESC
+                    LIMIT {limit}
+                """
+                var_args = [tid, min_confidence, f"%{var}%"] + (types if types else [])
+                var_rows = await conn.fetch(var_sql, *var_args)
+                if var_rows:
+                    rows = var_rows
+                    break
+
+            # If still no results, fetch a broader set and fuzzy-match client-side
+            if not rows:
+                broad_sql = f"""
+                    SELECT id, name, entity_type, category, description, confidence,
+                           properties, aliases
+                    FROM knowledge_entities
+                    WHERE tenant_id = $1
+                    AND confidence >= $2
+                    {type_filter}
+                    ORDER BY updated_at DESC
+                    LIMIT 500
+                """
+                broad_args = [tid, min_confidence] + (types if types else [])
+                broad_rows = await conn.fetch(broad_sql, *broad_args)
+
+                if broad_rows:
+                    contacts = []
+                    for r in broad_rows:
+                        c = dict(r)
+                        c["aliases"] = c.get("aliases") or []
+                        contacts.append(c)
+
+                    matches = match_contact(query, contacts, threshold=60.0)
+                    results = []
+                    for contact, score in matches[:limit]:
+                        results.append({
+                            "id": str(contact.get("id", "")),
+                            "name": contact.get("name", ""),
+                            "entity_type": contact.get("entity_type", ""),
+                            "category": contact.get("category", ""),
+                            "description": contact.get("description", ""),
+                            "confidence": float(contact.get("confidence", 0)),
+                            "similarity": round(score / 100.0, 4),
+                        })
+                    return results
+        except Exception:
+            logger.debug("Fuzzy search fallback failed", exc_info=True)
+
         return [_serialize_row(r) for r in rows]
     finally:
         await conn.close()
