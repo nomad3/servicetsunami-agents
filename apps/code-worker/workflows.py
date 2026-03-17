@@ -314,6 +314,22 @@ async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
         if not token:
             return ChatCliResult(response_text="", success=False, error="Claude Code not connected")
 
+        # Fetch GitHub token from vault for git operations
+        github_token = _fetch_github_token(task_input.tenant_id)
+        if github_token:
+            os.environ["GITHUB_TOKEN"] = github_token
+            # Update git remote with token
+            subprocess.run(
+                ["git", "remote", "set-url", "origin",
+                 f"https://{github_token}@github.com/nomad3/servicetsunami-agents.git"],
+                cwd=WORKSPACE, capture_output=True,
+            )
+            # Auth gh CLI
+            subprocess.run(
+                ["gh", "auth", "login", "--with-token"],
+                input=github_token, text=True, cwd=WORKSPACE, capture_output=True,
+            )
+
         # Persistent session directory per tenant (not temp — survives across calls)
         session_dir = os.path.join("/tmp", "st_sessions", task_input.tenant_id)
         os.makedirs(session_dir, exist_ok=True)
@@ -417,6 +433,23 @@ async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
         return ChatCliResult(response_text="", success=False, error="CLI timed out (5 min)")
     except Exception as e:
         return ChatCliResult(response_text="", success=False, error=str(e))
+
+
+def _fetch_github_token(tenant_id: str) -> Optional[str]:
+    """Fetch GitHub OAuth token from API credential vault."""
+    try:
+        resp = httpx.get(
+            f"{API_BASE_URL}/api/v1/oauth/internal/token/github",
+            params={"tenant_id": tenant_id},
+            headers={"X-Internal-Key": API_INTERNAL_KEY or "dev_mcp_key"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("oauth_token") or data.get("session_token")
+    except Exception as e:
+        logger.warning("Failed to fetch github token: %s", e)
+    return None
 
 
 def _fetch_claude_token(tenant_id: str) -> Optional[str]:
