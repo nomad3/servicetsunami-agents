@@ -4,13 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ServiceTsunami is an enterprise-grade agentic orchestration platform built as a monorepo. It provides multi-tenant control plane capabilities for managing AI agents, data pipelines, skill execution, and deployments. Features enterprise-grade credential management, traceability, and **LLM-agnostic execution** — tenants can switch between Anthropic Claude and Google Gemini (or any LiteLLM-supported provider) per-tenant via the integration registry. Local open-source embeddings (nomic-embed-text-v1.5, 768-dim) run without API keys. Deploys exclusively via Kubernetes (GKE) using Helm charts and GitHub Actions.
+ServiceTsunami is an AI agent orchestration platform that routes tasks to **Claude Code CLI** (Opus 4.6) via Temporal workflows. Agents are defined as marketplace skills, tools are served via **MCP** (77 tools), and the platform learns from user feedback via RL. Runs from a laptop via **Cloudflare Tunnel** serving both `servicetsunami.com` and `agentprovision.com`.
+
+**Key architecture**: Chat → Agent Router (Python, zero LLM cost) → Temporal → code-worker (Claude Code CLI with `--model opus`) → MCP tools (FastMCP, 77 tools) → response. The ADK server is legacy and being deprecated — the CLI orchestrator (`cli_orchestrator_enabled` feature flag) is the primary path.
 
 ## Architecture
 
 ### Monorepo Structure
 
-This is a **Turborepo monorepo** managed with `pnpm` workspaces:
+Docker Compose stack with Cloudflare Tunnel:
+
+- **`apps/api`** (port 8001): FastAPI backend — chat service, agent router, RL, knowledge graph, skill marketplace
+- **`apps/code-worker`**: Claude Code CLI execution via Temporal. Has git, gh, claude, node. Fetches GitHub + Claude Code tokens from vault per-session.
+- **`apps/mcp-server`** (port 8086): Original REST MCP server (Databricks/scraping)
+- **`mcp-tools`** (port 8087): FastMCP with 77 tools (email, calendar, knowledge, jira, github, data, ads, competitor, monitor, sales, reports, shell, analytics, skills)
+- **`apps/web`** (port 8002): React SPA with markdown rendering (react-markdown), Ocean theme
+- **`apps/adk-server`** (port 8085): **Legacy — being deprecated**. 25 custom agents via Google ADK + LiteLLM.
+- **`cloudflared`**: Cloudflare Tunnel — routes servicetsunami.com + agentprovision.com to local stack
+- **`temporal`** (port 7233): Workflow engine for durable task execution
+- **`db`** (port 8003): PostgreSQL + pgvector
+
+Previously a Turborepo monorepo managed with `pnpm` workspaces:
 
 - **`apps/api`**: FastAPI backend (Python 3.11)
   - Multi-tenant JWT-secured REST API
