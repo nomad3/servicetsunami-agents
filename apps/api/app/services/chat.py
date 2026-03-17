@@ -286,13 +286,13 @@ def _generate_agentic_response(
             db.query(ChatMessage)
             .filter(ChatMessage.session_id == session.id)
             .order_by(ChatMessage.created_at.desc())
-            .limit(20)  # Last 20 messages (10 turns)
+            .limit(30)  # Last 30 messages (15 turns)
             .all()
         )
         history_lines = []
         for m in reversed(recent_msgs):
             role = "User" if m.role == "user" else "Assistant"
-            content = m.content[:1000]  # Full content up to 1K per message
+            content = m.content[:500]  # 500 chars per message, 30 msgs = ~15K max
             history_lines.append(f"[{role}]: {content}")
             # Note if message had an attachment
             if m.context and isinstance(m.context, dict):

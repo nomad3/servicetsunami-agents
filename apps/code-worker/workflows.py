@@ -365,17 +365,15 @@ async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
         if os.path.isdir(WORKSPACE):
             cmd.extend(["--add-dir", WORKSPACE])
 
-        # Session continuity: --resume for existing, --session-id for new
-        if task_input.session_id:
-            cmd.extend(["--resume", task_input.session_id])
-        else:
-            # Inject system prompt only on first message
-            claude_md_path = os.path.join(session_dir, "CLAUDE.md")
-            if os.path.exists(claude_md_path):
-                with open(claude_md_path) as f:
-                    system_prompt = f.read()
-                if system_prompt.strip():
-                    cmd.extend(["--append-system-prompt", system_prompt[:20000]])
+        # Always inject system prompt — claude -p is stateless, --resume
+        # doesn't work in print mode. Context comes from conversation history
+        # injected in the CLAUDE.md by the API.
+        claude_md_path = os.path.join(session_dir, "CLAUDE.md")
+        if os.path.exists(claude_md_path):
+            with open(claude_md_path) as f:
+                system_prompt = f.read()
+            if system_prompt.strip():
+                cmd.extend(["--append-system-prompt", system_prompt[:20000]])
 
         # MCP config
         mcp_path = os.path.join(session_dir, "mcp.json")
@@ -389,22 +387,6 @@ async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
             cmd, capture_output=True, text=True,
             timeout=1500, env=env, cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
         )
-
-        # If --resume failed (session not found), retry without it
-        if result.returncode != 0 and task_input.session_id and "No conversation found" in (result.stderr or result.stdout or ""):
-            logger.warning("Session %s not found, retrying without --resume", task_input.session_id)
-            cmd = [c for c in cmd if c != "--resume" and c != task_input.session_id]
-            # Add system prompt since this is now a fresh session
-            claude_md_path = os.path.join(session_dir, "CLAUDE.md")
-            if os.path.exists(claude_md_path):
-                with open(claude_md_path) as f:
-                    system_prompt = f.read()
-                if system_prompt.strip() and "--append-system-prompt" not in cmd:
-                    cmd.extend(["--append-system-prompt", system_prompt[:20000]])
-            result = subprocess.run(
-                cmd, capture_output=True, text=True,
-                timeout=1500, env=env, cwd=session_dir,
-            )
 
         if result.returncode != 0:
             err = (result.stderr or result.stdout or "")[:1000]
