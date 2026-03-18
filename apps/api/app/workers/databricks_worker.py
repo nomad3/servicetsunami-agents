@@ -16,8 +16,6 @@ from app.workflows.activities.databricks_sync import (
     update_dataset_metadata
 )
 from app.workflows.activities.knowledge_extraction import extract_knowledge_from_session
-from app.workflows.agent_kit_execution import AgentKitExecutionWorkflow
-from app.workflows.activities.agent_kit_execution import execute_agent_kit_activity
 from app.workflows.activities.connectors.extract import (
     extract_from_connector,
     load_to_bronze,
@@ -56,7 +54,6 @@ async def run_databricks_worker():
         workflows=[
             DatasetSyncWorkflow,
             KnowledgeExtractionWorkflow,
-            AgentKitExecutionWorkflow,
             DataSourceSyncWorkflow,
             ScheduledSyncWorkflow
         ],
@@ -66,8 +63,7 @@ async def run_databricks_worker():
             transform_to_silver,
             update_dataset_metadata,
             extract_knowledge_from_session,
-            execute_agent_kit_activity,
-            # New connector sync activities
+            # Connector sync activities
             extract_from_connector,
             load_to_bronze,
             load_to_silver,

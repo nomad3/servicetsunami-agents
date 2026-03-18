@@ -1,6 +1,6 @@
 """Inbox and competitor monitor control MCP tools.
 
-Ports monitor_tools.py from apps/adk-server into MCP @mcp.tool() format.
+Inbox and competitor monitor lifecycle tools.
 Allows agents to start, stop, and check the status of proactive monitoring
 workflows via the API's Temporal workflow endpoints.
 """

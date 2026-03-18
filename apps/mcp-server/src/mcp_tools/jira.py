@@ -1,6 +1,6 @@
 """Jira MCP tools.
 
-Ports jira_tools.py from apps/adk-server into MCP @mcp.tool() format.
+Jira issue and project management tools.
 Fetches Jira credentials (api_token, email, domain) from the credential vault
 via the internal API endpoint and calls Jira REST API v3.
 """

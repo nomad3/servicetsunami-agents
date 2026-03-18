@@ -1,6 +1,6 @@
 """Email MCP tools — Gmail and Outlook.
 
-Ports email tools from apps/adk-server/tools/google_tools.py into MCP @mcp.tool() format.
+Email MCP tools for Gmail and Outlook.
 Uses httpx.AsyncClient to call Gmail/Outlook APIs via stored OAuth tokens fetched from
 the internal credential vault endpoint.
 """

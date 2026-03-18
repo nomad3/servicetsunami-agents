@@ -29,11 +29,8 @@ services:
     depends_on:
       - db
       - temporal
-      - adk-server
     environment:
       - MCP_SERVER_URL=http://mcp-server:8000
-      - ADK_BASE_URL=http://adk-server:8080
-      - ADK_APP_NAME=${ADK_APP_NAME:-servicetsunami_supervisor}
       - PLATFORM_CLAUDE_CODE_TOKEN=${PLATFORM_CLAUDE_CODE_TOKEN:-}
 
   web:
@@ -93,31 +90,6 @@ services:
       - FASTMCP_PORT=8000
     depends_on:
       - db
-    restart: unless-stopped
-
-  adk-server:
-    build:
-      context: ./apps/adk-server
-      dockerfile: Dockerfile
-    ports:
-      - "${ADK_PORT:-8085}:8080"
-    environment:
-      - ADK_HOST=0.0.0.0
-      - ADK_PORT=8080
-      - MCP_SERVER_URL=http://mcp-server:8000
-      - MCP_API_KEY=${MCP_API_KEY:-dev_mcp_key}
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/servicetsunami
-      - SECRET_KEY=${SECRET_KEY:-local_dev_secret_key}
-      - GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI:-false}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      - ADK_MODEL=${ADK_MODEL:-gemini-3.1-pro-preview}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - API_BASE_URL=http://api:8000
-    volumes:
-      - ./apps/adk-server:/app
-    depends_on:
-      - db
-      - mcp-server
     restart: unless-stopped
 
   mcp-tools:

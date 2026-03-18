@@ -21,7 +21,7 @@ class KnowledgeEntity(Base):
     name = Column(String, nullable=False, index=True)
     description = Column(Text, nullable=True)  # Entity description for semantic search
     attributes = Column(JSON, nullable=True)  # Flexible attribute storage
-    properties = Column(JSON, nullable=True)  # Structured properties (used by ADK)
+    properties = Column(JSON, nullable=True)  # Structured properties
     aliases = Column(JSON, default=list)  # Alternative names for the entity
 
     # Confidence and provenance

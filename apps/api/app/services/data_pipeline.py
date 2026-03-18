@@ -8,7 +8,6 @@ from app.models.pipeline_run import PipelineRun
 from app.schemas.data_pipeline import DataPipelineCreate, DataPipelineBase
 from temporalio.client import Client
 from app.core.config import settings
-from app.workflows.agent_kit_execution import AgentKitExecutionWorkflow
 from app.workflows.data_source_sync import DataSourceSyncWorkflow
 from app.services import data_source as data_source_service
 from app.services import connectors as connector_service
@@ -102,31 +101,6 @@ async def execute_pipeline(db: Session, data_pipeline_id: uuid.UUID) -> Dict[str
         pipeline_run.completed_at = datetime.utcnow()
         db.commit()
         raise e
-
-
-async def _execute_agent_kit_workflow(db: Session, pipeline: DataPipeline, config: dict) -> Dict[str, Any]:
-    """Execute an agent kit workflow."""
-    agent_kit_id = config.get("agent_kit_id")
-
-    # Connect to Temporal
-    client = await Client.connect(settings.TEMPORAL_ADDRESS)
-
-    # Generate a unique workflow ID
-    workflow_id = f"pipeline-{pipeline.id}-{uuid.uuid4()}"
-
-    # Start the workflow
-    handle = await client.start_workflow(
-        AgentKitExecutionWorkflow.run,
-        args=[str(agent_kit_id) if agent_kit_id else "default-kit", str(pipeline.tenant_id), config],
-        id=workflow_id,
-        task_queue="servicetsunami-databricks",
-    )
-
-    return {
-        "status": "started",
-        "workflow_id": workflow_id,
-        "run_id": handle.result_run_id
-    }
 
 
 async def _execute_connector_sync(db: Session, pipeline: DataPipeline, config: dict) -> Dict[str, Any]:

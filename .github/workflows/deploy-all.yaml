@@ -118,43 +118,6 @@ jobs:
           build-args: |
             REACT_APP_API_BASE_URL=https://servicetsunami.com
 
-  build-adk:
-    name: Build ADK
-    runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-      id-token: write
-
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tag }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set image tag
-        id: meta
-        run: echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Setup Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Configure Docker for GCR
-        run: gcloud auth configure-docker gcr.io --quiet
-
-      - name: Build and push ADK
-        run: |
-          docker build -t gcr.io/${{ env.GCP_PROJECT }}/servicetsunami-adk:${{ steps.meta.outputs.tag }} apps/adk-server/
-          docker tag gcr.io/${{ env.GCP_PROJECT }}/servicetsunami-adk:${{ steps.meta.outputs.tag }} gcr.io/${{ env.GCP_PROJECT }}/servicetsunami-adk:latest
-          docker push gcr.io/${{ env.GCP_PROJECT }}/servicetsunami-adk:${{ steps.meta.outputs.tag }}
-          docker push gcr.io/${{ env.GCP_PROJECT }}/servicetsunami-adk:latest
-
   build-mcp:
     name: Build MCP
     runs-on: ubuntu-latest
@@ -195,7 +158,7 @@ jobs:
   deploy-all:
     name: Deploy All Services
     runs-on: ubuntu-latest
-    needs: [build-api, build-web, build-adk, build-mcp]
+    needs: [build-api, build-web, build-mcp]
     environment: ${{ inputs.environment }}
 
     permissions:
@@ -286,16 +249,6 @@ jobs:
             --set image.tag=${{ needs.build-web.outputs.image_tag }} \
             --wait \
             --timeout 5m
-
-      - name: Deploy ADK
-        run: |
-          helm upgrade --install servicetsunami-adk \
-            ./helm/charts/microservice \
-            --namespace ${{ env.NAMESPACE }} \
-            --values ./helm/values/servicetsunami-adk.yaml \
-            --set image.tag=${{ needs.build-adk.outputs.image_tag }} \
-            --wait \
-            --timeout 10m
 
       - name: Deploy MCP
         run: |

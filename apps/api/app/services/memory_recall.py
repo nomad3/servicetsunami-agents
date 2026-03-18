@@ -1,7 +1,7 @@
 """Memory recall engine for Luna.
 
 Queries relevant entities, memories, and relations based on user message
-keywords and injects them into the ADK state_delta for automatic context.
+keywords and returns structured context for automatic recall.
 """
 import logging
 import re
@@ -68,10 +68,10 @@ def build_memory_context(
     tenant_id: uuid.UUID,
     user_message: str,
 ) -> Dict[str, Any]:
-    """Build a memory context payload for injection into ADK state_delta.
+    """Build a memory context payload for Luna's automatic recall.
 
     Queries entities, memories, and relations matching the user's message
-    keywords and returns a structured dict for Luna's automatic recall.
+    keywords and returns a structured dict for context injection.
     """
     keywords = extract_keywords(user_message)
     if not keywords:

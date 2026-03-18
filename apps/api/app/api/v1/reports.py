@@ -2,7 +2,7 @@
 
 Two entry points:
 - POST /generate  — JWT-authenticated (web UI)
-- POST /internal/generate — header-authenticated (ADK → API callbacks)
+- POST /internal/generate — header-authenticated (internal callbacks)
 - GET  /download/{file_id} — serves the generated .xlsx file
 """
 
@@ -35,7 +35,7 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 REPORT_TTL_HOURS = 24
 
 # ---------------------------------------------------------------------------
-# Pydantic schemas — matches ADK report_tools schema
+# Pydantic schemas — matches report_tools schema
 # ---------------------------------------------------------------------------
 
 
@@ -321,7 +321,7 @@ def generate_report_internal(
     payload: ReportRequest,
     x_tenant_id: str = Header(...),
 ):
-    """Generate an Excel report — internal endpoint for ADK callbacks (no JWT)."""
+    """Generate an Excel report — internal endpoint (no JWT)."""
     return _do_generate(payload, x_tenant_id)
 
 

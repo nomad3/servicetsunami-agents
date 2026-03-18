@@ -1,7 +1,7 @@
 """Internal endpoints for Remedia PharmApp integration.
 
 Token storage for WhatsApp users and order workflow trigger.
-All endpoints require X-Internal-Key header (ADK → API calls).
+All endpoints require X-Internal-Key header (internal service calls).
 """
 import uuid
 import logging

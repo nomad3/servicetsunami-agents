@@ -553,7 +553,7 @@ class WhatsAppService:
                     f"Caption: {media_caption or 'no caption'}. "
                     f"Please acknowledge the image was received and respond based on the caption/context.]"
                 )
-                # Also build media_parts for ADK fallback path
+                # Also build media_parts for multimodal processing
                 try:
                     from app.services.media_utils import build_media_parts
                     media_parts, _ = build_media_parts(
@@ -584,7 +584,7 @@ class WhatsAppService:
                 except Exception:
                     pass
             elif media_bytes:
-                # Audio/other: send to LLM as media_parts (ADK path only)
+                # Audio/other: send to LLM as media_parts
                 try:
                     from app.services.media_utils import build_media_parts
                     media_parts, _ = build_media_parts(
@@ -720,9 +720,9 @@ class WhatsAppService:
         self, tenant_id: str, sender_id: str, message: str,
         media_parts: list | None = None,
     ) -> Optional[str]:
-        """Route inbound message through the same ADK agent pipeline as the chat UI.
+        """Route inbound message through the same agent pipeline as the chat UI.
 
-        This ensures WhatsApp conversations share the same supervisor, agent kits,
+        This ensures WhatsApp conversations share the same agent kits,
         LLM provider, conversation history, and Temporal workflow audit trail.
         """
         db = self._get_db()
@@ -733,7 +733,7 @@ class WhatsAppService:
 
             tid = uuid.UUID(tenant_id)
 
-            # Find the tenant's admin user (needed for ADK session context)
+            # Find the tenant's admin user (needed for session context)
             user = db.query(User).filter(User.tenant_id == tid).first()
             if not user:
                 logger.error(f"No user found for tenant {tenant_id}")
@@ -778,7 +778,7 @@ class WhatsAppService:
                 db.refresh(session)
 
             # Route through the same chat service as the web UI
-            # This calls ADK supervisor → agent selection → LLM → tools → audit
+            # This calls agent selection → LLM → tools → audit
             # Wrapper captures content string eagerly in the thread (avoids
             # SQLAlchemy lazy-loading issues when crossing the thread boundary)
             def _run_chat():

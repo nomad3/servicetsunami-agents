@@ -1,6 +1,6 @@
 """Connector MCP tools for querying tenant data sources.
 
-Ports connector_tools.py from apps/adk-server into MCP @mcp.tool() format.
+Connector tools for querying tenant-connected data sources.
 Bridges agents to tenant-connected databases and APIs via the FastAPI
 backend's existing connector infrastructure.
 """

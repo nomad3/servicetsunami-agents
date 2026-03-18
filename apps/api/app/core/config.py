@@ -44,10 +44,6 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 4096
     LLM_TEMPERATURE: float = 0.7
 
-    # ADK (Google Agent Development Kit)
-    ADK_BASE_URL: str | None = None
-    ADK_APP_NAME: str = "servicetsunami_supervisor"
-
     # Credential Vault encryption (Fernet key — generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
     ENCRYPTION_KEY: str | None = None
 

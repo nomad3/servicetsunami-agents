@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ServiceTsunami is an AI agent orchestration platform that routes tasks to **Claude Code CLI** (Opus 4.6) via Temporal workflows. Agents are defined as marketplace skills, tools are served via **MCP** (77 tools), and the platform learns from user feedback via RL. Runs from a laptop via **Cloudflare Tunnel** serving both `servicetsunami.com` and `agentprovision.com`.
+ServiceTsunami is an AI agent orchestration platform that routes tasks to **Claude Code CLI** (Opus 4.6) via Temporal workflows. Agents are defined as marketplace skills, tools are served via **MCP** (81 tools), and the platform learns from user feedback via RL. Runs from a laptop via **Cloudflare Tunnel** serving both `servicetsunami.com` and `agentprovision.com`.
 
-**Key architecture**: Chat → Agent Router (Python, zero LLM cost) → Temporal → code-worker (Claude Code CLI with `--model opus`) → MCP tools (FastMCP, 77 tools) → response. The ADK server is legacy and being deprecated — the CLI orchestrator (`cli_orchestrator_enabled` feature flag) is the primary path.
+**Key architecture**: Chat → Agent Router (Python, zero LLM cost) → Temporal → code-worker (Claude Code CLI with `--model opus`) → MCP tools (FastMCP, 81 tools) → response.
 
 ## Architecture
 
@@ -17,9 +17,8 @@ Docker Compose stack with Cloudflare Tunnel:
 - **`apps/api`** (port 8001): FastAPI backend — chat service, agent router, RL, knowledge graph, skill marketplace
 - **`apps/code-worker`**: Claude Code CLI execution via Temporal. Has git, gh, claude, node. Fetches GitHub + Claude Code tokens from vault per-session.
 - **`apps/mcp-server`** (port 8086): Original REST MCP server (Databricks/scraping)
-- **`mcp-tools`** (port 8087): FastMCP with 77 tools (email, calendar, knowledge, jira, github, data, ads, competitor, monitor, sales, reports, shell, analytics, skills)
+- **`mcp-tools`** (port 8087): FastMCP with 81 tools (email, calendar, knowledge, jira, github, data, ads, competitor, monitor, sales, reports, shell, analytics, skills, drive)
 - **`apps/web`** (port 8002): React SPA with markdown rendering (react-markdown), Ocean theme
-- **`apps/adk-server`** (port 8085): **Legacy — being deprecated**. 25 custom agents via Google ADK + LiteLLM.
 - **`cloudflared`**: Cloudflare Tunnel — routes servicetsunami.com + agentprovision.com to local stack
 - **`temporal`** (port 7233): Workflow engine for durable task execution
 - **`db`** (port 8003): PostgreSQL + pgvector
@@ -38,14 +37,6 @@ Previously a Turborepo monorepo managed with `pnpm` workspaces:
   - i18next for internationalization
   - Authenticated console at `/dashboard/*`, marketing landing page at `/`
 
-- **`apps/adk-server`**: Google Agent Development Kit (ADK) server (Python 3.11)
-  - Multi-agent orchestration with supervisor pattern (25 agents across 5 teams)
-  - LLM-agnostic via `before_model_callback` + LiteLLM — switches between Gemini/Anthropic/others per-request
-  - Model callback registered on all 25 agent files individually (ADK doesn't propagate callbacks)
-  - Local embeddings via nomic-embed-text-v1.5 (768-dim, no API key needed)
-  - Tools for data, analytics, knowledge, email (Gmail attachments), calendar, Jira, and ads
-  - Connects to MCP server for Databricks operations
-
 - **`apps/code-worker`**: Claude Code CLI Temporal worker (Python 3.11 + Node.js 20)
   - Dedicated pod for autonomous coding tasks via Claude Code CLI
   - Authenticates using tenant's OAuth token via `CLAUDE_CODE_OAUTH_TOKEN` env var
@@ -61,7 +52,7 @@ Previously a Turborepo monorepo managed with `pnpm` workspaces:
 
 - **`helm/`**: Kubernetes Helm charts
   - `charts/microservice/`: Reusable base chart for all services
-  - `values/`: Per-service configuration (api, web, worker, adk, code-worker, temporal, redis, postgresql)
+  - `values/`: Per-service configuration (api, web, worker, code-worker, temporal, redis, postgresql)
 
 - **`infra/terraform`**: Infrastructure as Code for AWS deployment (EKS, Aurora PostgreSQL, VPC)
 
@@ -81,7 +72,7 @@ Previously a Turborepo monorepo managed with `pnpm` workspaces:
 
 **Database initialization**: On API startup, `apps/api/app/main.py` calls `init_db()` which creates tables and seeds demo data.
 
-**Multi-LLM Abstraction Layer**: Tenants choose their LLM provider (Anthropic Claude, Google Gemini, or any LiteLLM-supported provider) via the **integration registry + credential vault** pattern. Credentials are Fernet-encrypted. The chat service reads `tenant_features.active_llm_provider`, retrieves decrypted API key + model ID from the vault, and passes `llm_config` to ADK via `state_delta`. ADK's `before_model_callback` (in `config/model_callback.py`) sets `agent.model` to the LiteLLM format (e.g., `"anthropic/claude-opus-4-6"`), which ADK's `LLMRegistry` resolves to a `LiteLlm` instance. Agents stay as singletons; the model is overridden per-request. Free-text model IDs (no curated dropdowns). LLM Settings page (`LLMSettingsPage.js`) uses the same integration card pattern as other integrations.
+**Multi-LLM Abstraction Layer**: Tenants choose their LLM provider via the **integration registry + credential vault** pattern. Credentials are Fernet-encrypted. The CLI orchestrator reads `tenant_features.default_cli_platform` to route to the appropriate CLI agent (Claude Code, Gemini CLI, Codex CLI). LLM Settings page (`LLMSettingsPage.js`) uses the same integration card pattern as other integrations.
 
 **Multi-Agent Orchestration**: Agents are organized into a hierarchical multi-team structure. The **Root Supervisor** routes to 5 top-level teams, each with its own sub-supervisor. New tenants get a default "Luna Supervisor" AgentKit on registration.
 - **Personal Assistant Team**: "Luna", WhatsApp-native business co-pilot for high-level tasks. Shows typing indicator (composing presence) while processing. Luna's personality is warm and conversational — sends short messages like real human texting.
@@ -99,7 +90,7 @@ Previously a Turborepo monorepo managed with `pnpm` workspaces:
 
 **Knowledge Graph + Vector Search**: Entities (`knowledge_entity.py`) and relations (`knowledge_relation.py`) form a knowledge graph with pgvector-powered semantic search (768-dim embeddings via nomic-embed-text-v1.5). Supports **Lead Scoring** via configurable rubrics and the `LeadScoringTool`. Knowledge is extracted via `KnowledgeExtractionWorkflow`. Observations table (`knowledge_observations`) stores facts and insights. Entity history tracked in `knowledge_entity_history`. **Memory Activity** audit log (`memory_activities` table) tracks entity_created, entity_updated, relation_created, memory_created, and action_triggered events.
 
-**Embedding System**: Local open-source embeddings via `nomic-ai/nomic-embed-text-v1.5` (768-dim, sentence-transformers). No API key needed — runs locally in both API and ADK containers. Centralized in `embedding_service.py` (API) and `vertex_vector.py` (ADK). Used by: knowledge graph, chat messages, memory activities, RL experiences, skill registry (auto-trigger matching), and email attachment content. Email attachments downloaded via Gmail API are automatically embedded for semantic search (`content_type='email_attachment'`).
+**Embedding System**: Local open-source embeddings via `nomic-ai/nomic-embed-text-v1.5` (768-dim, sentence-transformers). No API key needed — runs locally in API and MCP containers. Centralized in `embedding_service.py`. Used by: knowledge graph, chat messages, memory activities, RL experiences, skill registry (auto-trigger matching), and email attachment content. Email attachments downloaded via Gmail API are automatically embedded for semantic search (`content_type='email_attachment'`).
 
 **Skill Marketplace**: Three-tier file-based skill system with GitHub import:
 - **Native tier**: Bundled skills shipped with the container (read-only): sql_query, calculator, data_summary, entity_extraction, knowledge_search, lead_scoring, report_generation
@@ -121,7 +112,7 @@ Previously a Turborepo monorepo managed with `pnpm` workspaces:
 
 **Competitor Monitor**: `CompetitorMonitorWorkflow` — long-running per-tenant workflow using `continue_as_new` (default 24h cycle). Monitors competitor entities (category="competitor" in knowledge graph) by scraping websites/news via MCP scraper, checking public ad libraries (Meta Ad Library), analyzing changes, storing observations, and creating notifications. Queue: `servicetsunami-orchestration`. Activities: fetch_competitors, scrape_competitor_activity, check_ad_libraries, analyze_competitor_changes, store_competitor_observations, create_competitor_notifications.
 
-**Marketing Intelligence & Ads Platform**: Integrates with Meta Ads, Google Ads, and TikTok Ads via manual API tokens stored in the integration registry. Tools in `apps/adk-server/tools/ads_tools.py` (12 functions) manage campaigns (list, insights, pause) and search public ad libraries. Competitor tools in `apps/adk-server/tools/competitor_tools.py` (5 functions) manage competitor entities in the knowledge graph. Luna has competitor tools directly; marketing_analyst agent has both ads + competitor tools.
+**Marketing Intelligence & Ads Platform**: Integrates with Meta Ads, Google Ads, and TikTok Ads via manual API tokens stored in the integration registry. MCP tools in `apps/mcp-server/src/mcp_tools/ads.py` (12 tools) manage campaigns (list, insights, pause) and search public ad libraries. Competitor tools in `competitor.py` (5 tools) manage competitor entities in the knowledge graph.
 
 **Temporal workflows**: Durable workflow execution across four task queues:
 - `servicetsunami-orchestration`: `TaskExecutionWorkflow`, `ChannelHealthMonitorWorkflow`, `FollowUpWorkflow`, `InboxMonitorWorkflow`, `CompetitorMonitorWorkflow`.
@@ -147,7 +138,7 @@ Previously a Turborepo monorepo managed with `pnpm` workspaces:
 # Start all services with custom ports
 DB_PORT=8003 API_PORT=8001 WEB_PORT=8002 docker-compose up --build
 
-# Services: API (8001), Web (8002), DB (8003), MCP (8086), ADK (8085), Temporal (7233/8233)
+# Services: API (8001), Web (8002), DB (8003), MCP (8086/8087), Temporal (7233/8233)
 
 # View logs
 docker-compose logs -f api
@@ -195,14 +186,6 @@ pytest tests/ -v
 python -m src.server                   # Runs on http://localhost:8085
 ```
 
-### ADK Server Development
-
-```bash
-cd apps/adk-server
-pip install -r requirements.txt
-python server.py                       # Runs on http://localhost:8080
-```
-
 ### Monorepo Commands
 
 ```bash
@@ -241,9 +224,11 @@ Business logic layer (one service per model):
 - `llm.py`: Claude AI integration with fallback handling
 - `context_manager.py`: Token counting, conversation summarization
 - `tool_executor.py`: Tool execution framework (SQL Query, Calculator, Data Summary, Entity Extraction, Knowledge Search)
-- `chat.py`, `enhanced_chat.py`: LLM-powered chat with tool and multi-agent support. Chat session creation requires only Title (optional) + Agent Kit selection; auto-selects kit when only one exists. Reads tenant's `active_llm_provider` and passes `llm_config` to ADK via `state_delta` (primary + retry paths).
+- `chat.py`, `enhanced_chat.py`: LLM-powered chat with CLI orchestrator. Chat session creation requires only Title (optional) + Agent Kit selection; auto-selects kit when only one exists.
+- `cli_session_manager.py`: CLI orchestrator session lifecycle — generates CLAUDE.md, MCP config, dispatches Temporal workflows.
+- `agent_router.py`: Deterministic agent routing (zero LLM cost) — maps channels/intents to skills.
 - `embedding_service.py`: Local embedding generation via nomic-embed-text-v1.5 (768-dim). Functions: `embed_text()`, `embed_and_store()`, `search_similar()`, `recall()`. Used by knowledge, chat, memory, RL, skills.
-- `adk_client.py`, `mcp_client.py`: Google ADK and MCP server clients
+- `mcp_client.py`: MCP server client
 - `knowledge.py`, `knowledge_extraction.py`: Knowledge graph operations and extraction
 - `skill_manager.py`: Three-tier skill marketplace (native/community/custom). GitHub import with external format adapter (GWS SKILL.md support). Skill execution across 4 engines. Semantic auto-trigger matching.
 - `skill_registry_service.py`: Sync file skills to DB + pgvector embeddings
@@ -293,8 +278,8 @@ Organized in 3-section navigation:
 API_PORT=8001    # FastAPI backend
 WEB_PORT=8002    # React frontend
 DB_PORT=8003     # PostgreSQL
-MCP_PORT=8086    # MCP server
-ADK_PORT=8085    # ADK server
+MCP_PORT=8086    # MCP server (Databricks)
+                 # MCP tools on 8087 (FastMCP, 81 tools)
 ```
 
 ### API Configuration (`apps/api/.env`)
@@ -313,10 +298,6 @@ TEMPORAL_ADDRESS=temporal:7233  # Use localhost:7233 for local dev
 # MCP/Databricks
 MCP_SERVER_URL=http://mcp-server:8000
 DATABRICKS_SYNC_ENABLED=true
-
-# ADK
-ADK_BASE_URL=http://adk-server:8080
-ADK_APP_NAME=servicetsunami_supervisor
 
 # Credential Vault
 ENCRYPTION_KEY=<fernet-key>  # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -354,7 +335,7 @@ TEMPORAL_ADDRESS=temporal:7233          # Temporal server address
 ```
 
 **Authentication flow:**
-1. ADK `code_agent` calls `start_code_task` tool → Temporal workflow starts on `servicetsunami-code` queue
+1. Chat service dispatches code task → Temporal workflow starts on `servicetsunami-code` queue
 2. Code-worker activity fetches tenant's OAuth token: `GET /api/v1/oauth/internal/token/claude_code?tenant_id=<uuid>`
 3. Token passed as `CLAUDE_CODE_OAUTH_TOKEN` env var to `claude -p` subprocess
 4. Claude Code CLI runs with tenant's subscription (Pro/Max), not API credits
@@ -370,25 +351,20 @@ Production deploys exclusively via Kubernetes using Helm charts and GitHub Actio
 # Deploy all services
 gh workflow run deploy-all.yaml -f deploy_infrastructure=false -f environment=prod
 
-# Deploy ADK server when agent logic changes
-gh workflow run adk-deploy.yaml -f deploy=true -f environment=prod
-
 # Watch rollout status
 kubectl get pods -n prod -w
 kubectl rollout status deployment/servicetsunami-api -n prod
-kubectl rollout status deployment/servicetsunami-adk -n prod
 
 # Validate Helm releases
 helm list -n prod | grep servicetsunami
-helm status servicetsunami-adk -n prod
 
 # Rollback if needed
 helm rollback servicetsunami-api -n prod
 ```
 
 **GitHub Actions Workflows** (`.github/workflows/`):
-- `deploy-all.yaml`: Full stack deployment (API, Web, Worker, ADK, Temporal, Redis, PostgreSQL)
-- `adk-deploy.yaml`: ADK server only (auto-triggers on push to `apps/adk-server/**`)
+- `deploy-all.yaml`: Full stack deployment (API, Web, Worker, Code-Worker, Temporal, Redis, PostgreSQL)
+- `code-worker-deploy.yaml`: Code-worker only (auto-triggers on push to `apps/code-worker/**`)
 - `servicetsunami-api.yaml`: API service
 - `servicetsunami-web.yaml`: Web frontend
 - `servicetsunami-worker.yaml`: Temporal worker
@@ -457,6 +433,6 @@ PRs created by the code agent include structured body with full audit trail:
   - `2026-03-07-orchestration-worker-architecture.md`: Orchestration worker design (Temporal worker for Gmail/Calendar/WhatsApp workflows)
   - `2026-03-10-marketing-intelligence-ads-platform-design.md`: Marketing intelligence, competitor monitoring, Meta/Google/TikTok ad integrations
   - `2026-03-10-marketing-intelligence-ads-platform-plan.md`: Implementation plan for marketing intelligence feature
-  - `2026-03-13-multi-model-abstraction-layer-design.md`: Multi-LLM provider switching via integration registry + ADK before_model_callback
+  - `2026-03-13-multi-model-abstraction-layer-design.md`: Multi-LLM provider switching via integration registry
   - `2026-03-13-multi-model-abstraction-layer-plan.md`: 10-task implementation plan for multi-model support
 - `LLM_INTEGRATION_README.md`, `TOOL_FRAMEWORK_README.md`, `DATABRICKS_SYNC_README.md`: Feature docs

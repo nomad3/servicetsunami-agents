@@ -32,14 +32,6 @@ spec:
     - host: "servicetsunami.com"
       http:
         paths:
-          # ADK handles all agent/chat operations
-          - path: /adk
-            pathType: Prefix
-            backend:
-              service:
-                name: servicetsunami-adk
-                port:
-                  number: 80
           - path: /api
             pathType: Prefix
             backend:
@@ -69,13 +61,6 @@ spec:
     - host: "agentprovision.com"
       http:
         paths:
-          - path: /adk
-            pathType: Prefix
-            backend:
-              service:
-                name: servicetsunami-adk
-                port:
-                  number: 80
           - path: /api
             pathType: Prefix
             backend:

@@ -1,6 +1,6 @@
 """Skill and memory MCP tools.
 
-Ports skill_tools.py from apps/adk-server into MCP @mcp.tool() format.
+Skill execution and semantic memory recall tools.
 Provides tools for listing/executing file-based skills and semantic
 memory recall across the platform.
 """

@@ -1,6 +1,6 @@
 """Google Calendar MCP tools.
 
-Ports calendar tools from apps/adk-server/tools/google_tools.py into MCP @mcp.tool() format.
+Google Calendar event management tools.
 Uses httpx.AsyncClient to call Google Calendar API via stored OAuth tokens fetched from
 the internal credential vault endpoint.
 """

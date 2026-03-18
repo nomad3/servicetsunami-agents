@@ -24,7 +24,7 @@ class AutoActionWorkflow:
     """Execute automated actions by routing through Luna's sub-agent teams.
 
     Memory triggers (reminders, auto-replies, research tasks) are dispatched
-    here and executed via the ADK agent system.
+    here and executed via the agent system.
     """
 
     @workflow.run

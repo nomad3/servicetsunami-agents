@@ -1,6 +1,6 @@
 """Competitor tracking MCP tools.
 
-Ports competitor_tools.py from apps/adk-server into MCP @mcp.tool() format.
+Competitor tracking and analysis tools.
 Manages competitor entities in the knowledge graph via the internal API.
 Competitors are stored as knowledge entities with category="competitor".
 """

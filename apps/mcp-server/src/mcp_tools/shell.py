@@ -1,6 +1,5 @@
 """Shell execution MCP tools.
 
-Ports shell_tools.py from apps/adk-server into MCP @mcp.tool() format.
 Provides controlled shell command execution and git-based deploy workflows.
 Used by coding agents to run build commands, tests, linting, and push
 code changes that trigger CI/CD pipelines.
@@ -20,10 +19,6 @@ logger = logging.getLogger(__name__)
 _MAX_STDOUT_BYTES = 10 * 1024  # 10 KB
 _MAX_STDERR_BYTES = 5 * 1024   # 5 KB
 _MAX_TIMEOUT = 300              # 5 minutes
-
-# Paths that trigger ADK deployment when changed
-_ADK_DEPLOY_PREFIXES = ("apps/adk-server/", "helm/values/servicetsunami-adk")
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -126,9 +121,7 @@ async def deploy_changes(
     """Stage, commit, and push code changes to trigger CI/CD deployment.
 
     Stages the specified files (or all changes), commits with the given
-    message, and pushes to the main branch. Detects whether the changes
-    include ADK server or Helm config files that would trigger an ADK
-    deployment workflow.
+    message, and pushes to the main branch.
 
     Args:
         commit_message: Git commit message describing the changes. Required.
@@ -137,7 +130,7 @@ async def deploy_changes(
         ctx: MCP request context (injected automatically).
 
     Returns:
-        Dict with status, commit_sha, files_changed, and deploy_triggered.
+        Dict with status, commit_sha, and files_changed.
         On error, returns dict with status "error" and details.
     """
     if not commit_message:
@@ -218,23 +211,15 @@ async def deploy_changes(
                 "detail": push_result["stderr"],
             }
 
-        # Check if any changed file triggers ADK deploy
-        deploy_triggered = any(
-            f.startswith(prefix)
-            for f in files_changed
-            for prefix in _ADK_DEPLOY_PREFIXES
-        )
-
         logger.info(
-            "deploy_changes: pushed %s (%d files, deploy_triggered=%s)",
-            commit_sha, len(files_changed), deploy_triggered,
+            "deploy_changes: pushed %s (%d files)",
+            commit_sha, len(files_changed),
         )
 
         return {
             "status": "pushed",
             "commit_sha": commit_sha,
             "files_changed": files_changed,
-            "deploy_triggered": deploy_triggered,
         }
 
     except Exception as e:

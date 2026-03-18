@@ -1,8 +1,8 @@
 """Knowledge graph MCP tools.
 
-Ports knowledge_tools.py from apps/adk-server into MCP @mcp.tool() format.
-Uses asyncpg directly (consistent with the rest of the MCP server) and mirrors
-the same SQL logic as apps/adk-server/services/knowledge_graph.py.
+Entity and relation CRUD, semantic search, and observation management.
+Uses asyncpg directly (consistent with the rest of the MCP server) for all
+knowledge graph SQL operations.
 """
 import json
 import logging

@@ -109,7 +109,7 @@ def execute_data_source_query(
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(e))
 
 
-# ==================== Internal Endpoints (ADK / MCP Server) ====================
+# ==================== Internal Endpoints (MCP Server) ====================
 
 @router.get("/internal/list")
 def list_data_sources_internal(
@@ -119,7 +119,7 @@ def list_data_sources_internal(
 ):
     """
     List data sources (internal, no JWT required).
-    Used by ADK agents to discover queryable data sources.
+    Used by agents to discover queryable data sources.
     """
     if x_internal_key not in (settings.API_INTERNAL_KEY, settings.MCP_API_KEY):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal key")
@@ -146,7 +146,7 @@ def execute_data_source_query_internal(
 ):
     """
     Execute a query on a data source (internal, no JWT required).
-    Used by ADK agents to query tenant data.
+    Used by agents to query tenant data.
 
     For REST API sources, pass endpoint + params for structured calls:
       {"endpoint": "/prices/compare", "params": {"medication_id": "...", "lat": -33.43}}

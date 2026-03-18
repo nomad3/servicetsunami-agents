@@ -105,7 +105,6 @@ configMap:
     HCA_API_URL: "http://marketing-backend-microservice:3000"
     HCA_SERVICE_KEY: "hca-st-integration-key-2026-prod"
     DATA_STORAGE_PATH: "/app/storage"
-    ADK_BASE_URL: "http://servicetsunami-adk"
     GOOGLE_REDIRECT_URI: "https://servicetsunami.com/api/v1/oauth/google/callback"
     GITHUB_REDIRECT_URI: "https://servicetsunami.com/api/v1/oauth/github/callback"
     LINKEDIN_REDIRECT_URI: "https://servicetsunami.com/api/v1/oauth/linkedin/callback"
@@ -167,6 +166,8 @@ env:
     value: "temporal:7233"
   - name: MCP_SERVER_URL
     value: "http://mcp-server:8000"
+  - name: MCP_TOOLS_URL
+    value: "http://servicetsunami-mcp-tools:80"
 
 # Horizontal Pod Autoscaler - disabled for cost savings
 autoscaling:

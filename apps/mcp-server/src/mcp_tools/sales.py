@@ -1,6 +1,6 @@
 """Sales automation MCP tools.
 
-Ports sales_tools.py from apps/adk-server into MCP @mcp.tool() format.
+Sales automation and pipeline management tools.
 Tools for lead qualification, outreach drafting, pipeline management,
 proposal generation, and follow-up scheduling. All operations route
 through the internal API which accesses the knowledge graph.

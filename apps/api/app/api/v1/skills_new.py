@@ -113,7 +113,7 @@ def list_file_skills(
 def list_file_skills_internal(
     _auth: None = Depends(_verify_internal_key),
 ):
-    """List file-based skills (internal — for ADK server)."""
+    """List file-based skills (internal)."""
     return skill_manager.list_skills()
 
 
@@ -218,7 +218,7 @@ def execute_file_skill_internal(
     tenant_id: Optional[str] = Body(None),
     _auth: None = Depends(_verify_internal_key),
 ):
-    """Execute a file-based skill by name (internal — for ADK server)."""
+    """Execute a file-based skill by name (internal)."""
     result = skill_manager.execute_skill(skill_name, inputs, tenant_id=tenant_id)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])

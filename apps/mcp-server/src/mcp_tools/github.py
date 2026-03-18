@@ -1,6 +1,6 @@
 """GitHub MCP tools.
 
-Ports github_tools.py from apps/adk-server into MCP @mcp.tool() format.
+GitHub repository and issue management tools.
 Retrieves GitHub OAuth token from the credential vault via the internal
 API endpoint and calls the GitHub REST API on behalf of the tenant.
 """

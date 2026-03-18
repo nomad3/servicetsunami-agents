@@ -1,7 +1,7 @@
 """Analytics and calculation MCP tools.
 
-Ports analytics_tools.py from apps/adk-server into MCP @mcp.tool() format.
-Provides mathematical calculations and Databricks-powered time-series analytics.
+Mathematical calculation and time-series analytics tools.
+Provides calculations and Databricks-powered time-series analytics.
 """
 import logging
 

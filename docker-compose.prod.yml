@@ -13,12 +13,9 @@ services:
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://servicetsunami.com,https://www.servicetsunami.com}
-      ADK_BASE_URL: ${ADK_BASE_URL:-http://adk-server:8080}
-      ADK_APP_NAME: ${ADK_APP_NAME:-servicetsunami_supervisor}
     depends_on:
       - db
       - redis
-      - adk-server
     ports:
       - "18000:8000"
 
@@ -67,21 +64,6 @@ services:
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
-
-  adk-server:
-    build:
-      context: ./apps/adk-server
-      dockerfile: Dockerfile
-    environment:
-      ADK_HOST: 0.0.0.0
-      ADK_PORT: 8080
-      MCP_SERVER_URL: ${MCP_SERVER_URL:-http://mcp-server:8000}
-      MCP_API_KEY: ${MCP_API_KEY:-dev_mcp_key}
-      DATABASE_URL: ${DATABASE_URL}
-      SECRET_KEY: ${SECRET_KEY}
-      GOOGLE_GENAI_USE_VERTEXAI: ${GOOGLE_GENAI_USE_VERTEXAI:-false}
-    depends_on:
-      - db
 
 volumes:
   postgres-data:

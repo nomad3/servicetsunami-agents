@@ -113,7 +113,7 @@ def search_memory_internal(
     x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
     db: Session = Depends(get_db),
 ):
-    """Unified semantic search (internal — for ADK server)."""
+    """Unified semantic search (internal)."""
     from app.core.config import settings
     if x_internal_key not in (getattr(settings, 'API_INTERNAL_KEY', ''), getattr(settings, 'MCP_API_KEY', '')):
         raise HTTPException(status_code=401, detail="Invalid internal key")

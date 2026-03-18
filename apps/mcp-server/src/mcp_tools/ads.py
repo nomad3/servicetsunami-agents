@@ -1,6 +1,6 @@
 """Ad platform MCP tools for campaign management.
 
-Ports ads_tools.py from apps/adk-server into MCP @mcp.tool() format.
+Campaign management for Meta, Google Ads, and TikTok Ads.
 Covers Meta (Facebook/Instagram), Google Ads, and TikTok Ads.
 Uses stored credentials from the credential vault via the internal API.
 Public ad library/transparency search functions require no authentication.

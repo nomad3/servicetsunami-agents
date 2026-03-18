@@ -23,7 +23,7 @@ def _get_tenant_id_from_internal_or_user(
 ) -> str:
     """Resolve tenant_id from JWT user or X-Internal-Key + tenant_id param.
 
-    ADK->API calls pass X-Internal-Key header with tenant_id as query param.
+    Internal service calls pass X-Internal-Key header with tenant_id as query param.
     Browser calls pass a JWT Bearer token.
     """
     # Try internal key first
@@ -378,7 +378,7 @@ async def start_competitor_monitor(
     from temporalio.client import Client
     from app.workflows.competitor_monitor import CompetitorMonitorWorkflow
 
-    # Allow tenant_id and interval from JSON body (ADK sends JSON)
+    # Allow tenant_id and interval from JSON body
     if body and body.get("tenant_id"):
         tenant_id = body["tenant_id"]
     check_interval_seconds = 86400  # 24 hours default

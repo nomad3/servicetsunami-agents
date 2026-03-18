@@ -1,6 +1,6 @@
 """Data discovery and querying MCP tools.
 
-Ports data_tools.py from apps/adk-server into MCP @mcp.tool() format.
+Data discovery and querying tools for Databricks.
 All data operations route through the MCP server's Databricks client.
 """
 import logging

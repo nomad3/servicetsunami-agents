@@ -1,6 +1,6 @@
 """
 Media processing utilities for converting raw media bytes into
-ADK-compatible message parts (inline_data / text).
+LLM-compatible message parts (inline_data / text).
 """
 
 import base64
@@ -81,11 +81,11 @@ def build_media_parts(
     filename: str = "",
 ) -> Tuple[List[Dict], Dict]:
     """
-    Convert raw media bytes into ADK-compatible message parts.
+    Convert raw media bytes into LLM-compatible message parts.
 
     Returns:
         (parts, attachment_meta)
-        - parts: list of ADK message-part dicts
+        - parts: list of message-part dicts
         - attachment_meta: metadata dict with type, mime_type, size_bytes, filename
     """
     clean_mime = mime_type.split(";")[0].strip().lower()
@@ -143,7 +143,7 @@ def _build_image_parts(
     mime_type: str,
     caption: str,
 ) -> List[Dict]:
-    """Base64-encode an image and return ADK inline_data + text parts."""
+    """Base64-encode an image and return inline_data + text parts."""
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     text = caption if caption else DEFAULT_IMAGE_PROMPT
 
@@ -158,7 +158,7 @@ def _build_audio_parts(
     mime_type: str,
     caption: str,
 ) -> List[Dict]:
-    """Base64-encode audio and return ADK inline_data + text parts."""
+    """Base64-encode audio and return inline_data + text parts."""
     b64 = base64.b64encode(audio_bytes).decode("utf-8")
     text = caption if caption else DEFAULT_AUDIO_PROMPT
 

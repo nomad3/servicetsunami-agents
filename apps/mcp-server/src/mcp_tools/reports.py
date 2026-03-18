@@ -1,6 +1,6 @@
 """Report generation MCP tools.
 
-Ports report_tools.py from apps/adk-server into MCP @mcp.tool() format.
+Report generation and document data extraction tools.
 Provides two tools:
 - extract_document_data: Returns a target JSON schema for the LLM to fill
   from uploaded file text (does NOT perform extraction itself).

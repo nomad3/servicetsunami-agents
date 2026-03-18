@@ -4,7 +4,7 @@ Temporal activities for task execution workflow.
 Activities:
 - dispatch_task: Find best agent for a task
 - recall_memory: Load relevant agent memories
-- execute_task: Run task via ADK
+- execute_task: Run task via CLI orchestrator
 - persist_entities: Extract and persist entities to knowledge graph
 - evaluate_task: Score results and store learnings
 """
@@ -175,10 +175,10 @@ async def recall_memory(task_id: str, tenant_id: str, agent_id: str, task_data: 
 @activity.defn
 async def execute_task(task_id: str, tenant_id: str, agent_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Execute the task via the ADK server.
+    Execute the task via the CLI orchestrator.
 
-    Updates task status to 'executing', calls ADK client, extracts response.
-    Falls back to a static response if ADK is unavailable.
+    Updates task status to 'executing', builds message from objective and
+    context, and delegates execution to the chat service / CLI path.
     """
     start = time.time()
     db = SessionLocal()
@@ -190,53 +190,28 @@ async def execute_task(task_id: str, tenant_id: str, agent_id: str, context: Dic
         task.status = "executing"
         db.commit()
 
-        output = {}
-        try:
-            from app.services.adk_client import get_adk_client
+        # Build message from task objective and context
+        message = context.get("objective", task.objective or "")
+        if context.get("memories"):
+            memory_text = "; ".join(m["content"] for m in context["memories"])
+            message = f"{message}\n\nRelevant context: {memory_text}"
 
-            client = get_adk_client()
+        # Execute via CLI orchestrator
+        from app.services.agent_router import route_and_execute
 
-            # Create a session for this task execution
-            session = client.create_session(
-                user_id=uuid.UUID(agent_id),
-                state={"task_id": task_id, "tenant_id": tenant_id},
-            )
-            session_id = session.get("id", session.get("session_id", ""))
+        response_text, metadata = route_and_execute(
+            db,
+            tenant_id=uuid.UUID(tenant_id),
+            user_id=uuid.UUID(agent_id),  # Use agent_id as actor
+            message=message,
+            channel="task",
+        )
 
-            # Build message from task objective and context
-            message = context.get("objective", task.objective or "")
-            if context.get("memories"):
-                memory_text = "; ".join(m["content"] for m in context["memories"])
-                message = f"{message}\n\nRelevant context: {memory_text}"
-
-            events = client.run(
-                user_id=uuid.UUID(agent_id),
-                session_id=session_id,
-                message=message,
-            )
-
-            # Extract response text from ADK events
-            response_parts = []
-            for event in events:
-                if isinstance(event, dict):
-                    parts = event.get("content", {}).get("parts", [])
-                    for part in parts:
-                        if isinstance(part, dict) and "text" in part:
-                            response_parts.append(part["text"])
-
-            output = {
-                "response": "\n".join(response_parts) if response_parts else "Task processed",
-                "events_count": len(events),
-                "source": "adk",
-            }
-
-        except Exception as adk_err:
-            logger.warning(f"ADK unavailable for task {task_id}, using fallback: {adk_err}")
-            output = {
-                "response": f"Task '{task.objective}' processed with fallback execution",
-                "events_count": 0,
-                "source": "fallback",
-            }
+        output = {
+            "response": response_text or f"Task '{task.objective}' processed",
+            "events_count": 0,
+            "source": metadata.get("source", "cli") if metadata else "cli",
+        }
 
         duration_ms = int((time.time() - start) * 1000)
         _log_trace(
@@ -408,7 +383,7 @@ async def persist_entities(
         content_type = "plain_text"
         if isinstance(output, dict):
             source = output.get("source", "")
-            if source == "adk":
+            if source in ("cli", "structured"):
                 content_type = "structured_json" if _looks_like_json(response_text) else "plain_text"
 
         # Build validation policy from task guardrails

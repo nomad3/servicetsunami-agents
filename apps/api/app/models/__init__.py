@@ -7,7 +7,6 @@ from .agent import Agent
 from .agent_group import AgentGroup
 from .agent_kit import AgentKit
 from .agent_memory import AgentMemory
-from .agent_message import AgentMessage
 from .agent_relationship import AgentRelationship
 from .agent_skill import AgentSkill
 from .agent_task import AgentTask
@@ -46,7 +45,7 @@ from .vector_store import VectorStore
 
 __all__ = [
     "Tenant", "User",
-    "Agent", "AgentGroup", "AgentKit", "AgentMemory", "AgentMessage",
+    "Agent", "AgentGroup", "AgentKit", "AgentMemory",
     "AgentRelationship", "AgentSkill", "AgentTask",
     "ChannelAccount", "ChannelEvent",
     "ChatSession", "ChatMessage",

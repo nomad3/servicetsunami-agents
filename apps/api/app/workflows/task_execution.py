@@ -4,7 +4,7 @@ Temporal workflow for executing agent tasks through the orchestration engine.
 Steps:
 1. Dispatch task to best agent
 2. Recall relevant agent memories
-3. Execute task via ADK
+3. Execute task via CLI orchestrator
 4. Persist entities from output to knowledge graph
 5. Evaluate results and store learnings
 """
@@ -22,7 +22,7 @@ class TaskExecutionWorkflow:
     Steps:
     1. dispatch_task - Find best agent for the task
     2. recall_memory - Load relevant agent memories
-    3. execute_task - Run task via ADK
+    3. execute_task - Run task via CLI orchestrator
     4. persist_entities - Extract and persist entities to knowledge graph
     5. evaluate_task - Score results, store memory, update skills
     """
@@ -73,7 +73,7 @@ class TaskExecutionWorkflow:
 
             workflow.logger.info(f"Recalled {len(memory_result.get('memories', []))} memories")
 
-            # Step 3: Execute task via ADK
+            # Step 3: Execute task
             context = {
                 **task_data,
                 "memories": memory_result.get("memories", []),
