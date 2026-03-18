@@ -43,8 +43,10 @@ def create_user_with_tenant(db: Session, *, user_in: UserCreate, tenant_in: Tena
         tenant_id=tenant.id,
         cli_orchestrator_enabled=True,
         default_cli_platform="claude_code",
+        rl_enabled=True,
     )
     db.add(features)
+    db.flush()
     default_kit = AgentKit(
         name="Luna Supervisor",
         description="Luna is your AI co-pilot. She coordinates specialized teams for data analysis, sales, marketing, development, and more.",
