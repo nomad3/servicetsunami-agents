@@ -10,6 +10,7 @@ from app.schemas.tenant import TenantCreate
 from app.models.agent_kit import AgentKit
 from app.models.chat import ChatSession
 from app.models.integration_config import IntegrationConfig
+from app.models.tenant_features import TenantFeatures
 import os
 import uuid
 
@@ -36,6 +37,14 @@ def create_user(db: Session, *, user_in: UserCreate, tenant_id: uuid.UUID) -> Us
 
 def create_user_with_tenant(db: Session, *, user_in: UserCreate, tenant_in: TenantCreate) -> User:
     tenant = tenant_service.create_tenant(db, tenant_in=tenant_in)
+
+    # Create tenant features with CLI orchestrator enabled by default
+    features = TenantFeatures(
+        tenant_id=tenant.id,
+        cli_orchestrator_enabled=True,
+        default_cli_platform="claude_code",
+    )
+    db.add(features)
     default_kit = AgentKit(
         name="Luna Supervisor",
         description="Luna is your AI co-pilot. She coordinates specialized teams for data analysis, sales, marketing, development, and more.",

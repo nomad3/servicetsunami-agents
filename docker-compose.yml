@@ -34,6 +34,7 @@ services:
       - MCP_SERVER_URL=http://mcp-server:8000
       - ADK_BASE_URL=http://adk-server:8080
       - ADK_APP_NAME=${ADK_APP_NAME:-servicetsunami_supervisor}
+      - PLATFORM_CLAUDE_CODE_TOKEN=${PLATFORM_CLAUDE_CODE_TOKEN:-}
 
   web:
     build:
