@@ -27,7 +27,8 @@ COPY . .
 # Non-root user
 RUN useradd -m -u 1000 codeworker && \
     mkdir -p /workspace && chown codeworker:codeworker /workspace && \
-    mkdir -p /home/codeworker/.config && chown -R codeworker:codeworker /home/codeworker
+    mkdir -p /home/codeworker/.config /home/codeworker/.claude/session-env && \
+    chown -R codeworker:codeworker /home/codeworker
 USER codeworker
 
 ENTRYPOINT ["/app/entrypoint.sh"]

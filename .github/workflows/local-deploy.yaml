@@ -1,0 +1,90 @@
+name: Local Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/**'
+      - 'apps/web/**'
+      - 'apps/code-worker/**'
+      - 'apps/mcp-server/**'
+      - 'docker-compose.yml'
+  workflow_dispatch:
+    inputs:
+      services:
+        description: 'Services to rebuild (comma-separated: api,web,code-worker,mcp-tools)'
+        required: false
+        default: 'all'
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changed services
+        id: changes
+        if: github.event_name == 'push'
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          echo "files=$CHANGED" >> $GITHUB_OUTPUT
+
+          SERVICES=""
+          echo "$CHANGED" | grep -q "apps/api/" && SERVICES="$SERVICES api"
+          echo "$CHANGED" | grep -q "apps/web/" && SERVICES="$SERVICES web"
+          echo "$CHANGED" | grep -q "apps/code-worker/" && SERVICES="$SERVICES code-worker"
+          echo "$CHANGED" | grep -q "apps/mcp-server/" && SERVICES="$SERVICES mcp-tools"
+          echo "$CHANGED" | grep -q "docker-compose.yml" && SERVICES="api web code-worker mcp-tools"
+
+          # Default to all if nothing specific matched
+          [ -z "$SERVICES" ] && SERVICES="api web code-worker mcp-tools"
+          echo "services=$SERVICES" >> $GITHUB_OUTPUT
+          echo "Deploying: $SERVICES"
+
+      - name: Set services from dispatch
+        id: dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          INPUT="${{ github.event.inputs.services }}"
+          if [ "$INPUT" = "all" ]; then
+            echo "services=api web code-worker mcp-tools" >> $GITHUB_OUTPUT
+          else
+            echo "services=$(echo $INPUT | tr ',' ' ')" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and deploy
+        run: |
+          SERVICES="${{ steps.changes.outputs.services || steps.dispatch.outputs.services }}"
+          echo "Building: $SERVICES"
+
+          cd /Users/nomade/Documents/GitHub/servicetsunami-agents
+
+          # Build and restart only changed services
+          for svc in $SERVICES; do
+            echo "--- Rebuilding $svc ---"
+            docker-compose up -d --build "$svc" 2>&1 | tail -3
+          done
+
+          # Wait for health
+          echo "--- Waiting for services to be healthy ---"
+          sleep 20
+
+          # Health check
+          API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/auth/login 2>/dev/null || echo "000")
+          echo "API status: $API_STATUS"
+          if [ "$API_STATUS" = "000" ]; then
+            echo "WARNING: API not responding yet, may still be starting up"
+          fi
+
+      - name: Post-deploy summary
+        run: |
+          echo "## Deploy Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
+          for svc in api web code-worker mcp-tools; do
+            STATUS=$(docker inspect --format='{{.State.Status}}' servicetsunami-agents-${svc}-1 2>/dev/null || echo "not found")
+            echo "| $svc | $STATUS |" >> $GITHUB_STEP_SUMMARY
+          done
