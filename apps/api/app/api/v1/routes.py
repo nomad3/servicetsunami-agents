@@ -31,6 +31,7 @@ from app.api.v1 import (
     skills_new,
     workflows,
     remedia,
+    webhook_connectors,
     webhooks,
     oauth,
     notifications,
@@ -76,6 +77,7 @@ router.include_router(integrations.router, prefix="/integrations", tags=["integr
 router.include_router(skills_new.router, prefix="/skills", tags=["skills"])
 router.include_router(workflows.router, prefix="/workflows", tags=["workflows"])
 router.include_router(remedia.router, prefix="/remedia", tags=["remedia"])
+router.include_router(webhook_connectors.router, prefix="/webhook-connectors", tags=["webhook-connectors"])
 router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 router.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
