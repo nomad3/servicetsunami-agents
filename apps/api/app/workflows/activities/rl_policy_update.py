@@ -1,14 +1,14 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from temporalio import activity
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from app.db.session import SessionLocal
 from app.models.rl_experience import RLExperience
 from app.models.rl_policy_state import RLPolicyState
 from app.models.tenant_features import TenantFeatures
-from app.services import rl_experience_service
+from app.services import rl_experience_service, embedding_service
 
 
 @activity.defn
@@ -180,5 +180,95 @@ async def archive_old_experiences(tenant_id: str, retention_days: int = 90) -> d
     try:
         count = rl_experience_service.archive_old_experiences(db, uuid.UUID(tenant_id), retention_days)
         return {"tenant_id": tenant_id, "archived": count}
+    finally:
+        db.close()
+
+
+@activity.defn
+async def experience_to_observation(tenant_id: str) -> dict:
+    """Convert high-reward RL experiences into knowledge observations.
+
+    Queries rl_experiences with |reward| > 0.5 from the last 24 hours.
+    For each, creates a KnowledgeObservation with observation_type='decision_insight'
+    and source_type='rl_experience', then auto-embeds the observation.
+
+    Returns:
+        Dict with tenant_id and observations_created count.
+    """
+    db = SessionLocal()
+    try:
+        tid = uuid.UUID(tenant_id)
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+
+        # Find high-signal experiences from the last 24h
+        experiences = (
+            db.query(RLExperience)
+            .filter(
+                RLExperience.tenant_id == tid,
+                RLExperience.created_at >= cutoff,
+                RLExperience.reward.isnot(None),
+                RLExperience.archived_at.is_(None),
+            )
+            .all()
+        )
+
+        # Filter to |reward| > 0.5
+        significant = [e for e in experiences if abs(e.reward) > 0.5]
+
+        created = 0
+        for exp in significant:
+            # Build observation text from experience
+            decision_point = exp.decision_point or "unknown"
+            action_desc = ""
+            if exp.action:
+                if "platform" in exp.action:
+                    action_desc += f"platform={exp.action['platform']}"
+                if "agent_slug" in exp.action:
+                    action_desc += f" agent={exp.action['agent_slug']}"
+                if "selected_agent" in exp.action:
+                    action_desc += f" agent={exp.action['selected_agent']}"
+
+            state_desc = ""
+            if exp.state:
+                if "task_type" in exp.state:
+                    state_desc += f"task_type={exp.state['task_type']}"
+                if "channel" in exp.state:
+                    state_desc += f" channel={exp.state['channel']}"
+
+            reward_label = "positive" if exp.reward > 0 else "negative"
+            obs_text = (
+                f"RL {reward_label} signal (reward={exp.reward:.2f}) "
+                f"at decision_point={decision_point}: "
+                f"{action_desc}. Context: {state_desc}. "
+                f"Source: {exp.reward_source or 'unknown'}"
+            ).strip()
+
+            obs_id = uuid.uuid4()
+            db.execute(
+                text("""
+                    INSERT INTO knowledge_observations
+                    (id, tenant_id, observation_text, observation_type, source_type, source_platform)
+                    VALUES (:id, :tid, :text, 'decision_insight', 'rl_experience', :platform)
+                """),
+                {
+                    "id": str(obs_id),
+                    "tid": str(tid),
+                    "text": obs_text,
+                    "platform": exp.action.get("platform", "unknown") if exp.action else "unknown",
+                },
+            )
+
+            # Auto-embed the observation
+            try:
+                embedding_service.embed_and_store(
+                    db, tid, "observation", str(obs_id), obs_text,
+                )
+            except Exception:
+                pass  # Don't block on embedding failure
+
+            created += 1
+
+        db.commit()
+        return {"tenant_id": tenant_id, "observations_created": created}
     finally:
         db.close()

@@ -10,7 +10,7 @@ from app.services import embedding_service
 
 # Decision point constants
 DECISION_POINTS = [
-    "agent_selection", "memory_recall", "skill_routing",
+    "agent_selection", "agent_routing", "memory_recall", "skill_routing",
     "orchestration_routing", "triage_classification",
     "response_generation", "tool_selection", "entity_validation",
     "score_weighting", "sync_strategy", "execution_decision",
@@ -219,3 +219,46 @@ def archive_old_experiences(db: Session, tenant_id: uuid.UUID, days: int = 90) -
     )
     db.commit()
     return updated
+
+
+def get_platform_performance(
+    db: Session,
+    tenant_id: uuid.UUID,
+    min_experiences: int = 5,
+) -> List[Dict[str, Any]]:
+    """Group experiences by metadata platform, agent_slug, task_type.
+
+    Computes avg reward, count, positive_pct. Filters to tuples with
+    more than `min_experiences` experiences. Returns sorted by avg reward desc.
+    """
+    sql = text("""
+        SELECT
+            COALESCE(action->>'platform', state->>'platform', 'unknown') AS platform,
+            COALESCE(action->>'agent_slug', state->>'agent_slug', 'unknown') AS agent_slug,
+            COALESCE(state->>'task_type', 'general') AS task_type,
+            COUNT(*) AS total,
+            AVG(reward) AS avg_reward,
+            COUNT(*) FILTER (WHERE reward > 0) AS positive_count
+        FROM rl_experiences
+        WHERE tenant_id = CAST(:tid AS uuid)
+          AND reward IS NOT NULL
+          AND archived_at IS NULL
+        GROUP BY
+            COALESCE(action->>'platform', state->>'platform', 'unknown'),
+            COALESCE(action->>'agent_slug', state->>'agent_slug', 'unknown'),
+            COALESCE(state->>'task_type', 'general')
+        HAVING COUNT(*) > :min_exp
+        ORDER BY AVG(reward) DESC
+    """)
+    rows = db.execute(sql, {"tid": str(tenant_id), "min_exp": min_experiences}).fetchall()
+    return [
+        {
+            "platform": r.platform,
+            "agent_slug": r.agent_slug,
+            "task_type": r.task_type,
+            "total": r.total,
+            "avg_reward": round(float(r.avg_reward or 0), 3),
+            "positive_pct": round(r.positive_count * 100.0 / r.total, 1) if r.total > 0 else 0.0,
+        }
+        for r in rows
+    ]

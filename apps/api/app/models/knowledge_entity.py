@@ -43,6 +43,16 @@ class KnowledgeEntity(Base):
     scored_at = Column(DateTime, nullable=True)  # When last scored
     scoring_rubric_id = Column(String, nullable=True)  # Which rubric was used: ai_lead, hca_deal, marketing_signal
 
+    # Memory recall & quality tracking
+    recall_count = Column(Integer, default=0)
+    reference_count = Column(Integer, default=0)
+    feedback_score = Column(Float, default=0.0)
+    last_recalled_at = Column(DateTime, nullable=True)
+
+    # Cross-platform extraction tracking
+    extraction_platform = Column(String(50), nullable=True)  # claude_code, gemini_cli, git, email
+    extraction_agent = Column(String(100), nullable=True)
+
     # Soft delete
     deleted_at = Column(DateTime, nullable=True)
 

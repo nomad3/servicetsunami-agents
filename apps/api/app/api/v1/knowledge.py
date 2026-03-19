@@ -17,6 +17,15 @@ from app.services import knowledge as service
 router = APIRouter()
 
 
+@router.get("/quality-stats")
+def get_quality_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Entity quality statistics: total entities, embedding coverage, top/bottom by usefulness, per-platform extraction stats."""
+    return service.get_quality_stats(db, current_user.tenant_id)
+
+
 @router.get("/scoring-rubrics")
 def list_scoring_rubrics(current_user: User = Depends(get_current_user)):
     """List all available scoring rubrics."""
@@ -301,3 +310,98 @@ def get_git_context(
     """Get recent git context (commits, PRs, hotspots) relevant to a query."""
     from app.services.memory_recall import get_recent_git_context
     return get_recent_git_context(db, current_user.tenant_id, q, limit=limit)
+
+
+# ---------------------------------------------------------------------------
+# Quality Stats
+# ---------------------------------------------------------------------------
+
+@router.get("/quality-stats")
+def get_quality_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Entity quality stats: coverage, usefulness, per-platform extraction accuracy."""
+    return service.get_quality_stats(db, current_user.tenant_id)
+
+
+# ---------------------------------------------------------------------------
+# Embedding Backfill
+# ---------------------------------------------------------------------------
+
+@router.post("/backfill-embeddings")
+async def trigger_backfill(
+    current_user: User = Depends(get_current_user),
+):
+    """Start an embedding backfill workflow (admin only)."""
+    from temporalio.client import Client
+    from app.core.config import settings as app_settings
+
+    client = await Client.connect(app_settings.TEMPORAL_ADDRESS)
+    workflow_id = f"embedding-backfill-{current_user.tenant_id}"
+    handle = await client.start_workflow(
+        "EmbeddingBackfillWorkflow",
+        str(current_user.tenant_id),
+        id=workflow_id,
+        task_queue="servicetsunami-databricks",
+    )
+    return {"workflow_id": workflow_id, "run_id": handle.result_run_id}
+
+
+# ---------------------------------------------------------------------------
+# Memory Consolidation
+# ---------------------------------------------------------------------------
+
+@router.post("/consolidation/start")
+async def start_consolidation(
+    current_user: User = Depends(get_current_user),
+):
+    """Start the nightly memory consolidation workflow."""
+    from temporalio.client import Client
+    from app.core.config import settings as app_settings
+
+    client = await Client.connect(app_settings.TEMPORAL_ADDRESS)
+    workflow_id = f"memory-consolidation-{current_user.tenant_id}"
+    handle = await client.start_workflow(
+        "MemoryConsolidationWorkflow",
+        str(current_user.tenant_id),
+        id=workflow_id,
+        task_queue="servicetsunami-orchestration",
+    )
+    return {"workflow_id": workflow_id, "status": "started"}
+
+
+@router.post("/consolidation/stop")
+async def stop_consolidation(
+    current_user: User = Depends(get_current_user),
+):
+    """Stop the memory consolidation workflow."""
+    from temporalio.client import Client
+    from app.core.config import settings as app_settings
+
+    client = await Client.connect(app_settings.TEMPORAL_ADDRESS)
+    workflow_id = f"memory-consolidation-{current_user.tenant_id}"
+    try:
+        handle = client.get_workflow_handle(workflow_id)
+        await handle.cancel()
+        return {"status": "stopped"}
+    except Exception as e:
+        return {"status": "not_running", "error": str(e)}
+
+
+@router.get("/consolidation/status")
+async def get_consolidation_status(
+    current_user: User = Depends(get_current_user),
+):
+    """Check if the consolidation workflow is running."""
+    from temporalio.client import Client
+    from app.core.config import settings as app_settings
+
+    client = await Client.connect(app_settings.TEMPORAL_ADDRESS)
+    workflow_id = f"memory-consolidation-{current_user.tenant_id}"
+    try:
+        handle = client.get_workflow_handle(workflow_id)
+        desc = await handle.describe()
+        return {"status": str(desc.status), "workflow_id": workflow_id}
+    except Exception:
+        return {"status": "not_running"}

@@ -1,11 +1,11 @@
 """Memory recall engine for Luna.
 
-Queries relevant entities, memories, and relations based on user message
-keywords and returns structured context for automatic recall.
+Hybrid recall: semantic search (pgvector cosine) + keyword boost + RL logging.
+Falls back to ILIKE keyword matching when the embedding model is unavailable.
 """
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List
 import uuid
 
@@ -15,6 +15,8 @@ from sqlalchemy import or_, text
 from app.models.knowledge_entity import KnowledgeEntity
 from app.models.knowledge_relation import KnowledgeRelation
 from app.models.agent_memory import AgentMemory
+from app.services import embedding_service
+from app.services.rl_experience_service import log_experience
 
 logger = logging.getLogger(__name__)
 
@@ -63,20 +65,12 @@ def extract_keywords(message: str) -> List[str]:
     return unique[:10]  # Cap at 10 keywords
 
 
-def build_memory_context(
+def _build_memory_context_keyword_fallback(
     db: Session,
     tenant_id: uuid.UUID,
-    user_message: str,
+    keywords: List[str],
 ) -> Dict[str, Any]:
-    """Build a memory context payload for Luna's automatic recall.
-
-    Queries entities, memories, and relations matching the user's message
-    keywords and returns a structured dict for context injection.
-    """
-    keywords = extract_keywords(user_message)
-    if not keywords:
-        return {}
-
+    """ILIKE-based fallback when the embedding model is not available."""
     # Query matching entities (top 10 by name/description match)
     entity_filters = []
     for kw in keywords:
@@ -87,6 +81,7 @@ def build_memory_context(
         db.query(KnowledgeEntity)
         .filter(
             KnowledgeEntity.tenant_id == tenant_id,
+            KnowledgeEntity.deleted_at.is_(None),
             or_(*entity_filters),
         )
         .order_by(KnowledgeEntity.confidence.desc().nullslast())
@@ -129,7 +124,6 @@ def build_memory_context(
 
     # Build entity name lookup for relations
     entity_map = {e.id: e.name for e in entities}
-    # Also fetch any entity names referenced in relations but not in our matched set
     rel_entity_ids = set()
     for r in relations:
         rel_entity_ids.add(r.from_entity_id)
@@ -176,9 +170,268 @@ def build_memory_context(
     if memories:
         db.commit()
 
+    return context
+
+
+def _fetch_top_observations_semantic(
+    db: Session,
+    tenant_id: uuid.UUID,
+    entity_id: str,
+    query_embedding: List[float],
+    limit: int = 3,
+) -> List[Dict[str, Any]]:
+    """Fetch top observations for an entity, ranked by semantic similarity to query."""
+    vector_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
+
+    sql = text(f"""
+        SELECT observation_text, observation_type, source_type, created_at,
+               1 - (embedding <=> CAST('{vector_literal}' AS vector)) AS similarity
+        FROM knowledge_observations
+        WHERE entity_id = CAST(:entity_id AS uuid)
+          AND tenant_id = CAST(:tenant_id AS uuid)
+          AND embedding IS NOT NULL
+        ORDER BY embedding <=> CAST('{vector_literal}' AS vector)
+        LIMIT :lim
+    """)
+    rows = db.execute(sql, {
+        "entity_id": entity_id,
+        "tenant_id": str(tenant_id),
+        "lim": limit,
+    }).fetchall()
+
+    if rows:
+        return [
+            {
+                "text": row.observation_text,
+                "type": row.observation_type,
+                "source": row.source_type or "",
+                "date": row.created_at.isoformat() if row.created_at else "",
+            }
+            for row in rows
+        ]
+
+    # Fallback: fetch most recent observations if none have embeddings
+    sql_fallback = text("""
+        SELECT observation_text, observation_type, source_type, created_at
+        FROM knowledge_observations
+        WHERE entity_id = CAST(:entity_id AS uuid)
+          AND tenant_id = CAST(:tenant_id AS uuid)
+        ORDER BY created_at DESC
+        LIMIT :lim
+    """)
+    rows = db.execute(sql_fallback, {
+        "entity_id": entity_id,
+        "tenant_id": str(tenant_id),
+        "lim": limit,
+    }).fetchall()
+    return [
+        {
+            "text": row.observation_text,
+            "type": row.observation_type,
+            "source": row.source_type or "",
+            "date": row.created_at.isoformat() if row.created_at else "",
+        }
+        for row in rows
+    ]
+
+
+def build_memory_context(
+    db: Session,
+    tenant_id: uuid.UUID,
+    user_message: str,
+) -> Dict[str, Any]:
+    """Build a memory context payload for Luna's automatic recall.
+
+    Hybrid recall engine:
+    1. Embed user message
+    2. Semantic search: top 30 entities + top 15 memories via pgvector cosine
+    3. Keyword boost: entities whose name exactly matches a query word get +0.3
+    4. Combine, sort by final score
+    5. Fetch top 3 observations per recalled entity (semantic)
+    6. Return top 10 entities + top 5 memories + observations + relations
+    7. Update recall counters on recalled entities
+    8. Log RL experience for the memory_recall decision point
+
+    Falls back to ILIKE keyword matching when embedding model is unavailable.
+    """
+    keywords = extract_keywords(user_message)
+    if not keywords:
+        return {}
+
+    # --- Step 1: Embed user message ---
+    query_embedding = embedding_service.embed_text(user_message, task_type="RETRIEVAL_QUERY")
+
+    # Fallback to keyword-based recall if embedding model is not loaded
+    if query_embedding is None:
+        logger.info("Embedding model unavailable — falling back to keyword recall")
+        return _build_memory_context_keyword_fallback(db, tenant_id, keywords)
+
+    # --- Step 2: Semantic search ---
+    semantic_entities = embedding_service.search_entities_semantic(
+        db, tenant_id, query_embedding, limit=30
+    )
+    semantic_memories = embedding_service.search_memories_semantic(
+        db, tenant_id, query_embedding, limit=15
+    )
+
+    # --- Step 3: Keyword boost ---
+    # Entities whose name exactly matches a word in the query get +0.3 similarity
+    query_words_lower = set(re.findall(r'[\w]+', user_message.lower()))
+    for ent in semantic_entities:
+        entity_name_words = set(re.findall(r'[\w]+', ent["name"].lower()))
+        if entity_name_words & query_words_lower:
+            ent["similarity"] = min(ent["similarity"] + 0.3, 1.0)
+
+    # --- Step 4: Sort by final score ---
+    semantic_entities.sort(key=lambda x: x["similarity"], reverse=True)
+    semantic_memories.sort(key=lambda x: x["similarity"], reverse=True)
+
+    # --- Step 5: Take top N ---
+    top_entities = semantic_entities[:10]
+    top_memories = semantic_memories[:5]
+
+    if not top_entities and not top_memories:
+        return {}
+
+    # --- Step 6: Fetch top 3 observations per recalled entity ---
+    entity_observations: Dict[str, List[Dict]] = {}
+    for ent in top_entities:
+        obs = _fetch_top_observations_semantic(
+            db, tenant_id, ent["id"], query_embedding, limit=3
+        )
+        if obs:
+            entity_observations[ent["name"]] = obs
+
+    # --- Fetch relations for recalled entities ---
+    entity_ids = [uuid.UUID(e["id"]) for e in top_entities]
+    relations = []
+    if entity_ids:
+        relations = (
+            db.query(KnowledgeRelation)
+            .filter(
+                KnowledgeRelation.tenant_id == tenant_id,
+                or_(
+                    KnowledgeRelation.from_entity_id.in_(entity_ids),
+                    KnowledgeRelation.to_entity_id.in_(entity_ids),
+                ),
+            )
+            .limit(15)
+            .all()
+        )
+
+    # Build entity name lookup for relations
+    entity_map = {uuid.UUID(e["id"]): e["name"] for e in top_entities}
+    rel_entity_ids = set()
+    for r in relations:
+        rel_entity_ids.add(r.from_entity_id)
+        rel_entity_ids.add(r.to_entity_id)
+    missing_ids = rel_entity_ids - set(entity_ids)
+    if missing_ids:
+        extra = db.query(KnowledgeEntity.id, KnowledgeEntity.name).filter(
+            KnowledgeEntity.id.in_(list(missing_ids))
+        ).all()
+        for eid, ename in extra:
+            entity_map[eid] = ename
+
+    # --- Step 7: Build context ---
+    context: Dict[str, Any] = {
+        "relevant_entities": [
+            {
+                "name": e["name"],
+                "type": e["entity_type"],
+                "category": e["category"],
+                "description": e["description"],
+                "similarity": round(e["similarity"], 4),
+            }
+            for e in top_entities
+        ],
+        "relevant_memories": [
+            {
+                "type": m["memory_type"],
+                "content": m["content"],
+                "similarity": round(m["similarity"], 4),
+            }
+            for m in top_memories
+        ],
+        "relevant_relations": [
+            {
+                "from": entity_map.get(r.from_entity_id, str(r.from_entity_id)),
+                "to": entity_map.get(r.to_entity_id, str(r.to_entity_id)),
+                "type": r.relation_type,
+            }
+            for r in relations
+        ],
+    }
+
+    if entity_observations:
+        context["entity_observations"] = entity_observations
+
+    # --- Step 8: Update recall counters on recalled entities ---
+    if entity_ids:
+        now = datetime.utcnow()
+        db.execute(
+            text("""
+                UPDATE knowledge_entities
+                SET recall_count = COALESCE(recall_count, 0) + 1,
+                    last_recalled_at = :now
+                WHERE id = ANY(CAST(:ids AS uuid[]))
+                  AND tenant_id = CAST(:tenant_id AS uuid)
+            """),
+            {
+                "now": now,
+                "ids": [str(eid) for eid in entity_ids],
+                "tenant_id": str(tenant_id),
+            },
+        )
+
+    # Update access counts for recalled memories
+    if top_memories:
+        now = datetime.utcnow()
+        memory_ids = [m["id"] for m in top_memories]
+        db.execute(
+            text("""
+                UPDATE agent_memories
+                SET access_count = COALESCE(access_count, 0) + 1,
+                    last_accessed_at = :now
+                WHERE id = ANY(CAST(:ids AS uuid[]))
+            """),
+            {"now": now, "ids": memory_ids},
+        )
+
+    db.commit()
+
+    # --- Step 9: Log RL experience for memory_recall decision ---
+    try:
+        trajectory_id = uuid.uuid4()
+        log_experience(
+            db=db,
+            tenant_id=tenant_id,
+            trajectory_id=trajectory_id,
+            step_index=0,
+            decision_point="memory_recall",
+            state={
+                "query": user_message[:500],
+                "keywords": keywords,
+                "num_entity_candidates": len(semantic_entities),
+                "num_memory_candidates": len(semantic_memories),
+            },
+            action={
+                "recalled_entities": [e["name"] for e in top_entities],
+                "recalled_memories_count": len(top_memories),
+                "top_entity_score": top_entities[0]["similarity"] if top_entities else 0,
+                "top_memory_score": top_memories[0]["similarity"] if top_memories else 0,
+            },
+            alternatives=[{"method": "keyword_only"}, {"method": "semantic_only"}],
+            explanation={"method": "hybrid_semantic_keyword_boost"},
+            state_text=user_message[:500],
+        )
+    except Exception:
+        logger.debug("Failed to log RL experience for memory_recall", exc_info=True)
+
     logger.info(
-        "Recall for tenant %s: %d entities, %d memories, %d relations (keywords: %s)",
-        tenant_id, len(entities), len(memories), len(relations), keywords[:5],
+        "Hybrid recall for tenant %s: %d entities, %d memories, %d relations, %d observations (keywords: %s)",
+        tenant_id, len(top_entities), len(top_memories), len(relations),
+        sum(len(v) for v in entity_observations.values()), keywords[:5],
     )
 
     return context
@@ -250,6 +503,200 @@ def get_recent_git_context(
             "date": row.created_at.isoformat() if row.created_at else "",
         }
         for row in rows
+    ]
+
+
+def find_meeting_context(
+    db: Session,
+    tenant_id: uuid.UUID,
+    attendee_emails: List[str],
+) -> List[Dict[str, Any]]:
+    """Find entities by email in attributes (JSONB containment) and return with top 3 observations.
+
+    Searches knowledge_entities whose `attributes` JSONB field contains any of the
+    provided email addresses. Returns entity info plus their most recent observations.
+    """
+    if not attendee_emails:
+        return []
+
+    results = []
+    for email_addr in attendee_emails:
+        email_addr = email_addr.strip().lower()
+        if not email_addr or "@" not in email_addr:
+            continue
+
+        # Search entities whose attributes contain this email (text search on JSONB)
+        sql = text("""
+            SELECT id, name, entity_type, category, description, attributes
+            FROM knowledge_entities
+            WHERE tenant_id = CAST(:tid AS uuid)
+              AND deleted_at IS NULL
+              AND (
+                  CAST(attributes AS text) ILIKE :email_pattern
+                  OR LOWER(name) = :email_lower
+              )
+            LIMIT 5
+        """)
+        rows = db.execute(sql, {
+            "tid": str(tenant_id),
+            "email_pattern": f"%{email_addr}%",
+            "email_lower": email_addr,
+        }).fetchall()
+
+        for row in rows:
+            entity_id = row.id
+            # Fetch top 3 observations for this entity
+            obs_sql = text("""
+                SELECT observation_text, observation_type, created_at
+                FROM knowledge_observations
+                WHERE entity_id = CAST(:eid AS uuid)
+                  AND tenant_id = CAST(:tid AS uuid)
+                ORDER BY created_at DESC
+                LIMIT 3
+            """)
+            observations = db.execute(obs_sql, {
+                "eid": str(entity_id),
+                "tid": str(tenant_id),
+            }).fetchall()
+
+            results.append({
+                "entity_id": str(entity_id),
+                "name": row.name,
+                "entity_type": row.entity_type,
+                "category": row.category or "",
+                "description": row.description or "",
+                "email": email_addr,
+                "observations": [
+                    {
+                        "text": obs.observation_text,
+                        "type": obs.observation_type,
+                        "date": obs.created_at.isoformat() if obs.created_at else "",
+                    }
+                    for obs in observations
+                ],
+            })
+
+    return results
+
+
+def find_stale_leads(
+    db: Session,
+    tenant_id: uuid.UUID,
+    stale_days: int = 7,
+) -> List[Dict[str, Any]]:
+    """Query entities where category='lead' with no activity in N days.
+
+    Returns list of stale lead dicts with entity info and days since last activity.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=stale_days)
+
+    stale_leads = (
+        db.query(KnowledgeEntity)
+        .filter(
+            KnowledgeEntity.tenant_id == tenant_id,
+            KnowledgeEntity.category == "lead",
+            KnowledgeEntity.deleted_at.is_(None),
+            KnowledgeEntity.status.notin_(["archived"]),
+            or_(
+                KnowledgeEntity.updated_at < cutoff,
+                KnowledgeEntity.updated_at.is_(None),
+            ),
+        )
+        .order_by(KnowledgeEntity.updated_at.asc().nullsfirst())
+        .limit(10)
+        .all()
+    )
+
+    results = []
+    now = datetime.utcnow()
+    for lead in stale_leads:
+        last_activity = lead.updated_at or lead.created_at
+        days_stale = (now - last_activity).days if last_activity else stale_days
+
+        results.append({
+            "entity_id": str(lead.id),
+            "name": lead.name,
+            "entity_type": lead.entity_type,
+            "description": lead.description or "",
+            "score": lead.score,
+            "days_stale": days_stale,
+            "last_activity": last_activity.isoformat() if last_activity else None,
+        })
+
+    return results
+
+
+def find_related_context(
+    db: Session,
+    tenant_id: uuid.UUID,
+    entity_ids: List[uuid.UUID],
+    limit: int = 3,
+) -> List[Dict[str, Any]]:
+    """Find 2-hop graph neighbors via knowledge_relations.
+
+    Starting from entity_ids, traverses relations to find directly connected
+    entities (1-hop) and their connections (2-hop). Returns unique neighbor
+    entities with relation info.
+    """
+    if not entity_ids:
+        return []
+
+    id_strs = [str(eid) for eid in entity_ids]
+    placeholders = ", ".join(f"CAST(:id{i} AS uuid)" for i in range(len(id_strs)))
+    params = {f"id{i}": id_str for i, id_str in enumerate(id_strs)}
+    params["tid"] = str(tenant_id)
+    params["lim"] = limit * 3  # fetch more for filtering
+
+    sql = text(f"""
+        WITH hop1 AS (
+            SELECT DISTINCT
+                CASE
+                    WHEN from_entity_id IN ({placeholders}) THEN to_entity_id
+                    ELSE from_entity_id
+                END AS neighbor_id,
+                relation_type
+            FROM knowledge_relations
+            WHERE tenant_id = CAST(:tid AS uuid)
+              AND (from_entity_id IN ({placeholders}) OR to_entity_id IN ({placeholders}))
+        ),
+        hop2 AS (
+            SELECT DISTINCT
+                CASE
+                    WHEN kr.from_entity_id = h1.neighbor_id THEN kr.to_entity_id
+                    ELSE kr.from_entity_id
+                END AS neighbor_id,
+                kr.relation_type
+            FROM knowledge_relations kr
+            JOIN hop1 h1 ON (kr.from_entity_id = h1.neighbor_id OR kr.to_entity_id = h1.neighbor_id)
+            WHERE kr.tenant_id = CAST(:tid AS uuid)
+        ),
+        all_neighbors AS (
+            SELECT neighbor_id, relation_type FROM hop1
+            UNION
+            SELECT neighbor_id, relation_type FROM hop2
+        )
+        SELECT DISTINCT ke.id, ke.name, ke.entity_type, ke.category, ke.description,
+               an.relation_type
+        FROM all_neighbors an
+        JOIN knowledge_entities ke ON ke.id = an.neighbor_id
+        WHERE ke.tenant_id = CAST(:tid AS uuid)
+          AND ke.deleted_at IS NULL
+          AND ke.id NOT IN ({placeholders})
+        LIMIT :lim
+    """)
+
+    rows = db.execute(sql, params).fetchall()
+
+    return [
+        {
+            "entity_id": str(row.id),
+            "name": row.name,
+            "entity_type": row.entity_type,
+            "category": row.category or "",
+            "description": row.description or "",
+            "relation_type": row.relation_type,
+        }
+        for row in rows[:limit]
     ]
 
 
