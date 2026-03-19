@@ -42,6 +42,7 @@ from .tenant_branding import TenantBranding
 from .tenant_features import TenantFeatures
 from .tool import Tool
 from .vector_store import VectorStore
+from .webhook_connector import WebhookConnector, WebhookDeliveryLog
 
 __all__ = [
     "Tenant", "User",
@@ -62,4 +63,5 @@ __all__ = [
     "Skill", "SkillExecution", "SkillRegistry",
     "TenantAnalytics", "TenantBranding", "TenantFeatures",
     "Tool", "VectorStore",
+    "WebhookConnector", "WebhookDeliveryLog",
 ]
