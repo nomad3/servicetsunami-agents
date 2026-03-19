@@ -33,6 +33,7 @@ from app.api.v1 import (
     remedia,
     webhook_connectors,
     webhooks,
+    mcp_server_connectors,
     oauth,
     notifications,
     reports,
@@ -79,6 +80,7 @@ router.include_router(workflows.router, prefix="/workflows", tags=["workflows"])
 router.include_router(remedia.router, prefix="/remedia", tags=["remedia"])
 router.include_router(webhook_connectors.router, prefix="/webhook-connectors", tags=["webhook-connectors"])
 router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
+router.include_router(mcp_server_connectors.router, prefix="/mcp-servers", tags=["mcp-servers"])
 router.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 router.include_router(reports.router, prefix="/reports", tags=["reports"])

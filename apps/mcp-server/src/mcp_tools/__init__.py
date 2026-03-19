@@ -16,3 +16,4 @@ from src.mcp_tools import analytics  # noqa: F401
 from src.mcp_tools import skills  # noqa: F401
 from src.mcp_tools import drive  # noqa: F401
 from src.mcp_tools import webhooks  # noqa: F401
+from src.mcp_tools import mcp_servers  # noqa: F401

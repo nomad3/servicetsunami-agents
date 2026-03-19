@@ -43,6 +43,7 @@ from .tenant_features import TenantFeatures
 from .tool import Tool
 from .vector_store import VectorStore
 from .webhook_connector import WebhookConnector, WebhookDeliveryLog
+from .mcp_server_connector import MCPServerConnector, MCPServerCallLog
 
 __all__ = [
     "Tenant", "User",
@@ -64,4 +65,5 @@ __all__ = [
     "TenantAnalytics", "TenantBranding", "TenantFeatures",
     "Tool", "VectorStore",
     "WebhookConnector", "WebhookDeliveryLog",
+    "MCPServerConnector", "MCPServerCallLog",
 ]
