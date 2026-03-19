@@ -54,6 +54,9 @@ jobs:
             echo "services=$(echo $INPUT | tr ',' ' ')" >> $GITHUB_OUTPUT
           fi
 
+      - name: Unlock keychain
+        run: security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" ~/Library/Keychains/login.keychain-db
+
       - name: Build and deploy
         run: |
           SERVICES="${{ steps.changes.outputs.services || steps.dispatch.outputs.services }}"
