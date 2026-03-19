@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 import uuid
 
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 
 from app.models.knowledge_entity import KnowledgeEntity
 from app.models.knowledge_relation import KnowledgeRelation
@@ -180,5 +180,94 @@ def build_memory_context(
         "Recall for tenant %s: %d entities, %d memories, %d relations (keywords: %s)",
         tenant_id, len(entities), len(memories), len(relations), keywords[:5],
     )
+
+    return context
+
+
+# ---------------------------------------------------------------------------
+# Git Context Recall
+# ---------------------------------------------------------------------------
+
+# Keywords that suggest a code-related query
+_CODE_KEYWORDS = {
+    "code", "commit", "change", "changed", "file", "files", "bug", "fix",
+    "deploy", "pr", "pull", "request", "branch", "merge", "release",
+    "refactor", "implement", "build", "test", "error", "crash", "update",
+    "migration", "schema", "api", "endpoint", "service", "component",
+    "feature", "hotfix", "revert", "push", "git",
+}
+
+
+def _is_code_related(message: str) -> bool:
+    """Heuristic: check if a user message is likely code-related."""
+    words = set(re.findall(r'[\w]+', message.lower()))
+    return bool(words & _CODE_KEYWORDS)
+
+
+def get_recent_git_context(
+    db: Session,
+    tenant_id: uuid.UUID,
+    query_text: str,
+    limit: int = 5,
+) -> List[Dict[str, Any]]:
+    """Retrieve recent git context (commits, PRs, hotspots) relevant to the query.
+
+    Searches knowledge_observations where observation_type is git_commit,
+    git_pr, or file_hotspot using text matching on the query keywords.
+
+    Returns a list of observation dicts sorted by relevance.
+    """
+    keywords = extract_keywords(query_text)
+    if not keywords:
+        return []
+
+    # Build ILIKE conditions for matching observations
+    conditions = []
+    params = {"tid": str(tenant_id), "lim": limit}
+    for i, kw in enumerate(keywords[:5]):
+        conditions.append(f"observation_text ILIKE :kw{i}")
+        params[f"kw{i}"] = f"%{kw}%"
+
+    if not conditions:
+        return []
+
+    where_clause = " OR ".join(conditions)
+    sql = text(f"""
+        SELECT id, observation_text, observation_type, source_type, created_at
+        FROM knowledge_observations
+        WHERE tenant_id = CAST(:tid AS uuid)
+          AND observation_type IN ('git_commit', 'git_pr', 'file_hotspot')
+          AND ({where_clause})
+        ORDER BY created_at DESC
+        LIMIT :lim
+    """)
+
+    rows = db.execute(sql, params).fetchall()
+    return [
+        {
+            "text": row.observation_text,
+            "type": row.observation_type,
+            "date": row.created_at.isoformat() if row.created_at else "",
+        }
+        for row in rows
+    ]
+
+
+def build_memory_context_with_git(
+    db: Session,
+    tenant_id: uuid.UUID,
+    user_message: str,
+) -> Dict[str, Any]:
+    """Extended memory context that includes git history when relevant.
+
+    Calls build_memory_context() first, then appends git context if the
+    message appears code-related.
+    """
+    context = build_memory_context(db, tenant_id, user_message)
+
+    if _is_code_related(user_message):
+        git_context = get_recent_git_context(db, tenant_id, user_message, limit=5)
+        if git_context:
+            context["git_context"] = git_context
 
     return context

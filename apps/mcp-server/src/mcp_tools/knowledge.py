@@ -758,6 +758,123 @@ async def search_knowledge(
 
 
 @mcp.tool()
+async def get_git_history(
+    tenant_id: str = "",
+    path: str = "",
+    days: int = 7,
+    limit: int = 20,
+    ctx: Context = None,
+) -> list:
+    """Get recent git commit history from the knowledge graph.
+
+    Returns git_commit observations stored by the periodic git history
+    extraction activity. Optionally scope to a file/directory path.
+
+    Args:
+        tenant_id: Tenant UUID (resolved from session if omitted).
+        path: Optional file/directory path to scope results (substring match).
+        days: Look back N days (default 7).
+        limit: Maximum number of results (default 20).
+        ctx: MCP request context (injected automatically).
+
+    Returns:
+        List of git commit observations with text, type, and date.
+    """
+    tid = resolve_tenant_id(ctx) or tenant_id
+
+    db_url = _get_db_url()
+    if not db_url:
+        return [{"error": "DATABASE_URL not configured"}]
+
+    conn = await asyncpg.connect(db_url)
+    try:
+        conditions = [
+            "tenant_id = $1",
+            "observation_type = 'git_commit'",
+            f"created_at > NOW() - INTERVAL '{int(days)} days'",
+        ]
+        params = [tid]
+        idx = 2
+
+        if path:
+            conditions.append(f"observation_text ILIKE ${idx}")
+            params.append(f"%{path}%")
+            idx += 1
+
+        where = " AND ".join(conditions)
+        sql = f"""
+            SELECT id, observation_text, observation_type, source_type, created_at
+            FROM knowledge_observations
+            WHERE {where}
+            ORDER BY created_at DESC
+            LIMIT {int(limit)}
+        """
+        rows = await conn.fetch(sql, *params)
+        return [_serialize_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+@mcp.tool()
+async def get_pr_status(
+    tenant_id: str = "",
+    pr_number: int = 0,
+    branch: str = "",
+    ctx: Context = None,
+) -> list:
+    """Get PR status and review feedback from the knowledge graph.
+
+    Returns git_pr observations stored when PRs are merged, closed, or reverted.
+    Filter by PR number or branch name.
+
+    Args:
+        tenant_id: Tenant UUID (resolved from session if omitted).
+        pr_number: PR number to look up (optional).
+        branch: Branch name to filter by (optional, substring match).
+        ctx: MCP request context (injected automatically).
+
+    Returns:
+        List of PR outcome observations with text, type, and date.
+    """
+    tid = resolve_tenant_id(ctx) or tenant_id
+
+    db_url = _get_db_url()
+    if not db_url:
+        return [{"error": "DATABASE_URL not configured"}]
+
+    conn = await asyncpg.connect(db_url)
+    try:
+        conditions = [
+            "tenant_id = $1",
+            "observation_type = 'git_pr'",
+        ]
+        params = [tid]
+        idx = 2
+
+        if pr_number > 0:
+            conditions.append(f"observation_text ILIKE ${idx}")
+            params.append(f"%PR #{pr_number}%")
+            idx += 1
+        elif branch:
+            conditions.append(f"observation_text ILIKE ${idx}")
+            params.append(f"%{branch}%")
+            idx += 1
+
+        where = " AND ".join(conditions)
+        sql = f"""
+            SELECT id, observation_text, observation_type, source_type, created_at
+            FROM knowledge_observations
+            WHERE {where}
+            ORDER BY created_at DESC
+            LIMIT 10
+        """
+        rows = await conn.fetch(sql, *params)
+        return [_serialize_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+@mcp.tool()
 async def ask_knowledge_graph(
     natural_language_question: str,
     tenant_id: str = "",

@@ -108,6 +108,48 @@ def _fetch_claude_token(tenant_id: str) -> str:
     return token
 
 
+def _log_code_task_rl(
+    tenant_id: str,
+    branch: str,
+    tag: str,
+    files_changed: list,
+    pr_number: int,
+) -> None:
+    """Log an RL experience for the code_task decision point.
+
+    Reward is initially 0 — it will be assigned later when the PR outcome
+    is reported via the /api/v1/knowledge/pr-outcome endpoint or nightly polling.
+    """
+    try:
+        resp = httpx.post(
+            f"{API_BASE_URL}/api/v1/rl/experiences",
+            headers={"X-Internal-Key": API_INTERNAL_KEY or "dev_mcp_key"},
+            json={
+                "tenant_id": tenant_id,
+                "decision_point": "code_task",
+                "state": {
+                    "task_type": tag,
+                    "affected_files": files_changed[:10],
+                    "branch": branch,
+                    "pr_number": pr_number,
+                },
+                "action": {
+                    "platform": "claude_code",
+                    "branch": branch,
+                    "files_changed": len(files_changed),
+                },
+                "state_text": (
+                    f"Task: {tag}, affected_files: {files_changed[:5]}, "
+                    f"branch: {branch}, PR #{pr_number}"
+                ),
+            },
+            timeout=10,
+        )
+        logger.info("RL experience logged for code_task PR #%s: %s", pr_number, resp.status_code)
+    except Exception as e:
+        logger.debug("RL experience log failed: %s", e)
+
+
 @activity.defn
 async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
     """Execute a code task using Claude Code CLI."""
@@ -248,6 +290,20 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         pr_url = pr_output.split("\n")[-1]
 
         summary = claude_data.get("result", claude_output[:2000]) if isinstance(claude_data, dict) else claude_output[:2000]
+
+        # Log RL experience for code_task decision point (reward assigned on PR outcome)
+        try:
+            pr_number_match = re.search(r'/pull/(\d+)', pr_url)
+            pr_num = int(pr_number_match.group(1)) if pr_number_match else 0
+            _log_code_task_rl(
+                tenant_id=task_input.tenant_id,
+                branch=branch_name,
+                tag=tag,
+                files_changed=files_changed,
+                pr_number=pr_num,
+            )
+        except Exception as e:
+            logger.debug("RL experience logging skipped: %s", e)
 
         return CodeTaskResult(
             pr_url=pr_url,

@@ -80,6 +80,10 @@ from app.workflows.activities.rl_policy_update import (
     anonymize_and_aggregate_global,
     archive_old_experiences,
 )
+from app.workflows.activities.git_history import (
+    extract_git_history,
+    poll_pr_outcomes,
+)
 from app.workflows.rl_policy_update_workflow import RLPolicyUpdateWorkflow
 from app.utils.logger import get_logger
 
@@ -170,6 +174,8 @@ async def run_orchestration_worker():
             update_tenant_policy,
             anonymize_and_aggregate_global,
             archive_old_experiences,
+            extract_git_history,
+            poll_pr_outcomes,
         ],
     )
 

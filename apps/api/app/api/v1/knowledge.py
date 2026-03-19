@@ -1,5 +1,6 @@
 """API routes for knowledge graph"""
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import uuid
@@ -213,3 +214,90 @@ def delete_relation(
     """Delete a relation."""
     if not service.delete_relation(db, relation_id, current_user.tenant_id):
         raise HTTPException(status_code=404, detail="Relation not found")
+
+
+# ---------------------------------------------------------------------------
+# Git History / PR Outcome
+# ---------------------------------------------------------------------------
+
+class PROutcomeRequest(BaseModel):
+    repo: str
+    pr_number: int
+    outcome: str  # merged, closed, reverted
+    title: str = ""
+    review_comments: List[str] = []
+
+
+@router.post("/pr-outcome")
+def report_pr_outcome(
+    payload: PROutcomeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Report a PR outcome for RL reward assignment and knowledge observation.
+
+    Called by code-worker or nightly polling when a PR is merged/closed/reverted.
+    Stores a git_pr observation and returns the suggested RL reward.
+    """
+    if payload.outcome not in ("merged", "closed", "reverted"):
+        raise HTTPException(status_code=400, detail="outcome must be merged, closed, or reverted")
+
+    result = service.store_pr_outcome(
+        db,
+        tenant_id=current_user.tenant_id,
+        repo=payload.repo,
+        pr_number=payload.pr_number,
+        outcome=payload.outcome,
+        title=payload.title,
+        review_comments=payload.review_comments,
+    )
+
+    # Try to assign RL reward to the code_task experience
+    try:
+        from app.services import rl_experience_service
+        from sqlalchemy import text as sql_text
+
+        exp = db.execute(
+            sql_text("""
+                SELECT id FROM rl_experiences
+                WHERE tenant_id = CAST(:tid AS uuid)
+                AND decision_point = 'code_task'
+                AND state::text LIKE :pr_pattern
+                AND reward IS NULL
+                ORDER BY created_at DESC LIMIT 1
+            """),
+            {
+                "tid": str(current_user.tenant_id),
+                "pr_pattern": f"%PR #{payload.pr_number}%",
+            },
+        ).fetchone()
+
+        if exp:
+            rl_experience_service.assign_reward(
+                db,
+                experience_id=exp.id,
+                reward=result["rl_reward"],
+                reward_components={
+                    "pr_outcome": payload.outcome,
+                    "pr_number": payload.pr_number,
+                    "review_count": len(payload.review_comments),
+                },
+                reward_source="git_pr_outcome",
+            )
+            result["rl_experience_rewarded"] = True
+    except Exception:
+        pass
+
+    return result
+
+
+@router.get("/git-context")
+def get_git_context(
+    q: str = "",
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get recent git context (commits, PRs, hotspots) relevant to a query."""
+    from app.services.memory_recall import get_recent_git_context
+    return get_recent_git_context(db, current_user.tenant_id, q, limit=limit)

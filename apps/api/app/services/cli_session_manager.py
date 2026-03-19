@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.integration_config import IntegrationConfig
-from app.services.memory_recall import build_memory_context
+from app.services.memory_recall import build_memory_context, build_memory_context_with_git
 from app.services.orchestration.credential_vault import retrieve_credentials_for_skill
 from app.services.skill_manager import skill_manager
 
@@ -108,6 +108,18 @@ def generate_claude_md(
             to = relation.get("to", "")
             rtype = relation.get("type", "")
             lines.append(f"- {frm} --{rtype}--> {to}")
+        lines.append("")
+
+    # Git context — recent commits, PRs, hotspots (when code-related)
+    git_context = memory_context.get("git_context", [])
+    if git_context:
+        lines.append("## Recent Git Context")
+        lines.append("")
+        for item in git_context:
+            gtype = item.get("type", "")
+            gtext = item.get("text", "")
+            gdate = item.get("date", "")[:10]
+            lines.append(f"- [{gtype}] {gtext} ({gdate})")
         lines.append("")
 
     return "\n".join(lines)
@@ -364,7 +376,7 @@ def run_agent_session(
 
     # 3. Build memory context
     try:
-        memory_context = build_memory_context(db, tenant_id, message)
+        memory_context = build_memory_context_with_git(db, tenant_id, message)
     except Exception as exc:
         logger.warning("Memory recall failed for tenant %s: %s", tenant_id, exc)
         memory_context = {}

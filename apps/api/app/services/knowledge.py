@@ -2,9 +2,11 @@
 import json as _json
 import logging
 import uuid
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.models.knowledge_entity import KnowledgeEntity
 from app.models.knowledge_relation import KnowledgeRelation
@@ -394,3 +396,292 @@ def delete_relation(db: Session, relation_id: uuid.UUID, tenant_id: uuid.UUID) -
     db.delete(relation)
     db.commit()
     return True
+
+
+# ---------------------------------------------------------------------------
+# Git History Context
+# ---------------------------------------------------------------------------
+
+def _find_or_create_entity(
+    db: Session,
+    tenant_id: uuid.UUID,
+    name: str,
+    entity_type: str,
+    category: str,
+    description: str = None,
+    properties: dict = None,
+) -> KnowledgeEntity:
+    """Find an existing entity by name+type or create a new one."""
+    entity = db.query(KnowledgeEntity).filter(
+        KnowledgeEntity.tenant_id == tenant_id,
+        KnowledgeEntity.name == name,
+        KnowledgeEntity.entity_type == entity_type,
+    ).first()
+
+    if entity:
+        # Update properties if provided
+        if properties:
+            existing = entity.properties or {}
+            existing.update(properties)
+            entity.properties = existing
+            entity.updated_at = datetime.utcnow()
+            db.flush()
+        return entity
+
+    entity = KnowledgeEntity(
+        tenant_id=tenant_id,
+        entity_type=entity_type,
+        category=category,
+        name=name,
+        description=description,
+        properties=properties or {},
+        confidence=0.9,
+        status="verified",
+        extraction_platform="git",
+    )
+    db.add(entity)
+    db.flush()
+    _safe_embed_entity(db, entity)
+    return entity
+
+
+def _find_or_create_relation(
+    db: Session,
+    tenant_id: uuid.UUID,
+    from_entity_id: uuid.UUID,
+    to_entity_id: uuid.UUID,
+    relation_type: str,
+) -> KnowledgeRelation:
+    """Find or create a relation between two entities."""
+    existing = db.query(KnowledgeRelation).filter(
+        KnowledgeRelation.tenant_id == tenant_id,
+        KnowledgeRelation.from_entity_id == from_entity_id,
+        KnowledgeRelation.to_entity_id == to_entity_id,
+        KnowledgeRelation.relation_type == relation_type,
+    ).first()
+    if existing:
+        return existing
+
+    relation = KnowledgeRelation(
+        tenant_id=tenant_id,
+        from_entity_id=from_entity_id,
+        to_entity_id=to_entity_id,
+        relation_type=relation_type,
+        strength=1.0,
+    )
+    db.add(relation)
+    db.flush()
+    return relation
+
+
+def _create_observation(
+    db: Session,
+    tenant_id: uuid.UUID,
+    observation_text: str,
+    observation_type: str,
+    source_type: str = "git_history",
+    entity_id: uuid.UUID = None,
+) -> None:
+    """Create a knowledge observation and auto-embed it."""
+    obs_id = uuid.uuid4()
+    db.execute(
+        text("""
+            INSERT INTO knowledge_observations
+            (id, tenant_id, entity_id, observation_text, observation_type, source_type, source_platform)
+            VALUES (:id, :tid, :eid, :text, :otype, :stype, 'git')
+        """),
+        {
+            "id": str(obs_id),
+            "tid": str(tenant_id),
+            "eid": str(entity_id) if entity_id else None,
+            "text": observation_text,
+            "otype": observation_type,
+            "stype": source_type,
+        },
+    )
+    # Auto-embed the observation
+    try:
+        embedding_service.embed_and_store(
+            db, tenant_id, "observation", str(obs_id), observation_text,
+        )
+    except Exception:
+        logger.debug("Observation embedding skipped for %s", obs_id)
+
+
+def store_git_context(
+    db: Session,
+    tenant_id: uuid.UUID,
+    commits: List[Dict[str, Any]],
+    repo_name: str,
+) -> Dict[str, int]:
+    """Store git commit history as knowledge entities and observations.
+
+    For each commit:
+    - Find or create contributor entity (category='contributor')
+    - Find or create repository entity (category='repository')
+    - Create contributes_to relation
+    - Create git_commit observation linked to repository entity
+
+    Args:
+        commits: List of dicts with keys: hash, author, email, date, subject, files_changed
+        repo_name: Repository name (e.g. 'nomad3/servicetsunami-agents')
+
+    Returns:
+        Dict with counts: contributors_created, commits_stored, relations_created
+    """
+    stats = {"contributors_created": 0, "commits_stored": 0, "relations_created": 0}
+
+    # Find or create repository entity
+    repo_entity = _find_or_create_entity(
+        db, tenant_id,
+        name=repo_name,
+        entity_type="repository",
+        category="repository",
+        description=f"Git repository: {repo_name}",
+    )
+
+    seen_authors = {}
+
+    for commit in commits:
+        author = commit.get("author", "Unknown")
+        email = commit.get("email", "")
+        subject = commit.get("subject", "")
+        commit_hash = commit.get("hash", "")[:8]
+        files_changed = commit.get("files_changed", 0)
+
+        # Skip merge commits and trivial changes
+        if subject.lower().startswith("merge") or not subject.strip():
+            continue
+
+        # Find or create contributor entity
+        author_key = email or author
+        if author_key not in seen_authors:
+            contributor = _find_or_create_entity(
+                db, tenant_id,
+                name=author,
+                entity_type="person",
+                category="contributor",
+                description=f"Git contributor: {author} ({email})",
+                properties={"email": email, "last_active": commit.get("date", "")},
+            )
+            seen_authors[author_key] = contributor
+
+            # Create contributes_to relation
+            _find_or_create_relation(
+                db, tenant_id,
+                from_entity_id=contributor.id,
+                to_entity_id=repo_entity.id,
+                relation_type="contributes_to",
+            )
+            stats["relations_created"] += 1
+            stats["contributors_created"] += 1
+        else:
+            contributor = seen_authors[author_key]
+
+        # Create git_commit observation
+        obs_text = f"{subject} ({files_changed} files changed) by {author} [{commit_hash}]"
+        _create_observation(
+            db, tenant_id, obs_text,
+            observation_type="git_commit",
+            entity_id=repo_entity.id,
+        )
+        stats["commits_stored"] += 1
+
+    db.commit()
+    return stats
+
+
+def detect_file_hotspots(
+    db: Session,
+    tenant_id: uuid.UUID,
+    file_changes: Dict[str, int],
+    repo_name: str,
+    threshold: int = 5,
+) -> int:
+    """Detect frequently-changed directories and store as file_hotspot observations.
+
+    Args:
+        file_changes: Dict mapping directory path to change count over rolling window
+        repo_name: Repository name
+        threshold: Minimum changes to qualify as a hotspot (default 5)
+
+    Returns:
+        Number of hotspot observations created
+    """
+    # Find repository entity
+    repo_entity = db.query(KnowledgeEntity).filter(
+        KnowledgeEntity.tenant_id == tenant_id,
+        KnowledgeEntity.name == repo_name,
+        KnowledgeEntity.entity_type == "repository",
+    ).first()
+
+    if not repo_entity:
+        return 0
+
+    hotspots = 0
+    for directory, count in file_changes.items():
+        if count >= threshold:
+            obs_text = f"{directory} had {count} changes in 7 days — active development area"
+            _create_observation(
+                db, tenant_id, obs_text,
+                observation_type="file_hotspot",
+                entity_id=repo_entity.id,
+            )
+            hotspots += 1
+
+    db.commit()
+    return hotspots
+
+
+def store_pr_outcome(
+    db: Session,
+    tenant_id: uuid.UUID,
+    repo: str,
+    pr_number: int,
+    outcome: str,
+    title: str = "",
+    review_comments: List[str] = None,
+) -> Dict[str, Any]:
+    """Store a PR outcome as a git_pr observation and return RL reward signal.
+
+    Args:
+        outcome: One of 'merged', 'closed', 'reverted'
+
+    Returns:
+        Dict with observation_id and suggested rl_reward
+    """
+    reward_map = {
+        "merged": 0.5,
+        "merged_with_comments": 0.3,
+        "closed": -0.3,
+        "reverted": -0.5,
+    }
+
+    # Adjust outcome based on review comments
+    effective_outcome = outcome
+    if outcome == "merged" and review_comments:
+        effective_outcome = "merged_with_comments"
+
+    reward = reward_map.get(effective_outcome, 0.0)
+
+    reviews_summary = ""
+    if review_comments:
+        reviews_summary = f" Reviews: {'; '.join(review_comments[:3])}"
+
+    obs_text = f"PR #{pr_number} {outcome}: {title}.{reviews_summary}"
+
+    repo_entity = db.query(KnowledgeEntity).filter(
+        KnowledgeEntity.tenant_id == tenant_id,
+        KnowledgeEntity.name == repo,
+        KnowledgeEntity.entity_type == "repository",
+    ).first()
+
+    _create_observation(
+        db, tenant_id, obs_text,
+        observation_type="git_pr",
+        source_type="git_pr",
+        entity_id=repo_entity.id if repo_entity else None,
+    )
+    db.commit()
+
+    return {"pr_number": pr_number, "outcome": outcome, "rl_reward": reward}

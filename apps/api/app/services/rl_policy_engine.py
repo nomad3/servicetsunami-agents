@@ -71,6 +71,16 @@ def _state_text_change_significance(state: Dict) -> str:
     return f"Competitor: {state.get('competitor_name', '')}, change_type: {state.get('change_type', '')}, source: {state.get('source', '')}"
 
 
+def _state_text_code_task(state: Dict) -> str:
+    return (
+        f"Task: {state.get('task_type', 'code')}, "
+        f"affected_files: {state.get('affected_files', [])}, "
+        f"recent_history: {state.get('recent_history', [])}, "
+        f"branch: {state.get('branch', '')}, "
+        f"PR #{state.get('pr_number', '')}"
+    )
+
+
 STATE_TEXT_GENERATORS = {
     "agent_selection": _state_text_agent_selection,
     "memory_recall": _state_text_memory_recall,
@@ -86,6 +96,7 @@ STATE_TEXT_GENERATORS = {
     "code_strategy": _state_text_code_strategy,
     "deal_stage_advance": _state_text_deal_stage_advance,
     "change_significance": _state_text_change_significance,
+    "code_task": _state_text_code_task,
 }
 
 
