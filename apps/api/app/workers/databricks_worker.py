@@ -22,6 +22,12 @@ from app.workflows.activities.connectors.extract import (
     load_to_silver,
     update_sync_metadata
 )
+from app.workflows.embedding_backfill_workflow import EmbeddingBackfillWorkflow
+from app.workflows.activities.embedding_backfill import (
+    backfill_entity_embeddings,
+    backfill_memory_embeddings,
+    backfill_observation_embeddings,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -55,7 +61,8 @@ async def run_databricks_worker():
             DatasetSyncWorkflow,
             KnowledgeExtractionWorkflow,
             DataSourceSyncWorkflow,
-            ScheduledSyncWorkflow
+            ScheduledSyncWorkflow,
+            EmbeddingBackfillWorkflow,
         ],
         activities=[
             # Existing activities
@@ -67,7 +74,11 @@ async def run_databricks_worker():
             extract_from_connector,
             load_to_bronze,
             load_to_silver,
-            update_sync_metadata
+            update_sync_metadata,
+            # Embedding backfill activities
+            backfill_entity_embeddings,
+            backfill_memory_embeddings,
+            backfill_observation_embeddings,
         ]
     )
 

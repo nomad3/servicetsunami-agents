@@ -54,7 +54,17 @@ from app.workflows.activities.inbox_monitor import (
     triage_items,
     create_notifications,
     extract_from_emails,
+    check_proactive_triggers,
     log_monitor_cycle,
+)
+from app.workflows.memory_consolidation_workflow import MemoryConsolidationWorkflow
+from app.workflows.activities.memory_consolidation import (
+    find_duplicate_entities,
+    auto_merge_duplicates,
+    apply_memory_decay,
+    promote_entities,
+    sync_memories_and_entities,
+    log_consolidation_results,
 )
 from app.workflows.competitor_monitor import CompetitorMonitorWorkflow
 from app.workflows.activities.competitor_monitor import (
@@ -127,6 +137,7 @@ async def run_orchestration_worker():
             CompetitorMonitorWorkflow,
             ProspectingPipelineWorkflow,
             RLPolicyUpdateWorkflow,
+            MemoryConsolidationWorkflow,
         ],
         activities=[
             dispatch_task,
@@ -157,6 +168,7 @@ async def run_orchestration_worker():
             triage_items,
             create_notifications,
             extract_from_emails,
+            check_proactive_triggers,
             log_monitor_cycle,
             fetch_competitors,
             scrape_competitor_activity,
@@ -176,6 +188,13 @@ async def run_orchestration_worker():
             archive_old_experiences,
             extract_git_history,
             poll_pr_outcomes,
+            # Memory consolidation activities
+            find_duplicate_entities,
+            auto_merge_duplicates,
+            apply_memory_decay,
+            promote_entities,
+            sync_memories_and_entities,
+            log_consolidation_results,
         ],
     )
 

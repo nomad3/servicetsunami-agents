@@ -551,6 +551,114 @@ def _dispatch_email_action_triggers(db, tid: uuid.UUID, triggers: List[Dict], te
 
 
 @activity.defn
+async def check_proactive_triggers(
+    tenant_id: str, events: List[Dict],
+) -> Dict[str, Any]:
+    """Check proactive memory triggers: meeting context and stale leads.
+
+    For each upcoming event with attendees: find matching entities and create
+    notifications with relevant context. Also find stale leads and notify.
+    """
+    db = SessionLocal()
+    try:
+        from app.services.memory_recall import find_meeting_context, find_stale_leads
+
+        tid = uuid.UUID(tenant_id)
+        meeting_notifications = 0
+        lead_notifications = 0
+
+        # --- Meeting context triggers ---
+        for event in events:
+            attendees = event.get("attendees", [])
+            if not attendees:
+                continue
+
+            context_results = find_meeting_context(db, tid, attendees)
+            if not context_results:
+                continue
+
+            # Build a notification body with entity context
+            entity_names = [r["name"] for r in context_results]
+            obs_summary_parts = []
+            for r in context_results:
+                for obs in r.get("observations", [])[:2]:
+                    obs_summary_parts.append(f"- {obs['text'][:100]}")
+
+            body = f"Known contacts in this meeting: {', '.join(entity_names)}"
+            if obs_summary_parts:
+                body += "\nRecent context:\n" + "\n".join(obs_summary_parts[:4])
+
+            # Deduplicate by reference_id
+            ref_id = f"meeting-ctx-{event.get('id', '')}"
+            existing = db.query(Notification.id).filter(
+                Notification.tenant_id == tid,
+                Notification.reference_id == ref_id,
+            ).first()
+            if existing:
+                continue
+
+            notif = Notification(
+                tenant_id=tid,
+                title=f"Meeting prep: {event.get('summary', 'Upcoming meeting')}"[:255],
+                body=body[:1000],
+                source="calendar",
+                priority="medium",
+                reference_id=ref_id,
+                reference_type="meeting_context",
+            )
+            db.add(notif)
+            meeting_notifications += 1
+
+        # --- Stale lead triggers ---
+        stale_leads = find_stale_leads(db, tid, stale_days=7)
+        for lead in stale_leads[:3]:
+            ref_id = f"stale-lead-{lead['entity_id'][:8]}"
+            existing = db.query(Notification.id).filter(
+                Notification.tenant_id == tid,
+                Notification.reference_id == ref_id,
+            ).first()
+            if existing:
+                continue
+
+            notif = Notification(
+                tenant_id=tid,
+                title=f"Stale lead: {lead['name']} ({lead['days_stale']}d inactive)"[:255],
+                body=f"Lead '{lead['name']}' has had no activity for {lead['days_stale']} days. "
+                     f"Consider following up. Score: {lead.get('score') or 'unscored'}.",
+                source="system",
+                priority="medium",
+                reference_id=ref_id,
+                reference_type="stale_lead",
+            )
+            db.add(notif)
+            lead_notifications += 1
+
+        db.commit()
+
+        if meeting_notifications or lead_notifications:
+            log_activity(
+                db, tid, "proactive_trigger",
+                f"Proactive triggers: {meeting_notifications} meeting preps, {lead_notifications} stale leads",
+                source="inbox_monitor",
+                event_metadata={
+                    "meeting_notifications": meeting_notifications,
+                    "lead_notifications": lead_notifications,
+                },
+            )
+
+        return {
+            "meeting_notifications": meeting_notifications,
+            "lead_notifications": lead_notifications,
+        }
+
+    except Exception as e:
+        logger.exception("check_proactive_triggers failed: %s", e)
+        return {"meeting_notifications": 0, "lead_notifications": 0, "error": str(e)}
+    finally:
+        db.close()
+
+
+@activity.defn
 async def log_monitor_cycle(
     tenant_id: str,
     workflow_run_id: str,

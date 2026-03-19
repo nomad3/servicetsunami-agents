@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import Column, String, Text, Float, Integer, DateTime, ForeignKey, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
 
 from app.db.base import Base
 
@@ -30,7 +31,8 @@ class AgentMemory(Base):
     # Memory content
     memory_type = Column(String(50), nullable=False, index=True)
     content = Column(Text, nullable=False)
-    embedding = Column(JSON, nullable=True)  # Vector [1536 dimensions for OpenAI]
+    embedding = Column(JSON, nullable=True)  # Legacy JSON embedding
+    content_embedding = Column(Vector(768), nullable=True)  # pgvector for semantic search
 
     # Importance and access tracking
     importance = Column(Float, default=0.5)

@@ -122,6 +122,20 @@ class InboxMonitorWorkflow:
             workflow.logger.error(f"Step 5 (extract_from_emails) failed: {e}")
             step_errors.append(f"extract_from_emails: {e}")
 
+        # Step 5b: Proactive memory surfacing (meeting context + stale leads)
+        try:
+            if events:
+                await workflow.execute_activity(
+                    "check_proactive_triggers",
+                    args=[tenant_id, events],
+                    start_to_close_timeout=activity_timeout,
+                    schedule_to_close_timeout=timedelta(minutes=4),
+                    retry_policy=retry_policy,
+                )
+        except Exception as e:
+            workflow.logger.error(f"Step 5b (check_proactive_triggers) failed: {e}")
+            step_errors.append(f"check_proactive_triggers: {e}")
+
         # Step 6: Log the scan cycle
         try:
             wf_info = workflow.info()

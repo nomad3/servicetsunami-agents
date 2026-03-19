@@ -427,6 +427,23 @@ def batch_rate_experiences(
     return {"rated": len([r for r in results if r["success"]]), "results": results}
 
 
+@router.get("/platform-performance")
+def get_platform_performance(
+    min_experiences: int = Query(5, ge=1),
+    db: Session = Depends(deps.get_db),
+    current_user=Depends(deps.get_current_active_user),
+):
+    """Cross-learning: platform/agent/task_type performance breakdown.
+
+    Groups RL experiences by platform, agent_slug, and task_type.
+    Returns avg reward, count, and positive percentage for each tuple.
+    Only includes tuples with more than min_experiences data points.
+    """
+    return rl_experience_service.get_platform_performance(
+        db, current_user.tenant_id, min_experiences=min_experiences,
+    )
+
+
 @router.get("/export")
 def export_experiences(
     decision_point: Optional[str] = None,

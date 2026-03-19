@@ -22,6 +22,8 @@ from .deployment import Deployment
 from .embedding import Embedding
 from .execution_trace import ExecutionTrace
 from .knowledge_entity import KnowledgeEntity
+from .knowledge_entity_history import KnowledgeEntityHistory
+from .knowledge_observation import KnowledgeObservation
 from .knowledge_relation import KnowledgeRelation
 from .llm_config import LLMConfig
 from .llm_model import LLMModel
@@ -54,7 +56,7 @@ __all__ = [
     "Connector",
     "DataPipeline", "DataSource", "Dataset", "DatasetGroup",
     "Deployment", "ExecutionTrace",
-    "KnowledgeEntity", "KnowledgeRelation",
+    "KnowledgeEntity", "KnowledgeEntityHistory", "KnowledgeObservation", "KnowledgeRelation",
     "LLMConfig", "LLMModel", "LLMProvider",
     "MemoryActivity", "Notebook", "Notification",
     "PipelineRun",

@@ -1,10 +1,14 @@
+import logging
 import uuid
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 
 from app.models.rl_experience import RLExperience
+from app.models.knowledge_entity import KnowledgeEntity
 from app.models.tenant_features import TenantFeatures
 from app.services import rl_experience_service
+
+logger = logging.getLogger(__name__)
 
 
 # Feedback type to reward mapping
@@ -149,3 +153,88 @@ def compute_implicit_reward(signals: Dict[str, Any]) -> float:
     if signals.get("pipeline_succeeded"):
         reward += 0.2
     return max(-1.0, min(1.0, reward))
+
+
+def compute_cost_adjusted_reward(
+    raw_reward: float,
+    cost_usd: float,
+    max_cost_budget: float = 0.10,
+) -> float:
+    """Adjust reward based on cost efficiency.
+
+    For positive rewards, cheaper executions get a bonus (up to full reward).
+    For negative rewards, expensive executions are penalized more.
+
+    Args:
+        raw_reward: The unadjusted reward value.
+        cost_usd: Actual cost of the action in USD.
+        max_cost_budget: Budget ceiling for cost normalization (default $0.10).
+
+    Returns:
+        Cost-adjusted reward clamped to [-1.0, 1.0].
+    """
+    cost_factor = max(0.0, 1.0 - (cost_usd / max_cost_budget))
+    if raw_reward >= 0:
+        adjusted = raw_reward * (0.7 + 0.3 * cost_factor)
+    else:
+        adjusted = raw_reward * (1.3 - 0.3 * cost_factor)
+    return max(-1.0, min(1.0, adjusted))
+
+
+def update_entity_scores_on_reward(
+    db: Session,
+    tenant_id: uuid.UUID,
+    entity_ids: List[uuid.UUID],
+    reward: float,
+) -> int:
+    """Update data_quality_score on entities based on RL reward signal.
+
+    Positive reward (>0): bump score by +0.02.
+    Negative reward (<0): drop score by -0.02, flag for review if below 0.3.
+
+    Args:
+        db: Database session.
+        tenant_id: Tenant UUID for isolation.
+        entity_ids: List of entity UUIDs involved in the decision.
+        reward: The reward value from feedback.
+
+    Returns:
+        Number of entities updated.
+    """
+    if not entity_ids:
+        return 0
+
+    entities = db.query(KnowledgeEntity).filter(
+        KnowledgeEntity.id.in_(entity_ids),
+        KnowledgeEntity.tenant_id == tenant_id,
+    ).all()
+
+    updated = 0
+    for entity in entities:
+        current_score = entity.data_quality_score if entity.data_quality_score is not None else 0.5
+        if reward > 0:
+            new_score = min(1.0, current_score + 0.02)
+        elif reward < 0:
+            new_score = max(0.0, current_score - 0.02)
+        else:
+            continue
+
+        entity.data_quality_score = new_score
+
+        # Flag for review if quality drops below threshold
+        if new_score < 0.3:
+            tags = entity.tags if isinstance(entity.tags, list) else []
+            if "needs_review" not in tags:
+                tags.append("needs_review")
+                entity.tags = tags
+            logger.info(
+                "Entity %s quality score dropped to %.2f — flagged for review",
+                entity.id, new_score,
+            )
+
+        updated += 1
+
+    if updated:
+        db.flush()
+
+    return updated

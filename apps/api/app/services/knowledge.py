@@ -1,15 +1,19 @@
 """Service for managing knowledge graph entities and relations"""
 import json as _json
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
 
 from app.models.knowledge_entity import KnowledgeEntity
+from app.models.knowledge_entity_history import KnowledgeEntityHistory
+from app.models.knowledge_observation import KnowledgeObservation
 from app.models.knowledge_relation import KnowledgeRelation
+from app.models.embedding import Embedding
 from app.schemas.knowledge_entity import KnowledgeEntityCreate, KnowledgeEntityUpdate
 from app.services import embedding_service
 from app.core.config import settings
@@ -35,6 +39,44 @@ def _safe_embed_entity(db: Session, entity: KnowledgeEntity) -> None:
         )
     except Exception:
         logger.exception("Failed to embed entity %s — skipping", entity.id)
+
+
+# ---------------------------------------------------------------------------
+# Entity History Tracking
+# ---------------------------------------------------------------------------
+
+def create_entity_history(
+    db: Session,
+    entity: KnowledgeEntity,
+    change_reason: str = None,
+    changed_by_platform: str = None,
+) -> KnowledgeEntityHistory:
+    """Snapshot current entity state into a history record before mutation.
+
+    Auto-increments version by querying the max version for the entity_id.
+    """
+    # Get next version number
+    max_version = db.query(func.max(KnowledgeEntityHistory.version)).filter(
+        KnowledgeEntityHistory.entity_id == entity.id,
+    ).scalar() or 0
+    next_version = max_version + 1
+
+    # Snapshot current properties + attributes
+    properties_snapshot = entity.properties if isinstance(entity.properties, dict) else None
+    attributes_snapshot = entity.attributes if isinstance(entity.attributes, dict) else None
+
+    history = KnowledgeEntityHistory(
+        entity_id=entity.id,
+        tenant_id=entity.tenant_id,
+        version=next_version,
+        properties_snapshot=properties_snapshot,
+        attributes_snapshot=attributes_snapshot,
+        change_reason=change_reason,
+        changed_by_platform=changed_by_platform,
+    )
+    db.add(history)
+    db.flush()
+    return history
 
 
 # Entity operations
@@ -146,12 +188,24 @@ def update_entity(
     db: Session,
     entity_id: uuid.UUID,
     tenant_id: uuid.UUID,
-    entity_in: KnowledgeEntityUpdate
+    entity_in: KnowledgeEntityUpdate,
+    change_reason: str = None,
+    changed_by_platform: str = None,
 ) -> Optional[KnowledgeEntity]:
-    """Update an entity."""
+    """Update an entity (snapshots current state to history first)."""
     entity = get_entity(db, entity_id, tenant_id)
     if not entity:
         return None
+
+    # Snapshot current state BEFORE applying changes
+    try:
+        create_entity_history(
+            db, entity,
+            change_reason=change_reason or "entity_updated",
+            changed_by_platform=changed_by_platform,
+        )
+    except Exception:
+        logger.exception("Failed to create entity history for %s — continuing with update", entity_id)
 
     update_data = entity_in.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -474,6 +528,139 @@ def _find_or_create_relation(
     return relation
 
 
+# ---------------------------------------------------------------------------
+# Observation CRUD
+# ---------------------------------------------------------------------------
+
+def create_observation(
+    db: Session,
+    tenant_id: uuid.UUID,
+    observation_text: str,
+    observation_type: str = "fact",
+    source_type: str = "conversation",
+    source_platform: str = None,
+    source_agent: str = None,
+    entity_id: uuid.UUID = None,
+    confidence: float = 1.0,
+) -> KnowledgeObservation:
+    """Create a knowledge observation using the ORM model.
+
+    Auto-embeds via embedding_service and stores the vector directly on the
+    model's embedding column.  Also logs a memory_activity event.
+
+    Returns:
+        The created KnowledgeObservation instance.
+    """
+    observation = KnowledgeObservation(
+        tenant_id=tenant_id,
+        entity_id=entity_id,
+        observation_text=observation_text,
+        observation_type=observation_type,
+        source_type=source_type,
+        source_platform=source_platform,
+        source_agent=source_agent,
+        confidence=confidence,
+    )
+
+    # Generate and store embedding directly on the model
+    try:
+        vec = embedding_service.embed_text(observation_text)
+        if vec is not None:
+            observation.embedding = vec
+    except Exception:
+        logger.debug("Observation embedding generation skipped for new observation")
+
+    db.add(observation)
+    db.flush()
+
+    # Also store in the shared vector_store for cross-content-type search
+    try:
+        embedding_service.embed_and_store(
+            db, tenant_id, "observation", str(observation.id), observation_text,
+        )
+    except Exception:
+        logger.debug("Observation vector_store embedding skipped for %s", observation.id)
+
+    # Log memory activity
+    try:
+        from app.services.memory_activity import log_activity
+        log_activity(
+            db,
+            tenant_id=tenant_id,
+            event_type="observation_created",
+            description=f"{observation_type}: {observation_text[:200]}",
+            source=source_platform or source_type,
+            event_metadata={
+                "observation_id": str(observation.id),
+                "observation_type": observation_type,
+                "entity_id": str(entity_id) if entity_id else None,
+            },
+            entity_id=entity_id,
+        )
+    except Exception:
+        logger.debug("Memory activity log skipped for observation %s", observation.id)
+
+    db.commit()
+    db.refresh(observation)
+    return observation
+
+
+def search_observations(
+    db: Session,
+    tenant_id: uuid.UUID,
+    query_text: str,
+    entity_id: uuid.UUID = None,
+    limit: int = 5,
+) -> List[Dict[str, Any]]:
+    """Semantic search on observation embeddings using pgvector cosine distance.
+
+    Optionally scoped to a specific entity.
+
+    Returns:
+        List of observation dicts with id, text, type, similarity score.
+    """
+    try:
+        query_vec = embedding_service.embed_text(query_text)
+    except Exception:
+        logger.debug("Failed to generate query embedding for observation search")
+        return []
+
+    if query_vec is None:
+        return []
+
+    from pgvector.sqlalchemy import Vector
+
+    # Build query using cosine distance operator
+    cosine_dist = KnowledgeObservation.embedding.cosine_distance(query_vec)
+    q = db.query(
+        KnowledgeObservation,
+        (1 - cosine_dist).label("similarity"),
+    ).filter(
+        KnowledgeObservation.tenant_id == tenant_id,
+        KnowledgeObservation.embedding.isnot(None),
+    )
+
+    if entity_id is not None:
+        q = q.filter(KnowledgeObservation.entity_id == entity_id)
+
+    q = q.order_by(cosine_dist).limit(limit)
+
+    results = []
+    for obs, similarity in q.all():
+        results.append({
+            "id": str(obs.id),
+            "observation_text": obs.observation_text,
+            "observation_type": obs.observation_type,
+            "source_type": obs.source_type,
+            "source_platform": obs.source_platform,
+            "entity_id": str(obs.entity_id) if obs.entity_id else None,
+            "confidence": obs.confidence,
+            "similarity": float(similarity) if similarity is not None else 0.0,
+            "created_at": obs.created_at.isoformat() if obs.created_at else None,
+        })
+    return results
+
+
 def _create_observation(
     db: Session,
     tenant_id: uuid.UUID,
@@ -482,30 +669,16 @@ def _create_observation(
     source_type: str = "git_history",
     entity_id: uuid.UUID = None,
 ) -> None:
-    """Create a knowledge observation and auto-embed it."""
-    obs_id = uuid.uuid4()
-    db.execute(
-        text("""
-            INSERT INTO knowledge_observations
-            (id, tenant_id, entity_id, observation_text, observation_type, source_type, source_platform)
-            VALUES (:id, :tid, :eid, :text, :otype, :stype, 'git')
-        """),
-        {
-            "id": str(obs_id),
-            "tid": str(tenant_id),
-            "eid": str(entity_id) if entity_id else None,
-            "text": observation_text,
-            "otype": observation_type,
-            "stype": source_type,
-        },
+    """Create a knowledge observation (legacy helper — delegates to create_observation)."""
+    create_observation(
+        db,
+        tenant_id=tenant_id,
+        observation_text=observation_text,
+        observation_type=observation_type,
+        source_type=source_type,
+        source_platform="git",
+        entity_id=entity_id,
     )
-    # Auto-embed the observation
-    try:
-        embedding_service.embed_and_store(
-            db, tenant_id, "observation", str(obs_id), observation_text,
-        )
-    except Exception:
-        logger.debug("Observation embedding skipped for %s", obs_id)
 
 
 def store_git_context(
@@ -685,3 +858,190 @@ def store_pr_outcome(
     db.commit()
 
     return {"pr_number": pr_number, "outcome": outcome, "rl_reward": reward}
+
+
+# ---------------------------------------------------------------------------
+# Entity Quality Tracking
+# ---------------------------------------------------------------------------
+
+def increment_reference_count(
+    db: Session,
+    tenant_id: uuid.UUID,
+    entity_names: List[str],
+    response_text: str,
+) -> int:
+    """Scan response text for entity names and increment reference_count.
+
+    Case-insensitive word-boundary matching is used to avoid false positives
+    on very short entity names.
+
+    Args:
+        entity_names: List of entity names to look for.
+        response_text: The agent response text to scan.
+
+    Returns:
+        Number of entities whose reference_count was incremented.
+    """
+    if not entity_names or not response_text:
+        return 0
+
+    response_lower = response_text.lower()
+    incremented = 0
+
+    for name in entity_names:
+        if not name or len(name) < 2:
+            continue
+        # Case-insensitive check
+        if name.lower() in response_lower:
+            entity = db.query(KnowledgeEntity).filter(
+                KnowledgeEntity.tenant_id == tenant_id,
+                func.lower(KnowledgeEntity.name) == name.lower(),
+            ).first()
+            if entity:
+                entity.reference_count = (entity.reference_count or 0) + 1
+                incremented += 1
+
+    if incremented:
+        db.flush()
+
+    return incremented
+
+
+def update_feedback_score(
+    db: Session,
+    tenant_id: uuid.UUID,
+    entity_id: uuid.UUID,
+    feedback_type: str,
+) -> Optional[KnowledgeEntity]:
+    """Update an entity's feedback_score based on user feedback.
+
+    memory_helpful  -> +0.1
+    memory_irrelevant -> -0.1
+    Clamped to [-1.0, 1.0].
+
+    Returns:
+        Updated entity, or None if not found.
+    """
+    feedback_deltas = {
+        "memory_helpful": 0.1,
+        "memory_irrelevant": -0.1,
+    }
+    delta = feedback_deltas.get(feedback_type)
+    if delta is None:
+        return None
+
+    entity = get_entity(db, entity_id, tenant_id)
+    if not entity:
+        return None
+
+    current = entity.feedback_score if entity.feedback_score is not None else 0.0
+    entity.feedback_score = max(-1.0, min(1.0, current + delta))
+    db.flush()
+    return entity
+
+
+def get_quality_stats(db: Session, tenant_id: uuid.UUID) -> Dict[str, Any]:
+    """Compute entity quality statistics for the tenant.
+
+    Returns:
+        Dict with total_entities, embedding_coverage_pct, top_10_by_usefulness,
+        bottom_10, and per_platform_extraction_stats.
+    """
+    total = db.query(func.count(KnowledgeEntity.id)).filter(
+        KnowledgeEntity.tenant_id == tenant_id,
+        KnowledgeEntity.deleted_at.is_(None),
+    ).scalar() or 0
+
+    if total == 0:
+        return {
+            "total_entities": 0,
+            "embedding_coverage_pct": 0.0,
+            "top_10_by_usefulness": [],
+            "bottom_10": [],
+            "per_platform_extraction_stats": [],
+        }
+
+    # Embedding coverage: count entities that have a corresponding embedding row
+    embedded_count = db.query(func.count(Embedding.id)).filter(
+        Embedding.tenant_id == tenant_id,
+        Embedding.content_type == "entity",
+    ).scalar() or 0
+
+    embedding_coverage = round(embedded_count * 100.0 / total, 1) if total > 0 else 0.0
+
+    # Top 10 by usefulness (reference_count + recall_count + feedback_score)
+    top_entities = (
+        db.query(KnowledgeEntity)
+        .filter(
+            KnowledgeEntity.tenant_id == tenant_id,
+            KnowledgeEntity.deleted_at.is_(None),
+        )
+        .order_by(
+            (
+                func.coalesce(KnowledgeEntity.reference_count, 0)
+                + func.coalesce(KnowledgeEntity.recall_count, 0)
+            ).desc(),
+            func.coalesce(KnowledgeEntity.feedback_score, 0).desc(),
+        )
+        .limit(10)
+        .all()
+    )
+
+    # Bottom 10 by quality
+    bottom_entities = (
+        db.query(KnowledgeEntity)
+        .filter(
+            KnowledgeEntity.tenant_id == tenant_id,
+            KnowledgeEntity.deleted_at.is_(None),
+        )
+        .order_by(
+            func.coalesce(KnowledgeEntity.data_quality_score, 0.5).asc(),
+            func.coalesce(KnowledgeEntity.feedback_score, 0).asc(),
+        )
+        .limit(10)
+        .all()
+    )
+
+    def _entity_summary(e: KnowledgeEntity) -> Dict[str, Any]:
+        return {
+            "id": str(e.id),
+            "name": e.name,
+            "entity_type": e.entity_type,
+            "category": e.category,
+            "reference_count": e.reference_count or 0,
+            "recall_count": e.recall_count or 0,
+            "feedback_score": e.feedback_score or 0.0,
+            "data_quality_score": e.data_quality_score,
+        }
+
+    # Per-platform extraction stats
+    platform_stats = (
+        db.query(
+            KnowledgeEntity.extraction_platform,
+            func.count(KnowledgeEntity.id).label("count"),
+            func.avg(KnowledgeEntity.data_quality_score).label("avg_quality"),
+        )
+        .filter(
+            KnowledgeEntity.tenant_id == tenant_id,
+            KnowledgeEntity.deleted_at.is_(None),
+            KnowledgeEntity.extraction_platform.isnot(None),
+        )
+        .group_by(KnowledgeEntity.extraction_platform)
+        .order_by(func.count(KnowledgeEntity.id).desc())
+        .all()
+    )
+
+    return {
+        "total_entities": total,
+        "embedding_coverage_pct": embedding_coverage,
+        "top_10_by_usefulness": [_entity_summary(e) for e in top_entities],
+        "bottom_10": [_entity_summary(e) for e in bottom_entities],
+        "per_platform_extraction_stats": [
+            {
+                "platform": p or "unknown",
+                "count": c,
+                "avg_quality": round(float(q), 3) if q is not None else None,
+            }
+            for p, c, q in platform_stats
+        ],
+    }

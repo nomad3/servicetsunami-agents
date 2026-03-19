@@ -316,6 +316,7 @@ def run_agent_session(
     image_b64: str = "",
     image_mime: str = "",
     db_session_memory: Dict = None,
+    pre_built_memory_context: Dict = None,
 ) -> Tuple[Optional[str], Dict]:
     """Run a full stateless CLI agent session.
 
@@ -374,12 +375,15 @@ def run_agent_session(
         metadata["error"] = err
         return None, metadata
 
-    # 3. Build memory context
-    try:
-        memory_context = build_memory_context_with_git(db, tenant_id, message)
-    except Exception as exc:
-        logger.warning("Memory recall failed for tenant %s: %s", tenant_id, exc)
-        memory_context = {}
+    # 3. Build memory context (reuse pre-built if provided by agent_router)
+    if pre_built_memory_context is not None:
+        memory_context = pre_built_memory_context
+    else:
+        try:
+            memory_context = build_memory_context_with_git(db, tenant_id, message)
+        except Exception as exc:
+            logger.warning("Memory recall failed for tenant %s: %s", tenant_id, exc)
+            memory_context = {}
 
     # 4. Build CLAUDE.md content and MCP config (strings, not files)
     tenant_name = str(tenant_id)

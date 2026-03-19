@@ -192,3 +192,94 @@ def recall(
 ) -> List[Dict]:
     """Broad recall across all content types — convenience wrapper."""
     return search_similar(db, tenant_id, content_types=None, query_text=query, limit=limit)
+
+
+# ------------------------------------------------------------------
+# Targeted semantic search for memory recall engine
+# ------------------------------------------------------------------
+
+def search_entities_semantic(
+    db: Session,
+    tenant_id: uuid.UUID,
+    query_embedding: List[float],
+    limit: int = 30,
+) -> List[Dict]:
+    """Search entities via cosine similarity on embeddings table (content_type='entity').
+
+    Joins with knowledge_entities to return entity metadata.
+    Returns list of dicts with id, name, entity_type, category, description, similarity.
+    """
+    vector_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
+
+    sql = text(f"""
+        SELECT
+            ke.id,
+            ke.name,
+            ke.entity_type,
+            ke.category,
+            ke.description,
+            1 - (e.embedding <=> CAST('{vector_literal}' AS vector)) AS similarity
+        FROM embeddings e
+        JOIN knowledge_entities ke
+            ON CAST(ke.id AS text) = e.content_id
+            AND ke.tenant_id = e.tenant_id
+        WHERE e.tenant_id = CAST(:tenant_id AS uuid)
+          AND e.content_type = 'entity'
+          AND ke.deleted_at IS NULL
+        ORDER BY e.embedding <=> CAST('{vector_literal}' AS vector)
+        LIMIT :lim
+    """)
+
+    rows = db.execute(sql, {"tenant_id": str(tenant_id), "lim": limit}).mappings().all()
+    return [
+        {
+            "id": str(r["id"]),
+            "name": r["name"],
+            "entity_type": r["entity_type"],
+            "category": r["category"] or "",
+            "description": r["description"] or "",
+            "similarity": float(r["similarity"]),
+        }
+        for r in rows
+    ]
+
+
+def search_memories_semantic(
+    db: Session,
+    tenant_id: uuid.UUID,
+    query_embedding: List[float],
+    limit: int = 15,
+) -> List[Dict]:
+    """Search agent_memories by content_embedding (pgvector cosine) directly.
+
+    Returns list of dicts with id, agent_id, memory_type, content, importance, similarity.
+    """
+    vector_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
+
+    sql = text(f"""
+        SELECT
+            id,
+            agent_id,
+            memory_type,
+            content,
+            importance,
+            1 - (content_embedding <=> CAST('{vector_literal}' AS vector)) AS similarity
+        FROM agent_memories
+        WHERE tenant_id = CAST(:tenant_id AS uuid)
+          AND content_embedding IS NOT NULL
+        ORDER BY content_embedding <=> CAST('{vector_literal}' AS vector)
+        LIMIT :lim
+    """)
+
+    rows = db.execute(sql, {"tenant_id": str(tenant_id), "lim": limit}).mappings().all()
+    return [
+        {
+            "id": str(r["id"]),
+            "agent_id": str(r["agent_id"]),
+            "memory_type": r["memory_type"],
+            "content": r["content"],
+            "importance": float(r["importance"]) if r["importance"] else 0.5,
+            "similarity": float(r["similarity"]),
+        }
+        for r in rows
+    ]

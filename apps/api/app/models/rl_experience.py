@@ -27,3 +27,4 @@ class RLExperience(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     rewarded_at = Column(DateTime, nullable=True)
     archived_at = Column(DateTime, nullable=True)
+    span_id = Column(UUID(as_uuid=True), nullable=True)  # Observability correlation

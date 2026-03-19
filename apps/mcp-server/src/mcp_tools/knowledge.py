@@ -280,11 +280,11 @@ async def update_entity(
             await conn.execute(
                 """
                 INSERT INTO knowledge_entity_history
-                (entity_id, version, properties_snapshot, change_reason)
-                SELECT $1, COALESCE(MAX(version), 0) + 1, $2, $3
+                (entity_id, tenant_id, version, properties_snapshot, change_reason, changed_by_platform)
+                SELECT $1, $4, COALESCE(MAX(version), 0) + 1, $2, $3, 'mcp'
                 FROM knowledge_entity_history WHERE entity_id = $1
                 """,
-                entity_id, props, reason or None,
+                entity_id, props, reason or None, tid,
             )
 
         await conn.execute(
@@ -624,6 +624,9 @@ async def record_observation(
     tenant_id: str = "",
     observation_type: str = "fact",
     source_type: str = "conversation",
+    entity_id: str = "",
+    source_platform: str = "",
+    source_agent: str = "",
     ctx: Context = None,
 ) -> dict:
     """Record a raw observation for later entity extraction.
@@ -633,6 +636,9 @@ async def record_observation(
         tenant_id: Tenant UUID (resolved from session if omitted).
         observation_type: Type — fact, opinion, question, or hypothesis (default 'fact').
         source_type: Source — conversation, dataset, or document (default 'conversation').
+        entity_id: Optional entity UUID to link this observation to.
+        source_platform: Platform that generated this observation (e.g. claude_code, gemini_cli, git).
+        source_agent: Agent name/id that created this observation.
         ctx: MCP request context (injected automatically).
 
     Returns:
@@ -640,6 +646,9 @@ async def record_observation(
     """
     tid = resolve_tenant_id(ctx) or tenant_id
     obs_id = str(uuid.uuid4())
+    eid = entity_id or None
+    s_platform = source_platform or None
+    s_agent = source_agent or None
 
     db_url = _get_db_url()
     if not db_url:
@@ -654,20 +663,24 @@ async def record_observation(
                 await conn.execute(
                     """
                     INSERT INTO knowledge_observations
-                    (id, tenant_id, observation_text, observation_type, source_type, embedding)
-                    VALUES ($1, $2, $3, $4, $5, $6::vector)
+                    (id, tenant_id, entity_id, observation_text, observation_type, source_type,
+                     source_platform, source_agent, embedding)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector)
                     """,
-                    obs_id, tid, observation_text, observation_type, source_type, str(embedding),
+                    obs_id, tid, eid, observation_text, observation_type, source_type,
+                    s_platform, s_agent, str(embedding),
                 )
                 return {"observation_id": obs_id}
 
         await conn.execute(
             """
             INSERT INTO knowledge_observations
-            (id, tenant_id, observation_text, observation_type, source_type)
-            VALUES ($1, $2, $3, $4, $5)
+            (id, tenant_id, entity_id, observation_text, observation_type, source_type,
+             source_platform, source_agent)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             """,
-            obs_id, tid, observation_text, observation_type, source_type,
+            obs_id, tid, eid, observation_text, observation_type, source_type,
+            s_platform, s_agent,
         )
     finally:
         await conn.close()
