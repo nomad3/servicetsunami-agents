@@ -20,6 +20,10 @@ WORKSPACE = "/workspace"
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 API_INTERNAL_KEY = os.environ.get("API_INTERNAL_KEY", "").strip()
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://servicetsunami-api").strip()
+CODE_TASK_COMMAND_TIMEOUT_SECONDS = 45 * 60
+CODE_TASK_ACTIVITY_TIMEOUT_MINUTES = 50
+CODE_TASK_SCHEDULE_TIMEOUT_MINUTES = 60
+CODE_TASK_HEARTBEAT_SECONDS = 240
 
 
 @dataclass
@@ -54,6 +58,60 @@ def _run(cmd: str, cwd: str = WORKSPACE, timeout: int = 600, extra_env: dict | N
         logger.error("Command failed: %s\nstderr: %s\nstdout: %s", cmd, result.stderr, result.stdout[:2000])
         raise RuntimeError(f"Command failed: {cmd}\n{error_detail}")
     return result.stdout.strip()
+
+
+def _run_long_command(
+    cmd: list[str],
+    *,
+    cwd: str = WORKSPACE,
+    timeout: int = CODE_TASK_COMMAND_TIMEOUT_SECONDS,
+    extra_env: dict | None = None,
+    heartbeat_message: str,
+    heartbeat_interval: int = 30,
+) -> subprocess.CompletedProcess[str]:
+    """Run a long-lived command while sending periodic Temporal heartbeats."""
+    logger.info("Running long command: %s", " ".join(cmd))
+    env = {**os.environ, **(extra_env or {})}
+    process = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    start = time.monotonic()
+
+    while True:
+        if process.poll() is not None:
+            break
+        elapsed = int(time.monotonic() - start)
+        activity.heartbeat(f"{heartbeat_message} ({elapsed}s elapsed)")
+        if elapsed >= timeout:
+            process.kill()
+            stdout, stderr = process.communicate()
+            logger.error(
+                "Long command timed out after %ss: %s\nstderr: %s\nstdout: %s",
+                timeout,
+                " ".join(cmd),
+                stderr,
+                stdout[:2000],
+            )
+            raise RuntimeError(f"Command timed out after {timeout} seconds: {' '.join(cmd)}")
+        time.sleep(heartbeat_interval)
+
+    stdout, stderr = process.communicate()
+    result = subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+    if result.returncode != 0:
+        error_detail = result.stderr or result.stdout
+        logger.error(
+            "Long command failed: %s\nstderr: %s\nstdout: %s",
+            " ".join(cmd),
+            result.stderr,
+            result.stdout[:2000],
+        )
+        raise RuntimeError(f"Command failed: {' '.join(cmd)}\n{error_detail}")
+    return result
 
 
 def _extract_goal(task_description: str) -> str:
@@ -201,7 +259,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
             "Do NOT create documentation files, READMEs, or test scripts in the root folder. "
             "Make minimal, focused changes — only what the task requires."
         )
-        claude_result = subprocess.run(
+        claude_result = _run_long_command(
             [
                 "claude", "-p", prompt,
                 "--output-format", "json",
@@ -209,8 +267,10 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
                 "--append-system-prompt", system_prompt,
                 "--dangerously-skip-permissions",
             ],
-            cwd=WORKSPACE, capture_output=True, text=True, timeout=600,
-            env={**os.environ, **claude_env},
+            cwd=WORKSPACE,
+            timeout=CODE_TASK_COMMAND_TIMEOUT_SECONDS,
+            extra_env=claude_env,
+            heartbeat_message="Claude Code is still running",
         )
         # Clean up prompt file
         try:
@@ -721,8 +781,8 @@ class CodeTaskWorkflow:
         return await workflow.execute_activity(
             execute_code_task,
             task_input,
-            start_to_close_timeout=timedelta(minutes=15),
-            schedule_to_close_timeout=timedelta(minutes=45),
-            heartbeat_timeout=timedelta(seconds=120),
+            start_to_close_timeout=timedelta(minutes=CODE_TASK_ACTIVITY_TIMEOUT_MINUTES),
+            schedule_to_close_timeout=timedelta(minutes=CODE_TASK_SCHEDULE_TIMEOUT_MINUTES),
+            heartbeat_timeout=timedelta(seconds=CODE_TASK_HEARTBEAT_SECONDS),
             retry_policy=retry_policy,
         )
