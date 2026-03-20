@@ -116,6 +116,16 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
              "help": "Run 'claude setup-token' in your terminal and paste the token (valid 1 year)"},
         ],
     },
+    "codex": {
+        "display_name": "Codex",
+        "description": "Connect your ChatGPT / Codex subscription for AI agent chat",
+        "icon": "FaTerminal",
+        "auth_type": "device_auth",
+        "credentials": [
+            {"key": "auth_json", "label": "ChatGPT Auth JSON", "type": "password", "required": True,
+             "help": "Run 'codex login' or 'codex login --device-auth'. For headless use, complete login in a browser on another machine, then paste the contents of ~/.codex/auth.json here."},
+        ],
+    },
     "meta_ads": {
         "display_name": "Meta Ads",
         "description": "Manage Facebook & Instagram ad campaigns, view insights, monitor competitor ads",

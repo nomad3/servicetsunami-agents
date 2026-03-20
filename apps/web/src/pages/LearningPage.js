@@ -879,7 +879,7 @@ function PlatformPerformanceTab({ t }) {
             {data.map((item, idx) => (
               <tr key={idx} style={{ borderBottom: '1px solid var(--color-border)' }}>
                 <td style={{ color: 'var(--color-foreground)', fontWeight: 500, border: 'none', paddingTop: 10, paddingBottom: 10 }}>
-                  <Badge bg={item.platform === 'claude_code' ? 'primary' : item.platform === 'gemini_cli' ? 'success' : 'secondary'} style={{ fontSize: '0.7rem' }}>
+                  <Badge bg={item.platform === 'claude_code' ? 'primary' : item.platform === 'codex' ? 'dark' : item.platform === 'gemini_cli' ? 'success' : 'secondary'} style={{ fontSize: '0.7rem' }}>
                     {(item.platform || 'unknown').replace(/_/g, ' ')}
                   </Badge>
                 </td>

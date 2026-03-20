@@ -1,13 +1,11 @@
-"""Temporal workflow and activities for Claude Code tasks."""
+"""Temporal workflows and activities for CLI-backed agent tasks."""
 
 import json
 import logging
 import os
 import re
 import subprocess
-import tempfile
 import time
-import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Optional
@@ -93,19 +91,24 @@ def _detect_tag(task_description: str) -> str:
 
 def _fetch_claude_token(tenant_id: str) -> str:
     """Fetch the Claude Code session token from the API's internal endpoint."""
-    url = f"{API_BASE_URL}/api/v1/oauth/internal/token/claude_code"  # integration_name=claude_code
-    headers = {"X-Internal-Key": API_INTERNAL_KEY}
-    params = {"tenant_id": tenant_id}
-
-    with httpx.Client(timeout=10.0) as client:
-        resp = client.get(url, headers=headers, params=params)
-        resp.raise_for_status()
-        data = resp.json()
+    data = _fetch_integration_credentials("claude_code", tenant_id)
 
     token = data.get("session_token")
     if not token:
         raise RuntimeError(f"No session_token in response: {data}")
     return token
+
+
+def _fetch_integration_credentials(integration_name: str, tenant_id: str) -> dict:
+    """Fetch decrypted tenant credentials for an integration from the API."""
+    url = f"{API_BASE_URL}/api/v1/oauth/internal/token/{integration_name}"
+    headers = {"X-Internal-Key": API_INTERNAL_KEY or "dev_mcp_key"}
+    params = {"tenant_id": tenant_id}
+
+    with httpx.Client(timeout=10.0) as client:
+        resp = client.get(url, headers=headers, params=params)
+        resp.raise_for_status()
+        return resp.json()
 
 
 def _log_code_task_rl(
@@ -339,13 +342,14 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
 
 @dataclass
 class ChatCliInput:
+    platform: str
     message: str
     tenant_id: str
-    claude_md_content: str = ""
+    instruction_md_content: str = ""
     mcp_config: str = ""  # JSON string
     image_b64: str = ""   # Base64-encoded image (optional)
     image_mime: str = ""   # e.g. "image/jpeg"
-    session_id: str = ""  # Claude Code session ID for continuity
+    session_id: str = ""  # Reserved for future platform-native session continuity
 
 
 @dataclass
@@ -358,18 +362,8 @@ class ChatCliResult:
 
 @activity.defn
 async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
-    """Run claude -p with session persistence via --session-id / --resume.
-
-    First message in a session uses --session-id to create it.
-    Subsequent messages use --resume to continue with full context.
-    Sessions persist in ~/.claude/projects/ inside the container.
-    """
+    """Run a conversational CLI turn through the selected provider."""
     try:
-        # Fetch tenant's OAuth token
-        token = _fetch_claude_token(task_input.tenant_id)
-        if not token:
-            return ChatCliResult(response_text="", success=False, error="Claude Code not connected")
-
         # Fetch GitHub token from vault for git operations
         github_token = _fetch_github_token(task_input.tenant_id)
         if github_token:
@@ -390,87 +384,176 @@ async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
         session_dir = os.path.join("/tmp", "st_sessions", task_input.tenant_id)
         os.makedirs(session_dir, exist_ok=True)
 
-        # Always write CLAUDE.md — needed for --resume retry fallback
-        if task_input.claude_md_content:
-            with open(os.path.join(session_dir, "CLAUDE.md"), "w") as f:
-                f.write(task_input.claude_md_content)
-
-        # Write MCP config
-        if task_input.mcp_config:
-            with open(os.path.join(session_dir, "mcp.json"), "w") as f:
-                f.write(task_input.mcp_config)
-
         # Save image if provided
+        image_path = ""
         if task_input.image_b64 and task_input.image_mime:
             import base64 as b64
             ext = task_input.image_mime.split("/")[-1].replace("jpeg", "jpg")
-            img_path = os.path.join(session_dir, f"user_image.{ext}")
-            with open(img_path, "wb") as f:
+            image_path = os.path.join(session_dir, f"user_image.{ext}")
+            with open(image_path, "wb") as f:
                 f.write(b64.b64decode(task_input.image_b64))
 
-        # Build command — full dev capabilities (git, edit, bash, MCP tools)
-        cmd = [
-            "claude", "-p", task_input.message,
-            "--output-format", "json",
-            "--model", "opus",
-            "--allowedTools", "mcp__servicetsunami__*,Bash,Read,Edit,Write",
-            "--add-dir", session_dir,
-        ]
-
-        # Give access to the repo workspace for code changes
-        if os.path.isdir(WORKSPACE):
-            cmd.extend(["--add-dir", WORKSPACE])
-
-        # Always inject system prompt — claude -p is stateless, --resume
-        # doesn't work in print mode. Context comes from conversation history
-        # injected in the CLAUDE.md by the API.
-        claude_md_path = os.path.join(session_dir, "CLAUDE.md")
-        if os.path.exists(claude_md_path):
-            with open(claude_md_path) as f:
-                system_prompt = f.read()
-            if system_prompt.strip():
-                cmd.extend(["--append-system-prompt", system_prompt[:20000]])
-
-        # MCP config
-        mcp_path = os.path.join(session_dir, "mcp.json")
-        if os.path.exists(mcp_path):
-            cmd.extend(["--mcp-config", mcp_path])
-
-        env = os.environ.copy()
-        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
-
-        result = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=1500, env=env, cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+        if task_input.platform == "claude_code":
+            return _execute_claude_chat(task_input, session_dir)
+        if task_input.platform == "codex":
+            return _execute_codex_chat(task_input, session_dir, image_path)
+        return ChatCliResult(
+            response_text="",
+            success=False,
+            error=f"Unsupported CLI platform '{task_input.platform}'",
         )
 
-        if result.returncode != 0:
-            err = (result.stderr or result.stdout or "")[:1000]
-            return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
-
-        raw = result.stdout.strip()
-        if not raw:
-            return ChatCliResult(response_text="", success=False, error="CLI produced no output")
-
-        # Parse JSON output
-        try:
-            data = json.loads(raw)
-            text = data.get("result") or data.get("response") or data.get("content") or data.get("text") or raw
-            meta = {
-                "input_tokens": (data.get("usage") or {}).get("input_tokens", 0),
-                "output_tokens": (data.get("usage") or {}).get("output_tokens", 0),
-                "model": data.get("model"),
-                "claude_session_id": data.get("session_id", ""),
-                "cost_usd": data.get("total_cost_usd", 0),
-            }
-            return ChatCliResult(response_text=text, success=True, metadata=meta)
-        except json.JSONDecodeError:
-            return ChatCliResult(response_text=raw, success=True)
-
     except subprocess.TimeoutExpired:
-        return ChatCliResult(response_text="", success=False, error="CLI timed out (5 min)")
+        return ChatCliResult(response_text="", success=False, error="CLI timed out")
     except Exception as e:
         return ChatCliResult(response_text="", success=False, error=str(e))
+
+
+def _execute_claude_chat(task_input: ChatCliInput, session_dir: str) -> ChatCliResult:
+    token = _fetch_claude_token(task_input.tenant_id)
+    if not token:
+        return ChatCliResult(response_text="", success=False, error="Claude Code not connected")
+
+    if task_input.instruction_md_content:
+        with open(os.path.join(session_dir, "CLAUDE.md"), "w") as f:
+            f.write(task_input.instruction_md_content)
+
+    if task_input.mcp_config:
+        with open(os.path.join(session_dir, "mcp.json"), "w") as f:
+            f.write(task_input.mcp_config)
+
+    cmd = [
+        "claude", "-p", task_input.message,
+        "--output-format", "json",
+        "--model", "opus",
+        "--allowedTools", "mcp__servicetsunami__*,Bash,Read,Edit,Write",
+        "--add-dir", session_dir,
+    ]
+    if os.path.isdir(WORKSPACE):
+        cmd.extend(["--add-dir", WORKSPACE])
+
+    claude_md_path = os.path.join(session_dir, "CLAUDE.md")
+    if os.path.exists(claude_md_path):
+        with open(claude_md_path) as f:
+            system_prompt = f.read()
+        if system_prompt.strip():
+            cmd.extend(["--append-system-prompt", system_prompt[:20000]])
+
+    mcp_path = os.path.join(session_dir, "mcp.json")
+    if os.path.exists(mcp_path):
+        cmd.extend(["--mcp-config", mcp_path])
+
+    env = os.environ.copy()
+    env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=1500,
+        env=env,
+        cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+    )
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "")[:1000]
+        return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
+
+    raw = result.stdout.strip()
+    if not raw:
+        return ChatCliResult(response_text="", success=False, error="CLI produced no output")
+
+    try:
+        data = json.loads(raw)
+        text = data.get("result") or data.get("response") or data.get("content") or data.get("text") or raw
+        meta = {
+            "platform": "claude_code",
+            "input_tokens": (data.get("usage") or {}).get("input_tokens", 0),
+            "output_tokens": (data.get("usage") or {}).get("output_tokens", 0),
+            "model": data.get("model"),
+            "claude_session_id": data.get("session_id", ""),
+            "cost_usd": data.get("total_cost_usd", 0),
+        }
+        return ChatCliResult(response_text=text, success=True, metadata=meta)
+    except json.JSONDecodeError:
+        return ChatCliResult(
+            response_text=raw,
+            success=True,
+            metadata={"platform": "claude_code"},
+        )
+
+
+def _execute_codex_chat(task_input: ChatCliInput, session_dir: str, image_path: str) -> ChatCliResult:
+    try:
+        creds = _fetch_integration_credentials("codex", task_input.tenant_id)
+    except Exception as exc:
+        return ChatCliResult(response_text="", success=False, error=f"Failed to load Codex credentials: {exc}")
+
+    raw_auth = creds.get("auth_json") or creds.get("session_token")
+    if not raw_auth:
+        return ChatCliResult(response_text="", success=False, error="Codex not connected")
+
+    try:
+        auth_payload = raw_auth if isinstance(raw_auth, dict) else json.loads(raw_auth)
+    except json.JSONDecodeError:
+        return ChatCliResult(
+            response_text="",
+            success=False,
+            error="Codex credential must be valid ~/.codex/auth.json contents from 'codex login' or 'codex login --device-auth'",
+        )
+
+    codex_home = _prepare_codex_home(session_dir, auth_payload, task_input.mcp_config)
+    prompt = task_input.message
+    if task_input.instruction_md_content.strip():
+        prompt = f"{task_input.instruction_md_content.strip()}\n\n# User Request\n\n{task_input.message}"
+
+    output_path = os.path.join(session_dir, "codex-last-message.txt")
+    cmd = [
+        "codex",
+        "exec",
+        prompt,
+        "--json",
+        "--output-last-message",
+        output_path,
+        "--dangerously-bypass-approvals-and-sandbox",
+        "-C",
+        WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+    ]
+
+    if os.path.isdir(WORKSPACE):
+        cmd.extend(["--add-dir", session_dir])
+    else:
+        cmd.extend(["--skip-git-repo-check"])
+
+    if image_path:
+        cmd.extend(["--image", image_path])
+
+    env = os.environ.copy()
+    env["CODEX_HOME"] = codex_home
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=1500,
+        env=env,
+        cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+    )
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "")[:2000]
+        return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
+
+    response_text = ""
+    if os.path.exists(output_path):
+        with open(output_path) as f:
+            response_text = f.read().strip()
+    if not response_text:
+        response_text = _extract_codex_last_message(result.stdout)
+    if not response_text:
+        return ChatCliResult(response_text="", success=False, error="Codex produced no final response")
+
+    metadata = _extract_codex_metadata(result.stdout)
+    metadata["platform"] = "codex"
+    return ChatCliResult(response_text=response_text, success=True, metadata=metadata)
 
 
 def _fetch_github_token(tenant_id: str) -> Optional[str]:
@@ -505,6 +588,100 @@ def _fetch_claude_token(tenant_id: str) -> Optional[str]:
     except Exception as e:
         logger.error("Failed to fetch claude token: %s", e)
     return None
+
+
+def _prepare_codex_home(session_dir: str, auth_payload: dict, mcp_config_json: str) -> str:
+    """Materialize tenant-scoped CODEX_HOME with auth.json and MCP config.toml."""
+    codex_home = os.path.join(session_dir, ".codex")
+    os.makedirs(codex_home, exist_ok=True)
+
+    with open(os.path.join(codex_home, "auth.json"), "w") as f:
+        json.dump(auth_payload, f)
+
+    config_lines = [
+        f'[projects."{WORKSPACE if os.path.isdir(WORKSPACE) else session_dir}"]',
+        'trust_level = "trusted"',
+        "",
+        f'[projects."{session_dir}"]',
+        'trust_level = "trusted"',
+    ]
+
+    if mcp_config_json:
+        config_lines.extend(_codex_mcp_config_lines(mcp_config_json))
+
+    with open(os.path.join(codex_home, "config.toml"), "w") as f:
+        f.write("\n".join(config_lines).strip() + "\n")
+
+    return codex_home
+
+
+def _codex_mcp_config_lines(mcp_config_json: str) -> list[str]:
+    """Convert the shared MCP JSON config into Codex config.toml entries."""
+    data = json.loads(mcp_config_json)
+    servers = data.get("mcpServers") or {}
+    lines: list[str] = []
+    for server_name, config in servers.items():
+        if not isinstance(config, dict):
+            continue
+        lines.append("")
+        lines.append(f"[mcp_servers.{server_name}]")
+        lines.append('transport = "streamable_http"')
+        if config.get("url"):
+            lines.append(f'url = "{_toml_escape(str(config["url"]))}"')
+        headers = config.get("headers") or {}
+        if headers:
+            lines.append(f"http_headers = {_toml_inline_table(headers)}")
+    return lines
+
+
+def _toml_inline_table(values: dict) -> str:
+    items = [f'"{_toml_escape(str(key))}" = "{_toml_escape(str(value))}"' for key, value in values.items()]
+    return "{ " + ", ".join(items) + " }"
+
+
+def _toml_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _extract_codex_last_message(raw_output: str) -> str:
+    """Best-effort fallback when --output-last-message is unavailable."""
+    for line in reversed(raw_output.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            msg = event.get("last_agent_message") or event.get("message")
+            if isinstance(msg, str) and msg.strip():
+                return msg.strip()
+    return ""
+
+
+def _extract_codex_metadata(raw_output: str) -> dict:
+    """Extract a minimal metadata snapshot from Codex JSONL events."""
+    metadata = {"input_tokens": 0, "output_tokens": 0, "model": None}
+    for line in raw_output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if metadata["model"] is None and isinstance(event.get("model"), str):
+            metadata["model"] = event["model"]
+        token_usage = event.get("token_usage") or event.get("total_token_usage") or {}
+        if isinstance(token_usage, dict):
+            metadata["input_tokens"] = token_usage.get("input_tokens", metadata["input_tokens"])
+            metadata["output_tokens"] = token_usage.get("output_tokens", metadata["output_tokens"])
+        if event.get("type") == "session_configured":
+            metadata["model"] = event.get("model", metadata["model"])
+    return metadata
 
 
 @workflow.defn

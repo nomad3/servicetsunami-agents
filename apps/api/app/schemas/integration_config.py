@@ -62,5 +62,5 @@ class IntegrationRegistryEntry(BaseModel):
     description: str
     icon: str
     credentials: list  # list of {key, label, type, required}
-    auth_type: str = "manual"  # "manual" | "oauth"
+    auth_type: str = "manual"  # "manual" | "oauth" | "device_auth"
     oauth_provider: Optional[str] = None  # "google" | "github" | "linkedin" | "microsoft"

@@ -16,6 +16,9 @@ const integrationConfigService = {
       params: accountEmail ? { account_email: accountEmail } : {},
     }),
   oauthStatus: (provider) => api.get(`/oauth/${provider}/status`),
+  codexAuthStart: () => api.post('/codex-auth/start'),
+  codexAuthStatus: () => api.get('/codex-auth/status'),
+  codexAuthCancel: () => api.post('/codex-auth/cancel'),
 };
 
 export default integrationConfigService;

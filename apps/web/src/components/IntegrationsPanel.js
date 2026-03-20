@@ -70,6 +70,7 @@ const SKILL_COLORS = {
   linear: '#5E6AD2',
   linkedin: '#0A66C2',
   claude_code: '#D97706',
+  codex: '#111827',
 };
 
 // Provider brand colors and icons for OAuth buttons
@@ -93,6 +94,7 @@ const IntegrationsPanel = () => {
   const [oauthStatuses, setOauthStatuses] = useState({});
   const [credentialStatuses, setCredentialStatuses] = useState({});
   const [connectingProvider, setConnectingProvider] = useState(null);
+  const [codexAuthState, setCodexAuthState] = useState({ status: 'idle', connected: false });
   const [monitorRunning, setMonitorRunning] = useState(false);
 
   const fetchData = useCallback(async () => {
@@ -146,6 +148,13 @@ const IntegrationsPanel = () => {
       );
       setCredentialStatuses(credStatuses);
 
+      try {
+        const codexRes = await integrationConfigService.codexAuthStatus();
+        setCodexAuthState(codexRes.data || { status: 'idle', connected: false });
+      } catch {
+        setCodexAuthState({ status: 'idle', connected: false });
+      }
+
       // Check inbox monitor status if Google is connected
       if (statuses.google?.connected) {
         try {
@@ -166,6 +175,32 @@ const IntegrationsPanel = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!['starting', 'pending'].includes(codexAuthState?.status)) return undefined;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await integrationConfigService.codexAuthStatus();
+        const nextState = res.data || { status: 'idle', connected: false };
+        setCodexAuthState(nextState);
+
+        if (nextState.status === 'connected') {
+          setSuccess('Connected Codex via ChatGPT');
+          setTimeout(() => setSuccess(null), 4000);
+          fetchData();
+        } else if (nextState.status === 'failed') {
+          setError(nextState.error || 'Codex login failed');
+          setTimeout(() => setError(null), 6000);
+        }
+      } catch {
+        setError('Failed to check Codex login status');
+        setTimeout(() => setError(null), 6000);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [codexAuthState?.status, fetchData]);
 
   // Listen for OAuth popup messages
   useEffect(() => {
@@ -228,6 +263,73 @@ const IntegrationsPanel = () => {
       setTimeout(() => setError(null), 5000);
     } finally {
       setSaving(null);
+    }
+  };
+
+  const handleCodexConnect = async () => {
+    try {
+      setConnectingProvider('codex');
+      const res = await integrationConfigService.codexAuthStart();
+      const nextState = res.data || { status: 'idle', connected: false };
+      setCodexAuthState(nextState);
+
+      if (nextState.verification_url) {
+        window.open(nextState.verification_url, 'codex-device-auth', 'width=700,height=820,scrollbars=yes');
+      }
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Codex login not available';
+      setError(detail);
+      setTimeout(() => setError(null), 6000);
+      setConnectingProvider(null);
+    } finally {
+      setConnectingProvider(null);
+    }
+  };
+
+  const handleCodexCancel = async () => {
+    try {
+      setSaving('codex-cancel');
+      const res = await integrationConfigService.codexAuthCancel();
+      setCodexAuthState(res.data || { status: 'cancelled', connected: false });
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Failed to cancel Codex login';
+      setError(detail);
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleCodexDisconnect = async () => {
+    const config = getConfigForSkill('codex');
+    if (!config) return;
+
+    try {
+      setSaving('codex-disconnect');
+      const storedKeys = credentialStatuses.codex || [];
+      const keysToRevoke = storedKeys.filter((key) => ['auth_json', 'session_token'].includes(key));
+      await Promise.all(keysToRevoke.map((key) => integrationConfigService.revokeCredential(config.id, key)));
+      setCodexAuthState({ status: 'idle', connected: false });
+      setSuccess('Disconnected Codex');
+      setTimeout(() => setSuccess(null), 3000);
+      await fetchData();
+    } catch (err) {
+      setError('Failed to disconnect Codex');
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleCopyCodexCode = async () => {
+    if (!codexAuthState?.user_code) return;
+    try {
+      await navigator.clipboard.writeText(codexAuthState.user_code);
+      setSuccess('Copied Codex one-time code');
+      setTimeout(() => setSuccess(null), 2500);
+    } catch {
+      setError('Failed to copy Codex code');
+      setTimeout(() => setError(null), 4000);
     }
   };
 
@@ -501,6 +603,140 @@ const IntegrationsPanel = () => {
     );
   };
 
+  const renderCodexExpanded = (skill) => {
+    const config = getConfigForSkill(skill.integration_name);
+    const storedKeys = credentialStatuses[skill.integration_name] || [];
+    const hasStoredAuth = storedKeys.includes('auth_json') || storedKeys.includes('session_token');
+    const isConnected = codexAuthState.connected || hasStoredAuth;
+    const isPending = ['starting', 'pending'].includes(codexAuthState.status);
+    const isConnecting = connectingProvider === 'codex';
+    const verificationUrl = codexAuthState.verification_url || 'https://auth.openai.com/codex/device';
+
+    return (
+      <div className="py-2">
+        {isConnected && (
+          <div
+            className="d-flex align-items-center justify-content-between mb-3 p-3"
+            style={{
+              border: '1px solid rgba(45,157,120,0.25)',
+              borderRadius: 10,
+              background: 'rgba(45,157,120,0.08)',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-foreground)' }}>
+                Connected with ChatGPT
+              </div>
+              <div style={{ fontSize: '0.74rem', color: 'var(--color-muted)' }}>
+                Codex auth.json is stored in the tenant vault
+              </div>
+            </div>
+            {!!config && (
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={handleCodexDisconnect}
+                disabled={saving === 'codex-disconnect'}
+              >
+                Disconnect
+              </Button>
+            )}
+          </div>
+        )}
+
+        {isPending && (
+          <Alert variant="info" className="mb-3" style={{ fontSize: '0.82rem' }}>
+            <div className="fw-semibold mb-2">Finish Codex sign-in</div>
+            <div className="mb-2">
+              Open{' '}
+              <a href={verificationUrl} target="_blank" rel="noreferrer">
+                {verificationUrl}
+              </a>
+              {' '}and approve access with your ChatGPT account.
+            </div>
+            {codexAuthState.user_code && (
+              <div
+                className="d-flex align-items-center justify-content-between px-3 py-2"
+                style={{
+                  borderRadius: 8,
+                  background: 'rgba(17,24,39,0.08)',
+                  border: '1px dashed rgba(17,24,39,0.2)',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--color-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    One-time code
+                  </div>
+                  <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-foreground)', letterSpacing: '0.08em' }}>
+                    {codexAuthState.user_code}
+                  </div>
+                </div>
+                <Button variant="outline-secondary" size="sm" onClick={handleCopyCodexCode}>
+                  Copy code
+                </Button>
+              </div>
+            )}
+          </Alert>
+        )}
+
+        {codexAuthState.status === 'failed' && codexAuthState.error && (
+          <Alert variant="danger" className="mb-3" style={{ fontSize: '0.8rem' }}>
+            {codexAuthState.error}
+          </Alert>
+        )}
+
+        <div className="d-flex gap-2">
+          <Button
+            size="sm"
+            onClick={handleCodexConnect}
+            disabled={isConnecting}
+            style={{
+              background: '#111827',
+              color: '#fff',
+              border: 'none',
+              fontWeight: 500,
+              fontSize: '0.85rem',
+              padding: '8px 16px',
+              borderRadius: 6,
+            }}
+          >
+            {isConnecting ? (
+              <Spinner
+                animation="border"
+                size="sm"
+                style={{ width: 14, height: 14, borderWidth: 1.5 }}
+                className="me-2"
+              />
+            ) : (
+              <FaTerminal className="me-2" size={14} />
+            )}
+            {isConnected ? 'Reconnect Codex' : 'Connect with ChatGPT'}
+          </Button>
+
+          {isPending && (
+            <>
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                onClick={() => window.open(verificationUrl, 'codex-device-auth', 'width=700,height=820,scrollbars=yes')}
+              >
+                Open sign-in page
+              </Button>
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={handleCodexCancel}
+                disabled={saving === 'codex-cancel'}
+              >
+                Cancel
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // ---------------------------------------------------------------------------
   // Skill card renderer
   // ---------------------------------------------------------------------------
@@ -508,11 +744,22 @@ const IntegrationsPanel = () => {
     const config = getConfigForSkill(skill.integration_name);
     const isExpanded = expandedSkill === skill.integration_name;
     const isOAuth = skill.auth_type === 'oauth';
+    const isDeviceAuth = skill.auth_type === 'device_auth';
     const providerStatus = isOAuth
       ? (oauthStatuses[skill.oauth_provider] || { connected: false, accounts: [] })
       : { connected: false, accounts: [] };
-    const isConfigured = isOAuth ? providerStatus.connected : !!config;
-    const isEnabled = isOAuth ? providerStatus.connected : (config?.enabled ?? false);
+    const storedKeys = credentialStatuses[skill.integration_name] || [];
+    const hasStoredCredentials = storedKeys.includes('auth_json') || storedKeys.includes('session_token') || storedKeys.length > 0;
+    const isConfigured = isOAuth
+      ? providerStatus.connected
+      : isDeviceAuth
+        ? (skill.integration_name === 'codex' ? (codexAuthState.connected || hasStoredCredentials) : hasStoredCredentials)
+        : !!config;
+    const isEnabled = isOAuth
+      ? providerStatus.connected
+      : isDeviceAuth
+        ? (config?.enabled ?? isConfigured)
+        : (config?.enabled ?? false);
     const accountCount = isOAuth ? providerStatus.accounts.length : 0;
     const accentColor = SKILL_COLORS[skill.integration_name] || '#6C757D';
     const formValues = credentialForms[skill.integration_name] || {};
@@ -536,56 +783,82 @@ const IntegrationsPanel = () => {
             onClick={() => handleCardClick(skill.integration_name)}
             style={{ padding: '1rem 1.25rem' }}
           >
-            <div className="d-flex align-items-center justify-content-between">
-              <div className="d-flex align-items-center gap-3">
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '44px minmax(0, 1fr)',
+                gap: '0.75rem 1rem',
+                alignItems: 'start',
+              }}
+            >
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 10,
+                  background: `${accentColor}22`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: accentColor,
+                  flexShrink: 0,
+                  gridRow: '1 / span 2',
+                }}
+              >
+                {getIcon(skill.icon)}
+              </div>
+              <div style={{ minWidth: 0 }}>
                 <div
+                  className="fw-semibold"
                   style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 10,
-                    background: `${accentColor}22`,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: accentColor,
-                    flexShrink: 0,
+                    color: 'var(--color-foreground)',
+                    fontSize: '0.95rem',
+                    lineHeight: 1.2,
+                    minWidth: 0,
+                    marginBottom: '0.25rem',
                   }}
                 >
-                  {getIcon(skill.icon)}
+                  {skill.display_name}
                 </div>
-                <div>
-                  <div
-                    className="fw-semibold"
-                    style={{ color: 'var(--color-foreground)', fontSize: '0.95rem' }}
-                  >
-                    {skill.display_name}
-                  </div>
-                  <div
-                    className="text-muted"
-                    style={{ fontSize: '0.78rem', lineHeight: 1.3 }}
-                  >
-                    {skill.description}
-                  </div>
+                <div
+                  className="text-muted"
+                  style={{
+                    fontSize: '0.78rem',
+                    lineHeight: 1.35,
+                    minWidth: 0,
+                    minHeight: '3.15rem',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 3,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    overflowWrap: 'anywhere',
+                  }}
+                >
+                  {skill.description}
                 </div>
-              </div>
-              <div className="d-flex align-items-center gap-2">
                 {isConfigured && (
-                  <Badge
-                    bg={isEnabled ? 'success' : 'secondary'}
-                    style={{ fontSize: '0.68rem' }}
-                  >
-                    {isEnabled ? (
-                      <>
-                        <FaCheckCircle size={8} className="me-1" />
-                        {isOAuth && accountCount > 1
-                          ? `${accountCount} accounts`
-                          : 'Connected'
-                        }
-                      </>
-                    ) : (
-                      'Disabled'
-                    )}
-                  </Badge>
+                  <div style={{ marginTop: '0.6rem' }}>
+                    <Badge
+                      bg={isEnabled ? 'success' : 'secondary'}
+                      style={{
+                        fontSize: '0.68rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      {isEnabled ? (
+                        <>
+                          <FaCheckCircle size={8} className="me-1" />
+                          {isOAuth && accountCount > 1
+                            ? `${accountCount} accounts`
+                            : 'Connected'
+                          }
+                        </>
+                      ) : (
+                        'Disabled'
+                      )}
+                    </Badge>
+                  </div>
                 )}
               </div>
             </div>
@@ -603,8 +876,10 @@ const IntegrationsPanel = () => {
               {/* OAuth skills */}
               {isOAuth && renderOAuthExpanded(skill)}
 
+              {isDeviceAuth && skill.integration_name === 'codex' && renderCodexExpanded(skill)}
+
               {/* Non-OAuth skills: manual credential flow */}
-              {!isOAuth && (
+              {!isOAuth && !isDeviceAuth && (
                 <>
                   {/* Enable/Disable Toggle */}
                   <div className="d-flex align-items-center justify-content-between mb-3">
@@ -811,9 +1086,17 @@ const IntegrationsPanel = () => {
   };
 
   // Count total active connections (OAuth accounts + manual configs)
-  const totalActive = Object.values(oauthStatuses).reduce(
-    (sum, s) => sum + (s.accounts?.length || 0), 0
-  ) + configs.filter((c) => c.enabled).length;
+  const totalActive =
+    Object.values(oauthStatuses).reduce((sum, s) => sum + (s.accounts?.length || 0), 0) +
+    configs.filter((c) => {
+      const entry = registry.find((item) => item.integration_name === c.integration_name);
+      return c.enabled && entry && entry.auth_type !== 'oauth' && entry.auth_type !== 'device_auth';
+    }).length +
+    registry.filter((item) => {
+      if (item.auth_type !== 'device_auth') return false;
+      const storedKeys = credentialStatuses[item.integration_name] || [];
+      return storedKeys.includes('auth_json') || storedKeys.includes('session_token');
+    }).length;
 
   return (
     <Card

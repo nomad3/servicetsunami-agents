@@ -8,10 +8,9 @@ import uuid
 from typing import Optional, Tuple, Dict, Any, List
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text
+from sqlalchemy import text
 
 from app.models.tenant_features import TenantFeatures
-from app.models.rl_experience import RLExperience
 from app.services.cli_session_manager import run_agent_session
 from app.services import rl_experience_service
 from app.services.memory_recall import build_memory_context_with_git
@@ -195,11 +194,12 @@ def route_and_execute(
     )
 
     # Execute on the selected platform
-    if platform == "claude_code":
+    if platform in {"claude_code", "codex"}:
         return run_agent_session(
             db,
             tenant_id=tenant_id,
             user_id=user_id,
+            platform=platform,
             agent_slug=agent_slug,
             message=message,
             channel=channel,
@@ -211,5 +211,5 @@ def route_and_execute(
             pre_built_memory_context=pre_built_memory_context,
         )
 
-    # Future: gemini_cli, codex_cli, etc.
+    # Future: gemini_cli and additional providers.
     return None, {"error": f"Platform '{platform}' not yet supported"}

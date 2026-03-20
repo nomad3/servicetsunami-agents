@@ -39,8 +39,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     libmagic1 \
     curl \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
+
+# Install Codex CLI for device-auth flows used by local Docker Compose / API
+RUN npm install -g @openai/codex
 
 WORKDIR /app
 

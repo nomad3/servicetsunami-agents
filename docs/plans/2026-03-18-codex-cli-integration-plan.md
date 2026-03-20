@@ -34,7 +34,7 @@ Codex should be added as the second CLI platform, not as a separate architecture
 These are the assumptions this plan is built on:
 
 1. Codex authentication will be tenant-owned and subscription-backed, analogous to Claude Code.
-2. The stored credential will be treated as a vault secret under a Codex integration, even if the exact auth artifact ends up being device-auth derived rather than a literal long-lived OAuth bearer token.
+2. The stored credential will be treated as a vault secret under a Codex integration, and the primary artifact is the contents of `~/.codex/auth.json`, including headless/device-auth flows.
 3. The local `codex` CLI supports:
    - non-interactive execution via `codex exec`
    - device auth via `codex login --device-auth`
@@ -94,14 +94,14 @@ Plan:
 
 1. Add `codex` integration entry to `INTEGRATION_CREDENTIAL_SCHEMAS`.
 2. Use a single secret field initially:
-   - `session_token`
-   - label: `Subscription Token`
+   - `auth_json`
+   - label: `ChatGPT Auth JSON`
 3. Add help text that explains the credential comes from the tenant's own ChatGPT/Codex login flow.
 4. Add Codex brand color/icon treatment in the integrations panel.
 
 Decision:
 
-- Keep the storage key aligned with Claude Code (`session_token`) so the internal token plumbing can remain generic.
+- Use `auth_json` as the tenant-facing key, but accept legacy `session_token` values at runtime for backward compatibility.
 
 ### Phase 2: Tenant Feature Flag Support
 
@@ -207,8 +207,9 @@ Plan:
 
 Recommended path:
 
-1. First try a stateless env-driven launch.
-2. If Codex requires a local auth store, generate it in the worker temp session dir before invoking `codex exec`.
+1. Support `codex login` on developer machines and `codex login --device-auth` for headless machines.
+2. Copy the resulting `~/.codex/auth.json` into the tenant vault.
+3. Generate a tenant-scoped local auth store in the worker temp session dir before invoking `codex exec`.
 
 Decision:
 
@@ -310,7 +311,7 @@ Modify:
 
 Deliverable:
 
-- `codex` appears on Integrations with token-based credential storage
+- `codex` appears on Integrations with `auth_json`-based credential storage
 
 ### Task 2: Add Codex as a valid CLI platform
 
@@ -410,8 +411,8 @@ These need explicit confirmation during implementation:
    - alternative: `codex_cli`
 
 2. Credential key:
-   - preferred: `session_token` for symmetry with Claude Code
-   - alternative: `oauth_token` if Codex runtime materialization expects that shape
+   - preferred: `auth_json`
+   - runtime compatibility: also accept legacy `session_token`
 
 3. Worker naming:
    - keep `code-worker` as the shared CLI worker now
@@ -426,7 +427,7 @@ These need explicit confirmation during implementation:
 To keep this implementation low-risk and aligned with the current platform:
 
 - use integration name `codex`
-- store the tenant credential under `session_token`
+- store the tenant credential under `auth_json`
 - keep `apps/code-worker/` and `ChatCliWorkflow` but generalize their inputs
 - keep Claude Code as the default platform initially
 - add Codex as an opt-in platform behind the existing tenant feature control

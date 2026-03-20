@@ -14,8 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-get update && apt-get install -y gh && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
+# Install CLI providers
+RUN npm install -g @anthropic-ai/claude-code @openai/codex
 
 # Python deps
 WORKDIR /app

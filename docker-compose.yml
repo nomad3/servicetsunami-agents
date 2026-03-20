@@ -24,6 +24,7 @@ services:
       - "${API_PORT:-8001}:8000"
     volumes:
       - ./apps/api:/app
+      - hf_cache:/root/.cache/huggingface
     env_file:
       - ./apps/api/.env
     depends_on:
@@ -32,6 +33,7 @@ services:
     environment:
       - MCP_SERVER_URL=http://mcp-server:8000
       - PLATFORM_CLAUDE_CODE_TOKEN=${PLATFORM_CLAUDE_CODE_TOKEN:-}
+      - HF_HUB_ENABLE_HF_TRANSFER=0
 
   web:
     build:
@@ -148,3 +150,4 @@ services:
 volumes:
   db_data:
   claude_sessions:
+  hf_cache:
