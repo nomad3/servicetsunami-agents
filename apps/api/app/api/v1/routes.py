@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from app.api.v1 import (
+    agent_packages,
     auth,
     channels,
     data_sources,
@@ -34,6 +35,7 @@ from app.api.v1 import (
     webhook_connectors,
     webhooks,
     mcp_server_connectors,
+    nodes,
     oauth,
     codex_auth,
     notifications,
@@ -50,6 +52,7 @@ def read_root():
     return {"message": "ServiceTsunami API"}
 
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
+router.include_router(nodes.router, prefix="/nodes", tags=["nodes"])
 router.include_router(channels.router, prefix="/channels", tags=["channels"])
 router.include_router(users.router, prefix="/users", tags=["users"])
 router.include_router(data_sources.router, prefix="/data_sources", tags=["data_sources"])
@@ -83,6 +86,7 @@ router.include_router(remedia.router, prefix="/remedia", tags=["remedia"])
 router.include_router(webhook_connectors.router, prefix="/webhook-connectors", tags=["webhook-connectors"])
 router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 router.include_router(mcp_server_connectors.router, prefix="/mcp-servers", tags=["mcp-servers"])
+router.include_router(agent_packages.router, prefix="/agent-packages", tags=["agent-packages"])
 router.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
 router.include_router(codex_auth.router, prefix="/codex-auth", tags=["codex-auth"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])

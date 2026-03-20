@@ -10,6 +10,7 @@ from .agent_memory import AgentMemory
 from .agent_relationship import AgentRelationship
 from .agent_skill import AgentSkill
 from .agent_task import AgentTask
+from .agent_package import AgentPackage
 from .channel_account import ChannelAccount
 from .channel_event import ChannelEvent
 from .chat import ChatSession, ChatMessage
@@ -29,6 +30,7 @@ from .llm_config import LLMConfig
 from .llm_model import LLMModel
 from .llm_provider import LLMProvider
 from .memory_activity import MemoryActivity
+from .network_node import NetworkNode
 from .notebook import Notebook
 from .notification import Notification
 from .pipeline_run import PipelineRun
@@ -51,6 +53,7 @@ __all__ = [
     "Tenant", "User",
     "Agent", "AgentGroup", "AgentKit", "AgentMemory",
     "AgentRelationship", "AgentSkill", "AgentTask",
+    "AgentPackage",
     "ChannelAccount", "ChannelEvent",
     "ChatSession", "ChatMessage",
     "Connector",
@@ -58,7 +61,7 @@ __all__ = [
     "Deployment", "ExecutionTrace",
     "KnowledgeEntity", "KnowledgeEntityHistory", "KnowledgeObservation", "KnowledgeRelation",
     "LLMConfig", "LLMModel", "LLMProvider",
-    "MemoryActivity", "Notebook", "Notification",
+    "MemoryActivity", "NetworkNode", "Notebook", "Notification",
     "PipelineRun",
     "RLExperience", "RLPolicyState",
     "IntegrationConfig", "IntegrationCredential",
