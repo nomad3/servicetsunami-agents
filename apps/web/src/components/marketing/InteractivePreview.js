@@ -98,7 +98,7 @@ const InteractivePreview = () => {
             PRODUCT TOUR
           </Badge>
           <h2 className="display-5 fw-bold mb-3" style={{ color: 'var(--color-foreground)' }}>
-            See <span className="gradient-text">ServiceTsunami</span> in Action
+            See <span className="gradient-text">wolfpoint.ai</span> in Action
           </h2>
           <p className="text-soft lead mx-auto" style={{ maxWidth: '600px' }}>
             Explore the unified command center for data, AI agents, and
@@ -170,7 +170,7 @@ const InteractivePreview = () => {
                   />
                 </div>
                 <div className="text-soft small font-monospace">
-                  servicetsunami.com/{active.key}
+                  wolfpoint.ai/{active.key}
                 </div>
                 <div className="d-flex align-items-center gap-2">
                   <active.icon className="text-primary" size={14} />

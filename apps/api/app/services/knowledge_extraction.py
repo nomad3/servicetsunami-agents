@@ -39,7 +39,7 @@ _MAX_CONTENT_CHARS = 12_000
 # Lowercase for case-insensitive matching.
 ENTITY_BLOCKLIST: set[str] = {
     # Platform internals
-    "luna", "servicetsunami", "service tsunami",
+    "luna", "servicetsunami", "service tsunami", "wolfpoint", "wolfpoint.ai",
     "adk", "adk service", "adk server", "google adk",
     "mcp", "mcp server",
     # Communication channels (the channels themselves, not contacts)

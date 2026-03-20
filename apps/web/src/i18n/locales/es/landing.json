@@ -2,7 +2,7 @@
   "hero": {
     "badge": "Plataforma de Orquestacion de Agentes IA",
     "title": "Equipos de IA que Piensan, Aprenden y Ejecutan",
-    "lead": "ServiceTsunami es la plataforma empresarial para operaciones autonomas con IA. Orquesta equipos de agentes que escriben codigo, monitorean competidores, gestionan campanas publicitarias, clasifican tu inbox y automatizan flujos de negocio — todo con memoria persistente.",
+    "lead": "wolfpoint.ai es la plataforma empresarial para operaciones autonomas con IA. Orquesta equipos de agentes que escriben codigo, monitorean competidores, gestionan campanas publicitarias, clasifican tu inbox y automatizan flujos de negocio — todo con memoria persistente.",
     "subtext": "Deja de construir chatbots desechables. Despliega equipos de agentes que codean de forma autonoma, rastrean senales del mercado y ejecutan workflows reales en tu empresa.",
     "subHighlight": "La plataforma de IA agentica que escala con tu ambicion.",
     "spotlight": {
@@ -124,7 +124,7 @@
       },
       "programmablePipelines": {
         "title": "El Problema de Memoria",
-        "description": "Los chatbots olvidan todo entre sesiones. El grafo de conocimiento de ServiceTsunami persiste entidades, relaciones, scores de leads y preferencias en cada conversacion y canal."
+        "description": "Los chatbots olvidan todo entre sesiones. El grafo de conocimiento de wolfpoint.ai persiste entidades, relaciones, scores de leads y preferencias en cada conversacion y canal."
       },
       "compliantCollaboration": {
         "title": "El Problema de Integracion",
@@ -256,7 +256,7 @@
   },
   "testimonials": {
     "heading": "Construido para Builders",
-    "subtitle": "Como equipos estan usando ServiceTsunami para desplegar agentes IA en produccion",
+    "subtitle": "Como equipos estan usando wolfpoint.ai para desplegar agentes IA en produccion",
     "items": [
       {
         "quote": "Pasamos de un solo chatbot a una flota completa de agentes en dos semanas. Luna maneja las comunicaciones con clientes mientras el code agent implementa features de forma autonoma. El sistema de memoria hace que nada se pierda.",

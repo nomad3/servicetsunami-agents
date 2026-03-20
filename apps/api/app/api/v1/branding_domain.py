@@ -4,11 +4,17 @@ from fastapi import APIRouter, Request
 router = APIRouter()
 
 DOMAIN_BRANDING = {
-    "servicetsunami.com": {
-        "brand_name": "ServiceTsunami",
-        "logo_url": "/assets/servicetsunami-logo.png",
+    "wolfpoint.ai": {
+        "brand_name": "wolfpoint.ai",
+        "logo_url": "/assets/wolfpoint-logo.png",
         "theme": "ocean",
-        "tagline": "AI Agent Orchestration Platform",
+        "tagline": "The Distributed Agent Network",
+    },
+    "servicetsunami.com": {
+        "brand_name": "wolfpoint.ai",
+        "logo_url": "/assets/wolfpoint-logo.png",
+        "theme": "ocean",
+        "tagline": "The Distributed Agent Network",
     },
     "agentprovision.com": {
         "brand_name": "AgentProvision",
@@ -18,7 +24,7 @@ DOMAIN_BRANDING = {
     },
 }
 
-DEFAULT_BRANDING = DOMAIN_BRANDING["servicetsunami.com"]
+DEFAULT_BRANDING = DOMAIN_BRANDING["wolfpoint.ai"]
 
 
 @router.get("/domain-branding")

@@ -1,26 +1,26 @@
 {
   "hero": {
-    "badge": "AI Agent Orchestration Platform",
-    "title": "Deploy AI Teams That Think, Learn & Act",
-    "lead": "ServiceTsunami is the enterprise platform for autonomous AI operations. Orchestrate agent teams that write code, monitor competitors, manage ad campaigns, triage your inbox, and automate business workflows — all with persistent memory.",
-    "subtext": "Stop building one-off chatbots. Deploy agent teams that code autonomously, track market signals, and execute real workflows across your business.",
-    "subHighlight": "The agentic AI platform that scales with your ambition.",
+    "badge": "Distributed Agent Network",
+    "title": "A Network of AI Agents That Runs Your Business",
+    "lead": "wolfpoint.ai deploys a coordinated network of specialized AI agents across your operations. Each agent owns a domain — code, sales, marketing, data, communications — sharing memory, routing tasks automatically, and getting smarter together.",
+    "subtext": "Stop managing one chatbot. Run a network of AI specialists that coordinate in real time, across your entire stack.",
+    "subHighlight": "The distributed agent network built for serious teams.",
     "spotlight": {
-      "heading": "Built for AI-First Teams",
+      "heading": "One Network. Every Domain.",
       "badge": "Production Ready"
     },
     "highlights": {
       "governedDataProducts": {
-        "title": "Multi-Agent Team Orchestration",
-        "description": "Hierarchical agent teams with supervisors, specialists, and leaf agents. Each team handles a domain — personal assistant, autonomous coding, data science, marketing, sales — coordinated by a root supervisor."
+        "title": "Specialized Agents, Each Owning a Domain",
+        "description": "Code agents ship features. Sales agents close deals. Marketing agents track competitors. Every specialist operates autonomously in their domain — all coordinated by a root supervisor with full visibility across the network."
       },
       "unifiedLakehouseFabric": {
-        "title": "Persistent Memory & Knowledge Graph",
-        "description": "Your agents remember. Entity extraction, relation mapping, lead scoring, and contextual recall across every conversation. Luna learns your contacts, preferences, and business context automatically."
+        "title": "Shared Memory Across Every Agent",
+        "description": "One knowledge graph, shared by the entire network. Contacts, preferences, deals, and decisions are extracted automatically and available to every agent — across every session, every channel, every conversation."
       },
       "agenticAutomation": {
-        "title": "Autonomous Execution Engine",
-        "description": "Temporal-powered durable workflows across 4 queues: orchestration, databricks, code, and business. From deal pipelines to competitor monitoring to autonomous coding — reliable execution with full audit trails."
+        "title": "Durable Execution at Every Layer",
+        "description": "Temporal-powered workflows keep every agent running reliably. From deal pipelines to competitor monitoring to autonomous coding — each task runs to completion with full audit trails and zero dropped balls."
       }
     }
   },
@@ -38,191 +38,191 @@
   "metrics": {
     "items": [
       {
-        "label": "Agent Teams",
-        "value": "8 Specialized Teams",
-        "description": "Personal assistant, code agent, data team, marketing & sales, deal management, veterinary cardiology — each with their own tools, memory, and domain expertise."
+        "label": "Specialized Agent Teams",
+        "value": "8 Domain Experts",
+        "description": "Personal assistant, code agent, data team, marketing & sales, deal management, and veterinary cardiology — each with their own tools, memory, and expertise, coordinated by a single network supervisor."
       },
       {
-        "label": "Integrations",
+        "label": "Live Integrations",
         "value": "Gmail, Calendar, WhatsApp, Jira & More",
-        "description": "10+ OAuth-connected integrations with automatic token refresh. Your agents read emails, manage calendar events, track Jira issues, and communicate via WhatsApp natively."
+        "description": "10+ OAuth-connected integrations with automatic token refresh. Your agents read emails, manage calendar events, track Jira issues, and communicate via WhatsApp — without you lifting a finger."
       },
       {
-        "label": "Knowledge System",
+        "label": "Shared Knowledge System",
         "value": "Entities, Relations & Lead Scoring",
-        "description": "Automatic extraction from every conversation. Entities are categorized, related, and scored with configurable rubrics. Agent memories capture preferences and decisions for contextual recall."
+        "description": "Automatic extraction from every interaction. Every agent in the network draws from the same live knowledge graph — contacts, companies, deals, preferences, and decisions, always in context."
       }
     ]
   },
   "features": {
-    "heading": "Everything Your AI Agents Need",
-    "subtitle": "From orchestration to memory — one platform for building production-grade AI agent systems.",
+    "heading": "Everything Your Agent Network Needs",
+    "subtitle": "From orchestration to shared memory — one platform for building AI agent networks that actually run your operations.",
     "items": {
       "connectEverySource": {
         "title": "Multi-Agent Orchestration",
-        "description": "Design hierarchical agent teams with a root supervisor routing to specialized sub-teams. Each agent has tools, instructions, and domain expertise. Powered by Google ADK."
+        "description": "A hierarchical agent network with a root supervisor routing tasks to specialized teams. Each agent has tools, instructions, and domain expertise. Coordination happens automatically — no manual routing required."
       },
       "semanticControlPlane": {
-        "title": "Knowledge Graph & Memory",
-        "description": "Automatic entity extraction from conversations. Entities, relations, and agent memories form a persistent knowledge graph. Lead scoring with configurable rubrics. Recall injection gives agents context on every interaction."
+        "title": "Network-Wide Shared Memory",
+        "description": "One knowledge graph, shared across every agent. Entity extraction, relation mapping, lead scoring, and contextual recall persist across every session. Every new interaction makes the entire network smarter."
       },
       "agentAutomationStudio": {
-        "title": "Workflow Automation",
-        "description": "Temporal-powered durable workflows for complex multi-step processes. Deal pipelines, competitor monitoring, inbox triage, knowledge extraction, and scheduled tasks — all with retry logic and audit trails."
+        "title": "Durable Workflow Automation",
+        "description": "Temporal-powered workflows for complex multi-step processes. Deal pipelines, competitor monitoring, inbox triage, code tasks — all running in parallel across the network, with retry logic and full audit trails."
       }
     }
   },
   "featuresGrid": {
-    "heading": "Everything you need for production AI agents",
-    "subtitle": "From orchestration to memory to integrations — built for real-world agentic systems",
+    "heading": "Everything your agent network needs to run",
+    "subtitle": "Specialized agents, shared memory, real integrations — built for teams that ship",
     "items": {
       "multiAgentTeams": {
-        "title": "Multi-Agent Teams",
-        "description": "Hierarchical agent orchestration with specialized teams, supervisors, and a root coordinator"
+        "title": "Distributed Agent Network",
+        "description": "A coordinated network of specialists — code, sales, marketing, data, personal assistant — each owning their domain, all sharing the same memory and routing layer"
       },
       "persistentMemory": {
-        "title": "Persistent Memory",
-        "description": "Knowledge graph with entity extraction, relations, lead scoring, and contextual recall"
+        "title": "Network-Wide Memory",
+        "description": "One knowledge graph shared by every agent. Contacts, deals, preferences, and decisions persist across every session and channel"
       },
       "aiChat": {
-        "title": "AI Chat with Luna",
-        "description": "Natural language interface that learns your preferences, contacts, and business context"
+        "title": "Luna — Your AI Chief of Staff",
+        "description": "The conversational interface to your entire agent network. Luna routes tasks, recalls context, and coordinates the specialists behind the scenes"
       },
       "oauthIntegrations": {
-        "title": "OAuth Integrations",
-        "description": "Gmail, Calendar, WhatsApp, Jira, GitHub — agents access your real tools with auto-refresh"
+        "title": "Real Tool Access",
+        "description": "Gmail, Calendar, WhatsApp, Jira, GitHub — agents work inside your actual tools with auto-refresh OAuth credentials"
       },
       "durableWorkflows": {
         "title": "Durable Workflows",
-        "description": "Temporal-powered automation across 4 task queues with retry logic and audit trails"
+        "description": "Temporal-powered automation across 4 task queues. Every agent task runs to completion with retry logic and full audit trails"
       },
       "enterpriseSecurity": {
         "title": "Enterprise Security",
-        "description": "Multi-tenant isolation, encrypted credential vault, JWT auth, and Kubernetes-native deployment"
+        "description": "Multi-tenant isolation, encrypted credential vault, JWT auth, and Kubernetes-native deployment — production-grade from day one"
       },
       "autonomousCodeAgent": {
         "title": "Autonomous Code Agent",
-        "description": "Claude Code CLI powers autonomous coding: creates branches, implements features, opens PRs with full traceability"
+        "description": "A dedicated coding specialist in your network. Creates branches, implements features, runs tests, and opens PRs — autonomously, with full traceability"
       },
       "marketingIntelligence": {
         "title": "Marketing Intelligence",
-        "description": "Monitor competitors, manage ad campaigns across Meta/Google/TikTok, and track market signals automatically"
+        "description": "A marketing specialist that monitors competitors, manages ad campaigns across Meta, Google, and TikTok, and surfaces market signals automatically"
       },
       "proactiveInboxMonitor": {
-        "title": "Proactive Inbox Monitor",
-        "description": "Gmail and Calendar monitoring with auto-triage, knowledge extraction from emails, and smart notifications"
+        "title": "Always-On Inbox Agent",
+        "description": "A proactive communications specialist that monitors Gmail and Calendar, triages what matters, extracts contacts, and never lets an important email slip"
       }
     }
   },
   "lakehouse": {
-    "heading": "Why Agent Teams Beat Single Chatbots",
-    "description": "Single-agent systems hit a wall. Multi-agent orchestration breaks through.",
+    "heading": "Why a Network Beats a Single Chatbot",
+    "description": "One agent hits a wall fast. A coordinated network of specialists scales with your business.",
     "highlights": {
       "unifiedGovernance": {
         "title": "The Complexity Problem",
-        "description": "Real business tasks span multiple domains — coding, analysis, marketing, communication. A single agent can't do it all well. Specialized agent teams divide and conquer."
+        "description": "Real work spans multiple domains — coding, analysis, marketing, client communications. A single agent can't do it all well. A network of specialists divides and conquers, each running in parallel on their own domain."
       },
       "programmablePipelines": {
         "title": "The Memory Problem",
-        "description": "Chatbots forget everything between sessions. ServiceTsunami's knowledge graph persists entities, relations, lead scores, and preferences across every conversation and channel."
+        "description": "Chatbots forget everything between sessions. wolfpoint.ai's network shares a single knowledge graph — contacts, deals, preferences, and decisions persist across every agent, every conversation, every channel."
       },
       "compliantCollaboration": {
         "title": "The Integration Problem",
-        "description": "Agents are useless without access to your tools. OAuth integrations with Gmail, Calendar, WhatsApp, Jira, and more give your agents real-world capabilities."
+        "description": "Agents are useless without access to your real tools. OAuth integrations with Gmail, Calendar, WhatsApp, Jira, and more give every agent in the network live access to what's actually happening in your business."
       }
     },
     "secondary": {
-      "heading": "Platform Capabilities",
-      "description": "What you get out of the box.",
+      "heading": "What Comes Built In",
+      "description": "Ready to run from day one — no assembly required.",
       "items": {
         "adaptiveGuardrails": {
-          "title": "Luna — Your AI Co-Pilot",
-          "description": "A personal assistant that learns from every interaction. Luna extracts contacts, remembers preferences, monitors your inbox, scores leads, and gets smarter over time."
+          "title": "Luna — Your AI Chief of Staff",
+          "description": "The conversational front door to your agent network. Luna learns from every interaction — extracts contacts, monitors your inbox, scores leads, coordinates specialists, and gets sharper over time."
         },
         "explainableDecisions": {
           "title": "Autonomous Code Agent",
-          "description": "Claude Code CLI runs in a dedicated pod, creating branches, implementing features, running tests, and opening PRs — autonomously and with full traceability."
+          "description": "A dedicated coding specialist that runs in isolation. Creates branches, implements features, runs tests, and opens pull requests — without you having to write a single line of prompt."
         },
         "lakehouseSignals": {
           "title": "Enterprise-Grade Security",
-          "description": "Multi-tenant isolation, Fernet-encrypted credential vault, JWT authentication, and full audit trails. Deploy on your own GKE cluster with Helm charts."
+          "description": "Multi-tenant isolation, Fernet-encrypted credential vault, JWT authentication, and full audit trails. Deploy on your own GKE cluster with Helm charts. Your data never leaves your infrastructure."
         }
       }
     }
   },
   "architecture": {
-    "heading": "Platform Architecture",
-    "description": "Production-grade infrastructure for agentic AI.",
+    "heading": "How the Network is Built",
+    "description": "A production-grade distributed architecture with real-time coordination and persistent shared memory.",
     "layers": {
       "dataIntegrationLayer": {
         "title": "Integration Layer",
-        "description": "OAuth providers (Google, GitHub, Jira), WhatsApp Business API, MCP server for Databricks, and credential vault for secure token management."
+        "description": "OAuth providers (Google, GitHub, Jira), WhatsApp Business API, MCP tool server, and encrypted credential vault — every agent in the network has live access to your real tools."
       },
       "semanticGovernanceLayer": {
         "title": "Orchestration Layer",
-        "description": "Google ADK multi-agent supervisor pattern with hierarchical routing. Task dispatch, entity validation, and lead scoring. Reliable execution at scale."
+        "description": "Root supervisor pattern with hierarchical routing. Tasks are dispatched to the right specialist automatically. Full visibility into what every agent is doing, in real time."
       },
       "executionLayer": {
         "title": "Execution Layer",
-        "description": "Temporal durable workflows across 4 queues: orchestration, databricks, code, and business. Inbox monitoring, competitor tracking, deal pipelines, and code tasks."
+        "description": "Temporal durable workflows across 4 queues: orchestration, data, code, and business. Inbox monitoring, competitor tracking, deal pipelines, and code tasks — all running in parallel, reliably."
       },
       "agenticExecutionLayer": {
         "title": "Intelligence Layer",
-        "description": "Knowledge graph with entity extraction, relation mapping, and contextual recall. Multi-LLM router supporting Claude, GPT, DeepSeek, and more. Report generation in Excel/PDF."
+        "description": "Shared knowledge graph with entity extraction, relation mapping, and contextual recall. Multi-LLM router supporting Claude, GPT, DeepSeek, and more. Every agent draws from the same live context."
       }
     }
   },
   "ai": {
-    "heading": "Agent Teams for Every Domain",
-    "description": "Deploy specialized AI teams across your organization. Each team has dedicated tools, memory, and domain expertise.",
+    "heading": "Specialists Across Every Domain",
+    "description": "Deploy dedicated AI specialists across your operations. Each one owns their domain, shares the same memory, and coordinates automatically with the rest of the network.",
     "items": {
       "insightCopilots": {
-        "title": "Personal Assistant (Luna)",
-        "description": "Email management, calendar coordination, WhatsApp communication, inbox monitoring, Jira tracking, and proactive follow-ups. Your AI executive assistant that learns from every interaction."
+        "title": "Luna — Personal AI Chief of Staff",
+        "description": "Email management, calendar coordination, WhatsApp communication, inbox monitoring, Jira tracking, and proactive follow-ups. Luna is the conversational hub of your entire agent network."
       },
       "composableSkills": {
         "title": "Data & Analytics Team",
-        "description": "Data analyst, report generator, and knowledge manager agents. SQL queries, dataset analysis, automated Excel/PDF reports, and knowledge graph management."
+        "description": "Data analyst, report generator, and knowledge manager working in concert. SQL queries, dataset analysis, automated Excel/PDF reports, and knowledge graph management — on demand."
       },
       "closedLoopActuators": {
-        "title": "Code Agent",
-        "description": "Autonomous coding powered by Claude Code CLI. Creates feature branches, implements code, runs tests, and opens pull requests — all in an isolated Kubernetes pod."
+        "title": "Autonomous Code Agent",
+        "description": "A dedicated coding specialist running in an isolated environment. Creates feature branches, implements code, runs tests, and opens pull requests — with full traceability and zero manual overhead."
       },
       "marketingSales": {
         "title": "Marketing & Sales Team",
-        "description": "Ad campaign management across Meta, Google, and TikTok. Competitor monitoring on a 24h cycle. Lead scoring with configurable rubrics. Customer support and deal management."
+        "description": "Ad campaign management across Meta, Google, and TikTok. Competitor monitoring on a 24-hour cycle. Lead scoring with configurable rubrics. Always working, always surfacing what matters."
       },
       "dealTeam": {
         "title": "Deal Team",
-        "description": "Full M&A pipeline: discover, score, research, outreach, advance, and sync. Automated deal workflows with multi-step research and stakeholder management."
+        "description": "A full pipeline specialist: discover, score, research, outreach, advance, and sync. Automated deal workflows with multi-step research and stakeholder coordination — handled end to end."
       },
       "vetCardiology": {
         "title": "Veterinary Cardiology (HealthPets)",
-        "description": "Cardiac analyst, billing agent, and vet supervisor for veterinary clinics. Monthly billing workflows, usage tracking, and specialized medical analysis."
+        "description": "Cardiac analyst, billing agent, and vet supervisor built for veterinary clinics. Monthly billing workflows, usage tracking, and specialized medical analysis — a network built for a specific domain."
       }
     }
   },
   "roadmap": {
     "heading": "What We're Building Next",
-    "subtitle": "Expanding agent capabilities and integrations.",
+    "subtitle": "Expanding the network with more specialists, deeper memory, and open extensions.",
     "items": {
       "marketplaceConnectors": {
         "title": "SRE & Infrastructure Agents",
-        "description": "Alert triage, pattern detection, cloud architecture design, and infrastructure troubleshooting. Slack integration for ops channel monitoring."
+        "description": "Alert triage, pattern detection, cloud architecture design, and infrastructure troubleshooting. Ops-focused specialists that monitor your stack and surface issues before they become incidents."
       },
       "adaptiveGovernanceAi": {
-        "title": "Advanced Memory & Recall",
-        "description": "Proactive memory suggestions, cross-session context threading, and memory-driven automations. Your agents anticipate what you need."
+        "title": "Deeper Memory & Proactive Recall",
+        "description": "Cross-session context threading, memory-driven automations, and proactive surfacing. Your network anticipates what you need before you ask."
       },
       "autonomousFinopsSuites": {
-        "title": "Marketplace & Plugins",
-        "description": "Community-built agent skills, tool integrations, and workflow templates. Extend your agent capabilities without writing code."
+        "title": "Open Skill Marketplace",
+        "description": "Community-built agent skills, tool connectors, and workflow templates. Extend your network with pre-built specialists — no code required."
       }
     }
   },
   "memory": {
-    "heading": "Memory That Gets Smarter Every Day",
-    "description": "Every conversation teaches your agents. Luna automatically extracts people, companies, preferences, and decisions into a persistent knowledge graph. Next time you ask, she already knows the context.",
+    "heading": "One Memory. Every Agent. Always On.",
+    "description": "Your entire agent network draws from a single, continuously updated knowledge graph. Every interaction teaches every agent. Luna extracts people, companies, preferences, and decisions automatically — and the whole network benefits instantly.",
     "badges": {
       "entityExtraction": "Entity Extraction",
       "relationMapping": "Relation Mapping",
@@ -230,7 +230,7 @@
       "activityFeed": "Activity Feed"
     },
     "overview": {
-      "title": "Memory Overview",
+      "title": "Network Memory",
       "subtitle": "Live from your conversations",
       "entities": "Entities",
       "memories": "Memories",
@@ -241,37 +241,37 @@
     }
   },
   "ctaBanner": {
-    "heading": "Your AI team is ready to deploy",
-    "description": "Create your account and start chatting with Luna in minutes. She'll learn your contacts, preferences, and workflows from day one.",
+    "heading": "Your agent network is ready to deploy",
+    "description": "Create your account and launch your first specialists in minutes. Luna comes ready — she'll start learning your contacts, preferences, and workflows from the very first conversation.",
     "badges": {
       "multiTenant": "Multi-Tenant Isolation",
       "encryptedVault": "Encrypted Credential Vault",
       "kubernetes": "Kubernetes Native"
     },
     "stats": {
-      "agentTeams": "Agent Teams",
+      "agentTeams": "Specialized Agents",
       "builtInTools": "Built-in Tools",
       "integrations": "Integrations"
     }
   },
   "testimonials": {
     "heading": "Built for Builders",
-    "subtitle": "How teams are using ServiceTsunami to deploy production AI agents",
+    "subtitle": "How teams are using wolfpoint.ai to run operations with a distributed agent network",
     "items": [
       {
-        "quote": "We went from a single chatbot to a full agent fleet in two weeks. Luna handles our client communications while the code agent ships features autonomously. The memory system means nothing falls through the cracks.",
+        "quote": "We went from a single chatbot to a full agent network in two weeks. Luna handles client communications while the code agent ships features autonomously. The shared memory means nothing falls through the cracks — every agent knows the full context.",
         "author": "AI Engineering Lead",
         "role": "SaaS Platform"
       },
       {
-        "quote": "The autonomous code agent is unlike anything I've seen. It creates branches, implements features, and opens PRs on its own. Combined with the marketing intelligence and knowledge graph, it's like having an AI team that gets smarter every day.",
+        "quote": "The code agent is unlike anything I've seen. It creates branches, implements features, and opens PRs on its own. Combined with the marketing intelligence agent and shared knowledge graph, it genuinely feels like a team that gets smarter every day.",
         "author": "CTO",
         "role": "Technology Startup"
       }
     ]
   },
   "cta": {
-    "heading": "Ready to Deploy Your AI Agent Team?",
-    "description": "Start building multi-agent systems today. Create your account and have Luna, your AI co-pilot, up and running in minutes."
+    "heading": "Ready to Deploy Your Agent Network?",
+    "description": "Launch a coordinated network of AI specialists today. Create your account and have Luna, your AI chief of staff, running in minutes."
   }
 }

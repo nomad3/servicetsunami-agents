@@ -30,7 +30,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-REPORTS_DIR = Path("/tmp/servicetsunami_reports")
+REPORTS_DIR = Path("/tmp/wolfpoint_reports")
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 REPORT_TTL_HOURS = 24
 

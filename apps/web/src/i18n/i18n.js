@@ -88,7 +88,7 @@ i18n
     detection: {
       order: ['localStorage', 'navigator', 'htmlTag'],
       caches: ['localStorage'],
-      lookupLocalStorage: 'servicetsunami.lang',
+      lookupLocalStorage: 'wolfpoint.lang',
     },
   });
 

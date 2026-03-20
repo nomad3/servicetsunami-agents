@@ -47,7 +47,7 @@ router = APIRouter()
 
 @router.get("/")
 def read_root():
-    return {"message": "ServiceTsunami API"}
+    return {"message": "wolfpoint.ai API"}
 
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
 router.include_router(channels.router, prefix="/channels", tags=["channels"])

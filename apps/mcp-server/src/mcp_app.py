@@ -3,7 +3,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 mcp = FastMCP(
-    "ServiceTsunami",
+    "wolfpoint.ai",
     stateless_http=True,
     json_response=True,
     host="0.0.0.0",

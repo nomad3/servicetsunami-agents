@@ -1,5 +1,5 @@
 {
-  "brand": "ServiceTsunami",
+  "brand": "wolfpoint.ai",
   "nav": {
     "platform": "Plataforma",
     "architecture": "Arquitectura",
@@ -73,6 +73,6 @@
     "setActive": "Establecer como Activo"
   },
   "footer": {
-    "copyright": "© {{year}} ServiceTsunami. Todos los derechos reservados."
+    "copyright": "© {{year}} wolfpoint.ai. Todos los derechos reservados."
   }
 }

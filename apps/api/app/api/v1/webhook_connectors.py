@@ -187,7 +187,7 @@ def test_webhook_internal(
         raise HTTPException(status_code=404, detail="Webhook not found")
     if webhook.direction == "inbound":
         from app.core.config import settings
-        base = getattr(settings, "BASE_URL", "https://servicetsunami.com")
+        base = getattr(settings, "BASE_URL", "https://wolfpoint.ai")
         url = f"{base}/api/v1/webhook-connectors/in/{webhook.slug}"
         curl = f'curl -X POST "{url}" -H "Content-Type: application/json"'
         if webhook.auth_type == "hmac_sha256":
@@ -342,7 +342,7 @@ def test_webhook_connector(
 
     if webhook.direction == "inbound":
         from app.core.config import settings
-        base = getattr(settings, "BASE_URL", "https://servicetsunami.com")
+        base = getattr(settings, "BASE_URL", "https://wolfpoint.ai")
         url = f"{base}/api/v1/webhook-connectors/in/{webhook.slug}"
         curl = f'curl -X POST "{url}" -H "Content-Type: application/json"'
         if webhook.auth_type == "hmac_sha256":

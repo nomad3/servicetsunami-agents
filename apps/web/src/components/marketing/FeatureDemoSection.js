@@ -394,7 +394,7 @@ const ChatMockup = () => {
                 }}>
                   {msg.role === 'assistant' && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, fontSize: 10, color: 'var(--color-primary)', fontWeight: 600 }}>
-                      <FaRobot size={10} /> ServiceTsunami AI
+                      <FaRobot size={10} /> wolfpoint.ai
                     </div>
                   )}
                   {msg.text}
@@ -487,7 +487,7 @@ const FeatureDemoSection = () => {
               Platform Tour
             </h2>
             <p className="section-subtitle">
-              See how ServiceTsunami empowers your workflow
+              See how wolfpoint.ai empowers your workflow
             </p>
           </div>
         </AnimatedSection>
@@ -538,7 +538,7 @@ const FeatureDemoSection = () => {
                               <div className="rounded-circle bg-success" style={{ width: '10px', height: '10px' }}></div>
                             </div>
                             <div className="mx-auto bg-white bg-opacity-75 px-4 py-1 rounded-pill text-muted small font-monospace" style={{ fontSize: '10px' }}>
-                              app.servicetsunami.com/{feature.key}
+                              app.wolfpoint.ai/{feature.key}
                             </div>
                           </div>
 

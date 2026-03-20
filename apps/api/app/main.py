@@ -25,6 +25,8 @@ app.add_middleware(ForceHTTPSRedirectMiddleware)
 
 # Set up CORS middleware
 origins = [
+    "https://wolfpoint.ai",
+    "https://app.wolfpoint.ai",
     "https://servicetsunami.com",
     "https://agentprovision.com",
     "https://www.agentprovision.com",
