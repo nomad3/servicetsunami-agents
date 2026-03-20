@@ -243,8 +243,21 @@ def _generate_agentic_response(
             content=error_msg, context=context,
         )
 
-    return _append_message(
+    assistant_msg = _append_message(
         db, session=session, role="assistant",
         content=response_text, context=context,
     )
+
+    # Auto-quality scoring (async, non-blocking — runs after response is saved)
+    try:
+        from app.services.auto_quality_scorer import score_and_log_async
+        score_and_log_async(
+            tenant_id=session.tenant_id,
+            user_message=user_message,
+            agent_response=response_text,
+        )
+    except Exception:
+        pass  # Never block response delivery for scoring
+
+    return assistant_msg
 

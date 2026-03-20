@@ -39,6 +39,7 @@ from app.api.v1 import (
     notifications,
     reports,
     rl,
+    local_ml,
     branding_domain,
 )
 
@@ -87,4 +88,5 @@ router.include_router(codex_auth.router, prefix="/codex-auth", tags=["codex-auth
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 router.include_router(reports.router, prefix="/reports", tags=["reports"])
 router.include_router(rl.router, prefix="/rl", tags=["reinforcement-learning"])
+router.include_router(local_ml.router, prefix="/local-ml", tags=["local-ml"])
 router.include_router(branding_domain.router, tags=["domain-branding"])

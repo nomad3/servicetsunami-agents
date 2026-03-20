@@ -34,6 +34,7 @@ services:
       - MCP_SERVER_URL=http://mcp-server:8000
       - PLATFORM_CLAUDE_CODE_TOKEN=${PLATFORM_CLAUDE_CODE_TOKEN:-}
       - HF_HUB_ENABLE_HF_TRANSFER=0
+      - OLLAMA_BASE_URL=http://ollama:11434
 
   web:
     build:
@@ -128,6 +129,19 @@ services:
       - temporal
     restart: unless-stopped
 
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel --config /etc/cloudflared/config.yml run
@@ -151,3 +165,4 @@ volumes:
   db_data:
   claude_sessions:
   hf_cache:
+  ollama_models:
