@@ -194,7 +194,7 @@ def route_and_execute(
     )
 
     # Execute on the selected platform
-    if platform in {"claude_code", "codex"}:
+    if platform in {"claude_code", "codex", "gemini_cli"}:
         return run_agent_session(
             db,
             tenant_id=tenant_id,
@@ -211,5 +211,4 @@ def route_and_execute(
             pre_built_memory_context=pre_built_memory_context,
         )
 
-    # Future: gemini_cli and additional providers.
     return None, {"error": f"Platform '{platform}' not yet supported"}

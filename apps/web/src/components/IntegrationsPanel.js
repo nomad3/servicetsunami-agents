@@ -17,6 +17,7 @@ import {
   FaEnvelope,
   FaGithub,
   FaGoogle,
+  FaGoogleDrive,
   FaKey,
   FaLink,
   FaLinkedin,
@@ -51,6 +52,8 @@ const ICON_MAP = {
   FaBook: FaBook,
   FaTasks: FaTasks,
   FaCalendar: FaCalendar,
+  FaGoogle: FaGoogle,
+  FaGoogleDrive: FaGoogleDrive,
   FaProjectDiagram: FaProjectDiagram,
   FaLinkedin: FaLinkedin,
   FaMicrosoft: FaMicrosoft,
@@ -71,6 +74,7 @@ const SKILL_COLORS = {
   linkedin: '#0A66C2',
   claude_code: '#D97706',
   codex: '#111827',
+  gemini_cli: '#0F9D58',
 };
 
 // Provider brand colors and icons for OAuth buttons

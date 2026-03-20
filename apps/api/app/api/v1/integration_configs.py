@@ -126,6 +126,18 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
              "help": "Run 'codex login' or 'codex login --device-auth'. For headless use, complete login in a browser on another machine, then paste the contents of ~/.codex/auth.json here."},
         ],
     },
+    "gemini_cli": {
+        "display_name": "Gemini CLI",
+        "description": "Connect Google Gemini CLI for cost-sensitive chat, analysis, and bulk operations",
+        "icon": "FaGoogle",
+        "credentials": [
+            {"key": "api_key", "label": "API Key", "type": "password", "required": True,
+             "help": "Get your Gemini API key at aistudio.google.com/apikey. It will be exposed to Gemini CLI as GEMINI_API_KEY."},
+            {"key": "model", "label": "Model ID", "type": "text", "required": False,
+             "help": "Optional. Defaults to gemini-2.5-flash. Example: gemini-2.5-pro"},
+        ],
+        "auth_type": "manual",
+    },
     "meta_ads": {
         "display_name": "Meta Ads",
         "description": "Manage Facebook & Instagram ad campaigns, view insights, monitor competitor ads",

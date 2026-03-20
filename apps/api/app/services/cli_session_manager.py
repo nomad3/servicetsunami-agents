@@ -17,7 +17,7 @@ from app.services.skill_manager import skill_manager
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_CLI_PLATFORMS = {"claude_code", "codex"}
+SUPPORTED_CLI_PLATFORMS = {"claude_code", "codex", "gemini_cli"}
 
 
 def generate_cli_instructions(
@@ -212,6 +212,18 @@ def run_agent_session(
         err = (
             "No Codex ChatGPT credential found for tenant "
             f"{tenant_id}. Store the contents of ~/.codex/auth.json in the Codex integration."
+        )
+        logger.error(err)
+        metadata["error"] = err
+        return None, metadata
+    if platform == "gemini_cli" and not (
+        credentials.get("api_key")
+        or credentials.get("gemini_api_key")
+        or credentials.get("google_api_key")
+    ):
+        err = (
+            "No Gemini CLI API key found for tenant "
+            f"{tenant_id}. Store a Gemini API key in the Gemini CLI integration."
         )
         logger.error(err)
         metadata["error"] = err

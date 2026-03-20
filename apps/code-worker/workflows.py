@@ -397,6 +397,8 @@ async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
             return _execute_claude_chat(task_input, session_dir)
         if task_input.platform == "codex":
             return _execute_codex_chat(task_input, session_dir, image_path)
+        if task_input.platform == "gemini_cli":
+            return _execute_gemini_chat(task_input, session_dir)
         return ChatCliResult(
             response_text="",
             success=False,
@@ -556,6 +558,85 @@ def _execute_codex_chat(task_input: ChatCliInput, session_dir: str, image_path: 
     return ChatCliResult(response_text=response_text, success=True, metadata=metadata)
 
 
+def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str) -> ChatCliResult:
+    try:
+        creds = _fetch_integration_credentials("gemini_cli", task_input.tenant_id)
+    except Exception as exc:
+        return ChatCliResult(response_text="", success=False, error=f"Failed to load Gemini CLI credentials: {exc}")
+
+    api_key = creds.get("api_key") or creds.get("gemini_api_key") or creds.get("google_api_key")
+    if not api_key:
+        return ChatCliResult(response_text="", success=False, error="Gemini CLI not connected")
+
+    model = creds.get("model") or "gemini-2.5-flash"
+    prompt = task_input.message
+    if task_input.instruction_md_content.strip():
+        prompt = f"{task_input.instruction_md_content.strip()}\n\n# User Request\n\n{task_input.message}"
+
+    _prepare_gemini_home(session_dir, task_input.mcp_config)
+
+    cmd = [
+        "gemini",
+        "-p",
+        prompt,
+        "--output-format",
+        "json",
+        "-m",
+        model,
+    ]
+    if os.path.isdir(WORKSPACE):
+        cmd.extend(["--include-directories", f"{WORKSPACE},{session_dir}"])
+
+    env = os.environ.copy()
+    env["HOME"] = session_dir
+    env["GEMINI_API_KEY"] = api_key
+    if creds.get("use_vertex_ai") in {True, "true", "1", "yes"}:
+        env["GOOGLE_API_KEY"] = api_key
+        env["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
+        if creds.get("google_cloud_project"):
+            env["GOOGLE_CLOUD_PROJECT"] = str(creds["google_cloud_project"])
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=1500,
+        env=env,
+        cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+    )
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "")[:2000]
+        return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
+
+    raw = result.stdout.strip()
+    if not raw:
+        return ChatCliResult(response_text="", success=False, error="Gemini CLI produced no output")
+
+    try:
+        data = json.loads(raw)
+        text = (
+            data.get("result")
+            or data.get("response")
+            or data.get("content")
+            or data.get("text")
+            or _extract_gemini_text(data)
+            or raw
+        )
+        metadata = {
+            "platform": "gemini_cli",
+            "input_tokens": (data.get("usage") or {}).get("input_tokens", 0),
+            "output_tokens": (data.get("usage") or {}).get("output_tokens", 0),
+            "model": data.get("model", model),
+        }
+        return ChatCliResult(response_text=text, success=True, metadata=metadata)
+    except json.JSONDecodeError:
+        return ChatCliResult(
+            response_text=raw,
+            success=True,
+            metadata={"platform": "gemini_cli", "model": model},
+        )
+
+
 def _fetch_github_token(tenant_id: str) -> Optional[str]:
     """Fetch GitHub OAuth token from API credential vault."""
     try:
@@ -615,6 +696,22 @@ def _prepare_codex_home(session_dir: str, auth_payload: dict, mcp_config_json: s
     return codex_home
 
 
+def _prepare_gemini_home(session_dir: str, mcp_config_json: str) -> str:
+    """Materialize Gemini CLI settings.json with MCP server definitions."""
+    gemini_home = os.path.join(session_dir, ".gemini")
+    os.makedirs(gemini_home, exist_ok=True)
+
+    settings = {"theme": "Default"}
+    if mcp_config_json:
+        settings["mcpServers"] = _gemini_mcp_servers(mcp_config_json)
+
+    with open(os.path.join(gemini_home, "settings.json"), "w") as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+
+    return gemini_home
+
+
 def _codex_mcp_config_lines(mcp_config_json: str) -> list[str]:
     """Convert the shared MCP JSON config into Codex config.toml entries."""
     data = json.loads(mcp_config_json)
@@ -632,6 +729,24 @@ def _codex_mcp_config_lines(mcp_config_json: str) -> list[str]:
         if headers:
             lines.append(f"http_headers = {_toml_inline_table(headers)}")
     return lines
+
+
+def _gemini_mcp_servers(mcp_config_json: str) -> dict:
+    """Convert the shared MCP JSON config into Gemini settings.json entries."""
+    data = json.loads(mcp_config_json)
+    servers = data.get("mcpServers") or {}
+    gemini_servers: dict[str, dict] = {}
+    for server_name, config in servers.items():
+        if not isinstance(config, dict) or not config.get("url"):
+            continue
+        entry: dict[str, object] = {
+            "httpUrl": str(config["url"]),
+        }
+        headers = config.get("headers") or {}
+        if headers:
+            entry["headers"] = headers
+        gemini_servers[server_name] = entry
+    return gemini_servers
 
 
 def _toml_inline_table(values: dict) -> str:
@@ -682,6 +797,19 @@ def _extract_codex_metadata(raw_output: str) -> dict:
         if event.get("type") == "session_configured":
             metadata["model"] = event.get("model", metadata["model"])
     return metadata
+
+
+def _extract_gemini_text(payload: dict) -> str:
+    """Best-effort extraction for Gemini CLI JSON output variants."""
+    if isinstance(payload.get("candidates"), list):
+        for candidate in payload["candidates"]:
+            content = candidate.get("content") or {}
+            parts = content.get("parts") or []
+            for part in parts:
+                text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    return text.strip()
+    return ""
 
 
 @workflow.defn
