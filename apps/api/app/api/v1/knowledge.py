@@ -271,13 +271,13 @@ def report_pr_outcome(
                 SELECT id FROM rl_experiences
                 WHERE tenant_id = CAST(:tid AS uuid)
                 AND decision_point = 'code_task'
-                AND state::text LIKE :pr_pattern
+                AND (state->>'pr_number')::int = :pr_num
                 AND reward IS NULL
                 ORDER BY created_at DESC LIMIT 1
             """),
             {
                 "tid": str(current_user.tenant_id),
-                "pr_pattern": f"%PR #{payload.pr_number}%",
+                "pr_num": payload.pr_number,
             },
         ).fetchone()
 
@@ -310,19 +310,6 @@ def get_git_context(
     """Get recent git context (commits, PRs, hotspots) relevant to a query."""
     from app.services.memory_recall import get_recent_git_context
     return get_recent_git_context(db, current_user.tenant_id, q, limit=limit)
-
-
-# ---------------------------------------------------------------------------
-# Quality Stats
-# ---------------------------------------------------------------------------
-
-@router.get("/quality-stats")
-def get_quality_stats(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Entity quality stats: coverage, usefulness, per-platform extraction accuracy."""
-    return service.get_quality_stats(db, current_user.tenant_id)
 
 
 # ---------------------------------------------------------------------------

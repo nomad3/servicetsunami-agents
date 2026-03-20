@@ -122,7 +122,7 @@ def _log_code_task_rl(
     """
     try:
         resp = httpx.post(
-            f"{API_BASE_URL}/api/v1/rl/experiences",
+            f"{API_BASE_URL}/api/v1/rl/internal/experience",
             headers={"X-Internal-Key": API_INTERNAL_KEY or "dev_mcp_key"},
             json={
                 "tenant_id": tenant_id,

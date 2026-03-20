@@ -3,11 +3,13 @@ import csv
 import io
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api import deps
+from app.core.config import settings
 from app.models.rl_experience import RLExperience
 from app.models.rl_policy_state import RLPolicyState
 from app.models.tenant_features import TenantFeatures
@@ -16,6 +18,43 @@ from app.schemas.rl_policy_state import RLPolicyStateInDB, RLSettingsUpdate
 from app.services import rl_experience_service, rl_reward_service
 
 router = APIRouter()
+
+
+def _verify_internal_key(
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+):
+    if x_internal_key not in (settings.API_INTERNAL_KEY, settings.MCP_API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid internal key")
+
+
+class InternalExperienceCreate(BaseModel):
+    tenant_id: str
+    decision_point: str
+    state: dict = {}
+    action: dict = {}
+    state_text: str = ""
+
+
+@router.post("/internal/experience")
+def create_internal_experience(
+    payload: InternalExperienceCreate,
+    db: Session = Depends(deps.get_db),
+    _auth: None = Depends(_verify_internal_key),
+):
+    """Create an RL experience from internal services (code-worker, MCP tools)."""
+    tid = uuid.UUID(payload.tenant_id)
+    trajectory_id = uuid.uuid4()
+    rl_experience_service.log_experience(
+        db,
+        tenant_id=tid,
+        trajectory_id=trajectory_id,
+        step_index=0,
+        decision_point=payload.decision_point,
+        state=payload.state,
+        action=payload.action,
+        state_text=payload.state_text,
+    )
+    return {"status": "logged", "trajectory_id": str(trajectory_id)}
 
 
 DP_DESCRIPTIONS = {
