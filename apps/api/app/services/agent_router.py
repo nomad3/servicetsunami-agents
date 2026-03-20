@@ -194,7 +194,7 @@ def route_and_execute(
     )
 
     # Execute on the selected platform
-    if platform in {"claude_code", "codex"}:
+    if platform in ("claude_code", "gemini_cli", "codex"):
         return run_agent_session(
             db,
             tenant_id=tenant_id,

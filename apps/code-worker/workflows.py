@@ -1,4 +1,5 @@
-"""Temporal workflows and activities for CLI-backed agent tasks."""
+"""Temporal workflow and activities for Claude Code tasks."""
+from __future__ import annotations
 
 import json
 import logging
@@ -24,6 +25,17 @@ CODE_TASK_COMMAND_TIMEOUT_SECONDS = 45 * 60
 CODE_TASK_ACTIVITY_TIMEOUT_MINUTES = 50
 CODE_TASK_SCHEDULE_TIMEOUT_MINUTES = 60
 CODE_TASK_HEARTBEAT_SECONDS = 240
+CLAUDE_CODE_MODEL = os.environ.get("CLAUDE_CODE_MODEL", "sonnet").strip() or "sonnet"
+CLAUDE_CREDIT_ERROR_PATTERNS = (
+    "credit balance is too low",
+    "usage limit reached",
+    "rate limit reached",
+    "monthly usage limit",
+    "max plan limit",
+    "out of credits",
+    "insufficient credits",
+    "subscription required",
+)
 
 
 @dataclass
@@ -157,6 +169,11 @@ def _fetch_claude_token(tenant_id: str) -> str:
     return token
 
 
+def _is_claude_credit_exhausted(error_text: str) -> bool:
+    text = (error_text or "").lower()
+    return any(pattern in text for pattern in CLAUDE_CREDIT_ERROR_PATTERNS)
+
+
 def _fetch_integration_credentials(integration_name: str, tenant_id: str) -> dict:
     """Fetch decrypted tenant credentials for an integration from the API."""
     url = f"{API_BASE_URL}/api/v1/oauth/internal/token/{integration_name}"
@@ -175,6 +192,7 @@ def _log_code_task_rl(
     tag: str,
     files_changed: list,
     pr_number: int,
+    platform: str = "claude_code",
 ) -> None:
     """Log an RL experience for the code_task decision point.
 
@@ -195,7 +213,7 @@ def _log_code_task_rl(
                     "pr_number": pr_number,
                 },
                 "action": {
-                    "platform": "claude_code",
+                    "platform": platform,
                     "branch": branch,
                     "files_changed": len(files_changed),
                 },
@@ -247,6 +265,9 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         with open(prompt_file, "w") as f:
             f.write(prompt)
 
+        execution_platform = "claude_code"
+        provider_label = "Claude Code"
+
         # 5. Run Claude Code with project context
         activity.heartbeat("Running Claude Code...")
         system_prompt = (
@@ -263,6 +284,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
             [
                 "claude", "-p", prompt,
                 "--output-format", "json",
+                "--model", CLAUDE_CODE_MODEL,
                 "--allowedTools", "Edit,Write,Bash,Read,Glob,Grep",
                 "--append-system-prompt", system_prompt,
                 "--dangerously-skip-permissions",
@@ -280,21 +302,37 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         if claude_result.returncode != 0:
             error_detail = claude_result.stderr or claude_result.stdout
             logger.error("Claude Code failed: %s\nstdout: %s", claude_result.stderr, claude_result.stdout[:2000])
-            raise RuntimeError(f"Claude Code failed:\n{error_detail}")
-        claude_output = claude_result.stdout.strip()
+            if _is_claude_credit_exhausted(error_detail):
+                activity.heartbeat("Claude credits exhausted, retrying with Codex...")
+                codex_prompt = (
+                    f"{system_prompt}\n\n"
+                    f"# Task\n\n{prompt}"
+                )
+                claude_output, provider_meta = _execute_codex_code_task(
+                    task_input,
+                    codex_prompt,
+                    session_dir=WORKSPACE,
+                )
+                claude_data = {"result": claude_output, "metadata": provider_meta}
+                execution_platform = "codex"
+                provider_label = "Codex"
+            else:
+                raise RuntimeError(f"Claude Code failed:\n{error_detail}")
+        else:
+            claude_output = claude_result.stdout.strip()
 
-        # Parse Claude output
-        try:
-            claude_data = json.loads(claude_output)
-        except json.JSONDecodeError:
-            claude_data = {"raw": claude_output}
+            # Parse Claude output
+            try:
+                claude_data = json.loads(claude_output)
+            except json.JSONDecodeError:
+                claude_data = {"raw": claude_output}
 
         # 7. Check if there are any changes to commit
         status = _run("git status --porcelain")
         if not status:
             return CodeTaskResult(
                 pr_url="",
-                summary="No changes were made by Claude Code.",
+                summary=f"No changes were made by {provider_label}.",
                 branch=branch_name,
                 files_changed=[],
                 claude_output=claude_output[:5000],
@@ -327,10 +365,10 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
 
         pr_body = (
             f"## Summary\n\n"
-            f"Autonomously implemented by Claude Code.\n\n"
+            f"Autonomously implemented by {provider_label}.\n\n"
             f"## Task\n\n"
             f"{task_input.task_description}\n\n"
-            f"## Claude Code Output\n\n"
+            f"## {provider_label} Output\n\n"
             f"{claude_summary}\n\n"
             f"## Commits\n\n"
             f"{commit_log}\n\n"
@@ -364,6 +402,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
                 tag=tag,
                 files_changed=files_changed,
                 pr_number=pr_num,
+                platform=execution_platform,
             )
         except Exception as e:
             logger.debug("RL experience logging skipped: %s", e)
@@ -454,9 +493,27 @@ async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
                 f.write(b64.b64decode(task_input.image_b64))
 
         if task_input.platform == "claude_code":
-            return _execute_claude_chat(task_input, session_dir)
+            claude_result = _execute_claude_chat(task_input, session_dir)
+            if claude_result.success or not _is_claude_credit_exhausted(claude_result.error or ""):
+                return claude_result
+
+            codex_result = _execute_codex_chat(task_input, session_dir, image_path)
+            if codex_result.success:
+                meta = dict(codex_result.metadata or {})
+                meta["fallback_from"] = "claude_code"
+                meta["requested_platform"] = "claude_code"
+                codex_result.metadata = meta
+                return codex_result
+
+            return ChatCliResult(
+                response_text="",
+                success=False,
+                error=f"Claude Code credits exhausted. Codex fallback also failed: {codex_result.error}",
+            )
         if task_input.platform == "codex":
             return _execute_codex_chat(task_input, session_dir, image_path)
+        if task_input.platform == "gemini_cli":
+            return _execute_gemini_chat(task_input, session_dir, image_path)
         return ChatCliResult(
             response_text="",
             success=False,
@@ -485,7 +542,7 @@ def _execute_claude_chat(task_input: ChatCliInput, session_dir: str) -> ChatCliR
     cmd = [
         "claude", "-p", task_input.message,
         "--output-format", "json",
-        "--model", "opus",
+        "--model", CLAUDE_CODE_MODEL,
         "--allowedTools", "mcp__servicetsunami__*,Bash,Read,Edit,Write",
         "--add-dir", session_dir,
     ]
@@ -616,6 +673,57 @@ def _execute_codex_chat(task_input: ChatCliInput, session_dir: str, image_path: 
     return ChatCliResult(response_text=response_text, success=True, metadata=metadata)
 
 
+def _execute_codex_code_task(task_input: CodeTaskInput, prompt: str, session_dir: str) -> tuple[str, dict]:
+    try:
+        creds = _fetch_integration_credentials("codex", task_input.tenant_id)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to load Codex credentials: {exc}") from exc
+
+    raw_auth = creds.get("auth_json") or creds.get("session_token")
+    if not raw_auth:
+        raise RuntimeError("Codex not connected")
+
+    try:
+        auth_payload = raw_auth if isinstance(raw_auth, dict) else json.loads(raw_auth)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Codex credential must be valid ~/.codex/auth.json contents") from exc
+
+    codex_home = _prepare_codex_home(session_dir, auth_payload, "")
+    output_path = os.path.join(session_dir, "codex-code-task-last-message.txt")
+    cmd = [
+        "codex",
+        "exec",
+        prompt,
+        "--json",
+        "--output-last-message",
+        output_path,
+        "--dangerously-bypass-approvals-and-sandbox",
+        "-C",
+        WORKSPACE,
+        "--add-dir",
+        session_dir,
+    ]
+    result = _run_long_command(
+        cmd,
+        cwd=WORKSPACE,
+        timeout=CODE_TASK_COMMAND_TIMEOUT_SECONDS,
+        extra_env={"CODEX_HOME": codex_home},
+        heartbeat_message="Codex fallback is still running",
+    )
+    raw = result.stdout.strip()
+    if not raw:
+        raise RuntimeError("Codex fallback produced no output")
+
+    response_text = ""
+    if os.path.exists(output_path):
+        with open(output_path) as f:
+            response_text = f.read().strip()
+    metadata = _extract_codex_metadata(raw)
+    metadata["platform"] = "codex"
+    metadata["fallback_from"] = "claude_code"
+    return response_text or raw, metadata
+
+
 def _fetch_github_token(tenant_id: str) -> Optional[str]:
     """Fetch GitHub OAuth token from API credential vault."""
     try:
@@ -742,6 +850,96 @@ def _extract_codex_metadata(raw_output: str) -> dict:
         if event.get("type") == "session_configured":
             metadata["model"] = event.get("model", metadata["model"])
     return metadata
+
+
+def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path: str) -> ChatCliResult:
+    try:
+        creds = _fetch_integration_credentials("gemini_cli", task_input.tenant_id)
+    except Exception as exc:
+        return ChatCliResult(response_text="", success=False, error=f"Failed to load Gemini credentials: {exc}")
+
+    # Gemini uses OAuth token, so credentials should contain oauth_token
+    oauth_token = creds.get("oauth_token") or creds.get("session_token")
+    if not oauth_token:
+        return ChatCliResult(response_text="", success=False, error="Gemini CLI not connected")
+
+    auth_payload = {"access_token": oauth_token}
+    if "refresh_token" in creds:
+        auth_payload["refresh_token"] = creds["refresh_token"]
+        
+    gemini_home = _prepare_gemini_home(session_dir, auth_payload, task_input.mcp_config)
+    
+    prompt = task_input.message
+    if task_input.instruction_md_content.strip():
+        # Inject instruction context and previous messages into the prompt body
+        prompt = f"{task_input.instruction_md_content.strip()}\n\n# User Request\n\n{task_input.message}"
+
+    cmd = [
+        "gemini",
+        "-p",
+        prompt,
+        "--json",
+    ]
+
+    env = os.environ.copy()
+    env["HOME"] = session_dir  # Tell Gemini CLI where to find .gemini/
+    env["GEMINI_AUTH_TOKEN"] = oauth_token
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=1500,
+        env=env,
+        cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+    )
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "")[:2000]
+        return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
+
+    raw = result.stdout.strip()
+    if not raw:
+        return ChatCliResult(response_text="", success=False, error="Gemini produced no output")
+
+    try:
+        data = json.loads(raw)
+        text = data.get("result") or data.get("response") or data.get("content") or data.get("text") or raw
+        meta = {
+            "platform": "gemini_cli",
+            "input_tokens": (data.get("usage") or {}).get("input_tokens", 0),
+            "output_tokens": (data.get("usage") or {}).get("output_tokens", 0),
+            "model": data.get("model", "gemini-2.5-pro"),
+        }
+        return ChatCliResult(response_text=text, success=True, metadata=meta)
+    except json.JSONDecodeError:
+        return ChatCliResult(
+            response_text=raw,
+            success=True,
+            metadata={"platform": "gemini_cli"},
+        )
+
+
+def _prepare_gemini_home(session_dir: str, auth_payload: dict, mcp_config_json: str) -> str:
+    """Materialize tenant-scoped GEMINI_HOME with credentials.json and MCP settings.json."""
+    gemini_home = os.path.join(session_dir, ".gemini")
+    os.makedirs(gemini_home, exist_ok=True)
+
+    with open(os.path.join(gemini_home, "credentials.json"), "w") as f:
+        json.dump(auth_payload, f)
+    
+    settings = {}
+    if mcp_config_json:
+        try:
+            mcp_data = json.loads(mcp_config_json)
+            servers = mcp_data.get("mcpServers", {})
+            settings["mcpServers"] = servers
+        except json.JSONDecodeError:
+            pass
+            
+    with open(os.path.join(gemini_home, "settings.json"), "w") as f:
+        json.dump(settings, f, indent=2)
+
+    return gemini_home
 
 
 @workflow.defn

@@ -126,6 +126,14 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
              "help": "Run 'codex login' or 'codex login --device-auth'. For headless use, complete login in a browser on another machine, then paste the contents of ~/.codex/auth.json here."},
         ],
     },
+    "gemini_cli": {
+        "display_name": "Gemini CLI",
+        "description": "Connect your Google account and AI Pro subscription for agent chat",
+        "icon": "FaGoogle",
+        "credentials": [],
+        "auth_type": "oauth",
+        "oauth_provider": "google",
+    },
     "meta_ads": {
         "display_name": "Meta Ads",
         "description": "Manage Facebook & Instagram ad campaigns, view insights, monitor competitor ads",

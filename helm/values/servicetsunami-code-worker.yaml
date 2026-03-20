@@ -84,6 +84,8 @@ externalSecret:
 env:
   - name: TEMPORAL_ADDRESS
     value: "temporal:7233"
+  - name: CLAUDE_CODE_MODEL
+    value: "sonnet"
 
 # No autoscaling — single instance
 autoscaling:

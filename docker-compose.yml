@@ -121,6 +121,7 @@ services:
       - API_BASE_URL=http://api:8000
       - API_INTERNAL_KEY=dev_mcp_key
       - MCP_API_KEY=dev_mcp_key
+      - CLAUDE_CODE_MODEL=${CLAUDE_CODE_MODEL:-sonnet}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-ghp_placeholder}
     volumes:
       - ./apps/code-worker:/app
