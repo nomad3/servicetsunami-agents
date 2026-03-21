@@ -310,6 +310,14 @@ def run_agent_session(
 
         if success and response_text:
             if isinstance(meta, dict):
+                input_tokens = meta.get("input_tokens") or 0
+                output_tokens = meta.get("output_tokens") or 0
+                try:
+                    meta["tokens_used"] = int(input_tokens) + int(output_tokens)
+                except (TypeError, ValueError):
+                    pass
+                if meta.get("cost") is None and meta.get("cost_usd") is not None:
+                    meta["cost"] = meta.get("cost_usd")
                 metadata.update(meta)
             return response_text, metadata
 

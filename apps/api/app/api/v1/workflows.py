@@ -51,6 +51,7 @@ def _get_tenant_id_from_internal_or_user(
 
 from app.models.agent import Agent
 from app.models.agent_task import AgentTask
+from app.models.chat import ChatMessage, ChatSession
 from app.models.execution_trace import ExecutionTrace
 from app.models.pipeline_run import PipelineRun
 from app.models.user import User
@@ -59,6 +60,44 @@ from app.services.workflows import _get_temporal_client, TemporalNotConfiguredEr
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(value: object) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _chat_message_usage_totals(db: Session, tenant_id) -> tuple[int, float]:
+    """Aggregate chat-backed CLI usage persisted in assistant message metadata."""
+    total_tokens = 0
+    total_cost = 0.0
+    rows = (
+        db.query(ChatMessage.tokens_used, ChatMessage.context)
+        .join(ChatSession, ChatMessage.session_id == ChatSession.id)
+        .filter(
+            ChatSession.tenant_id == tenant_id,
+            ChatMessage.role == "assistant",
+        )
+        .all()
+    )
+    for tokens_used, context in rows:
+        if isinstance(context, dict):
+            total_tokens += _safe_int(tokens_used) or _safe_int(context.get("tokens_used")) or (
+                _safe_int(context.get("input_tokens")) + _safe_int(context.get("output_tokens"))
+            )
+            total_cost += _safe_float(context.get("cost")) or _safe_float(context.get("cost_usd"))
+        else:
+            total_tokens += _safe_int(tokens_used)
+    return total_tokens, total_cost
 
 
 # ---------------------------------------------------------------------------
@@ -91,8 +130,11 @@ async def workflow_stats(
         .filter(Agent.tenant_id == tenant_id)
         .first()
     )
-    total_tokens = int(agg[0]) if agg else 0
-    total_cost = float(agg[1]) if agg else 0.0
+    task_tokens = int(agg[0]) if agg else 0
+    task_cost = float(agg[1]) if agg else 0.0
+    chat_tokens, chat_cost = _chat_message_usage_totals(db, tenant_id)
+    total_tokens = task_tokens + chat_tokens
+    total_cost = task_cost + chat_cost
 
     total_tasks = sum(task_by_status.values())
 

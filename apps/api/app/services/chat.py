@@ -15,6 +15,28 @@ from app.services.embedding_service import embed_and_store as _embed
 logger = logging.getLogger(__name__)
 
 
+def _extract_tokens_used(context: Dict[str, Any] | None) -> int | None:
+    """Normalize token usage from heterogeneous CLI metadata payloads."""
+    if not isinstance(context, dict):
+        return None
+
+    explicit_total = context.get("tokens_used")
+    if explicit_total is not None:
+        try:
+            return int(explicit_total)
+        except (TypeError, ValueError):
+            return None
+
+    input_tokens = context.get("input_tokens")
+    output_tokens = context.get("output_tokens")
+    try:
+        if input_tokens is None and output_tokens is None:
+            return None
+        return int(input_tokens or 0) + int(output_tokens or 0)
+    except (TypeError, ValueError):
+        return None
+
+
 def list_sessions(db: Session, *, tenant_id: uuid.UUID) -> List[ChatSessionModel]:
     return (
         db.query(ChatSessionModel)
@@ -100,12 +122,15 @@ def _append_message(
     content: str,
     context: Dict[str, Any] | None = None,
 ) -> ChatMessage:
-    tokens_used = (context or {}).get("tokens_used") if role == "assistant" else None
+    normalized_context = dict(context or {})
+    tokens_used = _extract_tokens_used(normalized_context) if role == "assistant" else None
+    if role == "assistant" and tokens_used is not None and normalized_context.get("tokens_used") is None:
+        normalized_context["tokens_used"] = tokens_used
     message = ChatMessage(
         session_id=session.id,
         role=role,
         content=content,
-        context=context,
+        context=normalized_context or None,
         tokens_used=tokens_used,
     )
     db.add(message)
@@ -260,4 +285,3 @@ def _generate_agentic_response(
         pass  # Never block response delivery for scoring
 
     return assistant_msg
-
