@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Button,
+  Card,
   Col,
   Container,
   Dropdown,
@@ -11,9 +12,19 @@ import {
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import AnimatedSection from "./components/common/AnimatedSection";
-import { roadmapItems } from "./components/marketing/data";
+import CTASection from "./components/marketing/CTASection";
+import {
+  aiHighlights,
+  architectureLayers,
+  featureBlocks,
+  lakehouseHighlights,
+  pipelineHighlights,
+  roadmapItems,
+} from "./components/marketing/data";
 import FeatureDemoSection from "./components/marketing/FeatureDemoSection";
+import FeaturesSection from "./components/marketing/FeaturesSection";
 import HeroSection from "./components/marketing/HeroSection";
+import InteractivePreview from "./components/marketing/InteractivePreview";
 import "./LandingPage.css";
 
 const LandingPage = () => {
@@ -67,11 +78,90 @@ const LandingPage = () => {
     return chunks;
   }, [metricsItems]);
 
+  const featureItems = useMemo(
+    () =>
+      featureBlocks.map(({ key, icon: Icon }) => {
+        const definition =
+          t(`landing:features.items.${key}`, { returnObjects: true }) || {};
+        return {
+          key,
+          Icon,
+          title: definition.title || "",
+          description: definition.description || "",
+        };
+      }),
+    [t, i18n.language],
+  );
+
+  const lakehousePrimary = useMemo(
+    () =>
+      lakehouseHighlights.map(({ key, icon: Icon }) => {
+        const definition =
+          t(`landing:lakehouse.highlights.${key}`, { returnObjects: true }) ||
+          {};
+        return {
+          key,
+          Icon,
+          title: definition.title || "",
+          description: definition.description || "",
+        };
+      }),
+    [t, i18n.language],
+  );
+
+  const pipelineItems = useMemo(
+    () =>
+      pipelineHighlights.map(({ key, icon: Icon }) => {
+        const definition =
+          t(`landing:lakehouse.secondary.items.${key}`, {
+            returnObjects: true,
+          }) || {};
+        return {
+          key,
+          Icon,
+          title: definition.title || "",
+          description: definition.description || "",
+        };
+      }),
+    [t, i18n.language],
+  );
+
+  const aiItems = useMemo(
+    () =>
+      aiHighlights.map(({ key, icon: Icon }) => {
+        const definition =
+          t(`landing:ai.items.${key}`, { returnObjects: true }) || {};
+        return {
+          key,
+          Icon,
+          title: definition.title || "",
+          description: definition.description || "",
+        };
+      }),
+    [t, i18n.language],
+  );
+
   const roadmap = useMemo(
     () =>
       roadmapItems.map(({ key, icon: Icon }) => {
         const definition =
           t(`landing:roadmap.items.${key}`, { returnObjects: true }) || {};
+        return {
+          key,
+          Icon,
+          title: definition.title || "",
+          description: definition.description || "",
+        };
+      }),
+    [t, i18n.language],
+  );
+
+  const architecture = useMemo(
+    () =>
+      architectureLayers.map(({ key, icon: Icon }) => {
+        const definition =
+          t(`landing:architecture.layers.${key}`, { returnObjects: true }) ||
+          {};
         return {
           key,
           Icon,
@@ -105,6 +195,12 @@ const LandingPage = () => {
           <Navbar.Toggle aria-controls="primary-nav" className="border-0" />
           <Navbar.Collapse id="primary-nav">
             <Nav className="ms-auto align-items-lg-center gap-lg-4">
+              <Nav.Link href="#features" className="mx-2">
+                {t("common:nav.platform")}
+              </Nav.Link>
+              <Nav.Link href="#architecture" className="mx-2">
+                {t("common:nav.architecture")}
+              </Nav.Link>
               <Nav.Link href="#stories" className="mx-2">
                 {t("common:nav.customers")}
               </Nav.Link>
@@ -145,7 +241,10 @@ const LandingPage = () => {
 
       <main>
         <HeroSection onPrimaryCta={goToRegister} onSecondaryCta={goToLogin} />
+        <InteractivePreview />
         <FeatureDemoSection />
+        <FeaturesSection />
+        <CTASection />
 
         <section id="logos" className="section-thin">
           <Container>
@@ -201,6 +300,167 @@ const LandingPage = () => {
                 ))}
               </Row>
             ))}
+          </Container>
+        </section>
+
+        <section id="features" className="section-wrapper section-dark section-separator">
+          <Container>
+            <AnimatedSection animation="fade-in">
+              <div className="text-center mb-5">
+                <h2 className="display-4 fw-bold section-heading gradient-text">
+                  {t("landing:features.heading")}
+                </h2>
+                <p className="lead section-subtitle mt-3">
+                  {t("landing:features.subtitle")}
+                </p>
+              </div>
+            </AnimatedSection>
+            <Row className="g-4">
+              {featureItems.map(({ key, Icon, title, description }, index) => (
+                <Col md={4} key={key}>
+                  <AnimatedSection animation="scale-up" delay={index * 100}>
+                    <Card className="feature-card h-100 p-4 border-0">
+                      <div className="icon-pill">
+                        <Icon size={28} />
+                      </div>
+                      <Card.Title className="text-white fw-semibold fs-4">
+                        {title}
+                      </Card.Title>
+                      <Card.Text className="text-soft mt-3">
+                        {description}
+                      </Card.Text>
+                    </Card>
+                  </AnimatedSection>
+                </Col>
+              ))}
+            </Row>
+          </Container>
+        </section>
+
+        <section id="lakehouse" className="section-wrapper section-with-bg bg-data section-separator">
+          <Container>
+            <Row className="g-5 align-items-center">
+              <Col lg={6}>
+                <AnimatedSection animation="slide-left">
+                  <div className="panel-glass p-5">
+                    <h2 className="display-5 fw-bold text-white">
+                      {t("landing:lakehouse.heading")}
+                    </h2>
+                    <div className="gradient-divider my-4" />
+                    {lakehousePrimary.map(
+                      ({ key, Icon, title, description }) => (
+                        <div
+                          className="d-flex align-items-start gap-3 mb-3"
+                          key={key}
+                        >
+                          <div className="icon-pill">
+                            <Icon size={22} />
+                          </div>
+                          <div>
+                            <h5 className="text-white fw-semibold mb-1">
+                              {title}
+                            </h5>
+                            <p className="mb-0 text-soft">{description}</p>
+                          </div>
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </AnimatedSection>
+              </Col>
+              <Col lg={6}>
+                <AnimatedSection animation="slide-right">
+                  <div className="glass-card">
+                    <h3 className="fs-3 fw-semibold text-white">
+                      {t("landing:lakehouse.secondary.heading")}
+                    </h3>
+                    <Row className="g-3 mt-4">
+                      {pipelineItems.map(
+                        ({ key, title, description, Icon }) => (
+                          <Col md={6} key={key}>
+                            <div className="feature-card p-4 h-100">
+                              <Icon size={26} className="text-primary" />
+                              <h5 className="text-white fw-semibold mt-3">
+                                {title}
+                              </h5>
+                              <p className="text-soft mb-0">{description}</p>
+                            </div>
+                          </Col>
+                        ),
+                      )}
+                    </Row>
+                  </div>
+                </AnimatedSection>
+              </Col>
+            </Row>
+          </Container>
+        </section>
+
+        <section id="architecture" className="section-wrapper section-with-bg bg-devops">
+          <Container>
+            <Row className="g-5 align-items-center">
+              <Col lg={5}>
+                <AnimatedSection animation="slide-left">
+                  <h2 className="display-5 fw-bold text-white">
+                    {t("landing:architecture.heading")}
+                  </h2>
+                </AnimatedSection>
+              </Col>
+              <Col lg={7}>
+                <Row className="g-4">
+                  {architecture.map(
+                    ({ key, Icon, title, description }, index) => (
+                      <Col md={6} key={key}>
+                        <AnimatedSection
+                          animation="slide-up"
+                          delay={index * 100}
+                        >
+                          <div className="feature-card h-100 p-4">
+                            <div className="icon-pill">
+                              <Icon size={26} />
+                            </div>
+                            <h5 className="text-white fw-semibold mt-2">
+                              {title}
+                            </h5>
+                            <p className="text-soft mb-0">{description}</p>
+                          </div>
+                        </AnimatedSection>
+                      </Col>
+                    ),
+                  )}
+                </Row>
+              </Col>
+            </Row>
+          </Container>
+        </section>
+
+        <section id="ai" className="section-wrapper section-with-bg bg-ai">
+          <Container>
+            <AnimatedSection animation="fade-in">
+              <div className="text-center mb-5">
+                <h2 className="display-5 fw-bold text-white">
+                  {t("landing:ai.heading")}
+                </h2>
+                <p className="lead text-soft mt-3">
+                  {t("landing:ai.description")}
+                </p>
+              </div>
+            </AnimatedSection>
+            <Row className="g-4">
+              {aiItems.map(({ key, Icon, title, description }, index) => (
+                <Col md={6} lg={4} key={key}>
+                  <AnimatedSection animation="scale-up" delay={index * 100}>
+                    <div className="feature-card h-100 p-4">
+                      <div className="icon-pill">
+                        <Icon size={26} />
+                      </div>
+                      <h5 className="text-white fw-semibold">{title}</h5>
+                      <p className="text-soft">{description}</p>
+                    </div>
+                  </AnimatedSection>
+                </Col>
+              ))}
+            </Row>
           </Container>
         </section>
 
