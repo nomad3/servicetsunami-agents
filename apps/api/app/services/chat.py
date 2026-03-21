@@ -276,10 +276,16 @@ def _generate_agentic_response(
     # Auto-quality scoring (async, non-blocking — runs after response is saved)
     try:
         from app.services.auto_quality_scorer import score_and_log_async
+        meta = context if isinstance(context, dict) else {}
         score_and_log_async(
             tenant_id=session.tenant_id,
             user_message=user_message,
             agent_response=response_text,
+            platform=meta.get("platform", "claude_code"),
+            agent_slug=agent_slug or "luna",
+            channel="whatsapp" if sender_phone else "web",
+            tokens_used=meta.get("input_tokens", 0) + meta.get("output_tokens", 0),
+            cost_usd=meta.get("cost_usd", 0.0),
         )
     except Exception:
         pass  # Never block response delivery for scoring

@@ -154,3 +154,53 @@ Return ONLY a JSON object with this exact structure:
         "champion_signals": {"max": 15, "description": "Internal champion and multi-contact engagement"},
     },
 })
+
+
+# ---------- Agent Response Quality (RL auto-scoring) ----------
+_register("agent_response_quality", {
+    "name": "Agent Response Quality",
+    "description": "Score agent responses 0-100 across quality dimensions for RL training. Includes cost efficiency tracking by platform.",
+    "system_prompt": "You are an AI response quality evaluator. Return only valid JSON.",
+    "prompt_template": """You are an expert AI response quality evaluator. Analyze this agent interaction and compute a quality score from 0 to 100.
+
+## Scoring Rubric (0-100 total)
+
+| Category | Max Points | What to look for |
+|---|---|---|
+| accuracy | 25 | Factually correct, answers the actual question, no hallucinations, verifiable claims |
+| helpfulness | 20 | Addresses what the user actually needs (not just what they asked), actionable, complete |
+| tool_usage | 20 | Used appropriate MCP tools (email, calendar, knowledge, code), didn't skip tools that would help, didn't call unnecessary tools |
+| memory_usage | 15 | Checked knowledge graph (find_entities, search_knowledge), used recalled context, built on previous conversations |
+| efficiency | 10 | Concise without losing substance, fast response, didn't over-explain or pad |
+| context_awareness | 10 | Used conversation history, referenced prior messages, maintained continuity |
+
+## Interaction Details
+
+Platform: {platform}
+Agent: {agent_slug}
+Task Type: {task_type}
+Channel: {channel}
+Tokens Used: {tokens_used}
+Response Time: {response_time_ms}ms
+Cost (USD): ${cost_usd}
+
+User Message: {user_message}
+
+Agent Response: {agent_response}
+
+Tools Called: {tools_called}
+Entities Recalled: {entities_recalled}
+
+## Instructions
+
+Return ONLY a JSON object with this exact structure:
+{{"score": <integer 0-100>, "breakdown": {{"accuracy": <integer 0-25>, "helpfulness": <integer 0-20>, "tool_usage": <integer 0-20>, "memory_usage": <integer 0-15>, "efficiency": <integer 0-10>, "context_awareness": <integer 0-10>}}, "cost_efficiency": {{"tokens_per_quality_point": <float>, "platform_recommendation": "<claude_code|gemini_cli|codex|any>"}}, "reasoning": "<one paragraph explaining the score>"}}""",
+    "categories": {
+        "accuracy": {"max": 25, "description": "Factual correctness, no hallucinations"},
+        "helpfulness": {"max": 20, "description": "Addresses actual user need, actionable"},
+        "tool_usage": {"max": 20, "description": "Appropriate MCP tool selection and usage"},
+        "memory_usage": {"max": 15, "description": "Knowledge graph recall, context building"},
+        "efficiency": {"max": 10, "description": "Concise, fast, no padding"},
+        "context_awareness": {"max": 10, "description": "Conversation continuity, history usage"},
+    },
+})
