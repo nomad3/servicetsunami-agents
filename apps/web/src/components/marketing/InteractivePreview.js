@@ -14,31 +14,31 @@ const screenshots = [
     key: 'dashboard',
     label: 'Analytics Overview',
     icon: FaChartBar,
-    image: '/images/product/dashboard.png',
+    image: `${process.env.PUBLIC_URL}/images/product/dashboard.png`,
   },
   {
     key: 'memory',
     label: 'Agent Memory',
     icon: FaDatabase,
-    image: '/images/product/memory.png',
+    image: `${process.env.PUBLIC_URL}/images/product/memory.png`,
   },
   {
     key: 'chat',
     label: 'AI Command',
     icon: FaComments,
-    image: '/images/product/chat.png',
+    image: `${process.env.PUBLIC_URL}/images/product/chat.png`,
   },
   {
     key: 'agents/fleet',
     label: 'Agent Fleet',
     icon: FaRobot,
-    image: '/images/product/agents.png',
+    image: `${process.env.PUBLIC_URL}/images/product/agents.png`,
   },
   {
     key: 'workflows',
     label: 'Workflows',
     icon: FaSitemap,
-    image: '/images/product/workflows.png',
+    image: `${process.env.PUBLIC_URL}/images/product/workflows.png`,
   },
 ];
 
