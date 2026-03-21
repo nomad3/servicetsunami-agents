@@ -38,7 +38,10 @@ const LoginPage = () => {
     <Container className="d-flex justify-content-center align-items-center" style={{ minHeight: '100vh' }}>
       <Card style={{ width: '400px' }} className="shadow-lg p-4">
         <Card.Body>
-          <h2 className="text-center mb-4">{t('login.title')}</h2>
+          <div className="text-center mb-4">
+            <img src={`${process.env.PUBLIC_URL}/assets/brand/wolf-logo-dark.png`} alt="wolfpoint.ai" style={{ width: 120, marginBottom: 16 }} />
+            <h2>{t('login.title')}</h2>
+          </div>
           {error && <Alert variant="danger">{error}</Alert>}
           <Form onSubmit={handleSubmit}>
             <Form.Group className="mb-3" controlId="formBasicEmail">

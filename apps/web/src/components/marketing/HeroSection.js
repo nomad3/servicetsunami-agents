@@ -10,6 +10,7 @@ const HeroSection = ({ onPrimaryCta = noop, onSecondaryCta = noop }) => {
 
   return (
     <section className="hero-section pt-5 pb-4" id="hero">
+      <div className="hero-wolf-bg" style={{ backgroundImage: `url(${process.env.PUBLIC_URL}/assets/brand/wolf-hero-bg.png)` }} />
       <NeuralCanvas />
       <div className="hero-overlay" />
       <Container className="hero-content py-5">
@@ -19,14 +20,16 @@ const HeroSection = ({ onPrimaryCta = noop, onSecondaryCta = noop }) => {
             <h1 className="display-2 fw-bold mt-4 mb-3 section-heading">
               {t('hero.title')}
             </h1>
+            <p className="lead text-soft mb-4" style={{ fontSize: '1.15rem', lineHeight: 1.7 }}>
+              {t('hero.lead')}
+            </p>
             <div className="d-flex flex-column flex-md-row gap-3 justify-content-center justify-content-lg-start mt-4">
-              <Button size="lg" className="px-5 py-3" onClick={onPrimaryCta}>
+              <Button size="lg" className="wolf-btn-primary px-5 py-3" onClick={onPrimaryCta}>
                 {t('common:cta.startFree', 'Start Free')}
               </Button>
               <Button
                 size="lg"
-                variant="outline-secondary"
-                className="px-5 py-3"
+                className="wolf-btn-secondary px-5 py-3"
                 onClick={onSecondaryCta}
               >
                 {t('common:cta.signIn', 'Sign In')}
@@ -34,11 +37,8 @@ const HeroSection = ({ onPrimaryCta = noop, onSecondaryCta = noop }) => {
               </Button>
             </div>
           </Col>
-          <Col lg={6} className="text-center text-lg-start">
-            <p className="lead text-soft mb-4" style={{ fontSize: '1.2rem', lineHeight: 1.7 }}>
-              {t('hero.lead')}
-            </p>
-            <p className="text-soft" style={{ fontSize: '1rem', opacity: 0.7 }}>
+          <Col lg={6} className="text-center">
+            <p className="text-soft mt-3" style={{ fontSize: '0.95rem', opacity: 0.7 }}>
               {t('hero.subtext')}
             </p>
           </Col>
