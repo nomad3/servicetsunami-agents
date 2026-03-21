@@ -46,6 +46,7 @@ from .tool import Tool
 from .vector_store import VectorStore
 from .webhook_connector import WebhookConnector, WebhookDeliveryLog
 from .mcp_server_connector import MCPServerConnector, MCPServerCallLog
+from .dynamic_workflow import DynamicWorkflow, WorkflowRun, WorkflowStepLog
 
 __all__ = [
     "Tenant", "User",
@@ -68,4 +69,5 @@ __all__ = [
     "Tool", "VectorStore",
     "WebhookConnector", "WebhookDeliveryLog",
     "MCPServerConnector", "MCPServerCallLog",
+    "DynamicWorkflow", "WorkflowRun", "WorkflowStepLog",
 ]

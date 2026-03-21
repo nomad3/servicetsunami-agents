@@ -40,6 +40,7 @@ from app.api.v1 import (
     reports,
     rl,
     local_ml,
+    dynamic_workflows,
     branding_domain,
 )
 
@@ -89,4 +90,5 @@ router.include_router(notifications.router, prefix="/notifications", tags=["noti
 router.include_router(reports.router, prefix="/reports", tags=["reports"])
 router.include_router(rl.router, prefix="/rl", tags=["reinforcement-learning"])
 router.include_router(local_ml.router, prefix="/local-ml", tags=["local-ml"])
+router.include_router(dynamic_workflows.router, prefix="/workflows/dynamic", tags=["dynamic-workflows"])
 router.include_router(branding_domain.router, tags=["domain-branding"])
