@@ -152,11 +152,11 @@ async def create_entity(
     async with (await _get_pool()).acquire() as conn:
         # Dedup: check if entity with same name+type already exists for this tenant
         existing = await conn.fetchrow(
-            "SELECT id, name FROM knowledge_entities WHERE tenant_id = $1 AND LOWER(name) = LOWER($2) AND entity_type = $3",
+            "SELECT id, name, entity_type, category FROM knowledge_entities WHERE tenant_id = $1 AND LOWER(name) = LOWER($2) AND entity_type = $3",
             tid, name, entity_type,
         )
         if existing:
-            return {"id": str(existing["id"]), "name": existing["name"], "entity_type": entity_type, "category": category, "already_exists": True}
+            return {"id": str(existing["id"]), "name": existing["name"], "entity_type": existing["entity_type"], "category": existing["category"], "already_exists": True}
 
         entity_id = str(uuid.uuid4())
         pgvector = await _has_pgvector(conn)

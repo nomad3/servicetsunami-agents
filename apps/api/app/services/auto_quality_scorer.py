@@ -174,7 +174,7 @@ async def _score_and_log(
                     "breakdown": breakdown,
                     "cost_efficiency": cost_efficiency,
                     "reasoning": reasoning,
-                    "model": "qwen2.5-coder:1.5b",
+                    "model": os.environ.get("QUALITY_MODEL", "qwen2.5-coder:1.5b"),
                     "platform": platform,
                     "tokens_used": tokens_used,
                     "cost_usd": cost_usd,
