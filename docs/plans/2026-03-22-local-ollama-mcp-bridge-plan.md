@@ -1,7 +1,7 @@
 # Local Tool Agent — Curated MCP Tool Calling for Free-Tier Tenants
 
 **Date**: 2026-03-22 (revised 2026-03-23)
-**Status**: In Progress
+**Status**: In Progress — code complete, blocked on model inference speed
 **Goal**: Give tenants without a Claude/Codex subscription access to curated MCP tools via a local model (qwen3:4b) through Ollama's native tool calling API.
 
 ## Context
@@ -14,6 +14,8 @@
 ## Model
 
 **qwen3:4b** — 2.5GB, ~4GB RAM. Tool calling confirmed 2026-03-22. Already pulled.
+
+**Known issue**: With 10 tool schemas, each call takes 47-80s on laptop. First call after cold start exceeds 300s timeout. May need faster hardware or smaller model.
 
 ## Architecture
 
@@ -38,50 +40,39 @@ User message (no subscription)
 - **Curated tool registry**: Typed allowlist per category, not all 81 tools
 - **Tenant-aware filtering**: Only expose tools for integrations the tenant has connected
 - **Reuse existing MCP call code**: JSON-RPC tools/call pattern from mcp_server_connectors.py
+- **Auto-injects tenant_id**: MCP tools require tenant_id — injected automatically before each call
 - **Hard limits**:
   - Max 3 tool call rounds per message
   - Max 5 tools per turn
-  - 30s timeout per tool call
+  - 30s timeout per tool call, 300s Ollama timeout
   - Explicit fallback on malformed tool_calls
-  - Tool allowlist by channel
+  - Context window limited to 4096 tokens for speed
 
-## Curated Tool Registry
+## Curated Tool Registry (actual MCP names)
 
-| Category | Tools | Requires Integration |
-|----------|-------|---------------------|
-| **knowledge** | knowledge_search, knowledge_list_entities, knowledge_create_entity, knowledge_create_observation | None (always available) |
-| **email** | email_search, email_read, email_send | google_gmail |
-| **calendar** | calendar_list_events, calendar_create_event | google_calendar |
-| **jira** | jira_search_issues, jira_get_issue, jira_create_issue | jira |
-| **reports** | report_generate | None (always available) |
+| Category | MCP Tool Name | Requires Integration |
+|----------|--------------|---------------------|
+| **knowledge** | search_knowledge | None |
+| **knowledge** | find_entities | None |
+| **knowledge** | create_entity | None |
+| **knowledge** | record_observation | None |
+| **email** | search_emails | gmail |
+| **email** | send_email | gmail |
+| **calendar** | list_calendar_events | google_calendar |
+| **jira** | search_jira_issues | jira |
+| **jira** | create_jira_issue | jira |
 
-~13 tools max exposed. Filtered down based on tenant's connected integrations.
+~9 tools max. Filtered by tenant's connected integrations.
 
-## Tasks
+## Status
 
-### 1. ~~Pull qwen3:4b~~ DONE (2026-03-22)
+### Done
+- qwen3:4b pulled and tool calling confirmed
+- local_tool_agent.py built with correct MCP tool names/schemas
+- Fallback chain wired: tool agent → plain text → error
+- Agent-preserving (skill_body as system prompt)
+- tenant_id auto-injected into MCP calls
 
-### 2. Build local_tool_agent.py
-- File: `apps/api/app/services/local_tool_agent.py`
-- Curated tool registry as typed dict in code
-- MCP JSON-RPC `tools/call` reusing pattern from mcp_server_connectors.py
-- Ollama `/api/chat` with `tools` parameter
-- Agent loop with max 3 rounds, 5 tools/turn, 30s timeout
-- Preserves agent_slug and skill_body as system prompt
-- Returns (response_text, metadata) or (None, metadata) on failure
-
-### 3. Wire into cli_session_manager.py fallback chain
-- Fallback order: local_tool_agent → generate_agent_response_sync → error
-- Metadata: platform=local_qwen_tools, fallback=true, tools_used=[...]
-
-### 4. Test end-to-end
-- QwenTest tenant (no credentials)
-- Knowledge search, entity creation
-- Verify tool calls execute and results return
-- Monitor resource usage
-
-## Out of Scope
-- Dynamic tool discovery (use curated registry)
-- Streaming responses
-- Models >7B
-- Codex CLI --oss approach (proven broken)
+### Blocked
+- qwen3:4b inference too slow on M-series laptop with 10 tool schemas (~5min per call)
+- Need either: fewer tools (2-3), smaller model (qwen3:1.7b), or beefier hardware
