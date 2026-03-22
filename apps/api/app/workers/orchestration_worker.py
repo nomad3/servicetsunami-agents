@@ -116,6 +116,14 @@ async def run_orchestration_worker():
 
     Task queue: servicetsunami-orchestration
     """
+    # Scan skills so agent activities can find them
+    try:
+        from app.services.skill_manager import skill_manager
+        skill_manager.scan()
+        logger.info("Skill manager: %d skills loaded", len(skill_manager.list_skills()))
+    except Exception as e:
+        logger.warning("Skill manager scan failed: %s", e)
+
     # Connect to Temporal server
     client = await Client.connect(settings.TEMPORAL_ADDRESS)
 
