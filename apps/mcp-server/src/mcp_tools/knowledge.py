@@ -20,6 +20,10 @@ from src.mcp_auth import resolve_tenant_id
 
 logger = logging.getLogger(__name__)
 
+# Module-level caches
+_pool: Optional[asyncpg.Pool] = None
+_pgvector_available: Optional[bool] = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -31,6 +35,23 @@ def _get_db_url() -> str:
     url = settings.DATABASE_URL or os.environ.get("DATABASE_URL", "")
     # asyncpg uses postgresql://, not postgresql+asyncpg://
     return url.replace("postgresql+asyncpg://", "postgresql://").replace("postgresql+psycopg2://", "postgresql://")
+
+
+async def _get_pool() -> asyncpg.Pool:
+    """Return a shared connection pool (created on first call)."""
+    global _pool
+    if _pool is None or _pool._closed:
+        db_url = _get_db_url()
+        if not db_url:
+            raise RuntimeError("DATABASE_URL not configured")
+        _pool = await asyncpg.create_pool(db_url, min_size=2, max_size=10)
+    return _pool
+
+
+async def _get_conn():
+    """Acquire a connection from the pool. Use as: async with _get_conn() as conn:"""
+    pool = await _get_pool()
+    return pool.acquire()
 
 
 def _serialize_row(row: asyncpg.Record) -> dict:
@@ -61,12 +82,16 @@ def _parse_json(val, default=None):
 
 
 async def _has_pgvector(conn: asyncpg.Connection) -> bool:
-    """Return True if the pgvector extension is installed."""
+    """Return True if the pgvector extension is installed (cached after first check)."""
+    global _pgvector_available
+    if _pgvector_available is not None:
+        return _pgvector_available
     try:
         row = await conn.fetchrow("SELECT 1 FROM pg_extension WHERE extname='vector'")
-        return row is not None
+        _pgvector_available = row is not None
     except Exception:
-        return False
+        _pgvector_available = False
+    return _pgvector_available
 
 
 async def _get_embedding(text: str) -> Optional[list]:
@@ -121,16 +146,19 @@ async def create_entity(
         dict with id, name, entity_type, category of the created entity.
     """
     tid = resolve_tenant_id(ctx) or tenant_id
-    entity_id = str(uuid.uuid4())
     props = _parse_json(properties, {})
     alias_list = _parse_json(aliases, [])
 
-    db_url = _get_db_url()
-    if not db_url:
-        return {"error": "DATABASE_URL not configured"}
+    async with (await _get_pool()).acquire() as conn:
+        # Dedup: check if entity with same name+type already exists for this tenant
+        existing = await conn.fetchrow(
+            "SELECT id, name FROM knowledge_entities WHERE tenant_id = $1 AND LOWER(name) = LOWER($2) AND entity_type = $3",
+            tid, name, entity_type,
+        )
+        if existing:
+            return {"id": str(existing["id"]), "name": existing["name"], "entity_type": entity_type, "category": category, "already_exists": True}
 
-    conn = await asyncpg.connect(db_url)
-    try:
+        entity_id = str(uuid.uuid4())
         pgvector = await _has_pgvector(conn)
         if pgvector:
             embedding = await _get_embedding(f"{name} {description or ''}")
@@ -161,8 +189,7 @@ async def create_entity(
                 json.dumps(props), json.dumps(alias_list),
                 confidence,
             )
-    finally:
-        await conn.close()
+    # connection returned to pool automatically
 
     return {"id": entity_id, "name": name, "entity_type": entity_type, "category": category}
 
@@ -192,12 +219,7 @@ async def find_entities(
     tid = resolve_tenant_id(ctx) or tenant_id
     types = _parse_json(entity_types, [])
 
-    db_url = _get_db_url()
-    if not db_url:
-        return [{"error": "DATABASE_URL not configured"}]
-
-    conn = await asyncpg.connect(db_url)
-    try:
+    async with (await _get_pool()).acquire() as conn:
         pgvector = await _has_pgvector(conn)
 
         type_filter = ""
@@ -237,8 +259,7 @@ async def find_entities(
         args = [tid, min_confidence, f"%{query}%"] + (types if types else [])
         rows = await conn.fetch(sql, *args)
         return [_serialize_row(r) for r in rows]
-    finally:
-        await conn.close()
+    # connection returned to pool automatically
 
 
 @mcp.tool()
@@ -267,8 +288,7 @@ async def update_entity(
 
     tid = resolve_tenant_id(ctx)
 
-    conn = await asyncpg.connect(db_url)
-    try:
+    async with (await _get_pool()).acquire() as conn:
         current = await conn.fetchrow(
             "SELECT properties FROM knowledge_entities WHERE id = $1 AND tenant_id = $2",
             entity_id, tid,
@@ -307,8 +327,7 @@ async def update_entity(
         if not updated:
             return {"error": "Entity not found"}
         return _serialize_row(updated)
-    finally:
-        await conn.close()
+    # connection returned to pool automatically
 
 
 @mcp.tool()
@@ -332,12 +351,7 @@ async def merge_entities(
     dup_ids = _parse_json(duplicate_entity_ids, [])
     tid = resolve_tenant_id(ctx)
 
-    db_url = _get_db_url()
-    if not db_url:
-        return {"error": "DATABASE_URL not configured"}
-
-    conn = await asyncpg.connect(db_url)
-    try:
+    async with (await _get_pool()).acquire() as conn:
         async with conn.transaction():
             for dup_id in dup_ids:
                 await conn.execute(
@@ -384,8 +398,7 @@ async def merge_entities(
         )
         result["relations"] = [_serialize_row(r) for r in relations]
         return result
-    finally:
-        await conn.close()
+    # connection returned to pool automatically
 
 
 @mcp.tool()
@@ -421,12 +434,7 @@ async def create_relation(
     relation_id = str(uuid.uuid4())
     evidence_json = json.dumps({"text": evidence or "", "properties": props})
 
-    db_url = _get_db_url()
-    if not db_url:
-        return {"error": "DATABASE_URL not configured"}
-
-    conn = await asyncpg.connect(db_url)
-    try:
+    async with (await _get_pool()).acquire() as conn:
         await conn.execute(
             """
             INSERT INTO knowledge_relations
@@ -448,8 +456,7 @@ async def create_relation(
                 reverse_id, tid, target_entity_id, source_entity_id,
                 relation_type, strength, evidence_json,
             )
-    finally:
-        await conn.close()
+    # connection returned to pool automatically
 
     return {"id": relation_id, "relation_type": relation_type}
 
@@ -479,12 +486,7 @@ async def find_relations(
     tid = resolve_tenant_id(ctx) or tenant_id
     types = _parse_json(relation_types, [])
 
-    db_url = _get_db_url()
-    if not db_url:
-        return [{"error": "DATABASE_URL not configured"}]
-
-    conn = await asyncpg.connect(db_url)
-    try:
+    async with (await _get_pool()).acquire() as conn:
         conditions = ["r.tenant_id = $1", "r.strength >= $2"]
         params: list = [tid, min_strength]
         idx = 3
@@ -518,8 +520,7 @@ async def find_relations(
         """
         rows = await conn.fetch(sql, *params)
         return [_serialize_row(r) for r in rows]
-    finally:
-        await conn.close()
+    # connection returned to pool automatically
 
 
 @mcp.tool()
@@ -546,12 +547,7 @@ async def get_neighborhood(
     ent_types = _parse_json(entity_types, [])
     tid = resolve_tenant_id(ctx)
 
-    db_url = _get_db_url()
-    if not db_url:
-        return {"error": "DATABASE_URL not configured"}
-
-    conn = await asyncpg.connect(db_url)
-    try:
+    async with (await _get_pool()).acquire() as conn:
         visited_entities: dict = {}
         all_relations: list = []
 
@@ -614,8 +610,7 @@ async def get_neighborhood(
             "entities": list(visited_entities.values()),
             "relations": all_relations,
         }
-    finally:
-        await conn.close()
+    # connection returned to pool automatically
 
 
 @mcp.tool()
@@ -650,12 +645,7 @@ async def record_observation(
     s_platform = source_platform or None
     s_agent = source_agent or None
 
-    db_url = _get_db_url()
-    if not db_url:
-        return {"error": "DATABASE_URL not configured"}
-
-    conn = await asyncpg.connect(db_url)
-    try:
+    async with (await _get_pool()).acquire() as conn:
         pgvector = await _has_pgvector(conn)
         if pgvector:
             embedding = await _get_embedding(observation_text)
@@ -682,8 +672,7 @@ async def record_observation(
             obs_id, tid, eid, observation_text, observation_type, source_type,
             s_platform, s_agent,
         )
-    finally:
-        await conn.close()
+    # connection returned to pool automatically
 
     return {"observation_id": obs_id}
 
@@ -706,12 +695,7 @@ async def get_entity_timeline(
     """
     tid = resolve_tenant_id(ctx)
 
-    db_url = _get_db_url()
-    if not db_url:
-        return [{"error": "DATABASE_URL not configured"}]
-
-    conn = await asyncpg.connect(db_url)
-    try:
+    async with (await _get_pool()).acquire() as conn:
         # Verify the entity belongs to the tenant before returning its history
         owner = await conn.fetchrow(
             "SELECT id FROM knowledge_entities WHERE id = $1 AND tenant_id = $2",
@@ -730,8 +714,7 @@ async def get_entity_timeline(
             entity_id,
         )
         return [_serialize_row(r) for r in rows]
-    finally:
-        await conn.close()
+    # connection returned to pool automatically
 
 
 @mcp.tool()
@@ -795,12 +778,7 @@ async def get_git_history(
     """
     tid = resolve_tenant_id(ctx) or tenant_id
 
-    db_url = _get_db_url()
-    if not db_url:
-        return [{"error": "DATABASE_URL not configured"}]
-
-    conn = await asyncpg.connect(db_url)
-    try:
+    async with (await _get_pool()).acquire() as conn:
         conditions = [
             "tenant_id = $1",
             "observation_type = 'git_commit'",
@@ -824,8 +802,7 @@ async def get_git_history(
         """
         rows = await conn.fetch(sql, *params)
         return [_serialize_row(r) for r in rows]
-    finally:
-        await conn.close()
+    # connection returned to pool automatically
 
 
 @mcp.tool()
@@ -851,12 +828,7 @@ async def get_pr_status(
     """
     tid = resolve_tenant_id(ctx) or tenant_id
 
-    db_url = _get_db_url()
-    if not db_url:
-        return [{"error": "DATABASE_URL not configured"}]
-
-    conn = await asyncpg.connect(db_url)
-    try:
+    async with (await _get_pool()).acquire() as conn:
         conditions = [
             "tenant_id = $1",
             "observation_type = 'git_pr'",
@@ -883,8 +855,7 @@ async def get_pr_status(
         """
         rows = await conn.fetch(sql, *params)
         return [_serialize_row(r) for r in rows]
-    finally:
-        await conn.close()
+    # connection returned to pool automatically
 
 
 @mcp.tool()
