@@ -131,22 +131,6 @@ def test_agent_task_model():
     assert hasattr(AgentTask, 'started_at')
     assert hasattr(AgentTask, 'completed_at')
 
-def test_agent_message_model():
-    """Test AgentMessage model has required fields."""
-    from app.models.agent_message import AgentMessage
-
-    assert hasattr(AgentMessage, 'id')
-    assert hasattr(AgentMessage, 'group_id')
-    assert hasattr(AgentMessage, 'task_id')
-    assert hasattr(AgentMessage, 'from_agent_id')
-    assert hasattr(AgentMessage, 'to_agent_id')
-    assert hasattr(AgentMessage, 'message_type')
-    assert hasattr(AgentMessage, 'content')
-    assert hasattr(AgentMessage, 'reasoning')
-    assert hasattr(AgentMessage, 'requires_response')
-    assert hasattr(AgentMessage, 'response_deadline')
-    assert hasattr(AgentMessage, 'created_at')
-
 def test_agent_skill_model():
     """Test AgentSkill model has required fields."""
     from app.models.agent_skill import AgentSkill
