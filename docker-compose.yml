@@ -144,11 +144,13 @@ services:
       - MCP_API_KEY=dev_mcp_key
       - CLAUDE_CODE_MODEL=${CLAUDE_CODE_MODEL:-sonnet}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-ghp_placeholder}
+      - OLLAMA_HOST=http://ollama:11434
     volumes:
       - ./apps/code-worker:/app
       - claude_sessions:/home/codeworker/.claude
     depends_on:
       - temporal
+      - ollama
     restart: unless-stopped
 
   ollama:
