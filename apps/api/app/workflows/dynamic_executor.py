@@ -5,6 +5,7 @@ policies, and heartbeating. for_each uses child workflows for per-iteration
 durability. human_approval uses Temporal signals.
 """
 
+import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import timedelta

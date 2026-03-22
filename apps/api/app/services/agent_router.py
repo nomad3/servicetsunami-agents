@@ -35,18 +35,8 @@ _TASK_TYPE_KEYWORDS = {
 
 
 def _infer_task_type(message: str) -> str:
-    """Infer task type from message — tries local Qwen first, falls back to keywords."""
-    # Try Qwen classification (fast, zero cost)
-    try:
-        from app.services.local_inference import classify_task_type_sync
-        result = classify_task_type_sync(message)
-        if result:
-            logger.debug("Task type classified by Qwen: %s", result)
-            return result
-    except Exception:
-        pass
-
-    # Fall back to keyword matching
+    """Infer task type from message keywords. Qwen classification runs async post-routing."""
+    # Keyword matching only — never block the hot path with Ollama calls
     msg_lower = message.lower()
     for task_type, keywords in _TASK_TYPE_KEYWORDS.items():
         if any(kw in msg_lower for kw in keywords):
