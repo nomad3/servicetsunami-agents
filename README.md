@@ -1,44 +1,21 @@
-<h1 align="center">ServiceTsunami</h1>
+<h1 align="center">ServiceTsunami / Wolfpoint.ai</h1>
 
 <p align="center"><strong>The Orchestration Layer for AI Agents</strong></p>
 
 <p align="center">
   <a href="https://agentprovision.com"><img src="https://img.shields.io/badge/live-agentprovision.com-00d2ff?style=flat-square" alt="Production"></a>
-  <a href="#"><img src="https://img.shields.io/badge/Phase_1-Claude%20Code%20CLI-blueviolet?style=flat-square" alt="Phase 1"></a>
-  <a href="#"><img src="https://img.shields.io/badge/Phase_2-Gemini%20CLI%20%2B%20Codex-grey?style=flat-square" alt="Phase 2"></a>
-  <a href="#"><img src="https://img.shields.io/badge/MCP_Tools-77-ff6b6b?style=flat-square" alt="MCP Tools"></a>
+  <a href="#"><img src="https://img.shields.io/badge/agents-Claude%20Code%20%7C%20Codex%20%7C%20Gemini-blueviolet?style=flat-square" alt="Agents"></a>
+  <a href="#"><img src="https://img.shields.io/badge/MCP_Tools-81-ff6b6b?style=flat-square" alt="MCP Tools"></a>
   <a href="#"><img src="https://img.shields.io/badge/skills-92%2B%20marketplace-green?style=flat-square" alt="Skill Marketplace"></a>
+  <a href="#"><img src="https://img.shields.io/badge/RL-auto%20scoring-orange?style=flat-square" alt="RL"></a>
   <a href="#"><img src="https://img.shields.io/badge/tunnel-Cloudflare-4285F4?style=flat-square" alt="Cloudflare"></a>
 </p>
 
 <p align="center">
-  Don't build agents — orchestrate them. ServiceTsunami routes tasks to the best existing AI agent platform (Claude Code, Gemini CLI, Codex), serves 77 MCP tools, maintains a shared knowledge graph, and learns which platform performs best via RL. Each tenant uses their own subscription — zero API credits.
+  Don't build agents — orchestrate them. ServiceTsunami routes tasks to existing AI agent platforms (Claude Code, Codex, Gemini CLI), serves 81 MCP tools, maintains a knowledge graph, auto-scores every response with a local LLM, and learns which platform performs best via RL. Each tenant uses their own subscription — zero API credits.
 </p>
 
 ---
-
-## Vision
-
-AI agent platforms (Claude Code, Gemini CLI, Codex) already handle context windows, memory, tool calling, and code execution. Building custom agents on top of LLM APIs is expensive and fragile.
-
-**ServiceTsunami is the layer above.** We handle what the platforms don't: multi-tenancy, integrations (Gmail, Calendar, Jira, GitHub), a persistent knowledge graph, a skill marketplace, RL-driven routing, WhatsApp gateway, and enterprise orchestration.
-
-| | Custom Agents (old) | CLI Orchestration (new) |
-|---|---|---|
-| LLM calls | API credits ($$$) | Subscription plans ($) |
-| Context windows | Manual management | Platform handles it |
-| Memory | Custom implementation | Native CLI sessions |
-| Tool calling | Custom framework | MCP standard |
-| Code execution | Sandboxed, limited | Full dev environment |
-
-## Roadmap
-
-| Phase | Platform | Status |
-|-------|----------|--------|
-| **Phase 1** | Claude Code CLI (Opus 4.6) | **Live** — 77 MCP tools, Temporal, WhatsApp, dev workflow |
-| **Phase 2** | Gemini CLI | Planned — free tier, 1M context, MCP support confirmed |
-| **Phase 3** | Codex CLI (OpenAI) | Planned — ChatGPT subscription, MCP support TBD |
-| **Phase 4** | RL-driven routing | Planned — learns best platform per task type from feedback |
 
 ## Architecture
 
@@ -47,40 +24,78 @@ Internet → Cloudflare Tunnel
   ├── servicetsunami.com
   └── agentprovision.com
 
-┌────────────────────────────────────────────────────────────┐
-│  Channels: WhatsApp (Neonize) · Web Chat · API             │
-└──────────────────────┬─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  Channels: WhatsApp (Neonize) · Web Chat · API              │
+└──────────────────────┬──────────────────────────────────────┘
                        │
-┌──────────────────────▼─────────────────────────────────────┐
-│  FastAPI Backend                                            │
-│  ┌──────────────┐  ┌────────────────┐  ┌────────────────┐  │
-│  │ Agent Router  │  │ Session Manager│  │ RL Engine      │  │
-│  │ (Python, no   │  │ (skill→config, │  │ (learns best   │  │
-│  │  LLM cost)    │  │  resume/retry) │  │  platform/task)│  │
-│  └──────┬────────┘  └────────────────┘  └────────────────┘  │
-└─────────┼───────────────────────────────────────────────────┘
+┌──────────────────────▼──────────────────────────────────────┐
+│  FastAPI Backend                                             │
+│  ┌──────────────┐  ┌────────────────┐  ┌─────────────────┐  │
+│  │ Agent Router  │  │ Session Manager│  │ Auto Quality    │  │
+│  │ (Python, zero │  │ (skill→config, │  │ Scorer (local   │  │
+│  │  LLM cost)    │  │  resume/retry) │  │ Qwen, 6-dim RL)│  │
+│  └──────┬────────┘  └────────────────┘  └─────────────────┘  │
+└─────────┼────────────────────────────────────────────────────┘
           │
-┌─────────▼───────────────────────────────────────────────────┐
-│  Temporal Workers                                            │
-│                                                              │
-│  ┌─────────────────┐  ┌──────────────┐  ┌────────────────┐  │
-│  │ Claude Code CLI  │  │ Gemini CLI   │  │ Codex CLI      │  │
-│  │ (Phase 1 - LIVE) │  │ (Phase 2)    │  │ (Phase 3)      │  │
-│  │ Opus 4.6         │  │ Free/Pro     │  │ ChatGPT plan   │  │
-│  │ Subscription     │  │ Subscription │  │ Subscription   │  │
-│  └────────┬─────────┘  └──────┬───────┘  └───────┬────────┘  │
-│           └──────────────────┼────────────────────┘          │
-│                              │                               │
-│                    ┌─────────▼─────────┐                     │
-│                    │  MCP Tool Server   │                     │
-│                    │  77 tools (FastMCP)│                     │
-│                    └───────────────────┘                     │
-└──────────────────────────────────────────────────────────────┘
+┌─────────▼────────────────────────────────────────────────────┐
+│  Temporal Workers                                             │
+│                                                               │
+│  ┌─────────────────┐  ┌──────────────┐  ┌─────────────────┐  │
+│  │ Claude Code CLI  │  │ Codex CLI    │  │ Gemini CLI      │  │
+│  │ Opus 4.6 ✅      │  │ OpenAI ✅    │  │ Google ⏳       │  │
+│  │ Subscription     │  │ Subscription │  │ Subscription    │  │
+│  └────────┬─────────┘  └──────┬───────┘  └───────┬─────────┘  │
+│           └──────────────────┼────────────────────┘           │
+│                              │                                │
+│                    ┌─────────▼──────────┐                     │
+│                    │  MCP Tool Server    │                     │
+│                    │  81 tools (FastMCP) │                     │
+│                    └────────────────────┘                     │
+└───────────────────────────────────────────────────────────────┘
+          │
+┌─────────▼────────────────────────────────────────────────────┐
+│  Local ML (Ollama — zero cloud cost)                          │
+│  ┌─────────────────┐  ┌──────────────┐  ┌─────────────────┐  │
+│  │ Auto Scoring     │  │ Knowledge    │  │ Fallback Chat   │  │
+│  │ qwen2.5-coder    │  │ Extraction   │  │ (no sub needed) │  │
+│  │ 6-dim rubric→RL  │  │ + Triage     │  │ Luna persona    │  │
+│  └──────────────────┘  └──────────────┘  └─────────────────┘  │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-## 77 MCP Tools
+## Auto Quality Scoring & RL
 
-All tools served via Anthropic's MCP protocol (FastMCP, Streamable HTTP). Any MCP-compatible CLI agent connects instantly.
+Every agent response is automatically scored by a local Qwen model across 6 dimensions:
+
+| Dimension | Max | What it measures |
+|-----------|-----|-----------------|
+| Accuracy | 25 | Factual correctness, no hallucinations |
+| Helpfulness | 20 | Addresses actual user need, actionable |
+| Tool Usage | 20 | Appropriate MCP tool selection |
+| Memory Usage | 15 | Knowledge graph recall, context building |
+| Efficiency | 10 | Concise, fast response |
+| Context Awareness | 10 | Conversation continuity |
+
+Scores are logged as **RL experiences** with cost tracking (tokens/cost per quality point) and platform recommendations. The system learns which agent platform performs best per task type. Zero cloud cost — fully local inference.
+
+## Local ML Pipeline
+
+All lightweight ML tasks run locally via Ollama (zero cloud cost):
+
+| Task | Model | Replaces |
+|------|-------|----------|
+| Response quality scoring | qwen2.5-coder:1.5b | Manual review |
+| Conversation summarization | qwen2.5-coder:0.5b | Anthropic API calls |
+| Knowledge extraction | qwen2.5-coder:1.5b | Anthropic API calls |
+| Email/calendar triage | qwen2.5-coder:1.5b | Anthropic API calls |
+| Competitor analysis | qwen2.5-coder:1.5b | Anthropic API calls |
+| Message intent classification | qwen2.5-coder:0.5b | LLM-based routing |
+| Free-tier fallback (Luna) | qwen2.5-coder:1.5b | Error message |
+| MCP tool calling (planned) | qwen3:4b | None — new capability |
+
+## 81 MCP Tools
+
+All tools served via Anthropic's MCP protocol (FastMCP, Streamable HTTP).
 
 | Category | Tools | Count |
 |----------|-------|-------|
@@ -98,54 +113,22 @@ All tools served via Anthropic's MCP protocol (FastMCP, Streamable HTTP). Any MC
 | **Analytics** | calculate, compare periods, forecast | 3 |
 | **Skills** | list, run, match context, recall memory | 4 |
 | **Shell** | execute commands, deploy changes | 2 |
+| **Drive** | search, read, list files | 3 |
 | **Connectors** | query data sources | 1 |
 
-## Skill & Agent Marketplace
-
-Agents and tools share the same three-tier marketplace:
-
-```bash
-# Import 92 Google Workspace skills
-POST /api/v1/skills/library/import-github
-{"repo_url": "https://github.com/googleworkspace/cli/tree/main/skills"}
-
-# Import MCP tools from community
-POST /api/v1/tools/import-github
-{"repo_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/slack"}
-```
-
-**Native** (bundled) | **Community** (GitHub imports) | **Custom** (per-tenant, versioned)
-
-Agents are skills with `engine: agent` and `platform_affinity: claude_code | gemini_cli | codex_cli`.
-
-## Development Workflow
-
-Luna (the default agent) has full dev capabilities:
-
-```
-User: "Fix the login button color"
-Luna:
-  1. cd /workspace && git checkout -b fix/login-button-color
-  2. Edits the file using Claude Code's Edit tool
-  3. git commit -m "fix: update login button color"
-  4. git push origin fix/login-button-color
-  5. gh pr create --title "fix: update login button color"
-  6. Returns PR URL to user
-```
-
-GitHub token fetched from OAuth vault per-session. No hardcoded credentials.
-
-## One-Click Platform Auth
+## Platform Auth
 
 Each CLI platform uses subscription-based OAuth — zero API credits:
 
 | Platform | Auth | Status |
 |----------|------|--------|
-| Claude Code | `claude setup-token` → vault | **Live** |
+| Claude Code | OAuth token → vault | **Live** |
+| Codex (OpenAI) | auth.json → vault | **Live** |
+| Gemini CLI | Google OAuth | Integrated, untested |
 | GitHub | OAuth via agentprovision.com | **Live** |
 | Gmail/Calendar | Google OAuth with auto-refresh | **Live** |
-| Gemini CLI | Google OAuth (extends existing) | Phase 2 |
-| Codex | ChatGPT OAuth | Phase 3 |
+| Microsoft/Outlook | Microsoft OAuth | Wired |
+| Jira | Basic Auth | **Live** |
 
 ## Quick Start
 
@@ -158,22 +141,22 @@ DB_PORT=8003 API_PORT=8001 WEB_PORT=8002 docker-compose up --build
 # API:         http://localhost:8001
 # MCP Tools:   http://localhost:8087
 # Temporal UI: http://localhost:8233
+# Demo login:  test@example.com / password
 ```
 
 ### Connect Your Agent
 1. **Integrations** → Claude Code → run `claude setup-token` → paste token
-2. **Settings** → enable CLI Orchestrator
-3. Chat via web or WhatsApp — Luna responds via your subscription
+2. Chat via web or WhatsApp — Luna responds via your subscription
+3. Every response auto-scored and logged for RL improvement
 
-## Design Documents
+## Stack
 
-| Document | Description |
-|----------|-------------|
-| `docs/plans/2026-03-15-cli-orchestration-pivot-design.md` | Full architecture spec |
-| `docs/plans/2026-03-15-cli-orchestration-pivot-plan.md` | Phase 1 implementation (10 tasks) |
-| `docs/plans/2026-03-16-adk-removal-plan.md` | ADK deprecation steps |
-| `docs/plans/2026-03-16-cloudflare-tunnel-design.md` | Cloudflare Tunnel setup |
+FastAPI · React 18 · PostgreSQL + pgvector · Temporal · FastMCP · Ollama (Qwen) · Neonize (WhatsApp) · Cloudflare Tunnel · Docker Compose · nomic-embed-text-v1.5
+
+## Documentation
+
+See `CLAUDE.md` for full architecture, API structure, development commands, and patterns.
 
 ---
 
-*Built with Claude Code CLI · Gemini CLI (soon) · Codex (soon) · MCP · Temporal · pgvector · Neonize · Cloudflare · FastAPI · React*
+*Built with Claude Code CLI · Codex CLI · Gemini CLI · MCP · Temporal · Ollama · pgvector · Neonize · Cloudflare · FastAPI · React*

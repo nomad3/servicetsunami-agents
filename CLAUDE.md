@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ServiceTsunami is an AI agent orchestration platform that routes tasks to **Claude Code CLI** (Opus 4.6) via Temporal workflows. Agents are defined as marketplace skills, tools are served via **MCP** (81 tools), and the platform learns from user feedback via RL. Runs from a laptop via **Cloudflare Tunnel** serving both `servicetsunami.com` and `agentprovision.com`.
 
-**Key architecture**: Chat → Agent Router (Python, zero LLM cost) → Temporal → code-worker (Claude Code CLI with `--model opus`) → MCP tools (FastMCP, 81 tools) → response.
+**Key architecture**: Chat → Agent Router (Python, zero LLM cost) → Temporal → code-worker (Claude Code CLI with `--model opus`) → MCP tools (FastMCP, 81 tools) → response. Every response is auto-scored by a local LLM (Qwen) across 6 quality dimensions and logged as an RL experience for continuous improvement.
 
 ## Architecture
 
@@ -21,6 +21,7 @@ Docker Compose stack with Cloudflare Tunnel:
 - **`apps/web`** (port 8002): React SPA with markdown rendering (react-markdown), Ocean theme
 - **`cloudflared`**: Cloudflare Tunnel — routes servicetsunami.com + agentprovision.com to local stack
 - **`temporal`** (port 7233): Workflow engine for durable task execution
+- **`ollama`** (port 11434): Local LLM runtime — hosts Qwen models for auto-scoring, RL, knowledge extraction, conversation summarization, and free-tier fallback responses
 - **`db`** (port 8003): PostgreSQL + pgvector
 
 Previously a Turborepo monorepo managed with `pnpm` workspaces:
@@ -91,6 +92,26 @@ Previously a Turborepo monorepo managed with `pnpm` workspaces:
 **Knowledge Graph + Vector Search**: Entities (`knowledge_entity.py`) and relations (`knowledge_relation.py`) form a knowledge graph with pgvector-powered semantic search (768-dim embeddings via nomic-embed-text-v1.5). Supports **Lead Scoring** via configurable rubrics and the `LeadScoringTool`. Knowledge is extracted via `KnowledgeExtractionWorkflow`. Observations table (`knowledge_observations`) stores facts and insights. Entity history tracked in `knowledge_entity_history`. **Memory Activity** audit log (`memory_activities` table) tracks entity_created, entity_updated, relation_created, memory_created, and action_triggered events.
 
 **Embedding System**: Local open-source embeddings via `nomic-ai/nomic-embed-text-v1.5` (768-dim, sentence-transformers). No API key needed — runs locally in API and MCP containers. Centralized in `embedding_service.py`. Used by: knowledge graph, chat messages, memory activities, RL experiences, skill registry (auto-trigger matching), and email attachment content. Email attachments downloaded via Gmail API are automatically embedded for semantic search (`content_type='email_attachment'`).
+
+**Auto Quality Scoring & RL**: Every agent response is automatically scored by a local Qwen model (`qwen2.5-coder:1.5b` via Ollama) across a 6-dimension rubric (100 points total):
+- **Accuracy** (25pts): Factual correctness, no hallucinations
+- **Helpfulness** (20pts): Addresses actual user need, actionable
+- **Tool Usage** (20pts): Appropriate MCP tool selection and usage
+- **Memory Usage** (15pts): Knowledge graph recall, context building
+- **Efficiency** (10pts): Concise, fast, no padding
+- **Context Awareness** (10pts): Conversation continuity, history usage
+Scores are logged as RL experiences (`rl_experience` table) with reward components, cost tracking (tokens/cost per quality point), and platform recommendation. The scoring runs async after each response via `auto_quality_scorer.py` using the `agent_response_quality` rubric from `scoring_rubrics.py`. Zero cloud cost — fully local inference.
+
+**Reinforcement Learning System**: RL experiences track agent decisions across multiple decision points (`chat_response`, `code_task`, `agent_routing`). Each experience stores state, action, reward (0-1 scale from quality score), and reward components (the 6-dimension breakdown). Services: `rl_experience_service.py` (CRUD + querying), `rl_reward_service.py` (reward assignment), `rl_policy_engine.py` (policy updates). The `RLPolicyUpdateWorkflow` (Temporal) periodically retrains policies from accumulated experiences. Embeddings of state text enable semantic similarity search over past decisions.
+
+**Local ML Inference** (`local_inference.py`): All lightweight ML tasks run locally via Ollama (zero cloud cost):
+- `generate_luna_response_sync()`: Free-tier fallback when no CLI subscription connected
+- `summarize_conversation_sync()`: Conversation summarization (replaces Anthropic calls in context_manager)
+- `extract_knowledge_sync()`: Entity/relation extraction from content
+- `triage_inbox_items()`: Email/calendar triage for inbox monitor
+- `analyze_competitor_data()`: Competitor monitoring analysis
+- `classify_task_type()`: Message intent classification for agent routing
+- Models: `qwen2.5-coder:0.5b` (default fast), `qwen2.5-coder:1.5b` (quality scoring), `qwen3:4b` (tool calling — planned for MCP bridge)
 
 **Skill Marketplace**: Three-tier file-based skill system with GitHub import:
 - **Native tier**: Bundled skills shipped with the container (read-only): sql_query, calculator, data_summary, entity_extraction, knowledge_search, lead_scoring, report_generation
@@ -216,6 +237,7 @@ Core domain models (all inherit from SQLAlchemy Base, include `tenant_id` Foreig
 - `integration_credential.py`: Encrypted API keys/tokens for integrations (OAuth tokens, session tokens, API keys)
 - `notification.py`: Proactive alerts from inbox monitor, system events
 - `memory_activity.py`: Audit log for knowledge graph operations
+- `rl_experience.py`: Reinforcement learning experiences with decision_point, state, action, reward, reward_components (JSONB), reward_source, embedded state_text
 
 ### Services (`apps/api/app/services/`)
 
@@ -235,6 +257,12 @@ Business logic layer (one service per model):
 - `whatsapp_service.py`: Neonize-based WhatsApp integration with persistent typing indicator (refreshes composing presence every 4s until response sent)
 - `branding.py`, `features.py`, `tenant_analytics.py`: Tenant customization services
 - `integration_configs.py`: Integration configuration CRUD service
+- `auto_quality_scorer.py`: Async post-response scoring via local Qwen model (6-dimension rubric → RL experience)
+- `scoring_rubrics.py`: Configurable scoring rubrics registry (agent_response_quality rubric)
+- `rl_experience_service.py`: RL experience CRUD, querying, and semantic search
+- `rl_reward_service.py`: Reward assignment and aggregation for RL experiences
+- `rl_policy_engine.py`: Policy updates from accumulated RL experiences
+- `local_inference.py`: Local Ollama-based inference for scoring, summarization, extraction, triage (zero cloud cost)
 - `orchestration/`: Orchestration services package
   - `credential_vault.py`: Fernet-encrypted credential storage with CRUD helpers
   - `task_dispatcher.py`: Agent selection and task dispatch
@@ -435,4 +463,5 @@ PRs created by the code agent include structured body with full audit trail:
   - `2026-03-10-marketing-intelligence-ads-platform-plan.md`: Implementation plan for marketing intelligence feature
   - `2026-03-13-multi-model-abstraction-layer-design.md`: Multi-LLM provider switching via integration registry
   - `2026-03-13-multi-model-abstraction-layer-plan.md`: 10-task implementation plan for multi-model support
+  - `2026-03-22-local-ollama-mcp-bridge-plan.md`: Local Qwen3:4b → Ollama tool calling → MCP bridge for free-tier tenants
 - `LLM_INTEGRATION_README.md`, `TOOL_FRAMEWORK_README.md`, `DATABRICKS_SYNC_README.md`: Feature docs
