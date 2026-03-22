@@ -210,9 +210,33 @@ def run_agent_session(
     )
     if subscription_missing:
         logger.warning(
-            "No %s credential for tenant %s — falling back to local Qwen",
+            "No %s credential for tenant %s — falling back to local agent",
             platform, tenant_id,
         )
+        # 1. Try local tool agent (curated MCP tools via Ollama)
+        try:
+            from app.services import local_tool_agent
+            connected = [
+                r[0] for r in db.query(IntegrationConfig.integration_name)
+                .filter(IntegrationConfig.tenant_id == tenant_id, IntegrationConfig.enabled.is_(True))
+                .all()
+            ]
+            tool_response, tool_meta = local_tool_agent.run(
+                message=message,
+                tenant_id=tenant_id,
+                skill_body=skill_body,
+                agent_slug=agent_slug,
+                conversation_summary=conversation_summary,
+                connected_integrations=connected,
+            )
+            if tool_response:
+                metadata.update(tool_meta)
+                return tool_response, metadata
+            logger.info("Local tool agent returned no response — falling back to plain text")
+        except Exception as exc:
+            logger.warning("Local tool agent failed: %s — falling back to plain text", exc)
+
+        # 2. Fall back to plain text response (no tools)
         from app.services.local_inference import generate_agent_response_sync
         local_response = generate_agent_response_sync(
             message=message,
@@ -224,6 +248,8 @@ def run_agent_session(
             metadata["platform"] = "local_qwen"
             metadata["fallback"] = True
             return local_response, metadata
+
+        # 3. Friendly error
         err = (
             f"{'Claude Code' if platform == 'claude_code' else 'Codex'} subscription is not connected "
             "and the local model is unavailable. Please connect your account in Settings → Integrations."

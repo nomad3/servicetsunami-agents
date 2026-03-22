@@ -1,106 +1,87 @@
-# Local Ollama MCP Bridge — Tool Calling for Free-Tier Tenants
+# Local Tool Agent — Curated MCP Tool Calling for Free-Tier Tenants
 
-**Date**: 2026-03-22
-**Status**: Planned
-**Goal**: Give tenants without a Claude/Codex subscription access to MCP tools via a lightweight local model through Ollama's native tool calling API.
+**Date**: 2026-03-22 (revised 2026-03-23)
+**Status**: In Progress
+**Goal**: Give tenants without a Claude/Codex subscription access to curated MCP tools via a local model (qwen3:4b) through Ollama's native tool calling API.
 
 ## Context
 
-- Codex CLI `--oss --local-provider ollama` does NOT wire MCP tool calls to local models — models output tool calls as plain text
-- Ollama's `/api/chat` endpoint natively supports a `tools` parameter with function calling (separate from Codex CLI)
-- We need a thin bridge: Ollama `/api/chat` with tools ↔ our MCP server (81 tools at `http://mcp-tools:8000/mcp`)
+- Codex CLI `--oss --local-provider ollama` does NOT wire MCP tool calls — models output tool calls as plain text
+- Ollama's `/api/chat` endpoint natively supports `tools` parameter with proper structured `tool_calls` responses
+- Existing `mcp_server_connectors.py` already has JSON-RPC `tools/call` and `tools/list` patterns we reuse
+- Internal MCP server at `http://mcp-tools:8000/mcp`
 
-## Recommended Model
+## Model
 
-**qwen3:4b** — 2.5GB download, ~4GB RAM
-- Native tool calling CONFIRMED working via Ollama `/api/chat` with `tools` param
-- Produces proper structured `tool_calls` (not text) — tested 2026-03-22
-- Reportedly rivals Qwen2.5-72B performance despite 4B params
-- Built-in thinking/reasoning before tool selection
-- Already pulled on local Ollama
-
-Fallback options: `qwen3:1.7b` (~1.1GB), `ministral:3b` (~2GB)
+**qwen3:4b** — 2.5GB, ~4GB RAM. Tool calling confirmed 2026-03-22. Already pulled.
 
 ## Architecture
 
 ```
 User message (no subscription)
   → cli_session_manager.py detects missing credentials
-  → calls local_tool_agent() instead of Temporal workflow
-  → local_tool_agent:
-      1. Fetches available MCP tools from mcp-tools server (GET /mcp/tools or similar)
-      2. Converts MCP tool schemas → Ollama tool format
-      3. Calls Ollama /api/chat with message + tools
-      4. If model returns tool_calls → executes them against MCP server
-      5. Feeds tool results back to model for final response
-      6. Returns final text to user
+  → Fallback chain:
+      1. local_tool_agent.run() — curated tools, agent-preserving
+      2. generate_agent_response_sync() — plain text fallback
+      3. friendly error message
+  → local_tool_agent.run():
+      1. Build curated tool schemas (allowlist filtered by tenant integrations)
+      2. Call Ollama /api/chat with message + skill system prompt + tools
+      3. If tool_calls → execute via JSON-RPC tools/call to /mcp
+      4. Feed results back → next round (max 3 rounds)
+      5. Return final text
 ```
+
+## Design Constraints
+
+- **Agent-preserving**: Uses selected agent's skill_body as system prompt, not hardcoded Luna
+- **Curated tool registry**: Typed allowlist per category, not all 81 tools
+- **Tenant-aware filtering**: Only expose tools for integrations the tenant has connected
+- **Reuse existing MCP call code**: JSON-RPC tools/call pattern from mcp_server_connectors.py
+- **Hard limits**:
+  - Max 3 tool call rounds per message
+  - Max 5 tools per turn
+  - 30s timeout per tool call
+  - Explicit fallback on malformed tool_calls
+  - Tool allowlist by channel
+
+## Curated Tool Registry
+
+| Category | Tools | Requires Integration |
+|----------|-------|---------------------|
+| **knowledge** | knowledge_search, knowledge_list_entities, knowledge_create_entity, knowledge_create_observation | None (always available) |
+| **email** | email_search, email_read, email_send | google_gmail |
+| **calendar** | calendar_list_events, calendar_create_event | google_calendar |
+| **jira** | jira_search_issues, jira_get_issue, jira_create_issue | jira |
+| **reports** | report_generate | None (always available) |
+
+~13 tools max exposed. Filtered down based on tenant's connected integrations.
 
 ## Tasks
 
-### 1. ~~Pull qwen3:4b model~~ DONE
-- Already pulled and tested (2026-03-22)
-- Tool calling confirmed: returns structured `tool_calls` with correct args
-- First load ~148s (cold), subsequent calls much faster
+### 1. ~~Pull qwen3:4b~~ DONE (2026-03-22)
 
-### 2. Build MCP tool schema converter
+### 2. Build local_tool_agent.py
 - File: `apps/api/app/services/local_tool_agent.py`
-- Fetch tool list from MCP server (`http://mcp-tools:8000/mcp` — check endpoint)
-- Convert MCP tool JSON schema → Ollama's tool calling format:
-  ```json
-  {
-    "type": "function",
-    "function": {
-      "name": "knowledge_search",
-      "description": "Search the knowledge graph",
-      "parameters": { "type": "object", "properties": {...} }
-    }
-  }
-  ```
-- Cache tool schemas (don't fetch on every message)
+- Curated tool registry as typed dict in code
+- MCP JSON-RPC `tools/call` reusing pattern from mcp_server_connectors.py
+- Ollama `/api/chat` with `tools` parameter
+- Agent loop with max 3 rounds, 5 tools/turn, 30s timeout
+- Preserves agent_slug and skill_body as system prompt
+- Returns (response_text, metadata) or (None, metadata) on failure
 
-### 3. Build the agent loop
-- In `local_tool_agent.py`:
-  - Send user message + tool schemas to Ollama `/api/chat`
-  - Parse response for `tool_calls`
-  - If tool_calls present: execute each against MCP server, collect results
-  - Send tool results back to model as follow-up messages
-  - Max 3 tool call rounds to prevent loops
-  - Return final assistant text
-- Use `qwen3:4b` by default, configurable via `LOCAL_TOOL_MODEL` env var
+### 3. Wire into cli_session_manager.py fallback chain
+- Fallback order: local_tool_agent → generate_agent_response_sync → error
+- Metadata: platform=local_qwen_tools, fallback=true, tools_used=[...]
 
-### 4. Wire into cli_session_manager.py fallback
-- Replace `generate_luna_response_sync()` call with `local_tool_agent()` call
-- Keep `generate_luna_response_sync()` as fallback if tool agent fails
-- Metadata should include: `platform=local_qwen`, `fallback=true`, `tools_used=[...]`
-
-### 5. Subset tool selection
-- 81 tools is too many for a 3B model's context window
-- Select a subset of ~10-15 most useful tools for chat:
-  - `knowledge_search`, `knowledge_list_entities`, `knowledge_create_entity`
-  - `memory_search`, `memory_list_activities`
-  - `email_search`, `email_send` (if Google connected)
-  - `calendar_list_events` (if Google connected)
-  - `jira_search_issues`, `jira_create_issue` (if Jira connected)
-  - `shell_execute` (basic commands)
-  - `report_generate`
-- Filter based on which integrations the tenant has connected
-
-### 6. Test end-to-end
-- Create test tenant with no Claude/Codex credentials
-- Send messages that should trigger tool use:
-  - "Search my knowledge base for contacts"
-  - "What meetings do I have today?"
-  - "Create a new entity for Acme Corp"
-- Verify tool calls execute and results return correctly
-- Monitor laptop resource usage during inference
+### 4. Test end-to-end
+- QwenTest tenant (no credentials)
+- Knowledge search, entity creation
+- Verify tool calls execute and results return
+- Monitor resource usage
 
 ## Out of Scope
-- Codex CLI `--oss` mode (proven to not work for MCP tool calling)
-- Models larger than 7B (laptop thermal constraints)
-- Streaming responses (keep it simple, batch response)
-
-## References
-- [Ollama Tool Calling Docs](https://docs.ollama.com/capabilities/tool-calling)
-- [Ollama MCP Bridge](https://github.com/patruff/ollama-mcp-bridge) — reference implementation
-- [Qwen 2.5 Function Calling](https://qwen.readthedocs.io/en/latest/framework/function_call.html)
+- Dynamic tool discovery (use curated registry)
+- Streaming responses
+- Models >7B
+- Codex CLI --oss approach (proven broken)
