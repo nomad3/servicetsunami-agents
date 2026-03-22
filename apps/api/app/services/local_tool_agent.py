@@ -392,7 +392,7 @@ def run(
 
         # No tool calls — model is done, return text
         if not tool_calls:
-            text = msg.get("content", "").strip()
+            text = _clean_response(msg.get("content", ""))
             if text:
                 metadata["tool_rounds"] = round_num
                 return text, metadata
@@ -440,10 +440,28 @@ def run(
         metadata["tool_rounds"] = round_num + 1
 
     # Exhausted rounds — do one final call without tools to get a summary
+    messages.append({
+        "role": "user",
+        "content": "Now summarize the tool results above and give a final answer to the user. Do not call any more tools.",
+    })
     resp = _ollama_chat(messages, tools=[])
     if resp:
-        text = resp.get("message", {}).get("content", "").strip()
+        text = _clean_response(resp.get("message", {}).get("content", ""))
         if text:
             return text, metadata
 
     return None, metadata
+
+
+def _clean_response(text: str) -> str:
+    """Strip model artifacts like <tool_call>, <think>, etc from response."""
+    import re
+    if not text:
+        return ""
+    # Remove <tool_call>...</tool_call> blocks
+    text = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL)
+    # Remove <think>...</think> blocks
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    # Remove unclosed tags
+    text = re.sub(r"</?(?:tool_call|think)>", "", text)
+    return text.strip()
