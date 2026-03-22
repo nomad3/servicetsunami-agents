@@ -350,6 +350,39 @@ If no entities found, return: {{"entities": [], "relations": [], "memories": [],
     return None
 
 
+def extract_knowledge_with_prompt_sync(prompt: str) -> Optional[dict]:
+    """Extract knowledge using a pre-built prompt (preserves tenant entity schemas).
+
+    Accepts the full prompt from KnowledgeExtractionService._build_prompt()
+    so tenant-specific extraction rules and schemas are honored.
+    Returns a dict with keys: entities, relations, memories, action_triggers.
+    Returns None on failure so callers can fall back to Anthropic.
+    """
+    import json
+
+    result = generate_sync(
+        prompt=prompt,
+        model=QUALITY_MODEL,
+        system="You are a knowledge extraction agent. Output valid JSON only.",
+        temperature=0.0,
+        max_tokens=1200,
+        timeout=60.0,
+    )
+
+    if not result:
+        return None
+
+    try:
+        start = result.index("{")
+        end = result.rindex("}") + 1
+        data = json.loads(result[start:end])
+        if "entities" in data:
+            return data
+    except (json.JSONDecodeError, ValueError, IndexError):
+        logger.debug("Failed to parse Qwen knowledge extraction (with prompt): %s", result[:200])
+    return None
+
+
 def classify_task_type_sync(message: str) -> Optional[str]:
     """Classify a user message into a task type using local Qwen model (sync).
 
@@ -446,14 +479,16 @@ Keys in observations must match competitor IDs from the data."""
     return None
 
 
-def generate_luna_response_sync(
+def generate_agent_response_sync(
     message: str,
     conversation_summary: str = "",
     skill_body: str = "",
+    agent_slug: str = "luna",
 ) -> Optional[str]:
-    """Generate a Luna-style response using local Qwen model (sync).
+    """Generate an agent response using local Qwen model (sync).
 
     Used as a fallback when no CLI subscription (Claude Code / Codex) is connected.
+    Uses the agent's skill_body as the persona — not hardcoded to Luna.
     Returns response text or None on failure.
     """
     context_block = ""
@@ -464,28 +499,33 @@ def generate_luna_response_sync(
 
 USER: {message[:600]}
 
-Respond as Luna. Be warm, brief, and conversational — like a smart friend texting back, not a formal report.
+Respond in character. Be warm, brief, and conversational — like a smart colleague texting back, not a formal report.
 Keep your reply to 1-3 short sentences unless the question truly needs more detail.
 Do NOT use markdown headers or bullet-point walls.
 Do NOT mention that you are a local model or that any subscription is missing."""
 
-    luna_system = (skill_body.strip()[:1200] + "\n\n") if skill_body else ""
-    luna_system += (
-        "You are Luna, an AI chief of staff and business co-pilot. "
-        "You are warm, sharp, proactive, and loyal. "
-        "You respond in short, direct, conversational messages — never stiff or formal. "
-        "Use contractions. React first, then inform. Never start with 'Certainly!' or 'Of course!'. "
-        "Always respond in the same language the user writes in."
-    )
+    system = (skill_body.strip()[:1200] + "\n\n") if skill_body else ""
+    if not system.strip():
+        # Default persona only if no skill body provided
+        system = (
+            "You are an AI assistant. "
+            "You respond in short, direct, conversational messages — never stiff or formal. "
+            "Use contractions. React first, then inform. Never start with 'Certainly!' or 'Of course!'. "
+            "Always respond in the same language the user writes in."
+        )
 
     return generate_sync(
         prompt=prompt,
         model=QUALITY_MODEL,
-        system=luna_system,
+        system=system,
         temperature=0.7,
         max_tokens=400,
         timeout=60.0,
     )
+
+
+# Backward-compatible alias
+generate_luna_response_sync = generate_agent_response_sync
 
 
 def summarize_conversation_sync(conversation_text: str) -> Optional[str]:

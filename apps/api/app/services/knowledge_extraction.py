@@ -164,8 +164,8 @@ class KnowledgeExtractionService:
             # ── Try local Qwen model first (zero token cost) ──
             parsed = None
             try:
-                from app.services.local_inference import extract_knowledge_sync as _qwen_extract
-                qwen_result = _qwen_extract(content, content_type)
+                from app.services.local_inference import extract_knowledge_with_prompt_sync as _qwen_extract
+                qwen_result = _qwen_extract(prompt)
                 if qwen_result is not None:
                     parsed = qwen_result
                     logger.info(

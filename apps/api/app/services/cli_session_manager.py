@@ -213,11 +213,12 @@ def run_agent_session(
             "No %s credential for tenant %s — falling back to local Qwen",
             platform, tenant_id,
         )
-        from app.services.local_inference import generate_luna_response_sync
-        local_response = generate_luna_response_sync(
+        from app.services.local_inference import generate_agent_response_sync
+        local_response = generate_agent_response_sync(
             message=message,
             conversation_summary=conversation_summary,
             skill_body=skill_body,
+            agent_slug=agent_slug,
         )
         if local_response:
             metadata["platform"] = "local_qwen"
