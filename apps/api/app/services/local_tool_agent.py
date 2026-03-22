@@ -262,6 +262,7 @@ def _call_mcp_tool(
     }
     headers = {
         "Content-Type": "application/json",
+        "Accept": "application/json",
         "X-Internal-Key": MCP_INTERNAL_KEY,
         "X-Tenant-Id": tenant_id,
     }
