@@ -4,6 +4,10 @@ Uses the agent_response_quality rubric from scoring_rubrics.py for
 multi-dimensional scoring (accuracy, helpfulness, tool_usage, memory_usage,
 efficiency, context_awareness) plus cost efficiency tracking per platform.
 
+Also runs a 3-agent consensus review council (Accuracy, Helpfulness, Persona
+reviewers) that mirrors the code-worker review pattern — extended to ALL agents.
+Requires 2/3 approval to pass. Consensus results are merged into the RL experience.
+
 Runs asynchronously after each chat response is returned to the user.
 """
 
@@ -63,7 +67,7 @@ async def _score_and_log(
     tools_called: list,
     entities_recalled: list,
 ):
-    """Score the response with multi-dimensional rubric and log as RL reward."""
+    """Score the response with multi-dimensional rubric + consensus council, log as RL reward."""
     from app.services.local_inference import is_available, generate
 
     logger.info("Auto-quality scorer: starting for tenant %s (platform=%s)", str(tenant_id)[:8], platform)
@@ -72,8 +76,10 @@ async def _score_and_log(
         logger.info("Auto-quality scorer: Ollama not available — skipping")
         return
 
-    # Build the rubric prompt with full context
+    # ── Run single-agent rubric scoring AND 3-agent consensus in parallel ──
     from app.services.scoring_rubrics import get_rubric
+    from app.services.consensus_reviewer import run_consensus_review
+
     rubric = get_rubric("agent_response_quality")
     if not rubric:
         logger.warning("agent_response_quality rubric not found")
@@ -93,41 +99,73 @@ async def _score_and_log(
         entities_recalled=", ".join(str(e) for e in entities_recalled[:5]) if entities_recalled else "none",
     )
 
-    raw = await generate(
-        prompt=prompt,
-        model=os.environ.get("QUALITY_MODEL", "qwen2.5-coder:1.5b"),
-        system=rubric["system_prompt"],
-        temperature=0.1,
-        max_tokens=300,
+    # Run rubric scorer + consensus council in parallel
+    rubric_raw, consensus = await asyncio.gather(
+        generate(
+            prompt=prompt,
+            model=os.environ.get("QUALITY_MODEL", "qwen2.5-coder:1.5b"),
+            system=rubric["system_prompt"],
+            temperature=0.1,
+            max_tokens=300,
+        ),
+        run_consensus_review(
+            user_message=user_message,
+            agent_response=agent_response,
+            agent_slug=agent_slug,
+            platform=platform,
+            channel=channel,
+            tools_called=tools_called,
+            entities_recalled=entities_recalled,
+        ),
+        return_exceptions=True,
     )
 
-    if not raw:
-        logger.debug("Auto-quality scoring returned no result")
-        return
+    # ── Parse rubric score ──
+    import json, re
+    score = 50
+    breakdown = {}
+    cost_efficiency = {}
+    reasoning = ""
 
-    # Parse JSON response
-    import json
-    try:
-        json_str = raw[raw.index('{'):raw.rindex('}') + 1]
-        data = json.loads(json_str)
-    except (json.JSONDecodeError, ValueError):
-        logger.debug("Failed to parse quality score from: %s", raw[:100])
-        return
+    if rubric_raw:
+        try:
+            clean = re.sub(r"<think>.*?</think>", "", rubric_raw, flags=re.DOTALL).strip()
+            json_str = clean[clean.index('{'):clean.rindex('}') + 1]
+            data = json.loads(json_str)
+            score = max(0, min(100, int(data.get("score", 50))))
+            breakdown = data.get("breakdown", {})
+            cost_efficiency = data.get("cost_efficiency", {})
+            reasoning = str(data.get("reasoning", ""))[:300]
+        except (json.JSONDecodeError, ValueError):
+            logger.debug("Failed to parse quality score from: %s", rubric_raw[:100])
 
-    score = max(0, min(100, int(data.get("score", 50))))
-    breakdown = data.get("breakdown", {})
-    cost_efficiency = data.get("cost_efficiency", {})
-    reasoning = str(data.get("reasoning", ""))[:300]
+    # Handle gather exceptions — consensus may be an Exception if return_exceptions=True
+    if isinstance(consensus, Exception):
+        logger.warning("Consensus review raised exception: %s — skipping penalty", consensus)
+        from app.services.consensus_reviewer import ConsensusResult
+        consensus = ConsensusResult(passed=True, approved_count=3, total_reviewers=3, reviews=[], report="skipped")
 
-    # Map 0-100 score to RL reward: 0→-1.0, 50→0.0, 100→+1.0
-    reward = (score - 50) / 50.0
+    # ── Blend consensus signal into reward ──
+    # Consensus failure: reduce reward by up to 15 points (proportional to disapprovals)
+    disapproval_ratio = 1.0 - (consensus.approved_count / consensus.total_reviewers)
+    consensus_penalty = disapproval_ratio * 15  # Max 15-pt penalty for 0/3 approval
+    adjusted_score = max(0, score - int(consensus_penalty))
+
+    # Map adjusted 0-100 score to RL reward: 0→-1.0, 50→0.0, 100→+1.0
+    reward = (adjusted_score - 50) / 50.0
 
     logger.info(
-        "Auto-quality: %d/100 (reward=%.2f) platform=%s tokens=%d — %s",
-        score, reward, platform, tokens_used, reasoning[:80],
+        "Auto-quality: %d/100 → adjusted %d/100 (reward=%.2f) consensus=%s (%d/%d) platform=%s",
+        score, adjusted_score, reward,
+        "PASSED" if consensus.passed else "FAILED",
+        consensus.approved_count, consensus.total_reviewers,
+        platform,
     )
 
-    # Log as RL experience with full breakdown
+    if not consensus.passed:
+        logger.info("Consensus FAILED for agent=%s — issues: %s", agent_slug, "; ".join(consensus.all_issues[:3]))
+
+    # ── Log as RL experience with rubric + consensus breakdown ──
     try:
         from app.db.session import SessionLocal
         from app.services import rl_experience_service
@@ -170,7 +208,9 @@ async def _score_and_log(
                 experience_id=exp.id,
                 reward=reward,
                 reward_components={
+                    # Rubric scoring
                     "score": score,
+                    "adjusted_score": adjusted_score,
                     "breakdown": breakdown,
                     "cost_efficiency": cost_efficiency,
                     "reasoning": reasoning,
@@ -178,10 +218,22 @@ async def _score_and_log(
                     "platform": platform,
                     "tokens_used": tokens_used,
                     "cost_usd": cost_usd,
+                    # Consensus council
+                    "consensus_passed": consensus.passed,
+                    "consensus_approved": consensus.approved_count,
+                    "consensus_total": consensus.total_reviewers,
+                    "consensus_reviews": consensus.reviews,
+                    "consensus_issues": consensus.all_issues[:6],
+                    "consensus_suggestions": consensus.all_suggestions[:6],
+                    "consensus_penalty": consensus_penalty,
                 },
-                reward_source="auto_quality",
+                reward_source="auto_quality_consensus",
             )
-            logger.info("Auto-quality RL saved: id=%s score=%d platform=%s", str(exp.id)[:8], score, platform)
+            logger.info(
+                "Auto-quality RL saved: id=%s score=%d→%d consensus=%s/%s platform=%s",
+                str(exp.id)[:8], score, adjusted_score,
+                consensus.approved_count, consensus.total_reviewers, platform,
+            )
         finally:
             db.close()
     except Exception as e:
