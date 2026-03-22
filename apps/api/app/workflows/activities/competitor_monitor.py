@@ -262,6 +262,20 @@ Respond ONLY with a JSON object (no markdown fences):
   "summary": "Overall summary of competitive landscape (2-3 sentences)"
 }"""
 
+    # Try local Qwen first (zero cost)
+    try:
+        from app.services.local_inference import analyze_competitors_local
+        analysis = await analyze_competitors_local(
+            competitors_context=context,
+            previous_summary=last_summary or "",
+        )
+        if analysis:
+            logger.info("analyze_competitor_changes: used local Qwen (saved Anthropic tokens)")
+            return analysis
+    except Exception as e:
+        logger.debug("Qwen competitor analysis failed, falling back to Anthropic: %s", e)
+
+    # Fall back to Anthropic
     try:
         from app.services.llm.legacy_service import get_llm_service
         llm = get_llm_service()

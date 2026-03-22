@@ -350,6 +350,102 @@ If no entities found, return: {{"entities": [], "relations": [], "memories": [],
     return None
 
 
+def classify_task_type_sync(message: str) -> Optional[str]:
+    """Classify a user message into a task type using local Qwen model (sync).
+
+    Returns one of: code, data, sales, marketing, knowledge, support, scheduling, general.
+    Returns None on failure so callers can fall back to keyword matching.
+    """
+    prompt = f"""Classify this user message into exactly one task type.
+
+MESSAGE: {message[:300]}
+
+TASK TYPES: code, data, sales, marketing, knowledge, support, scheduling, general
+
+Respond with ONLY the task type word, nothing else."""
+
+    result = generate_sync(
+        prompt=prompt,
+        model=DEFAULT_MODEL,
+        system="You are a task classifier. Output only a single word.",
+        temperature=0.0,
+        max_tokens=10,
+        timeout=10.0,
+    )
+
+    if result:
+        task_type = result.strip().lower().split()[0] if result.strip() else None
+        valid_types = {"code", "data", "sales", "marketing", "knowledge", "support", "scheduling", "general"}
+        if task_type in valid_types:
+            return task_type
+    return None
+
+
+async def analyze_competitors_local(
+    competitors_context: str,
+    previous_summary: str = "",
+) -> Optional[dict]:
+    """Analyze competitor data using local Qwen model.
+
+    Returns dict with observations, notable_changes, summary — or None on failure.
+    Replaces the Anthropic call in competitor_monitor.analyze_competitor_changes().
+    """
+    import json
+
+    previous = f"\n\nPrevious summary:\n{previous_summary}" if previous_summary else ""
+
+    prompt = f"""Analyze these competitors and identify notable changes.{previous}
+
+COMPETITOR DATA:
+{competitors_context[:4000]}
+
+Return ONLY a JSON object (no markdown fences):
+{{
+  "observations": {{
+    "competitor_id": "Observation text (1-3 sentences) about current activity"
+  }},
+  "notable_changes": [
+    {{
+      "competitor_id": "...",
+      "competitor_name": "...",
+      "change_type": "new_product|pricing|campaign|partnership|expansion|other",
+      "title": "Brief title (max 100 chars)",
+      "description": "What changed and why it matters (1-2 sentences)"
+    }}
+  ],
+  "summary": "Overall competitive landscape summary (2-3 sentences)"
+}}
+If no notable changes, return notable_changes as empty array [].
+Keys in observations must match competitor IDs from the data."""
+
+    result = await generate(
+        prompt=prompt,
+        model=QUALITY_MODEL,
+        system=(
+            "You are a competitive intelligence analyst. "
+            "Analyze competitor data and output only valid JSON."
+        ),
+        temperature=0.2,
+        max_tokens=2000,
+        timeout=90.0,
+    )
+
+    if not result:
+        return None
+
+    try:
+        start = result.index("{")
+        end = result.rindex("}") + 1
+        data = json.loads(result[start:end])
+        if "observations" in data:
+            data.setdefault("notable_changes", [])
+            data.setdefault("summary", "")
+            return data
+    except (json.JSONDecodeError, ValueError, IndexError):
+        logger.debug("Failed to parse Qwen competitor analysis: %s", result[:200])
+    return None
+
+
 def summarize_conversation_sync(conversation_text: str) -> Optional[str]:
     """Summarize a conversation using local Qwen model (sync).
 
