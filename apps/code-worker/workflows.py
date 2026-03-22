@@ -291,9 +291,8 @@ def _run_review_agent(
             "claude", "-p", review_prompt,
             "--output-format", "json",
             "--model", CLAUDE_CODE_MODEL,
-            "--allowedTools", "Read,Glob,Grep,Bash",
+            "--allowedTools", "Read,Glob,Grep",
             "--append-system-prompt", system_prompt,
-            "--dangerously-skip-permissions",
         ],
         cwd=WORKSPACE,
         capture_output=True,
@@ -385,10 +384,11 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         # ── PHASE 1: Planning ────────────────────────────────────────────────
         # 4a. Architect agent reads the task + CLAUDE.md and writes a plan file
         activity.heartbeat("Phase 1: Architect agent creating implementation plan...")
-        plan_file = os.path.join(WORKSPACE, ".claude-plan.md")
+        plan_file = os.path.join(WORKSPACE, ".claude", "plan.md")
+        os.makedirs(os.path.join(WORKSPACE, ".claude"), exist_ok=True)
         plan_prompt = (
             f"Read CLAUDE.md carefully, then analyse the following task and write a detailed "
-            f"implementation plan to the file `.claude-plan.md`.\n\n"
+            f"implementation plan to the file `.claude/plan.md`.\n\n"
             f"## Task\n\n{task_input.task_description}\n\n"
             f"The plan MUST include these sections:\n"
             f"## Goal\n## Files to Change\n## Implementation Steps\n"
@@ -399,7 +399,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
             "You are the Architect agent for the wolfpoint.ai platform. "
             "Your ONLY job right now is to read the existing code and write a concise implementation plan. "
             "Do NOT write any production code yet. Do NOT modify any source files. "
-            "Only create/write `.claude-plan.md`."
+            "Only create/write `.claude/plan.md`."
         )
         _run_long_command(
             [
@@ -428,12 +428,12 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         activity.heartbeat("Phase 1: Plan review council (3 agents)...")
         plan_context = (
             f"## Original Task\n{task_input.task_description}\n\n"
-            f"## Proposed Plan (`.claude-plan.md`)\n{plan_content[:3000]}"
+            f"## Proposed Plan (`.claude/plan.md`)\n{plan_content[:3000]}"
         )
         plan_review_1 = _run_review_agent(
             role="Architect Reviewer",
             review_prompt=(
-                f"Read CLAUDE.md and `.claude-plan.md`, then review the WORK PLANNED:\n"
+                f"Read CLAUDE.md and `.claude/plan.md`, then review the WORK PLANNED:\n"
                 f"1. Correct architectural patterns (multi-tenancy, auth, route mounting)\n"
                 f"2. Alignment with existing codebase conventions (CLAUDE.md patterns)\n"
                 f"3. All required wiring steps mentioned (routes.py, __init__.py, migrations)?\n"
@@ -446,7 +446,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         plan_review_2 = _run_review_agent(
             role="Technical Reviewer",
             review_prompt=(
-                f"Read `.claude-plan.md` and the relevant existing source files mentioned in it, "
+                f"Read `.claude/plan.md` and the relevant existing source files mentioned in it, "
                 f"then review the WORK PLANNED:\n"
                 f"1. Technical feasibility — can this plan be implemented as written?\n"
                 f"2. Completeness — is anything missing or ambiguous?\n"
@@ -460,7 +460,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         plan_review_3 = _run_review_agent(
             role="Behavior Reviewer",
             review_prompt=(
-                f"Read `.claude-plan.md` and the original task, then review the WORK PLANNED:\n"
+                f"Read `.claude/plan.md` and the original task, then review the WORK PLANNED:\n"
                 f"1. Does the plan fully address ALL behavioral requirements in the task?\n"
                 f"2. Are edge cases, error paths, and integration points accounted for?\n"
                 f"3. Will the planned outputs (endpoints, UI, DB schema) match what was asked?\n"
@@ -584,11 +584,11 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
             diff_patch = ""
             try:
                 diff_stat = subprocess.run(
-                    ["git", "diff", "--stat", "HEAD"],
+                    ["git", "diff", "--stat", "main"],
                     cwd=WORKSPACE, capture_output=True, text=True, timeout=15,
                 ).stdout.strip()
                 diff_patch = subprocess.run(
-                    ["git", "diff", "HEAD", "--", "*.py", "*.js", "*.ts", "*.tsx"],
+                    ["git", "diff", "main", "--", "*.py", "*.js", "*.ts", "*.tsx"],
                     cwd=WORKSPACE, capture_output=True, text=True, timeout=15,
                 ).stdout.strip()[:4000]
             except Exception:
@@ -618,7 +618,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
                 review_prompt=(
                     f"Read CLAUDE.md and all changed files. You must review ALL of the following:\n\n"
                     f"WORK PLANNED vs WORK DONE:\n"
-                    f"- Does the implementation match the plan in `.claude-plan.md`?\n"
+                    f"- Does the implementation match the plan in `.claude/plan.md`?\n"
                     f"- Were all planned steps executed? What was skipped or changed?\n\n"
                     f"OUTPUTS:\n"
                     f"- Are all expected files/endpoints/schemas present and correctly placed?\n"
@@ -640,7 +640,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
                 review_prompt=(
                     f"Read all changed files carefully. You must review ALL of the following:\n\n"
                     f"WORK PLANNED vs WORK DONE:\n"
-                    f"- Compare the plan in `.claude-plan.md` with actual changes — any drift?\n"
+                    f"- Compare the plan in `.claude/plan.md` with actual changes — any drift?\n"
                     f"- Were implementation steps followed in the right order?\n\n"
                     f"OUTPUTS:\n"
                     f"- Are outputs complete? Any half-implemented features or missing pieces?\n"
