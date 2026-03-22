@@ -61,6 +61,26 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
 
+  orchestration-worker:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    command: python -m app.workers.orchestration_worker
+    volumes:
+      - ./apps/api:/app
+      - hf_cache:/root/.cache/huggingface
+    env_file:
+      - ./apps/api/.env
+    depends_on:
+      - db
+      - temporal
+    environment:
+      - MCP_SERVER_URL=http://mcp-server:8000
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+      - HF_HUB_DISABLE_XET=1
+    restart: unless-stopped
+
   databricks-worker:
     build:
       context: ./apps/api
