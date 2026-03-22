@@ -700,7 +700,7 @@ def _execute_codex_chat(task_input: ChatCliInput, session_dir: str, image_path: 
 
 def _execute_local_qwen_chat(task_input: ChatCliInput, session_dir: str, image_path: str) -> ChatCliResult:
     """Run Codex CLI with --oss --local-provider ollama for local Qwen inference with full MCP tool access."""
-    QWEN_MODEL = os.environ.get("LOCAL_QWEN_MODEL", "qwen2.5-coder:7b")
+    QWEN_MODEL = os.environ.get("LOCAL_QWEN_MODEL", "qwen2.5-coder:1.5b")
 
     if task_input.instruction_md_content.strip():
         with open(os.path.join(session_dir, "AGENTS.md"), "w") as f:

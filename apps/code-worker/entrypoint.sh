@@ -30,6 +30,13 @@ git config user.name "ServiceTsunami Code Worker"
 # Configure gh CLI
 echo -n "${GITHUB_TOKEN}" | gh auth login --with-token 2>/dev/null || true
 
+# Proxy localhost:11434 → ollama:11434 so Codex CLI --oss can reach Ollama
+if [ -n "${OLLAMA_HOST:-}" ]; then
+    OLLAMA_TARGET="${OLLAMA_HOST#http://}"  # strip http:// prefix
+    echo "[code-worker] Starting socat proxy: localhost:11434 → ${OLLAMA_TARGET}"
+    socat TCP-LISTEN:11434,fork,reuseaddr TCP:"${OLLAMA_TARGET}" &
+fi
+
 echo "[code-worker] Starting Temporal worker..."
 cd /app
 exec python -m worker
