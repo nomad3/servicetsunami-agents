@@ -106,8 +106,8 @@ class WorkflowRunInDB(BaseModel):
     duration_ms: Optional[int]
     current_step: Optional[str]
     error: Optional[str]
-    total_tokens: int = 0
-    total_cost_usd: float = 0.0
+    total_tokens: Optional[int] = 0
+    total_cost_usd: Optional[float] = 0.0
     step_results: Optional[Dict[str, Any]] = None
 
     class Config:
@@ -124,10 +124,10 @@ class WorkflowStepLogInDB(BaseModel):
     completed_at: Optional[datetime]
     duration_ms: Optional[int]
     error: Optional[str]
-    tokens_used: int = 0
-    cost_usd: float = 0.0
+    tokens_used: Optional[int] = 0
+    cost_usd: Optional[float] = 0.0
     platform: Optional[str] = None
-    retry_count: int = 0
+    retry_count: Optional[int] = 0
 
     class Config:
         from_attributes = True
