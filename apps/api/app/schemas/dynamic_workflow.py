@@ -106,9 +106,9 @@ class WorkflowRunInDB(BaseModel):
     duration_ms: Optional[int]
     current_step: Optional[str]
     error: Optional[str]
-    total_tokens: int
-    total_cost_usd: float
-    step_results: Optional[Dict[str, Any]]
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    step_results: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True

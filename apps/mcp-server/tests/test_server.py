@@ -9,22 +9,25 @@ def test_server_has_tools():
     # FastMCP stores tools in _tool_manager._tools dict
     tool_names = list(mcp._tool_manager._tools.keys())
 
+    # Core tools that must always be present
     expected_tools = [
-        "connect_postgres",
-        "verify_connection",  # Note: renamed from test_connection
-        "list_source_tables",
-        "sync_table_to_bronze",
-        "upload_file",
-        "query_sql",
-        "list_tables",
-        "describe_table",
-        "transform_to_silver",
+        "search_knowledge",
+        "find_entities",
+        "create_entity",
+        "record_observation",
+        "search_emails",
+        "send_email",
+        "list_calendar_events",
+        "search_jira_issues",
     ]
 
     for tool in expected_tools:
         assert tool in tool_names, f"Missing tool: {tool}"
 
+    # Should have many more tools (81+)
+    assert len(tool_names) >= 50, f"Expected 50+ tools, got {len(tool_names)}"
+
 
 def test_server_name():
     """Test server has correct name"""
-    assert mcp.name == "ServiceTsunami"
+    assert mcp.name == "wolfpoint.ai"
