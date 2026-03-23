@@ -124,6 +124,33 @@ def route_and_execute(
     # Infer task type for RL context
     inferred_type = _infer_task_type(message)
 
+    # ── RL-learned routing: override platform/agent if strong signal ──
+    routing_source = "default"
+    try:
+        from app.services.rl_routing import get_routing_recommendation
+        rl_rec = get_routing_recommendation(
+            db, tenant_id, message,
+            task_type=inferred_type,
+            current_platform=platform,
+            current_agent=agent_slug,
+        )
+        if rl_rec.platform and rl_rec.confidence >= 0.4:
+            logger.info(
+                "RL routing override: platform %s→%s (confidence=%.2f, %s)",
+                platform, rl_rec.platform, rl_rec.confidence, rl_rec.reasoning,
+            )
+            platform = rl_rec.platform
+            routing_source = rl_rec.source
+        if rl_rec.agent_slug and rl_rec.confidence >= 0.5:
+            logger.info(
+                "RL routing override: agent %s→%s (confidence=%.2f, %s)",
+                agent_slug, rl_rec.agent_slug, rl_rec.confidence, rl_rec.reasoning,
+            )
+            agent_slug = rl_rec.agent_slug
+            routing_source = rl_rec.source
+    except Exception as e:
+        logger.debug("RL routing lookup failed: %s — using defaults", e)
+
     # Build memory context early so recalled entities enrich routing RL state
     pre_built_memory_context = None
     if not recalled_entities:
@@ -182,6 +209,7 @@ def route_and_execute(
             action={
                 "platform": platform,
                 "agent_slug": agent_slug,
+                "routing_source": routing_source,
             },
             state_text=state_text,
         )
