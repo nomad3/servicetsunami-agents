@@ -1664,11 +1664,17 @@ async def review_with_local_qwen(input: ProviderReviewInput) -> ProviderReview:
             return ProviderReview(provider="local_qwen", approved=True, verdict="ERROR",
                                   score=0, issues=[], suggestions=[],
                                   summary=f"Ollama HTTP {resp.status_code}", duration_ms=duration_ms)
-        raw = resp.json().get("response", "")
-        logger.debug("Qwen review raw (%d chars): %s", len(raw), raw[:300])
+        resp_json = resp.json()
+        raw = resp_json.get("response", "")
+        logger.info("Qwen review: status=%s raw_len=%d response_preview=%s",
+                     resp.status_code, len(raw), repr(raw[:300]))
+        if not raw.strip():
+            # Log full response for debugging empty responses
+            logger.warning("Qwen review empty response. Full Ollama JSON keys: %s", list(resp_json.keys()))
         return _parse_provider_review("local_qwen", raw, duration_ms)
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
+        logger.warning("Qwen review exception: %s", e)
         return ProviderReview(provider="local_qwen", approved=True, verdict="ERROR",
                               score=0, issues=[], suggestions=[],
                               summary=str(e)[:200], duration_ms=duration_ms)
