@@ -1650,13 +1650,16 @@ async def review_with_local_qwen(input: ProviderReviewInput) -> ProviderReview:
 
     start = time.time()
     try:
-        # Prefix with /no_think to skip qwen3's reasoning and get direct JSON output
-        review_prompt = f"/no_think\n{prompt}"
+        # Use /api/chat with think:false to skip qwen3's reasoning mode
         with _httpx.Client(timeout=120) as client:
-            resp = client.post(f"{OLLAMA_URL}/api/generate", json={
-                "model": MODEL, "prompt": review_prompt,
-                "system": "You are a response quality reviewer. Return only valid JSON. Do not use <think> tags.",
+            resp = client.post(f"{OLLAMA_URL}/api/chat", json={
+                "model": MODEL,
+                "messages": [
+                    {"role": "system", "content": "You are a response quality reviewer. Return only valid JSON."},
+                    {"role": "user", "content": prompt},
+                ],
                 "stream": False,
+                "think": False,
                 "options": {"temperature": 0.1, "num_predict": 400},
             })
         duration_ms = int((time.time() - start) * 1000)
@@ -1665,12 +1668,8 @@ async def review_with_local_qwen(input: ProviderReviewInput) -> ProviderReview:
                                   score=0, issues=[], suggestions=[],
                                   summary=f"Ollama HTTP {resp.status_code}", duration_ms=duration_ms)
         resp_json = resp.json()
-        raw = resp_json.get("response", "")
-        logger.info("Qwen review: status=%s raw_len=%d response_preview=%s",
-                     resp.status_code, len(raw), repr(raw[:300]))
-        if not raw.strip():
-            # Log full response for debugging empty responses
-            logger.warning("Qwen review empty response. Full Ollama JSON keys: %s", list(resp_json.keys()))
+        raw = resp_json.get("message", {}).get("content", "")
+        logger.info("Qwen review: status=%s raw_len=%d", resp.status_code, len(raw))
         return _parse_provider_review("local_qwen", raw, duration_ms)
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
