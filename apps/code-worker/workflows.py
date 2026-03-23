@@ -1650,12 +1650,14 @@ async def review_with_local_qwen(input: ProviderReviewInput) -> ProviderReview:
 
     start = time.time()
     try:
+        # Prefix with /no_think to skip qwen3's reasoning and get direct JSON output
+        review_prompt = f"/no_think\n{prompt}"
         with _httpx.Client(timeout=120) as client:
             resp = client.post(f"{OLLAMA_URL}/api/generate", json={
-                "model": MODEL, "prompt": prompt,
-                "system": "You are a response quality reviewer. Return only valid JSON.",
+                "model": MODEL, "prompt": review_prompt,
+                "system": "You are a response quality reviewer. Return only valid JSON. Do not use <think> tags.",
                 "stream": False,
-                "options": {"temperature": 0.1, "num_predict": 300},
+                "options": {"temperature": 0.1, "num_predict": 400},
             })
         duration_ms = int((time.time() - start) * 1000)
         if resp.status_code != 200:
@@ -1663,6 +1665,7 @@ async def review_with_local_qwen(input: ProviderReviewInput) -> ProviderReview:
                                   score=0, issues=[], suggestions=[],
                                   summary=f"Ollama HTTP {resp.status_code}", duration_ms=duration_ms)
         raw = resp.json().get("response", "")
+        logger.debug("Qwen review raw (%d chars): %s", len(raw), raw[:300])
         return _parse_provider_review("local_qwen", raw, duration_ms)
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
