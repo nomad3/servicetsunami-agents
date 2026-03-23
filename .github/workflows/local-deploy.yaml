@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: 'Services to rebuild (comma-separated: api,web,code-worker,mcp-tools)'
+        description: 'Services to rebuild (comma-separated: api,web,code-worker,mcp-tools,orchestration-worker)'
         required: false
         default: 'all'
 
@@ -33,14 +33,14 @@ jobs:
           echo "files=$CHANGED" >> $GITHUB_OUTPUT
 
           SERVICES=""
-          echo "$CHANGED" | grep -q "apps/api/" && SERVICES="$SERVICES api"
+          echo "$CHANGED" | grep -q "apps/api/" && SERVICES="$SERVICES api orchestration-worker"
           echo "$CHANGED" | grep -q "apps/web/" && SERVICES="$SERVICES web"
           echo "$CHANGED" | grep -q "apps/code-worker/" && SERVICES="$SERVICES code-worker"
           echo "$CHANGED" | grep -q "apps/mcp-server/" && SERVICES="$SERVICES mcp-tools"
-          echo "$CHANGED" | grep -q "docker-compose.yml" && SERVICES="api web code-worker mcp-tools"
+          echo "$CHANGED" | grep -q "docker-compose.yml" && SERVICES="api web code-worker mcp-tools orchestration-worker"
 
           # Default to all if nothing specific matched
-          [ -z "$SERVICES" ] && SERVICES="api web code-worker mcp-tools"
+          [ -z "$SERVICES" ] && SERVICES="api web code-worker mcp-tools orchestration-worker"
           echo "services=$SERVICES" >> $GITHUB_OUTPUT
           echo "Deploying: $SERVICES"
 
@@ -50,7 +50,7 @@ jobs:
         run: |
           INPUT="${{ github.event.inputs.services }}"
           if [ "$INPUT" = "all" ]; then
-            echo "services=api web code-worker mcp-tools" >> $GITHUB_OUTPUT
+            echo "services=api web code-worker mcp-tools orchestration-worker" >> $GITHUB_OUTPUT
           else
             echo "services=$(echo $INPUT | tr ',' ' ')" >> $GITHUB_OUTPUT
           fi
@@ -126,7 +126,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Service | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
-          for svc in api web code-worker mcp-tools; do
+          for svc in api web code-worker mcp-tools orchestration-worker; do
             STATUS=$(docker inspect --format='{{.State.Status}}' servicetsunami-agents-${svc}-1 2>/dev/null || echo "not found")
             echo "| $svc | $STATUS |" >> $GITHUB_STEP_SUMMARY
           done
