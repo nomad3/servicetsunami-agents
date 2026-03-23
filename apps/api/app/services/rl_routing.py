@@ -52,6 +52,7 @@ def get_best_platform(
         WHERE tenant_id = CAST(:tid AS uuid)
           AND reward IS NOT NULL
           AND archived_at IS NULL
+          AND action->>'platform' IS NOT NULL
           AND state->>'task_type' = :task_type
         GROUP BY action->>'platform'
         HAVING COUNT(*) >= :min_exp
