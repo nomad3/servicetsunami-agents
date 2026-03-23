@@ -136,11 +136,17 @@ def route_and_execute(
             current_agent=agent_slug,
         )
         if rl_rec.platform and rl_rec.platform_confidence >= 0.4:
-            logger.info(
-                "RL routing override: platform %s→%s (confidence=%.2f, %s)",
-                platform, rl_rec.platform, rl_rec.platform_confidence, rl_rec.platform_reasoning,
-            )
-            platform = rl_rec.platform
+            if rl_rec.platform != platform:
+                logger.info(
+                    "RL routing override: platform %s→%s (confidence=%.2f, %s)",
+                    platform, rl_rec.platform, rl_rec.platform_confidence, rl_rec.platform_reasoning,
+                )
+                platform = rl_rec.platform
+            else:
+                logger.info(
+                    "RL routing confirmed: %s (confidence=%.2f, %s)",
+                    platform, rl_rec.platform_confidence, rl_rec.platform_reasoning,
+                )
             routing_source = "rl_platform"
     except Exception as e:
         logger.debug("RL routing lookup failed: %s — using defaults", e)
