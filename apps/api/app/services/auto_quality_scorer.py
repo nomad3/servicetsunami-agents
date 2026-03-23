@@ -300,7 +300,7 @@ def _maybe_trigger_provider_council(
         trigger_reason = "low_score"
 
     # 4. Random 5% sample
-    elif random.random() < 0.05:
+    elif random.random() < float(os.environ.get("PROVIDER_COUNCIL_SAMPLE_RATE", "0.05")):
         trigger_reason = "sampled"
 
     if not trigger_reason:
