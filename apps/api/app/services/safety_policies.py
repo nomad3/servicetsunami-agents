@@ -26,6 +26,13 @@ from app.schemas.safety_policy import (
 
 ALL_CHANNEL = "*"
 KNOWN_CHANNELS = ("web", "whatsapp", "workflow", "local_agent", "api", "webhook")
+_DECISION_SEVERITY = {
+    PolicyDecision.ALLOW: 0,
+    PolicyDecision.ALLOW_WITH_LOGGING: 1,
+    PolicyDecision.REQUIRE_CONFIRMATION: 2,
+    PolicyDecision.REQUIRE_REVIEW: 3,
+    PolicyDecision.BLOCK: 4,
+}
 
 
 @dataclass(frozen=True)
@@ -413,6 +420,25 @@ def _get_policy_override(
     )
 
 
+def _validate_override_ceiling(
+    profile: ActionRiskProfile,
+    channel: str,
+    requested_decision: PolicyDecision,
+) -> None:
+    if profile.risk_level not in (RiskLevel.HIGH, RiskLevel.CRITICAL):
+        return
+
+    channels = KNOWN_CHANNELS if channel == ALL_CHANNEL else (channel,)
+    for candidate_channel in channels:
+        default_decision, _ = _default_decision_for(profile, candidate_channel)
+        if _DECISION_SEVERITY[requested_decision] < _DECISION_SEVERITY[default_decision]:
+            raise ValueError(
+                "Tenant overrides cannot relax "
+                f"{profile.action_key} on channel '{candidate_channel}' below the default "
+                f"{default_decision.value} policy for {profile.risk_level.value}-risk actions."
+            )
+
+
 def list_action_catalog(
     db: Session,
     tenant_id: uuid.UUID,
@@ -466,7 +492,8 @@ def upsert_tenant_policy(
     policy_in: TenantActionPolicyUpsert,
 ) -> TenantActionPolicy:
     channel = _normalize_channel(policy_in.channel)
-    _get_profile(policy_in.action_type, policy_in.action_name)
+    profile = _get_profile(policy_in.action_type, policy_in.action_name)
+    _validate_override_ceiling(profile, channel, policy_in.decision)
 
     policy = (
         db.query(TenantActionPolicy)

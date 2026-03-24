@@ -249,9 +249,46 @@ def call_tool(
     connector: MCPServerConnector,
     tool_name: str,
     arguments: Dict[str, Any],
+    channel: str = "api",
+    agent_slug: Optional[str] = None,
     timeout: int = 60,
 ) -> Dict[str, Any]:
     """Proxy a tool call to an external MCP server via JSON-RPC."""
+    from app.schemas.safety_policy import ActionType, PolicyDecision, SafetyEnforcementRequest
+    from app.services import safety_enforcement
+
+    enforcement = safety_enforcement.enforce_action(
+        db,
+        tenant_id=connector.tenant_id,
+        request=SafetyEnforcementRequest(
+            action_type=ActionType.MCP_TOOL,
+            action_name="call_mcp_tool",
+            channel=channel,
+            proposed_action={
+                "connector_id": str(connector.id),
+                "remote_tool_name": tool_name,
+                "arguments": arguments,
+            },
+            world_state_facts=[],
+            recent_observations=[],
+            assumptions=["This action proxies execution to an external MCP server."],
+            uncertainty_notes=["The downstream tool contract and side effects may not be fully inspectable locally."],
+            context_summary=f"External MCP proxy call to '{tool_name}' via connector '{connector.name}'.",
+            context_ref={"connector_id": str(connector.id), "tool_name": tool_name},
+            expected_downside="An external MCP server may execute arbitrary high-impact tool actions.",
+            agent_slug=agent_slug,
+        ),
+    )
+    if enforcement.decision not in (PolicyDecision.ALLOW, PolicyDecision.ALLOW_WITH_LOGGING):
+        return {
+            "success": False,
+            "tool_name": tool_name,
+            "error": (
+                f"Governed action 'call_mcp_tool' requires {enforcement.decision.value} "
+                f"for channel '{channel}'. evidence_pack_id={enforcement.evidence_pack_id}"
+            ),
+        }
+
     headers = _build_auth_headers(connector)
 
     rpc_body = {
