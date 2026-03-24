@@ -41,7 +41,10 @@ def create_blackboard(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new blackboard for task collaboration."""
-    return blackboard_service.create_blackboard(db, current_user.tenant_id, board_in)
+    try:
+        return blackboard_service.create_blackboard(db, current_user.tenant_id, board_in)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("/{board_id}", response_model=BlackboardDetailInDB)
@@ -108,7 +111,12 @@ def resolve_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Resolve an entry (authority-checked). Returns the new resolution entry."""
+    """Resolve an entry (authority-checked). Returns the new resolution entry.
+
+    Note: resolved_by_agent and resolved_by_role are currently self-declared
+    by the caller. The authenticated user_id is recorded for audit. Server-side
+    agent identity verification is planned for Phase 2.
+    """
     try:
         entry = blackboard_service.resolve_entry(
             db, current_user.tenant_id, board_id, entry_id,
@@ -116,6 +124,7 @@ def resolve_entry(
             resolved_by_agent=request.resolved_by_agent,
             resolved_by_role=request.resolved_by_role.value,
             resolution_reason=request.resolution_reason,
+            authenticated_user_id=current_user.id,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))

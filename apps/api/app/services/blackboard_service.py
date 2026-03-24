@@ -175,11 +175,13 @@ def resolve_entry(
     resolved_by_agent: str,
     resolved_by_role: str = "contributor",
     resolution_reason: Optional[str] = None,
+    authenticated_user_id: Optional[uuid.UUID] = None,
 ) -> Optional[BlackboardEntry]:
     """Resolve an entry by appending a resolution entry (append-only).
 
     Authority check: resolver must have >= authority of the entry author,
-    OR be the original author.
+    OR be the original author. The authenticated_user_id is recorded for
+    audit since agent identity is currently self-declared.
     """
     board = get_blackboard(db, tenant_id, board_id)
     if not board:
@@ -209,6 +211,7 @@ def resolve_entry(
         board_version=new_version,
         entry_type="resolution",
         content=f"Resolved entry to '{resolution_status}': {resolution_reason or 'no reason given'}",
+        evidence=[{"authenticated_user_id": str(authenticated_user_id)}] if authenticated_user_id else [],
         confidence=1.0,
         author_agent_slug=resolved_by_agent,
         author_role=resolved_by_role,
