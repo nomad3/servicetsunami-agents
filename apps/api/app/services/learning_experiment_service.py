@@ -72,9 +72,28 @@ def promote_candidate(
     tenant_id: uuid.UUID,
     candidate_id: uuid.UUID,
 ) -> Optional[PolicyCandidate]:
+    """Promote a candidate only if it has a completed experiment with significant improvement."""
     candidate = get_candidate(db, tenant_id, candidate_id)
     if not candidate or candidate.status not in ("proposed", "evaluating"):
         return None
+
+    # Require at least one completed experiment with significant improvement
+    successful_experiment = (
+        db.query(LearningExperiment)
+        .filter(
+            LearningExperiment.candidate_id == candidate_id,
+            LearningExperiment.tenant_id == tenant_id,
+            LearningExperiment.status == "completed",
+            LearningExperiment.is_significant == "yes",
+        )
+        .first()
+    )
+    if not successful_experiment:
+        raise ValueError(
+            "Cannot promote: no completed experiment with significant improvement. "
+            "Run an offline evaluation first."
+        )
+
     candidate.status = "promoted"
     candidate.promoted_at = datetime.utcnow()
     candidate.updated_at = datetime.utcnow()
@@ -108,6 +127,13 @@ def create_experiment(
     tenant_id: uuid.UUID,
     experiment_in: LearningExperimentCreate,
 ) -> LearningExperiment:
+    # Phase 1 only supports offline evaluation
+    if experiment_in.experiment_type.value != "offline":
+        raise ValueError(
+            f"Only 'offline' experiments are supported in Phase 1. "
+            f"Shadow and split experiments are planned for Phase 2."
+        )
+
     candidate = get_candidate(db, tenant_id, experiment_in.candidate_id)
     if not candidate:
         raise ValueError(f"Policy candidate {experiment_in.candidate_id} not found in this tenant")
@@ -163,12 +189,19 @@ def run_offline_evaluation(
 ) -> Optional[Dict]:
     """Run an offline evaluation of a policy candidate against historical RL data.
 
-    Compares the candidate's decision_point reward distribution against
-    the current baseline using the existing rl_experiences table.
+    Only uses exploration-routed experiences (randomized baseline) to avoid
+    selection bias from incumbent routing. This is the counterfactual
+    evaluation requirement from the design doc.
     """
     experiment = get_experiment(db, tenant_id, experiment_id)
     if not experiment or experiment.status not in ("pending", "running"):
         return None
+
+    if experiment.experiment_type != "offline":
+        raise ValueError(
+            f"run_offline_evaluation only supports 'offline' experiments, "
+            f"got '{experiment.experiment_type}'. Shadow/split are Phase 2."
+        )
 
     candidate = get_candidate(db, tenant_id, experiment.candidate_id)
     if not candidate:
@@ -178,16 +211,20 @@ def run_offline_evaluation(
     experiment.status = "running"
     experiment.started_at = now
 
-    # Query RL experiences for this decision point
-    # Control: experiences matching current policy
-    # Treatment: experiences that would match proposed policy
-    control_sql = text("""
+    # CRITICAL: Only use exploration-routed experiences for both control and
+    # treatment. This ensures the comparison uses randomized data, not biased
+    # incumbent routing. Exploration data has routing_source like 'exploration_%'.
+    exploration_filter = "action->>'routing_source' LIKE 'exploration_%'"
+
+    # Control: all exploration experiences for this decision point
+    control_sql = text(f"""
         SELECT COUNT(*) AS cnt, AVG(reward) AS avg_reward
         FROM rl_experiences
         WHERE tenant_id = CAST(:tid AS uuid)
           AND decision_point = :dp
           AND reward IS NOT NULL
           AND archived_at IS NULL
+          AND {exploration_filter}
     """)
     control_row = db.execute(control_sql, {
         "tid": str(tenant_id),
@@ -197,10 +234,9 @@ def run_offline_evaluation(
     experiment.control_sample_size = int(control_row.cnt or 0)
     experiment.control_avg_reward = float(control_row.avg_reward) if control_row.avg_reward is not None else None
 
-    # For offline evaluation, treatment is simulated from the proposed policy params
-    # Use experiences that match the proposed policy's target (e.g., platform=codex)
+    # Treatment: exploration experiences matching the proposed policy
     proposed = candidate.proposed_policy or {}
-    treatment_filters = []
+    treatment_filters = [exploration_filter]
     params = {"tid": str(tenant_id), "dp": candidate.decision_point}
 
     if "platform" in proposed:
@@ -210,7 +246,7 @@ def run_offline_evaluation(
         treatment_filters.append("COALESCE(action->>'agent_slug', state->>'agent_slug') = :agent")
         params["agent"] = proposed["agent_slug"]
 
-    where_clause = " AND ".join(treatment_filters) if treatment_filters else "1=1"
+    where_clause = " AND ".join(treatment_filters)
     treatment_sql = text(f"""
         SELECT COUNT(*) AS cnt, AVG(reward) AS avg_reward
         FROM rl_experiences

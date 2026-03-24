@@ -74,8 +74,11 @@ def promote_candidate(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Promote a policy candidate to production."""
-    candidate = learning_experiment_service.promote_candidate(db, current_user.tenant_id, candidate_id)
+    """Promote a policy candidate. Requires a completed experiment with significant improvement."""
+    try:
+        candidate = learning_experiment_service.promote_candidate(db, current_user.tenant_id, candidate_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not candidate:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot promote: not in promotable state")
     return candidate
