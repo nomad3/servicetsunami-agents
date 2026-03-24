@@ -409,16 +409,24 @@ def handle_step_failure(
         retry_max = (current_step.retry_policy or {}).get("max_attempts", 3)
         retry_count = (current_step.retry_policy or {}).get("_attempts", 0)
         if retry_count < retry_max:
+            # Log the transient failure before retrying
+            _log_event(
+                db, plan_id, "step_failed",
+                previous_status="running", new_status="failed",
+                step_id=current_step.id, reason=f"Transient error (will retry): {error}",
+                metadata_json={"failure_class": failure_class, "retry_attempt": retry_count},
+            )
             current_step.retry_policy = {
                 **(current_step.retry_policy or {}),
                 "_attempts": retry_count + 1,
             }
             current_step.error = None
             current_step.started_at = now
+            # Step goes back to running for the retry
             _log_event(
                 db, plan_id, "step_started",
                 previous_status="failed", new_status="running",
-                step_id=current_step.id, reason=f"Retry {retry_count + 1}/{retry_max}: {error}",
+                step_id=current_step.id, reason=f"Retry {retry_count + 1}/{retry_max}",
                 metadata_json={"failure_class": failure_class, "retry_attempt": retry_count + 1},
             )
             result["action_taken"] = f"retry ({retry_count + 1}/{retry_max})"
@@ -505,6 +513,11 @@ def _apply_fallback(
     plan.current_step_index = fallback.step_index
     fallback.status = "running"
     fallback.started_at = now
+    fallback.completed_at = None
+    fallback.error = None
+    fallback.output = None
+    if fallback.retry_policy and "_attempts" in (fallback.retry_policy or {}):
+        fallback.retry_policy = {k: v for k, v in fallback.retry_policy.items() if k != "_attempts"}
 
     _log_event(db, plan.id, "step_failed", step_id=failed_step.id, reason=error)
     _log_event(db, plan.id, "step_started", new_status="running", step_id=fallback.id,
@@ -556,12 +569,14 @@ def resume_plan(
     if not resume_step:
         return None
 
-    # Reset the step for re-execution
+    # Reset the step for re-execution (full reset including retry budget)
     old_status = resume_step.status
     resume_step.status = "running"
     resume_step.started_at = now
     resume_step.error = None
     resume_step.output = None
+    if resume_step.retry_policy and "_attempts" in (resume_step.retry_policy or {}):
+        resume_step.retry_policy = {k: v for k, v in resume_step.retry_policy.items() if k != "_attempts"}
     resume_step.completed_at = None
 
     plan.status = "executing"
