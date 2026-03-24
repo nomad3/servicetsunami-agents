@@ -143,10 +143,36 @@ async def _call_agent(step: dict, context: dict, tenant_id: str) -> dict:
     activity.heartbeat(f"Running agent: {agent_slug}")
 
     from app.db.session import SessionLocal
+    from app.schemas.safety_policy import ActionType, PolicyDecision, SafetyEnforcementRequest
     from app.services.agent_router import route_and_execute
+    from app.services import safety_enforcement
 
     db = SessionLocal()
     try:
+        enforcement = safety_enforcement.enforce_action(
+            db,
+            tenant_id=uuid.UUID(tenant_id),
+            request=SafetyEnforcementRequest(
+                action_type=ActionType.WORKFLOW_ACTION,
+                action_name="agent",
+                channel="workflow",
+                proposed_action={"prompt": prompt[:500], "agent_slug": agent_slug},
+                world_state_facts=[],
+                recent_observations=[],
+                assumptions=["This agent step is running inside an automated workflow."],
+                uncertainty_notes=["No inline human confirmation is available during workflow execution."],
+                context_summary=f"Dynamic workflow agent step '{step.get('id', 'unknown')}'.",
+                context_ref={"step_id": step.get("id", "unknown"), "agent_slug": agent_slug},
+                expected_downside=f"Workflow agent '{agent_slug}' may trigger downstream tools or external side effects.",
+                agent_slug=agent_slug,
+            ),
+        )
+        if enforcement.decision not in (PolicyDecision.ALLOW, PolicyDecision.ALLOW_WITH_LOGGING):
+            raise PermissionError(
+                f"Governed workflow action 'agent' requires {enforcement.decision.value} "
+                f"for channel 'workflow'. evidence_pack_id={enforcement.evidence_pack_id}"
+            )
+
         response_text, metadata = route_and_execute(
             db,
             tenant_id=uuid.UUID(tenant_id),

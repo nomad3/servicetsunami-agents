@@ -159,7 +159,7 @@ def call_tool_internal(
         raise HTTPException(status_code=404, detail="MCP server connector not found")
     if not connector.enabled:
         raise HTTPException(status_code=400, detail="MCP server connector is disabled")
-    return svc.call_tool(db, connector, body.tool_name, body.arguments)
+    return svc.call_tool(db, connector, body.tool_name, body.arguments, channel="api")
 
 
 @router.post("/internal/{connector_id}/health")
@@ -273,7 +273,7 @@ def call_tool_endpoint(
         raise HTTPException(status_code=404, detail="MCP server connector not found")
     if not connector.enabled:
         raise HTTPException(status_code=400, detail="MCP server connector is disabled")
-    return svc.call_tool(db, connector, body.tool_name, body.arguments)
+    return svc.call_tool(db, connector, body.tool_name, body.arguments, channel="api")
 
 
 @router.post("/{connector_id}/health")
