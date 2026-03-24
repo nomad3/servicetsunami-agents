@@ -16,6 +16,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
+from app.db.session import SessionLocal
+from app.schemas.safety_policy import ActionType, PolicyDecision
+from app.services import safety_policies
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -142,22 +146,37 @@ _TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
 
 
 # ---------------------------------------------------------------------------
-# Pre-execution safety gate — block side-effect tools for local model
+# Pre-execution safety gate — evaluate through the shared policy engine
 # ---------------------------------------------------------------------------
 
-# Tools that cause side effects — local model MUST NOT execute these.
-# Local fallback is READ-ONLY: search and retrieve only, no mutations.
-_BLOCKED_TOOLS = {
-    "send_email", "deploy_changes", "execute_shell",       # External side effects
-    "create_jira_issue",                                     # External side effects
-    "create_entity", "record_observation",                   # Knowledge graph mutations
-}
+def _load_local_tool_policies(tenant_id: uuid.UUID) -> Dict[str, Tuple[str, str]]:
+    """Evaluate local-agent policy once per request for every curated tool."""
+    db = SessionLocal()
+    try:
+        policies: Dict[str, Tuple[str, str]] = {}
+        for tool_name in _TOOL_REGISTRY:
+            try:
+                evaluation = safety_policies.evaluate_action(
+                    db,
+                    tenant_id=tenant_id,
+                    action_type=ActionType.MCP_TOOL,
+                    action_name=tool_name,
+                    channel="local_agent",
+                )
+            except ValueError:
+                policies[tool_name] = (
+                    "block",
+                    f"Tool '{tool_name}' is not registered in the governed action catalog.",
+                )
+                continue
 
-def _check_tool_risk(tool_name: str) -> str:
-    """Returns 'allow' or 'block'. Local model cannot execute side-effect tools."""
-    if tool_name in _BLOCKED_TOOLS:
-        return "block"
-    return "allow"
+            if evaluation.decision in (PolicyDecision.ALLOW, PolicyDecision.ALLOW_WITH_LOGGING):
+                policies[tool_name] = ("allow", evaluation.rationale)
+            else:
+                policies[tool_name] = ("block", evaluation.rationale)
+        return policies
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +336,7 @@ def run(
     if not tools:
         logger.info("No tools available for tenant %s — skipping tool agent", tenant_id)
         return None, metadata
+    tool_policies = _load_local_tool_policies(tenant_id)
 
     # Build initial messages
     messages: List[Dict[str, Any]] = [{"role": "system", "content": system}]
@@ -375,12 +395,15 @@ def run(
                 continue
 
             # Pre-execution safety gate — block side-effect tools for local model
-            risk = _check_tool_risk(tool_name)
+            risk, rationale = tool_policies.get(
+                tool_name,
+                ("block", f"Tool '{tool_name}' is not registered in the governed action catalog."),
+            )
             if risk == "block":
-                logger.warning("BLOCKED high-risk tool %s — local model cannot execute side effects", tool_name)
+                logger.warning("BLOCKED governed tool %s for local agent — %s", tool_name, rationale)
                 messages.append({
                     "role": "tool",
-                    "content": json.dumps({"error": f"Tool '{tool_name}' requires a connected subscription (Claude/Codex). Please connect in Settings → Integrations."}),
+                    "content": json.dumps({"error": f"Tool '{tool_name}' is blocked for the local runtime. {rationale} Connect Claude Code or Codex in Settings → Integrations for supervised execution."}),
                 })
                 continue
 
