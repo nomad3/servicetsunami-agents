@@ -214,13 +214,24 @@ def _complete_experiment(experiment: LearningExperiment, reason: str) -> None:
     else:
         experiment.is_significant = "insufficient_data"
 
-    experiment.conclusion = (
-        f"Completed ({reason}): treatment={experiment.treatment_avg_reward:.3f} "
-        f"vs control={experiment.control_avg_reward:.3f} "
-        f"({experiment.improvement_pct:+.1f}%) "
-        f"n_control={experiment.control_sample_size}, n_treatment={experiment.treatment_sample_size}. "
-        f"Significant: {experiment.is_significant}"
-    ) if experiment.control_avg_reward is not None else f"Completed ({reason}): insufficient reward data"
+    if (
+        experiment.control_avg_reward is not None
+        and experiment.treatment_avg_reward is not None
+        and experiment.improvement_pct is not None
+    ):
+        experiment.conclusion = (
+            f"Completed ({reason}): treatment={experiment.treatment_avg_reward:.3f} "
+            f"vs control={experiment.control_avg_reward:.3f} "
+            f"({experiment.improvement_pct:+.1f}%) "
+            f"n_control={experiment.control_sample_size}, n_treatment={experiment.treatment_sample_size}. "
+            f"Significant: {experiment.is_significant}"
+        )
+    else:
+        experiment.conclusion = (
+            f"Completed ({reason}): insufficient reward data "
+            f"(control={experiment.control_sample_size} samples, "
+            f"treatment={experiment.treatment_sample_size} samples)"
+        )
 
 
 def start_rollout(
@@ -245,6 +256,14 @@ def start_rollout(
     if experiment_type not in ("split", "shadow"):
         raise ValueError(f"Rollout experiment type must be 'split' or 'shadow'")
 
+    # Enforce one active rollout per decision point
+    existing = get_active_rollout(db, tenant_id, candidate.decision_point)
+    if existing:
+        raise ValueError(
+            f"An active rollout already exists for decision_point='{candidate.decision_point}' "
+            f"(experiment_id={existing['experiment_id']}). Stop it first."
+        )
+
     experiment = LearningExperiment(
         tenant_id=tenant_id,
         candidate_id=candidate_id,
@@ -254,8 +273,8 @@ def start_rollout(
         max_duration_hours=max_duration_hours,
         status="running",
         started_at=datetime.utcnow(),
-        control_avg_reward=0.0,
-        treatment_avg_reward=0.0,
+        control_avg_reward=None,
+        treatment_avg_reward=None,
     )
     db.add(experiment)
     db.commit()
