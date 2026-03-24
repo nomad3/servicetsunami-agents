@@ -128,6 +128,12 @@ def record_outcome(
                 f"Outcome pattern '{outcome_in.pattern}' does not match "
                 f"collaboration pattern '{collab.pattern}'"
             )
+        if outcome_in.role_agent_map and collab.role_assignments:
+            if outcome_in.role_agent_map != collab.role_assignments:
+                raise ValueError(
+                    f"Outcome role_agent_map does not match collaboration's "
+                    f"role_assignments: {collab.role_assignments}"
+                )
 
     outcome = CoalitionOutcome(
         tenant_id=tenant_id,
@@ -186,6 +192,41 @@ def _update_template_stats(
     template.updated_at = datetime.utcnow()
 
 
+def _compute_task_type_stats(
+    db: Session,
+    tenant_id: uuid.UUID,
+    template_id: uuid.UUID,
+    task_type: str,
+) -> Dict:
+    """Compute performance stats for a template filtered by task_type."""
+    outcomes = (
+        db.query(CoalitionOutcome)
+        .filter(
+            CoalitionOutcome.tenant_id == tenant_id,
+            CoalitionOutcome.template_id == template_id,
+            CoalitionOutcome.task_type == task_type,
+        )
+        .all()
+    )
+    if not outcomes:
+        return {"total": 0, "success_count": 0, "avg_quality": 0.0, "avg_cost": 0.0, "avg_rounds": 0.0}
+
+    total = len(outcomes)
+    success_count = sum(1 for o in outcomes if o.success == "yes")
+    qualities = [o.quality_score for o in outcomes if o.quality_score is not None]
+    avg_quality = sum(qualities) / len(qualities) if qualities else 0.0
+    avg_cost = sum(o.cost_usd for o in outcomes) / total
+    avg_rounds = sum(o.rounds_completed for o in outcomes) / total
+
+    return {
+        "total": total,
+        "success_count": success_count,
+        "avg_quality": avg_quality,
+        "avg_cost": avg_cost,
+        "avg_rounds": avg_rounds,
+    }
+
+
 def recommend_coalition(
     db: Session,
     tenant_id: uuid.UUID,
@@ -194,15 +235,15 @@ def recommend_coalition(
 ) -> List[Dict]:
     """Recommend the best coalition template for a task type based on historical outcomes.
 
-    Scores templates by: success_rate * 0.5 + normalized_quality * 0.3 + cost_efficiency * 0.2
-    Only considers templates with at least min_uses uses.
+    Stats are computed per task_type from coalition_outcomes, not from
+    global template aggregates. This ensures a coalition's performance on
+    sales work doesn't influence its recommendation for code work.
     """
     templates = (
         db.query(CoalitionTemplate)
         .filter(
             CoalitionTemplate.tenant_id == tenant_id,
             CoalitionTemplate.status == "active",
-            CoalitionTemplate.total_uses >= min_uses,
         )
         .all()
     )
@@ -211,20 +252,22 @@ def recommend_coalition(
     candidates = []
     for t in templates:
         if not t.task_types or task_type in t.task_types:
-            candidates.append(t)
+            stats = _compute_task_type_stats(db, tenant_id, t.id, task_type)
+            if stats["total"] >= min_uses:
+                candidates.append((t, stats))
 
     if not candidates:
         return []
 
-    # Score each candidate
-    max_quality = max(t.avg_quality_score for t in candidates) or 1.0
-    max_cost = max(t.avg_cost_usd for t in candidates) or 1.0
+    # Score each candidate using per-task-type stats
+    max_quality = max(s["avg_quality"] for _, s in candidates) or 1.0
+    max_cost = max(s["avg_cost"] for _, s in candidates) or 1.0
 
     scored = []
-    for t in candidates:
-        success_rate = t.success_count / max(t.total_uses, 1)
-        norm_quality = t.avg_quality_score / max_quality if max_quality > 0 else 0
-        cost_efficiency = 1.0 - (t.avg_cost_usd / max_cost) if max_cost > 0 else 1.0
+    for t, stats in candidates:
+        success_rate = stats["success_count"] / max(stats["total"], 1)
+        norm_quality = stats["avg_quality"] / max_quality if max_quality > 0 else 0
+        cost_efficiency = 1.0 - (stats["avg_cost"] / max_cost) if max_cost > 0 else 1.0
 
         score = success_rate * 0.5 + norm_quality * 0.3 + cost_efficiency * 0.2
 
@@ -235,12 +278,13 @@ def recommend_coalition(
             "role_agent_map": t.role_agent_map,
             "score": round(score, 3),
             "reasoning": (
-                f"success={success_rate:.0%}, quality={t.avg_quality_score:.1f}, "
-                f"cost=${t.avg_cost_usd:.3f}, rounds={t.avg_rounds_to_consensus:.1f}"
+                f"success={success_rate:.0%}, quality={stats['avg_quality']:.1f}, "
+                f"cost=${stats['avg_cost']:.3f}, rounds={stats['avg_rounds']:.1f} "
+                f"(task_type={task_type}, {stats['total']} outcomes)"
             ),
-            "total_uses": t.total_uses,
+            "total_uses": stats["total"],
             "success_rate": round(success_rate, 3),
-            "avg_quality": round(t.avg_quality_score, 2),
+            "avg_quality": round(stats["avg_quality"], 2),
         })
 
     scored.sort(key=lambda x: x["score"], reverse=True)
