@@ -109,6 +109,8 @@ def update_goal(
             update_data["completed_at"] = None
             update_data["abandoned_at"] = None
             update_data["abandoned_reason"] = None
+            if "progress_pct" not in update_data:
+                update_data["progress_pct"] = 0
 
     for key, value in update_data.items():
         if hasattr(goal, key):
