@@ -10,11 +10,35 @@ from app.models.coalition import CoalitionTemplate, CoalitionOutcome
 from app.schemas.coalition import CoalitionTemplateCreate, CoalitionOutcomeCreate
 
 
+def _validate_pattern_and_roles(pattern: str, role_agent_map: Dict) -> None:
+    """Validate the pattern exists and all required roles are assigned."""
+    from app.schemas.collaboration import PATTERN_PHASES, PHASE_REQUIRED_ROLES
+
+    phases = PATTERN_PHASES.get(pattern)
+    if not phases:
+        valid = ", ".join(PATTERN_PHASES.keys())
+        raise ValueError(f"Unknown pattern '{pattern}'. Valid patterns: {valid}")
+
+    required_roles = set()
+    for phase in phases:
+        required_roles.update(PHASE_REQUIRED_ROLES.get(phase, []))
+
+    assigned_roles = set(role_agent_map.keys())
+    missing = required_roles - assigned_roles
+    if missing:
+        raise ValueError(
+            f"Pattern '{pattern}' requires roles: {sorted(missing)}. "
+            f"Provide them in role_agent_map."
+        )
+
+
 def create_template(
     db: Session,
     tenant_id: uuid.UUID,
     template_in: CoalitionTemplateCreate,
 ) -> CoalitionTemplate:
+    _validate_pattern_and_roles(template_in.pattern, template_in.role_agent_map)
+
     template = CoalitionTemplate(
         tenant_id=tenant_id,
         name=template_in.name,
@@ -52,7 +76,12 @@ def list_templates(
         .filter(CoalitionTemplate.tenant_id == tenant_id, CoalitionTemplate.status == "active")
     )
     if task_type:
-        q = q.filter(CoalitionTemplate.task_types.contains([task_type]))
+        # Include templates that match the task type OR have no type restriction (wildcard)
+        from sqlalchemy import or_
+        q = q.filter(or_(
+            CoalitionTemplate.task_types.contains([task_type]),
+            CoalitionTemplate.task_types == [],
+        ))
     return q.order_by(CoalitionTemplate.avg_quality_score.desc()).limit(limit).all()
 
 
@@ -61,12 +90,26 @@ def record_outcome(
     tenant_id: uuid.UUID,
     outcome_in: CoalitionOutcomeCreate,
 ) -> CoalitionOutcome:
-    """Record a coalition outcome and update the template's aggregate stats."""
-    # Validate template ref if provided
+    """Record a coalition outcome and update the template's aggregate stats.
+
+    When linked to a template, the outcome's pattern and role_agent_map must
+    match the template to prevent stat pollution.
+    """
+    # Validate template ref and enforce consistency
     if outcome_in.template_id:
         template = get_template(db, tenant_id, outcome_in.template_id)
         if not template:
             raise ValueError(f"Coalition template {outcome_in.template_id} not found in this tenant")
+        if outcome_in.pattern != template.pattern:
+            raise ValueError(
+                f"Outcome pattern '{outcome_in.pattern}' does not match "
+                f"template pattern '{template.pattern}'"
+            )
+        if outcome_in.role_agent_map and outcome_in.role_agent_map != template.role_agent_map:
+            raise ValueError(
+                f"Outcome role_agent_map does not match template. "
+                f"Template: {template.role_agent_map}"
+            )
 
     # Validate collaboration ref if provided
     if outcome_in.collaboration_id:
@@ -80,6 +123,11 @@ def record_outcome(
         )
         if not collab:
             raise ValueError(f"Collaboration {outcome_in.collaboration_id} not found in this tenant")
+        if outcome_in.pattern != collab.pattern:
+            raise ValueError(
+                f"Outcome pattern '{outcome_in.pattern}' does not match "
+                f"collaboration pattern '{collab.pattern}'"
+            )
 
     outcome = CoalitionOutcome(
         tenant_id=tenant_id,

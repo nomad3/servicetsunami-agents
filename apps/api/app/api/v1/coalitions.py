@@ -37,7 +37,10 @@ def create_template(
     current_user: User = Depends(get_current_user),
 ):
     """Create a reusable coalition template (team shape)."""
-    return coalition_service.create_template(db, current_user.tenant_id, template_in)
+    try:
+        return coalition_service.create_template(db, current_user.tenant_id, template_in)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("/templates/{template_id}", response_model=CoalitionTemplateInDB)
