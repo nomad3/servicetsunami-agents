@@ -723,15 +723,26 @@ def resume_plan(
             ).first()
         )
     else:
-        # Find the first non-completed step
+        # Resume from current_step_index (the plan's execution pointer).
+        # This is correct after fallback jumps — current_step_index tracks
+        # where execution actually was, not just step ordering.
         resume_step = (
             db.query(PlanStep).filter(
                 PlanStep.plan_id == plan_id,
-                PlanStep.status.in_(["pending", "failed"]),
-            )
-            .order_by(PlanStep.step_index.asc())
-            .first()
+                PlanStep.step_index == plan.current_step_index,
+            ).first()
         )
+        # If current step is already completed, find the next non-completed one
+        if resume_step and resume_step.status == "completed":
+            resume_step = (
+                db.query(PlanStep).filter(
+                    PlanStep.plan_id == plan_id,
+                    PlanStep.step_index > plan.current_step_index,
+                    PlanStep.status.in_(["pending", "failed"]),
+                )
+                .order_by(PlanStep.step_index.asc())
+                .first()
+            )
 
     if not resume_step:
         return None
@@ -747,7 +758,7 @@ def resume_plan(
         }
 
     # Reset the step for re-execution (full reset including retry budget)
-    old_status = resume_step.status
+    plan_old_status = plan.status
     resume_step.status = "running"
     resume_step.started_at = now
     resume_step.error = None
@@ -762,7 +773,7 @@ def resume_plan(
 
     _log_event(
         db, plan_id, "resumed",
-        previous_status=old_status, new_status="executing",
+        previous_status=plan_old_status, new_status="executing",
         step_id=resume_step.id,
         reason=f"Resumed from step {resume_step.step_index}",
         metadata_json={"from_step_index": resume_step.step_index},
