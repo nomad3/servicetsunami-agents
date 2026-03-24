@@ -183,8 +183,18 @@ def update_plan(
             agent_slug=plan.owner_agent_slug,
         )
 
-        # When transitioning to executing, start the first step
+        # When transitioning to executing, check budget then start the first step
         if new_status == "executing" and old_status != "executing":
+            # Apply status first so budget check sees "executing"
+            plan.status = new_status
+            budget_violation = _enforce_budget_before_step(db, plan, plan_id)
+            if budget_violation:
+                # Budget already exceeded — don't start execution
+                plan.updated_at = datetime.utcnow()
+                db.commit()
+                db.refresh(plan)
+                return plan
+
             first_step = (
                 db.query(PlanStep).filter(
                     PlanStep.plan_id == plan_id,
@@ -250,6 +260,14 @@ def advance_step(
         ).first()
     )
 
+    # Check budget after every step completion (including the last one)
+    budget_violation = _enforce_budget_before_step(db, plan, plan_id)
+    if budget_violation:
+        plan.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(current_step)
+        return current_step
+
     if next_step:
         plan.current_step_index += 1
         next_step.status = "running"
@@ -305,6 +323,155 @@ def fail_step(
     db.commit()
     db.refresh(current_step)
     return current_step
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Budget-aware execution
+# ---------------------------------------------------------------------------
+
+BUDGET_WARNING_THRESHOLD = 0.8  # Warn at 80% of budget
+
+
+def check_budget(
+    db: Session,
+    tenant_id: uuid.UUID,
+    plan_id: uuid.UUID,
+) -> Optional[dict]:
+    """Check budget status for a plan. Returns violations, warnings, and usage."""
+    plan = get_plan(db, tenant_id, plan_id)
+    if not plan:
+        return None
+
+    now = datetime.utcnow()
+    violations = []
+    warnings = []
+
+    # Actions budget
+    if plan.budget_max_actions is not None:
+        pct = plan.budget_actions_used / max(plan.budget_max_actions, 1)
+        if plan.budget_actions_used >= plan.budget_max_actions:
+            violations.append({
+                "budget": "actions",
+                "limit": plan.budget_max_actions,
+                "used": plan.budget_actions_used,
+                "message": f"Action budget exhausted ({plan.budget_actions_used}/{plan.budget_max_actions})",
+            })
+        elif pct >= BUDGET_WARNING_THRESHOLD:
+            warnings.append({
+                "budget": "actions",
+                "limit": plan.budget_max_actions,
+                "used": plan.budget_actions_used,
+                "pct": round(pct, 2),
+                "message": f"Action budget at {round(pct * 100)}% ({plan.budget_actions_used}/{plan.budget_max_actions})",
+            })
+
+    # Cost budget
+    if plan.budget_max_cost_usd is not None:
+        pct = plan.budget_cost_used / max(plan.budget_max_cost_usd, 0.01)
+        if plan.budget_cost_used >= plan.budget_max_cost_usd:
+            violations.append({
+                "budget": "cost",
+                "limit": plan.budget_max_cost_usd,
+                "used": round(plan.budget_cost_used, 4),
+                "message": f"Cost budget exhausted (${plan.budget_cost_used:.4f}/${plan.budget_max_cost_usd:.2f})",
+            })
+        elif pct >= BUDGET_WARNING_THRESHOLD:
+            warnings.append({
+                "budget": "cost",
+                "limit": plan.budget_max_cost_usd,
+                "used": round(plan.budget_cost_used, 4),
+                "pct": round(pct, 2),
+                "message": f"Cost budget at {round(pct * 100)}% (${plan.budget_cost_used:.4f}/${plan.budget_max_cost_usd:.2f})",
+            })
+
+    # Runtime budget
+    if plan.budget_max_runtime_hours is not None:
+        runtime_hours = (now - plan.created_at).total_seconds() / 3600
+        pct = runtime_hours / max(plan.budget_max_runtime_hours, 0.01)
+        if runtime_hours >= plan.budget_max_runtime_hours:
+            violations.append({
+                "budget": "runtime",
+                "limit": plan.budget_max_runtime_hours,
+                "used": round(runtime_hours, 2),
+                "message": f"Runtime budget exhausted ({runtime_hours:.1f}h/{plan.budget_max_runtime_hours}h)",
+            })
+        elif pct >= BUDGET_WARNING_THRESHOLD:
+            warnings.append({
+                "budget": "runtime",
+                "limit": plan.budget_max_runtime_hours,
+                "used": round(runtime_hours, 2),
+                "pct": round(pct, 2),
+                "message": f"Runtime budget at {round(pct * 100)}% ({runtime_hours:.1f}h/{plan.budget_max_runtime_hours}h)",
+            })
+
+    return {
+        "plan_id": str(plan.id),
+        "budget_ok": len(violations) == 0,
+        "violations": violations,
+        "warnings": warnings,
+        "usage": {
+            "actions": {"used": plan.budget_actions_used, "limit": plan.budget_max_actions},
+            "cost_usd": {"used": round(plan.budget_cost_used, 4), "limit": plan.budget_max_cost_usd},
+            "runtime_hours": {
+                "used": round((now - plan.created_at).total_seconds() / 3600, 2),
+                "limit": plan.budget_max_runtime_hours,
+            },
+        },
+    }
+
+
+def _enforce_budget_before_step(
+    db: Session,
+    plan: Plan,
+    plan_id: uuid.UUID,
+) -> Optional[dict]:
+    """Check budget before starting a step. If violated, pause the plan.
+
+    Returns None if budget is OK, or the violation dict if paused.
+    """
+    budget = check_budget(db, plan.tenant_id, plan_id)
+    if not budget:
+        return None
+
+    # Log warnings
+    for w in budget.get("warnings", []):
+        _log_event(
+            db, plan_id, "budget_warning",
+            reason=w["message"],
+            metadata_json={"budget": w["budget"], "pct": w.get("pct")},
+        )
+
+    # Enforce violations — pause the plan
+    if budget["violations"]:
+        plan.status = "paused"
+        plan.updated_at = datetime.utcnow()
+        violation_msg = "; ".join(v["message"] for v in budget["violations"])
+        _log_event(
+            db, plan_id, "budget_warning",
+            previous_status="executing", new_status="paused",
+            reason=f"Budget exceeded — paused: {violation_msg}",
+            metadata_json={"violations": budget["violations"]},
+        )
+        return budget
+
+    return None
+
+
+def record_step_cost(
+    db: Session,
+    tenant_id: uuid.UUID,
+    plan_id: uuid.UUID,
+    cost_usd: float,
+) -> Optional[Plan]:
+    """Record cost incurred by the current step."""
+    plan = get_plan(db, tenant_id, plan_id)
+    if not plan:
+        return None
+    plan.budget_cost_used = round(plan.budget_cost_used + cost_usd, 6)
+    plan.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(plan)
+    return plan
 
 
 def list_plan_events(
@@ -568,6 +735,16 @@ def resume_plan(
 
     if not resume_step:
         return None
+
+    # Check budget before resuming — don't restart an over-budget plan
+    budget = check_budget(db, tenant_id, plan_id)
+    if budget and budget["violations"]:
+        violation_msg = "; ".join(v["message"] for v in budget["violations"])
+        return {
+            "error": "budget_exceeded",
+            "message": f"Cannot resume: {violation_msg}",
+            "violations": budget["violations"],
+        }
 
     # Reset the step for re-execution (full reset including retry budget)
     old_status = resume_step.status

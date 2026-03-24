@@ -147,7 +147,39 @@ def resume_plan(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot resume: plan not paused/failed or no resumable step found",
         )
+    if result.get("error") == "budget_exceeded":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["message"],
+        )
     return result
+
+
+@router.get("/{plan_id}/budget", response_model=dict)
+def check_plan_budget(
+    plan_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Check budget status: violations, warnings, and usage."""
+    result = plan_service.check_budget(db, current_user.tenant_id, plan_id)
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    return result
+
+
+@router.post("/{plan_id}/cost", response_model=dict)
+def record_step_cost(
+    plan_id: uuid.UUID,
+    cost_usd: float = Query(..., ge=0.0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Record cost incurred by the current step."""
+    plan = plan_service.record_step_cost(db, current_user.tenant_id, plan_id, cost_usd)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    return {"budget_cost_used": plan.budget_cost_used}
 
 
 @router.get("/{plan_id}/events", response_model=List[PlanEventInDB])

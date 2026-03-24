@@ -58,6 +58,20 @@ jobs:
       - name: Unlock keychain
         run: security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" ~/Library/Keychains/login.keychain-db
 
+      - name: Clean up Docker disk
+        run: |
+          echo "--- Docker disk before cleanup ---"
+          docker system df 2>/dev/null || true
+
+          # Remove dangling images (old builds)
+          docker image prune -f 2>/dev/null || true
+
+          # Remove unused images not referenced by running containers
+          docker image prune -af 2>/dev/null || true
+
+          echo "--- Docker disk after cleanup ---"
+          docker system df 2>/dev/null || true
+
       - name: Build and deploy
         run: |
           SERVICES="${{ steps.changes.outputs.services || steps.dispatch.outputs.services }}"
