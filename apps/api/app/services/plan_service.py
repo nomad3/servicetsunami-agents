@@ -183,8 +183,18 @@ def update_plan(
             agent_slug=plan.owner_agent_slug,
         )
 
-        # When transitioning to executing, start the first step
+        # When transitioning to executing, check budget then start the first step
         if new_status == "executing" and old_status != "executing":
+            # Apply status first so budget check sees "executing"
+            plan.status = new_status
+            budget_violation = _enforce_budget_before_step(db, plan, plan_id)
+            if budget_violation:
+                # Budget already exceeded — don't start execution
+                plan.updated_at = datetime.utcnow()
+                db.commit()
+                db.refresh(plan)
+                return plan
+
             first_step = (
                 db.query(PlanStep).filter(
                     PlanStep.plan_id == plan_id,
@@ -250,16 +260,15 @@ def advance_step(
         ).first()
     )
 
-    if next_step:
-        # Check budget before starting next step
-        budget_violation = _enforce_budget_before_step(db, plan, plan_id)
-        if budget_violation:
-            # Plan paused by budget enforcement — don't start next step
-            plan.updated_at = datetime.utcnow()
-            db.commit()
-            db.refresh(current_step)
-            return current_step
+    # Check budget after every step completion (including the last one)
+    budget_violation = _enforce_budget_before_step(db, plan, plan_id)
+    if budget_violation:
+        plan.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(current_step)
+        return current_step
 
+    if next_step:
         plan.current_step_index += 1
         next_step.status = "running"
         next_step.started_at = datetime.utcnow()
@@ -726,6 +735,16 @@ def resume_plan(
 
     if not resume_step:
         return None
+
+    # Check budget before resuming — don't restart an over-budget plan
+    budget = check_budget(db, tenant_id, plan_id)
+    if budget and budget["violations"]:
+        violation_msg = "; ".join(v["message"] for v in budget["violations"])
+        return {
+            "error": "budget_exceeded",
+            "message": f"Cannot resume: {violation_msg}",
+            "violations": budget["violations"],
+        }
 
     # Reset the step for re-execution (full reset including retry budget)
     old_status = resume_step.status
