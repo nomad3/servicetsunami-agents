@@ -27,6 +27,7 @@ def generate_cli_instructions(
     channel: str,
     conversation_summary: str,
     memory_context: Dict[str, Any],
+    agent_slug: str = "luna",
 ) -> str:
     """Generate provider-neutral instruction markdown from agent skill + tenant context."""
     lines: list[str] = []
@@ -37,17 +38,28 @@ def generate_cli_instructions(
     lines.append(f"When calling ANY MCP tool, ALWAYS pass tenant_id=\"{tenant_name}\".")
     lines.append(f"Session: tenant={tenant_name} user={user_name} channel={channel}")
     lines.append("")
-    lines.append("## IDENTITY")
-    lines.append("Your user-facing identity is Luna.")
-    lines.append("The underlying execution runtime may be Codex or Claude Code, but that is not your identity.")
-    lines.append("If the user asks who you are, answer that you are Luna.")
-    lines.append("If the user asks about the underlying model or runtime, explain it plainly: you are Luna running on the tenant's configured CLI platform.")
-    lines.append("Do not introduce yourself as Codex, Claude, Claude Code, or 'the code agent' unless the user is explicitly asking about infrastructure.")
-    lines.append("")
+    # Identity section: use identity profile if available, otherwise default to Luna
+    identity_profile = (memory_context.get("self_model") or {}).get("identity_context")
+    if identity_profile:
+        lines.append("## IDENTITY")
+        lines.append(f"Your user-facing identity is {agent_slug}.")
+        lines.append("The underlying execution runtime may be Codex, Claude Code, or Copilot CLI, but that is not your identity.")
+        lines.append(f"If the user asks who you are, answer that you are {agent_slug}.")
+        lines.append(f"If the user asks about the underlying model or runtime, explain it plainly: you are {agent_slug} running on the tenant's configured CLI platform.")
+        lines.append("Do not introduce yourself as Codex, Claude, Claude Code, or 'the code agent' unless the user is explicitly asking about infrastructure.")
+        lines.append("")
+    else:
+        lines.append("## IDENTITY")
+        lines.append("Your user-facing identity is Luna.")
+        lines.append("The underlying execution runtime may be Codex or Claude Code, but that is not your identity.")
+        lines.append("If the user asks who you are, answer that you are Luna.")
+        lines.append("If the user asks about the underlying model or runtime, explain it plainly: you are Luna running on the tenant's configured CLI platform.")
+        lines.append("Do not introduce yourself as Codex, Claude, Claude Code, or 'the code agent' unless the user is explicitly asking about infrastructure.")
+        lines.append("")
     lines.append("## MANDATORY: Check Memory Before Every Response")
     lines.append("Before answering ANY question, you MUST call find_entities and search_knowledge.")
     lines.append("NEVER say 'I don't have information' without checking your MCP tools first.")
-    lines.append("You are Luna, an AI chief of staff with full access to email, calendar, knowledge graph, Jira, and code tools.")
+    lines.append(f"You are {agent_slug}, an AI agent with full access to email, calendar, knowledge graph, Jira, and code tools.")
     lines.append("")
 
     lines.append("# Agent Instructions")
@@ -328,6 +340,7 @@ def run_agent_session(
         channel=channel,
         conversation_summary=conversation_summary,
         memory_context=memory_context,
+        agent_slug=agent_slug,
     )
 
     internal_key = settings.MCP_API_KEY or "dev_mcp_key"

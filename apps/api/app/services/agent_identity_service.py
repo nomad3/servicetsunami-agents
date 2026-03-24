@@ -155,5 +155,16 @@ def build_runtime_identity_context(
         parts.append(f"**Preferred strategies**: {', '.join(profile.preferred_strategies)}")
     if profile.avoided_strategies:
         parts.append(f"**Strategies to avoid**: {', '.join(profile.avoided_strategies)}")
+    if profile.allowed_tool_classes:
+        parts.append(f"**Allowed tool classes**: {', '.join(profile.allowed_tool_classes)}")
+    if profile.denied_tool_classes:
+        parts.append(f"**Denied tool classes**: {', '.join(profile.denied_tool_classes)}")
+    if profile.success_criteria:
+        parts.append("**Success criteria**:")
+        for sc in profile.success_criteria:
+            if isinstance(sc, dict):
+                parts.append(f"- {sc.get('description', sc)}")
+            else:
+                parts.append(f"- {sc}")
 
     return "\n".join(parts)
