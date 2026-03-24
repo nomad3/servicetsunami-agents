@@ -32,20 +32,33 @@ def _validate_observation_ref(db: Session, tenant_id: uuid.UUID, obs_id: Optiona
         raise ValueError(f"Observation {obs_id} not found in this tenant")
 
 
-def _expire_stale_assertions(db: Session, tenant_id: uuid.UUID) -> int:
-    """Transition active assertions past their freshness TTL to expired."""
+def _expire_stale_assertions(db: Session, tenant_id: uuid.UUID) -> List[str]:
+    """Transition active assertions past their freshness TTL to expired.
+
+    Returns the list of affected subject_slugs so callers can refresh their snapshots.
+    """
     now = datetime.utcnow()
-    expired_count = (
-        db.query(WorldStateAssertion)
+    stale_rows = (
+        db.query(WorldStateAssertion.subject_slug)
         .filter(
             WorldStateAssertion.tenant_id == tenant_id,
             WorldStateAssertion.status == "active",
             WorldStateAssertion.valid_from + WorldStateAssertion.freshness_ttl_hours * timedelta(hours=1) < now,
         )
-        .update({"status": "expired", "valid_to": now}, synchronize_session="fetch")
+        .distinct()
+        .all()
     )
-    if expired_count:
+    affected_slugs = [row.subject_slug for row in stale_rows]
+
+    if affected_slugs:
+        db.query(WorldStateAssertion).filter(
+            WorldStateAssertion.tenant_id == tenant_id,
+            WorldStateAssertion.status == "active",
+            WorldStateAssertion.valid_from + WorldStateAssertion.freshness_ttl_hours * timedelta(hours=1) < now,
+        ).update({"status": "expired", "valid_to": now}, synchronize_session="fetch")
         db.commit()
+
+    return affected_slugs
     return expired_count
 
 
@@ -58,8 +71,11 @@ def assert_state(
     _validate_entity_ref(db, tenant_id, assertion_in.subject_entity_id)
     _validate_observation_ref(db, tenant_id, assertion_in.source_observation_id)
 
-    # Expire stale assertions before evaluating
-    _expire_stale_assertions(db, tenant_id)
+    # Expire stale assertions and refresh affected snapshots
+    affected = _expire_stale_assertions(db, tenant_id)
+    for slug in affected:
+        if slug != assertion_in.subject_slug:  # current subject refreshed later
+            _update_snapshot_no_expire(db, tenant_id, slug)
 
     # Find existing active assertion for same subject + attribute
     existing = (
@@ -231,9 +247,22 @@ def _update_snapshot(
     subject_entity_id: Optional[uuid.UUID] = None,
 ) -> WorldStateSnapshot:
     """Recompute the snapshot for a subject from its active, non-expired assertions."""
-    # Expire stale assertions first so they don't pollute the snapshot
-    _expire_stale_assertions(db, tenant_id)
+    # Expire stale assertions and refresh any other affected subjects
+    affected = _expire_stale_assertions(db, tenant_id)
+    for slug in affected:
+        if slug != subject_slug:
+            _update_snapshot_no_expire(db, tenant_id, slug)
 
+    return _update_snapshot_no_expire(db, tenant_id, subject_slug, subject_entity_id)
+
+
+def _update_snapshot_no_expire(
+    db: Session,
+    tenant_id: uuid.UUID,
+    subject_slug: str,
+    subject_entity_id: Optional[uuid.UUID] = None,
+) -> WorldStateSnapshot:
+    """Recompute snapshot without triggering expiry (avoids recursion)."""
     active = (
         db.query(WorldStateAssertion)
         .filter(
