@@ -52,6 +52,7 @@ from .commitment_record import CommitmentRecord
 from .agent_identity_profile import AgentIdentityProfile
 from .world_state import WorldStateAssertion, WorldStateSnapshot
 from .causal_edge import CausalEdge
+from .plan import Plan, PlanStep, PlanAssumption, PlanEvent
 from .dynamic_workflow import DynamicWorkflow, WorkflowRun, WorkflowStepLog
 
 __all__ = [
@@ -78,5 +79,6 @@ __all__ = [
     "MCPServerConnector", "MCPServerCallLog",
     "GoalRecord", "CommitmentRecord", "AgentIdentityProfile",
     "WorldStateAssertion", "WorldStateSnapshot", "CausalEdge",
+    "Plan", "PlanStep", "PlanAssumption", "PlanEvent",
     "DynamicWorkflow", "WorkflowRun", "WorkflowStepLog",
 ]
