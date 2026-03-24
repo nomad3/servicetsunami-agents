@@ -88,6 +88,9 @@ def assert_state(
         .first()
     )
 
+    is_dispute = False
+    dispute_reason = None
+
     if existing:
         # Same value = corroboration
         if existing.value_json == assertion_in.value_json:
@@ -100,15 +103,17 @@ def assert_state(
             db.refresh(existing)
             return existing
 
-        # Different value from same source type = supersede
-        # Different value from different source type = dispute (conflicting claims)
-        if existing.source_type != assertion_in.source_type.value:
-            existing.status = "disputed"
-            existing.dispute_reason = (
+        # Different value from same source type = supersede (source updated its own claim)
+        # Different value from different source type = dispute (neither side wins)
+        is_dispute = existing.source_type != assertion_in.source_type.value
+        if is_dispute:
+            dispute_reason = (
                 f"Conflicting value from {assertion_in.source_type.value} "
                 f"(was {existing.source_type}): "
                 f"{existing.value_json} vs {assertion_in.value_json}"
             )
+            existing.status = "disputed"
+            existing.dispute_reason = dispute_reason
         else:
             existing.status = "superseded"
         existing.valid_to = datetime.utcnow()
@@ -124,7 +129,9 @@ def assert_state(
         source_observation_id=assertion_in.source_observation_id,
         source_type=assertion_in.source_type.value,
         freshness_ttl_hours=assertion_in.freshness_ttl_hours,
-        status="active",
+        # Disputes: new assertion also disputed — neither side wins until resolved
+        status="disputed" if (existing and is_dispute) else "active",
+        dispute_reason=dispute_reason if (existing and is_dispute) else None,
         valid_from=datetime.utcnow(),
     )
     db.add(assertion)
@@ -264,14 +271,34 @@ def resolve_dispute(
     assertion_id: uuid.UUID,
     resolution: str = "superseded",
 ) -> Optional[WorldStateAssertion]:
-    """Resolve a disputed assertion by marking it superseded or reactivating it."""
+    """Resolve a disputed assertion by marking it superseded or reactivating it.
+
+    When reactivating: supersedes any currently active assertion for the same
+    attribute so only one active claim exists per attribute.
+    """
     assertion = get_assertion(db, tenant_id, assertion_id)
     if not assertion or assertion.status != "disputed":
         return None
-    assertion.status = resolution
-    if resolution != "active":
-        assertion.valid_to = datetime.utcnow()
-    assertion.updated_at = datetime.utcnow()
+
+    now = datetime.utcnow()
+
+    if resolution == "active":
+        # Supersede any other active assertion for this attribute first
+        db.query(WorldStateAssertion).filter(
+            WorldStateAssertion.tenant_id == tenant_id,
+            WorldStateAssertion.subject_slug == assertion.subject_slug,
+            WorldStateAssertion.attribute_path == assertion.attribute_path,
+            WorldStateAssertion.status == "active",
+            WorldStateAssertion.id != assertion_id,
+        ).update({"status": "superseded", "valid_to": now}, synchronize_session="fetch")
+        assertion.status = "active"
+        assertion.dispute_reason = None
+        assertion.valid_to = None
+    else:
+        assertion.status = "superseded"
+        assertion.valid_to = now
+
+    assertion.updated_at = now
     db.flush()
     _update_snapshot_no_expire(db, tenant_id, assertion.subject_slug, assertion.subject_entity_id)
     db.commit()
