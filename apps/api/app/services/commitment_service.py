@@ -14,12 +14,30 @@ from app.schemas.commitment_record import (
 )
 
 
+def _validate_goal_ref(
+    db: Session,
+    tenant_id: uuid.UUID,
+    goal_id: Optional[uuid.UUID],
+) -> None:
+    if not goal_id:
+        return
+    from app.models.goal_record import GoalRecord
+    goal = (
+        db.query(GoalRecord)
+        .filter(GoalRecord.id == goal_id, GoalRecord.tenant_id == tenant_id)
+        .first()
+    )
+    if not goal:
+        raise ValueError(f"Goal {goal_id} not found in this tenant")
+
+
 def create_commitment(
     db: Session,
     tenant_id: uuid.UUID,
     commitment_in: CommitmentRecordCreate,
     created_by: Optional[uuid.UUID] = None,
 ) -> CommitmentRecord:
+    _validate_goal_ref(db, tenant_id, commitment_in.goal_id)
     commitment = CommitmentRecord(
         tenant_id=tenant_id,
         owner_agent_slug=commitment_in.owner_agent_slug,
@@ -86,16 +104,29 @@ def update_commitment(
 
     update_data = commitment_in.model_dump(exclude_unset=True)
 
+    if "goal_id" in update_data:
+        _validate_goal_ref(db, tenant_id, update_data["goal_id"])
+
     if "state" in update_data:
         new_state = update_data["state"]
         if isinstance(new_state, CommitmentState):
             new_state = new_state.value
         update_data["state"] = new_state
 
-        if new_state == "fulfilled" and not commitment.fulfilled_at:
+        if new_state == "fulfilled":
             update_data["fulfilled_at"] = datetime.utcnow()
-        elif new_state == "broken" and not commitment.broken_at:
+            update_data["broken_at"] = None
+            update_data["broken_reason"] = None
+        elif new_state == "broken":
             update_data["broken_at"] = datetime.utcnow()
+            update_data["fulfilled_at"] = None
+        elif new_state in ("open", "in_progress"):
+            update_data["fulfilled_at"] = None
+            update_data["broken_at"] = None
+            update_data["broken_reason"] = None
+        elif new_state == "cancelled":
+            update_data["fulfilled_at"] = None
+            update_data["broken_at"] = None
 
     for key, value in update_data.items():
         if hasattr(commitment, key):

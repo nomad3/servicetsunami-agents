@@ -59,12 +59,15 @@ def create_commitment(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new commitment record."""
-    return commitment_service.create_commitment(
-        db,
-        tenant_id=current_user.tenant_id,
-        commitment_in=commitment_in,
-        created_by=current_user.id,
-    )
+    try:
+        return commitment_service.create_commitment(
+            db,
+            tenant_id=current_user.tenant_id,
+            commitment_in=commitment_in,
+            created_by=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("/{commitment_id}", response_model=CommitmentRecordInDB)
@@ -88,9 +91,12 @@ def update_commitment(
     current_user: User = Depends(get_current_user),
 ):
     """Update a commitment (state transitions, progress, etc.)."""
-    commitment = commitment_service.update_commitment(
-        db, current_user.tenant_id, commitment_id, commitment_in
-    )
+    try:
+        commitment = commitment_service.update_commitment(
+            db, current_user.tenant_id, commitment_id, commitment_in
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not commitment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Commitment not found")
     return commitment

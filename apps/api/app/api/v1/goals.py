@@ -39,12 +39,15 @@ def create_goal(
     current_user: User = Depends(get_current_user),
 ):
     """Create a new goal record."""
-    return goal_service.create_goal(
-        db,
-        tenant_id=current_user.tenant_id,
-        goal_in=goal_in,
-        created_by=current_user.id,
-    )
+    try:
+        return goal_service.create_goal(
+            db,
+            tenant_id=current_user.tenant_id,
+            goal_in=goal_in,
+            created_by=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("/{goal_id}", response_model=GoalRecordInDB)
@@ -68,7 +71,10 @@ def update_goal(
     current_user: User = Depends(get_current_user),
 ):
     """Update a goal record (state transitions, progress, etc.)."""
-    goal = goal_service.update_goal(db, current_user.tenant_id, goal_id, goal_in)
+    try:
+        goal = goal_service.update_goal(db, current_user.tenant_id, goal_id, goal_in)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not goal:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Goal not found")
     return goal
