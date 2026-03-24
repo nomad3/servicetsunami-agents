@@ -130,6 +130,39 @@ Each CLI platform uses subscription-based OAuth — zero API credits:
 | Microsoft/Outlook | Microsoft OAuth | Wired |
 | Jira | Basic Auth | **Live** |
 
+## AGI Roadmap — Brain Architecture
+
+The platform is evolving from a reactive assistant into a durable agent system through six capability gaps:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     AGENT BRAIN                             │
+│                                                             │
+│  Safety Layer (Gap 05)      ████████████████████ COMPLETE   │
+│  111 governed actions, trust scores, autonomy tiers         │
+│  Evidence packs, tenant overrides, enforcement gates        │
+│                                                             │
+│  Self-Model (Gap 02)        ████████████████████ COMPLETE   │
+│  Goals, commitments, identity profiles                      │
+│  6h review workflow, runtime injection into CLI sessions    │
+│                                                             │
+│  World Model (Gap 01)       █████░░░░░░░░░░░░░░ Phase 1    │
+│  Assertions with confidence, TTL, corroboration             │
+│  Auto-projected snapshots per entity                        │
+│                                                             │
+│  Planning (Gap 03)          ░░░░░░░░░░░░░░░░░░░ Planned    │
+│  Society of Agents (Gap 06) ░░░░░░░░░░░░░░░░░░░ Planned    │
+│  Self-Improvement (Gap 04)  ░░░░░░░░░░░░░░░░░░░ Planned    │
+└─────────────────────────────────────────────────────────────┘
+
+RL Feedback Loop:
+  Response → Auto Score (Qwen 6-dim) → Provider Council (20%)
+  → RL Experience → Trust Recompute → Routing Optimization
+  → Exploration: 70% Codex / 30% Claude Code
+```
+
+See `docs/plans/2026-03-24-agi-roadmap-summary.md` for full diagrams and implementation details.
+
 ## Quick Start
 
 ```bash

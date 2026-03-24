@@ -242,6 +242,11 @@ Core domain models (all inherit from SQLAlchemy Base, include `tenant_id` Foreig
 - `notification.py`: Proactive alerts from inbox monitor, system events
 - `memory_activity.py`: Audit log for knowledge graph operations
 - `rl_experience.py`: Reinforcement learning experiences with decision_point, state, action, reward, reward_components (JSONB), reward_source, embedded state_text
+- `safety_policy.py`: `TenantActionPolicy` (tenant overrides), `SafetyEvidencePack` (enforcement audit trail, 30d TTL), `AgentTrustProfile` (per-agent trust scores + autonomy tiers)
+- `goal_record.py`: Durable goals with state machine (proposed→active→blocked→completed/abandoned), hierarchical parent goals, success criteria, deadlines
+- `commitment_record.py`: Agent promises with state machine (open→in_progress→fulfilled/broken/cancelled), source tracking, due dates, goal linkage
+- `agent_identity_profile.py`: Per-agent operating profiles — role, mandate, domain boundaries, tool access, risk posture, communication style, learned strengths/weaknesses
+- `world_state.py`: `WorldStateAssertion` (normalized claims with confidence, provenance, TTL, supersession), `WorldStateSnapshot` (auto-projected current state per entity)
 
 ### Services (`apps/api/app/services/`)
 
@@ -270,6 +275,13 @@ Business logic layer (one service per model):
 - `orchestration/`: Orchestration services package
   - `credential_vault.py`: Fernet-encrypted credential storage with CRUD helpers
   - `task_dispatcher.py`: Agent selection and task dispatch
+- `safety_policies.py`: Unified risk catalog (111 actions), evaluation, tenant overrides with ceiling enforcement
+- `safety_enforcement.py`: Central enforcement, evidence packs, autonomy tier restrictions, automated channel escalation
+- `safety_trust.py`: Trust scoring from RL + provider council, autonomy tier derivation, auto-refresh stale profiles (6h)
+- `goal_service.py`: Goal CRUD with state machine transitions, cross-tenant validation, hierarchical goals
+- `commitment_service.py`: Commitment CRUD with state machine, overdue detection, goal linkage validation
+- `agent_identity_service.py`: Identity profile CRUD, `build_runtime_identity_context()` for CLI prompt injection
+- `world_state_service.py`: `assert_state()` (corroborate/supersede), TTL expiry, atomic snapshot projection, `build_world_state_context()`
 - Pattern: `{resource}s.py` (e.g., `agents.py`, `datasets.py`, `agent_groups.py`, `vector_stores.py`)
 
 ### Workers (`apps/api/app/workers/`)
@@ -450,6 +462,114 @@ PRs created by the code agent include structured body with full audit trail:
 - **Commits**: Full commit log with short hashes
 - **Files Changed**: Bulleted list of modified files
 - **Footer**: ServiceTsunami Code Agent attribution
+
+## AGI Roadmap — Brain Architecture
+
+The platform is evolving from a reactive assistant into a durable agent system through six capability gaps. The "brain" is the combination of safety governance, self-model persistence, world state grounding, and reinforcement learning that makes agents self-consistent across sessions.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     AGENT BRAIN                             │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ SAFETY LAYER (Gap 05) — Foundation for all autonomy   │  │
+│  │  • 111 governed actions, 5 risk classes               │  │
+│  │  • Evidence packs, tenant overrides, ceiling enforce  │  │
+│  │  • Trust scores → autonomy tiers per agent            │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                          ▲                                  │
+│  ┌──────────────────┐    │    ┌────────────────────────┐   │
+│  │ SELF-MODEL        │    │    │ WORLD MODEL            │   │
+│  │ (Gap 02)          │    │    │ (Gap 01)               │   │
+│  │                   │    │    │                        │   │
+│  │ Identity profiles │    │    │ Assertions + snapshots │   │
+│  │ Goals + deadlines │    │    │ Confidence + TTL       │   │
+│  │ Commitments       │    │    │ Corroboration chain    │   │
+│  │ Strengths/weak    │    │    │ Supersession tracking  │   │
+│  └────────┬──────────┘    │    └───────────┬────────────┘   │
+│           │               │                │                │
+│           ▼               │                ▼                │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │ REINFORCEMENT LEARNING — Continuous improvement loop  │  │
+│  │  • Auto quality scorer (6-dim, 100pts)                │  │
+│  │  • Provider council (Claude+Codex+Qwen, 20% sample)  │  │
+│  │  • RL experiences → trust scores → routing decisions  │  │
+│  │  • Exploration: 70% Codex / 30% Claude Code           │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                          │                                  │
+│  ┌───────────────────────▼───────────────────────────────┐  │
+│  │ ORCHESTRATION — Temporal durable execution            │  │
+│  │  • CLI routing (Claude/Codex/Gemini + fallback)      │  │
+│  │  • Goal review workflow (6h cycle, stale detection)   │  │
+│  │  • Inbox/competitor monitors (continue_as_new)        │  │
+│  │  • Dynamic workflows with safety-gated steps         │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Implementation Status
+
+```
+Gap 05: Safety & Trust          ████████████████████ COMPLETE
+  Phase 1: Risk taxonomy         ████ PR #28
+  Phase 2: Enforcement           ████ PR #29
+  Phase 3: Trust autonomy        ████ PR #30
+  Bypass fixes                   ████ PR #31
+
+Gap 02: Self-Model & Goals      ████████████████████ COMPLETE
+  Phase 1: Goals + commitments   ████ PR #32
+  Phase 2: Identity profiles     ████ PR #33
+  Phase 3: Goal review workflow  ████ PR #34
+
+Gap 01: World Model             █████░░░░░░░░░░░░░░░ Phase 1 done
+  Phase 1: Assertions            ████ PR #35
+  Phase 2: Conflict/freshness    ░░░░ next
+  Phase 3: Causal graph          ░░░░
+  Phase 4: State-first prompts   ░░░░
+
+Gap 03: Long-Horizon Planning   ░░░░░░░░░░░░░░░░░░░░ Not started
+Gap 06: Society of Agents       ░░░░░░░░░░░░░░░░░░░░ Not started
+Gap 04: Self-Improvement        ░░░░░░░░░░░░░░░░░░░░ Not started
+```
+
+### RL Feedback Loop
+
+```
+User message
+    │
+    ▼
+Agent Router ──────────────────────────────┐
+    │ (trust profile + RL routing)         │
+    ▼                                      │
+CLI Execution ─────────────────────┐       │
+    │ (Claude/Codex/Gemini)        │       │
+    ▼                              │       │
+Response ──────────────────┐       │       │
+    │                      │       │       │
+    ▼                      ▼       ▼       ▼
+Auto Quality Scorer    RL Experience Logged
+    │ (Qwen, 6-dim)       (state, action, reward)
+    │                          │
+    ▼                          ▼
+Provider Council (20%)    Trust Recompute (6h)
+    │ (Claude+Codex+Qwen)     │
+    │                          ▼
+    ▼                     Autonomy Tier Update
+RL Experience Updated         │
+    │                         ▼
+    └─────────────────► Next routing decision
+```
+
+### AGI Design Documents
+
+- `docs/plans/2026-03-24-agi-roadmap-summary.md`: Full roadmap with ASCII diagrams
+- `docs/plans/2026-03-24-agi-gap-01-world-model-grounding-design.md`: World model design
+- `docs/plans/2026-03-24-agi-gap-02-self-model-and-goal-persistence-design.md`: Self-model design
+- `docs/plans/2026-03-24-agi-gap-03-long-horizon-autonomy-design.md`: Planning design
+- `docs/plans/2026-03-24-agi-gap-04-self-improvement-and-experimentation-design.md`: Self-improvement design
+- `docs/plans/2026-03-24-agi-gap-05-safety-governance-and-trust-design.md`: Safety design
+- `docs/plans/2026-03-24-agi-gap-06-collective-intelligence-and-society-of-agents-design.md`: Multi-agent design
+- `docs/plans/2026-03-24-copilot-cli-integration-design.md`: GitHub Copilot CLI integration (planned)
 
 ## Additional Documentation
 
