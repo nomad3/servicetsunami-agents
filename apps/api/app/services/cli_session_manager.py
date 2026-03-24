@@ -149,6 +149,34 @@ def generate_cli_instructions(
             lines.append(f"- **{c.get('title', '')}**{due}")
         lines.append("")
 
+    # World model context: current state, unstable assumptions, causal patterns
+    world_model = memory_context.get("world_model", {})
+    state_context = world_model.get("state_context")
+    unstable_assertions = world_model.get("unstable_assertions", [])
+    causal_patterns = world_model.get("causal_patterns", [])
+
+    if state_context:
+        lines.append("## Current World State")
+        lines.append("")
+        lines.append(state_context)
+        lines.append("")
+
+    if unstable_assertions:
+        lines.append("## Assumptions Needing Verification")
+        lines.append("")
+        lines.append("These facts have low confidence or are aging. Verify before relying on them:")
+        for ua in unstable_assertions:
+            lines.append(f"- **{ua['subject']}.{ua['attribute']}** = {ua['value']} (confidence: {ua['confidence']})")
+        lines.append("")
+
+    if causal_patterns:
+        lines.append("## Known Causal Patterns")
+        lines.append("")
+        lines.append("Actions and their observed outcomes (use for planning):")
+        for cp in causal_patterns:
+            lines.append(f"- {cp['cause']} → {cp['effect']} (confidence: {cp['confidence']}, seen {cp['observations']}x)")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -330,6 +358,64 @@ def run_agent_session(
             memory_context["self_model"] = self_model
     except Exception as exc:
         logger.debug("Self-model injection failed for %s: %s", agent_slug, exc)
+
+    # Inject world state context: snapshots, unstable assertions, causal patterns
+    try:
+        from app.services import world_state_service, causal_edge_service
+
+        world_model: Dict[str, Any] = {}
+
+        # Get snapshots for entities mentioned in the message or recalled entities
+        recalled = memory_context.get("relevant_entities", [])
+        subject_slugs = []
+        for ent in recalled[:5]:
+            name = ent.get("name", "") if isinstance(ent, dict) else getattr(ent, "name", "")
+            if name:
+                subject_slugs.append(name.lower().replace(" ", "_"))
+        if subject_slugs:
+            state_md = world_state_service.build_world_state_context(db, tenant_id, subject_slugs)
+            if state_md:
+                world_model["state_context"] = state_md
+
+        # Get unstable assertions scoped to recalled subjects only
+        if subject_slugs:
+            all_unstable = world_state_service.get_unstable_assertions(
+                db, tenant_id, confidence_threshold=0.5, limit=20
+            )
+            unstable = [a for a in all_unstable if a.subject_slug in subject_slugs][:5]
+            if unstable:
+                world_model["unstable_assertions"] = [
+                    {
+                        "subject": a.subject_slug,
+                        "attribute": a.attribute_path,
+                        "value": a.value_json,
+                        "confidence": round(a.confidence, 2),
+                    }
+                    for a in unstable
+                ]
+
+        # Get causal patterns: confirmed first (strongest), then corroborated
+        top_patterns = causal_edge_service.list_causal_edges(
+            db, tenant_id=tenant_id, status="confirmed", limit=3
+        )
+        top_patterns += causal_edge_service.list_causal_edges(
+            db, tenant_id=tenant_id, status="corroborated", limit=max(0, 5 - len(top_patterns))
+        )
+        if top_patterns:
+            world_model["causal_patterns"] = [
+                {
+                    "cause": e.cause_summary,
+                    "effect": e.effect_summary,
+                    "confidence": round(e.confidence, 2),
+                    "observations": e.observation_count,
+                }
+                for e in top_patterns
+            ]
+
+        if world_model:
+            memory_context["world_model"] = world_model
+    except Exception as exc:
+        logger.debug("World model injection failed for %s: %s", agent_slug, exc)
 
     tenant_name = str(tenant_id)
     user_name = sender_phone or str(user_id)
