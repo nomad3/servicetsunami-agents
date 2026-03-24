@@ -56,10 +56,9 @@ def _expire_stale_assertions(db: Session, tenant_id: uuid.UUID) -> List[str]:
             WorldStateAssertion.status == "active",
             WorldStateAssertion.valid_from + WorldStateAssertion.freshness_ttl_hours * timedelta(hours=1) < now,
         ).update({"status": "expired", "valid_to": now}, synchronize_session="fetch")
-        db.commit()
+        db.flush()
 
     return affected_slugs
-    return expired_count
 
 
 def assert_state(
@@ -95,9 +94,10 @@ def assert_state(
             existing.corroboration_count += 1
             existing.confidence = min(1.0, existing.confidence + 0.05)
             existing.updated_at = datetime.utcnow()
+            db.flush()
+            _update_snapshot_no_expire(db, tenant_id, assertion_in.subject_slug, assertion_in.subject_entity_id)
             db.commit()
             db.refresh(existing)
-            _update_snapshot(db, tenant_id, assertion_in.subject_slug, assertion_in.subject_entity_id)
             return existing
 
         # Different value = supersede old assertion
@@ -122,10 +122,9 @@ def assert_state(
     db.flush()  # Populate assertion.id before linking supersession chain
     if existing:
         existing.superseded_by_id = assertion.id
+    _update_snapshot_no_expire(db, tenant_id, assertion_in.subject_slug, assertion_in.subject_entity_id)
     db.commit()
     db.refresh(assertion)
-
-    _update_snapshot(db, tenant_id, assertion_in.subject_slug, assertion_in.subject_entity_id)
     return assertion
 
 
@@ -310,6 +309,5 @@ def _update_snapshot_no_expire(
     snapshot.last_projected_at = now
     snapshot.updated_at = now
 
-    db.commit()
-    db.refresh(snapshot)
+    db.flush()
     return snapshot
