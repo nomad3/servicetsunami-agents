@@ -16,6 +16,21 @@ from app.schemas.collaboration import (
 from app.services import blackboard_service
 
 
+def _find_last_proposal(db: Session, blackboard_id: uuid.UUID) -> Optional[str]:
+    """Find the content of the last proposal/revision entry on the blackboard."""
+    from app.models.blackboard import BlackboardEntry
+    entry = (
+        db.query(BlackboardEntry)
+        .filter(
+            BlackboardEntry.blackboard_id == blackboard_id,
+            BlackboardEntry.entry_type.in_(["proposal", "synthesis"]),
+        )
+        .order_by(BlackboardEntry.board_version.desc())
+        .first()
+    )
+    return entry.content if entry else None
+
+
 def create_session(
     db: Session,
     tenant_id: uuid.UUID,
@@ -102,6 +117,20 @@ def advance_phase(
     current_phase = session.current_phase
     required_roles = PHASE_REQUIRED_ROLES.get(current_phase, [])
 
+    # Enforce role assignment: check the agent is assigned to a required role
+    if required_roles and session.role_assignments:
+        agent_assigned_role = None
+        for role, assigned_agent in session.role_assignments.items():
+            if assigned_agent == agent_slug:
+                agent_assigned_role = role
+                break
+        if agent_assigned_role not in required_roles:
+            raise ValueError(
+                f"Agent '{agent_slug}' is not assigned to a required role "
+                f"for phase '{current_phase}'. Required: {required_roles}, "
+                f"agent's role: {agent_assigned_role or 'none'}"
+            )
+
     # Map the phase to a blackboard entry type
     phase_to_entry_type = {
         "propose": EntryType.PROPOSAL,
@@ -168,9 +197,17 @@ def advance_phase(
         result["next_phase"] = session.current_phase
         result["next_required_roles"] = PHASE_REQUIRED_ROLES.get(session.current_phase, [])
     else:
-        # All phases complete — check if we should loop for another round
+        # All phases complete — check consensus
         session.rounds_completed += 1
-        if session.rounds_completed < session.max_rounds and agrees_with_previous is False:
+
+        if agrees_with_previous is None:
+            # Terminal phase must explicitly signal agreement or disagreement
+            raise ValueError(
+                f"Phase '{current_phase}' is the final phase — "
+                f"'agrees_with_previous' must be true or false (not omitted)"
+            )
+
+        if not agrees_with_previous and session.rounds_completed < session.max_rounds:
             # Disagreement → start another round from critique
             critique_index = phases.index("critique") if "critique" in phases else 1
             session.phase_index = critique_index
@@ -179,8 +216,10 @@ def advance_phase(
             result["next_phase"] = session.current_phase
         else:
             session.status = "completed"
-            session.consensus_reached = "yes" if agrees_with_previous is not False else "partial"
-            session.outcome = contribution
+            session.consensus_reached = "yes" if agrees_with_previous else "partial"
+            # Store the accepted proposal (last 'propose' or 'revise' entry), not the verifier's note
+            accepted = _find_last_proposal(db, session.blackboard_id)
+            session.outcome = accepted if accepted else contribution
             result["completed"] = True
             result["consensus"] = session.consensus_reached
 
