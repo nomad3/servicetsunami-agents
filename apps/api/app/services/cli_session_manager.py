@@ -377,27 +377,30 @@ def run_agent_session(
             if state_md:
                 world_model["state_context"] = state_md
 
-        # Get unstable assertions that need verification
-        unstable = world_state_service.get_unstable_assertions(db, tenant_id, confidence_threshold=0.5, limit=5)
-        if unstable:
-            world_model["unstable_assertions"] = [
-                {
-                    "subject": a.subject_slug,
-                    "attribute": a.attribute_path,
-                    "value": a.value_json,
-                    "confidence": round(a.confidence, 2),
-                }
-                for a in unstable
-            ]
-
-        # Get top causal patterns for context
-        top_patterns = causal_edge_service.list_causal_edges(
-            db, tenant_id=tenant_id, status="corroborated", limit=5
-        )
-        if not top_patterns:
-            top_patterns = causal_edge_service.list_causal_edges(
-                db, tenant_id=tenant_id, status="confirmed", limit=5
+        # Get unstable assertions scoped to recalled subjects only
+        if subject_slugs:
+            all_unstable = world_state_service.get_unstable_assertions(
+                db, tenant_id, confidence_threshold=0.5, limit=20
             )
+            unstable = [a for a in all_unstable if a.subject_slug in subject_slugs][:5]
+            if unstable:
+                world_model["unstable_assertions"] = [
+                    {
+                        "subject": a.subject_slug,
+                        "attribute": a.attribute_path,
+                        "value": a.value_json,
+                        "confidence": round(a.confidence, 2),
+                    }
+                    for a in unstable
+                ]
+
+        # Get causal patterns: confirmed first (strongest), then corroborated
+        top_patterns = causal_edge_service.list_causal_edges(
+            db, tenant_id=tenant_id, status="confirmed", limit=3
+        )
+        top_patterns += causal_edge_service.list_causal_edges(
+            db, tenant_id=tenant_id, status="corroborated", limit=max(0, 5 - len(top_patterns))
+        )
         if top_patterns:
             world_model["causal_patterns"] = [
                 {
