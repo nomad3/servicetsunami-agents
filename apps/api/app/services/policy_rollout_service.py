@@ -267,6 +267,7 @@ def start_rollout(
     experiment = LearningExperiment(
         tenant_id=tenant_id,
         candidate_id=candidate_id,
+        decision_point=candidate.decision_point,
         experiment_type=experiment_type,
         rollout_pct=max(0.01, min(1.0, rollout_pct)),
         min_sample_size=min_sample_size,

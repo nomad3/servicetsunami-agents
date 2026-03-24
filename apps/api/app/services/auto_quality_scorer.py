@@ -50,6 +50,7 @@ def score_and_log_async(
             platform, agent_slug, task_type, channel,
             tokens_used, response_time_ms, cost_usd,
             tools_called or [], entities_recalled or [],
+            rollout_experiment_id, rollout_arm,
         )),
         daemon=True,
     ).start()
@@ -69,6 +70,8 @@ async def _score_and_log(
     cost_usd: float,
     tools_called: list,
     entities_recalled: list,
+    rollout_experiment_id: Optional[str] = None,
+    rollout_arm: Optional[str] = None,
 ):
     """Score the response with multi-dimensional rubric + consensus council, log as RL reward."""
     from app.services.local_inference import is_available, generate
