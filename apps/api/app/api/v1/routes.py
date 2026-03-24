@@ -50,6 +50,7 @@ from app.api.v1 import (
     plans,
     blackboards,
     collaborations,
+    coalitions,
     branding_domain,
 )
 
@@ -109,4 +110,5 @@ router.include_router(causal_edges.router, prefix="/causal-edges", tags=["causal
 router.include_router(plans.router, prefix="/plans", tags=["plans"])
 router.include_router(blackboards.router, prefix="/blackboards", tags=["blackboards"])
 router.include_router(collaborations.router, prefix="/collaborations", tags=["collaborations"])
+router.include_router(coalitions.router, prefix="/coalitions", tags=["coalitions"])
 router.include_router(branding_domain.router, tags=["domain-branding"])

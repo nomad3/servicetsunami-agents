@@ -55,6 +55,7 @@ from .causal_edge import CausalEdge
 from .plan import Plan, PlanStep, PlanAssumption, PlanEvent
 from .blackboard import Blackboard, BlackboardEntry
 from .collaboration import CollaborationSession
+from .coalition import CoalitionTemplate, CoalitionOutcome
 from .dynamic_workflow import DynamicWorkflow, WorkflowRun, WorkflowStepLog
 
 __all__ = [
@@ -83,5 +84,6 @@ __all__ = [
     "WorldStateAssertion", "WorldStateSnapshot", "CausalEdge",
     "Plan", "PlanStep", "PlanAssumption", "PlanEvent",
     "Blackboard", "BlackboardEntry", "CollaborationSession",
+    "CoalitionTemplate", "CoalitionOutcome",
     "DynamicWorkflow", "WorkflowRun", "WorkflowStepLog",
 ]
