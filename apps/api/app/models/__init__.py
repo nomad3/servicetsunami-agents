@@ -56,6 +56,7 @@ from .plan import Plan, PlanStep, PlanAssumption, PlanEvent
 from .blackboard import Blackboard, BlackboardEntry
 from .collaboration import CollaborationSession
 from .coalition import CoalitionTemplate, CoalitionOutcome
+from .learning_experiment import PolicyCandidate, LearningExperiment
 from .dynamic_workflow import DynamicWorkflow, WorkflowRun, WorkflowStepLog
 
 __all__ = [
@@ -85,5 +86,6 @@ __all__ = [
     "Plan", "PlanStep", "PlanAssumption", "PlanEvent",
     "Blackboard", "BlackboardEntry", "CollaborationSession",
     "CoalitionTemplate", "CoalitionOutcome",
+    "PolicyCandidate", "LearningExperiment",
     "DynamicWorkflow", "WorkflowRun", "WorkflowStepLog",
 ]
