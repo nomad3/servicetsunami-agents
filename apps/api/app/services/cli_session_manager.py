@@ -480,7 +480,7 @@ def run_agent_session(
                 task_input,
                 id=f"chat-cli-{uuid.uuid4()}",
                 task_queue="servicetsunami-code",
-                execution_timeout=timedelta(minutes=45),
+                execution_timeout=timedelta(minutes=180),
             )
 
         loop = asyncio.new_event_loop()
