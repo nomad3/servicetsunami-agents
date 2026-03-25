@@ -160,7 +160,7 @@ def get_experiment(
 def start_rollout(
     candidate_id: uuid.UUID = Query(...),
     rollout_pct: float = Query(default=0.1, ge=0.01, le=1.0),
-    experiment_type: str = Query(default="split", regex="^(split|shadow)$"),
+    experiment_type: str = Query(default="split", regex="^(split)$"),
     min_sample_size: int = Query(default=30, ge=5),
     max_duration_hours: int = Query(default=168, ge=1),
     db: Session = Depends(get_db),

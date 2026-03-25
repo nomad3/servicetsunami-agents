@@ -195,24 +195,17 @@ def route_and_execute(
         if rollout:
             apply_policy, is_treatment = policy_rollout_service.should_apply_rollout(rollout)
             rollout_experiment_id = rollout["experiment_id"]
-            if is_treatment:
+            if is_treatment and apply_policy:
                 routing_source = "rollout_treatment"
-                if apply_policy:
-                    proposed = rollout.get("proposed_policy", {})
-                    if "platform" in proposed:
-                        platform = proposed["platform"]
-                    if "agent_slug" in proposed:
-                        agent_slug = proposed["agent_slug"]
-                    logger.info(
-                        "Policy rollout: applying treatment (experiment=%s, pct=%.0f%%)",
-                        rollout["experiment_id"], rollout["rollout_pct"] * 100,
-                    )
-                else:
-                    # Shadow treatment: tagged for measurement but policy unchanged
-                    logger.info(
-                        "Policy rollout: shadow treatment (experiment=%s)",
-                        rollout["experiment_id"],
-                    )
+                proposed = rollout.get("proposed_policy", {})
+                if "platform" in proposed:
+                    platform = proposed["platform"]
+                if "agent_slug" in proposed:
+                    agent_slug = proposed["agent_slug"]
+                logger.info(
+                    "Policy rollout: applying treatment (experiment=%s, pct=%.0f%%)",
+                    rollout["experiment_id"], rollout["rollout_pct"] * 100,
+                )
             else:
                 routing_source = "rollout_control"
     except Exception as e:

@@ -65,16 +65,11 @@ def should_apply_rollout(rollout: Dict) -> tuple:
 
     Returns (apply_policy: bool, is_treatment_arm: bool).
 
-    For shadow mode: never applies the policy to the live response, but
-    randomly assigns treatment/control tagging so both arms accumulate
-    data for comparison.
-    For split mode: applies the policy with probability rollout_pct.
+    Only split mode is supported in Phase 2. Shadow mode (parallel
+    execution of both policies) requires background CLI execution
+    infrastructure and is planned for Phase 3.
     """
     is_treatment = random.random() < rollout["rollout_pct"]
-    if rollout["experiment_type"] == "shadow":
-        # Shadow: tag as treatment for measurement, but don't change the live policy
-        return False, is_treatment
-    # Split: actually apply the policy change
     return is_treatment, is_treatment
 
 
@@ -260,8 +255,11 @@ def start_rollout(
         raise ValueError(f"Candidate {candidate_id} not found")
     if candidate.status not in ("evaluating", "promoted"):
         raise ValueError(f"Candidate must be evaluating or promoted, got '{candidate.status}'")
-    if experiment_type not in ("split", "shadow"):
-        raise ValueError(f"Rollout experiment type must be 'split' or 'shadow'")
+    if experiment_type != "split":
+        raise ValueError(
+            "Only 'split' rollouts are supported in Phase 2. "
+            "Shadow mode (parallel execution) is planned for Phase 3."
+        )
 
     # Enforce one active rollout per decision point
     existing = get_active_rollout(db, tenant_id, candidate.decision_point)
