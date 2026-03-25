@@ -60,15 +60,22 @@ def get_active_rollout(
     }
 
 
-def should_apply_rollout(rollout: Dict) -> bool:
+def should_apply_rollout(rollout: Dict) -> tuple:
     """Decide whether to apply the rollout policy for this request.
 
-    For shadow mode: always returns False (shadow just observes).
-    For split mode: returns True with probability rollout_pct.
+    Returns (apply_policy: bool, is_treatment_arm: bool).
+
+    For shadow mode: never applies the policy to the live response, but
+    randomly assigns treatment/control tagging so both arms accumulate
+    data for comparison.
+    For split mode: applies the policy with probability rollout_pct.
     """
+    is_treatment = random.random() < rollout["rollout_pct"]
     if rollout["experiment_type"] == "shadow":
-        return False
-    return random.random() < rollout["rollout_pct"]
+        # Shadow: tag as treatment for measurement, but don't change the live policy
+        return False, is_treatment
+    # Split: actually apply the policy change
+    return is_treatment, is_treatment
 
 
 def record_rollout_observation(

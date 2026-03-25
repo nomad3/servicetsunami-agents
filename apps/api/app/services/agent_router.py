@@ -193,19 +193,28 @@ def route_and_execute(
         from app.services import policy_rollout_service
         rollout = policy_rollout_service.get_active_rollout(db, tenant_id, "chat_response")
         if rollout:
-            if policy_rollout_service.should_apply_rollout(rollout):
-                proposed = rollout.get("proposed_policy", {})
-                if "platform" in proposed:
+            apply_policy, is_treatment = policy_rollout_service.should_apply_rollout(rollout)
+            rollout_experiment_id = rollout["experiment_id"]
+            if is_treatment:
+                routing_source = "rollout_treatment"
+                if apply_policy:
+                    proposed = rollout.get("proposed_policy", {})
+                    if "platform" in proposed:
+                        platform = proposed["platform"]
+                    if "agent_slug" in proposed:
+                        agent_slug = proposed["agent_slug"]
                     logger.info(
-                        "Policy rollout: applying treatment platform=%s (experiment=%s, pct=%.0f%%)",
-                        proposed["platform"], rollout["experiment_id"], rollout["rollout_pct"] * 100,
+                        "Policy rollout: applying treatment (experiment=%s, pct=%.0f%%)",
+                        rollout["experiment_id"], rollout["rollout_pct"] * 100,
                     )
-                    platform = proposed["platform"]
-                    routing_source = "rollout_treatment"
-                    rollout_experiment_id = rollout["experiment_id"]
+                else:
+                    # Shadow treatment: tagged for measurement but policy unchanged
+                    logger.info(
+                        "Policy rollout: shadow treatment (experiment=%s)",
+                        rollout["experiment_id"],
+                    )
             else:
                 routing_source = "rollout_control"
-                rollout_experiment_id = rollout["experiment_id"]
     except Exception as e:
         logger.debug("Policy rollout check failed: %s", e)
 
