@@ -98,6 +98,26 @@ from app.workflows.activities.autonomous_learning import (
     manage_active_rollouts,
     generate_morning_report,
 )
+from app.workflows.activities.simulation_activities import (
+    select_personas_for_cycle,
+    generate_simulation_scenarios,
+    execute_simulation_scenarios,
+    classify_simulation_failures,
+    detect_skill_gaps,
+)
+from app.workflows.activities.proactive_activities import (
+    scan_for_proactive_actions,
+    send_proactive_notifications,
+)
+from app.workflows.activities.feedback_activities import (
+    process_human_feedback,
+    run_self_diagnosis,
+    monitor_regression,
+    apply_feedback_to_cycle,
+    adjust_exploration_rates,
+)
+from app.workflows.activities.skill_gap_activities import auto_create_skill_stubs
+from app.workflows.activities.cost_tracking_activities import track_cycle_cost
 from app.workflows.activities.skill_activities import execute_skill
 from app.workflows.activities.rl_policy_update import (
     collect_tenant_experiences,
@@ -226,6 +246,24 @@ async def run_orchestration_worker():
             generate_and_evaluate_candidates,
             manage_active_rollouts,
             generate_morning_report,
+            # Self-simulation activities
+            select_personas_for_cycle,
+            generate_simulation_scenarios,
+            execute_simulation_scenarios,
+            classify_simulation_failures,
+            detect_skill_gaps,
+            # Proactive agent activities
+            scan_for_proactive_actions,
+            send_proactive_notifications,
+            # Feedback + diagnosis activities
+            process_human_feedback,
+            run_self_diagnosis,
+            monitor_regression,
+            apply_feedback_to_cycle,
+            adjust_exploration_rates,
+            # Phase 6: skill auto-creation + cost tracking
+            auto_create_skill_stubs,
+            track_cycle_cost,
             # Goal review activities
             review_goals,
             review_commitments,

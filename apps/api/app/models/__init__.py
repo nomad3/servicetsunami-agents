@@ -58,6 +58,10 @@ from .collaboration import CollaborationSession
 from .coalition import CoalitionTemplate, CoalitionOutcome
 from .learning_experiment import PolicyCandidate, LearningExperiment
 from .dynamic_workflow import DynamicWorkflow, WorkflowRun, WorkflowStepLog
+from .simulation import SimulationPersona, SimulationScenario, SimulationResult, SkillGap
+from .proactive_action import ProactiveAction
+from .feedback_record import FeedbackRecord
+from .decision_point_config import DecisionPointConfig
 
 __all__ = [
     "Tenant", "User",
@@ -88,4 +92,8 @@ __all__ = [
     "CoalitionTemplate", "CoalitionOutcome",
     "PolicyCandidate", "LearningExperiment",
     "DynamicWorkflow", "WorkflowRun", "WorkflowStepLog",
+    "SimulationPersona", "SimulationScenario", "SimulationResult", "SkillGap",
+    "ProactiveAction",
+    "FeedbackRecord",
+    "DecisionPointConfig",
 ]

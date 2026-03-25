@@ -253,6 +253,139 @@ async def stop_competitor_monitor(
         return {"error": str(e)}
 
 
+# ---------------------------------------------------------------------------
+# MCP Tools — Autonomous Learning
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def start_autonomous_learning(
+    tenant_id: str = "",
+    cycle_interval_hours: int = 24,
+    ctx: Context = None,
+) -> dict:
+    """Start the nightly autonomous learning cycle for this tenant.
+
+    The learning cycle runs every N hours and:
+    - Collects RL metrics and platform performance data
+    - Generates and evaluates policy candidates
+    - Runs self-simulation across industry personas
+    - Detects skill gaps and creates improvement stubs
+    - Sends a morning report via WhatsApp
+
+    Args:
+        tenant_id: Tenant UUID (resolved from session if omitted).
+        cycle_interval_hours: How often to run the cycle (default: 24h).
+        ctx: MCP request context (injected automatically).
+    """
+    tid = resolve_tenant_id(ctx) or tenant_id
+    if not tid:
+        return {"error": "tenant_id is required."}
+
+    api_base_url = _get_api_base_url()
+    internal_key = _get_internal_key()
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{api_base_url}/api/v1/workflows/autonomous-learning/start",
+                headers={"X-Internal-Key": internal_key},
+                params={"tenant_id": tid, "cycle_interval_hours": cycle_interval_hours},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status") == "already_running":
+                    return {"status": "already_active", "message": "Autonomous learning cycle is already running."}
+                return {
+                    "status": "started",
+                    "message": f"Autonomous learning cycle started. Runs every {cycle_interval_hours}h.",
+                    "workflow_id": data.get("workflow_id"),
+                    "interval_hours": cycle_interval_hours,
+                }
+            return {"error": f"Failed to start: {resp.status_code} - {resp.text[:200]}"}
+    except Exception as e:
+        logger.exception("start_autonomous_learning failed")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def stop_autonomous_learning(
+    tenant_id: str = "",
+    ctx: Context = None,
+) -> dict:
+    """Stop the autonomous learning cycle for this tenant.
+
+    Args:
+        tenant_id: Tenant UUID (resolved from session if omitted).
+        ctx: MCP request context (injected automatically).
+    """
+    tid = resolve_tenant_id(ctx) or tenant_id
+    if not tid:
+        return {"error": "tenant_id is required."}
+
+    api_base_url = _get_api_base_url()
+    internal_key = _get_internal_key()
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{api_base_url}/api/v1/workflows/autonomous-learning/stop",
+                headers={"X-Internal-Key": internal_key},
+                params={"tenant_id": tid},
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            return {"error": f"Failed to stop: {resp.status_code}"}
+    except Exception as e:
+        logger.exception("stop_autonomous_learning failed")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def check_autonomous_learning_status(
+    tenant_id: str = "",
+    ctx: Context = None,
+) -> dict:
+    """Check if the autonomous learning cycle is running and get its current status.
+
+    Args:
+        tenant_id: Tenant UUID (resolved from session if omitted).
+        ctx: MCP request context (injected automatically).
+    """
+    tid = resolve_tenant_id(ctx) or tenant_id
+    if not tid:
+        return {"error": "tenant_id is required."}
+
+    api_base_url = _get_api_base_url()
+    internal_key = _get_internal_key()
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{api_base_url}/api/v1/workflows/autonomous-learning/status",
+                headers={"X-Internal-Key": internal_key},
+                params={"tenant_id": tid},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                running = data.get("running", False)
+                return {
+                    "running": running,
+                    "workflow_id": data.get("workflow_id"),
+                    "status": data.get("status"),
+                    "start_time": data.get("start_time"),
+                    "message": (
+                        "Autonomous learning cycle is active."
+                        if running
+                        else "Cycle is not running. Use start_autonomous_learning to begin."
+                    ),
+                }
+            return {"running": False, "message": "Autonomous learning is not active."}
+    except Exception as e:
+        logger.exception("check_autonomous_learning_status failed")
+        return {"error": str(e)}
+
+
 @mcp.tool()
 async def check_competitor_monitor_status(
     tenant_id: str = "",

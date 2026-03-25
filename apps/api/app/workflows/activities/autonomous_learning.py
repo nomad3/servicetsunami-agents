@@ -344,6 +344,7 @@ async def generate_morning_report(
     from app.db.session import SessionLocal
     from app.models.notification import Notification
     from app.services import learning_dashboard_service
+    from sqlalchemy import text
     import uuid
 
     db = SessionLocal()
@@ -412,6 +413,57 @@ async def generate_morning_report(
         if ws.get("disputed", 0) > 0:
             lines.append(f"  World state: {ws['disputed']} disputed assertions")
 
+        # Simulation results section
+        sim_executed = cycle_result.get("simulation_executed", 0)
+        sim_avg = cycle_result.get("simulation_avg_score")
+        gaps_detected = cycle_result.get("skill_gaps_detected", 0)
+        if sim_executed:
+            avg_str = f", avg_score={sim_avg:.2f}" if sim_avg is not None else ""
+            lines.append(f"Simulation: {sim_executed} scenarios run{avg_str}")
+            lines.append("")
+
+        # Skill gaps section
+        if gaps_detected:
+            lines.append(f"Skill Gaps Detected: {gaps_detected} new gap(s)")
+            try:
+                today = datetime.utcnow().date()
+                gap_rows = db.execute(text("""
+                    SELECT industry, description, severity
+                    FROM skill_gaps
+                    WHERE tenant_id = CAST(:tid AS uuid)
+                      AND DATE(detected_at) = :today
+                    ORDER BY
+                        CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                        detected_at DESC
+                    LIMIT 3
+                """), {"tid": tenant_id, "today": today}).fetchall()
+                for gap in gap_rows:
+                    ind = f"[{gap.industry}] " if gap.industry else ""
+                    lines.append(f"  {ind}{gap.description[:80]} ({gap.severity})")
+            except Exception:
+                pass
+            lines.append("")
+
+        # Proactive actions
+        proactive = cycle_result.get("proactive_actions", 0)
+        if proactive:
+            lines.append(f"Proactive Actions Queued: {proactive} nudge(s)/briefing(s)")
+            lines.append("")
+
+        # Regression alerts
+        regressions = cycle_result.get("regressions_detected", 0)
+        if regressions:
+            lines.append(f"REGRESSION ALERTS: {regressions} promoted policy candidate(s) reverted")
+            lines.append("")
+
+        # Diagnosis summary
+        diagnosis = cycle_result.get("diagnosis", {})
+        if diagnosis:
+            health = diagnosis.get("overall_health", "unknown")
+            failure_rate = diagnosis.get("failure_rate", 0)
+            lines.append(f"Platform Health: {health} (simulation failure rate: {failure_rate:.0%})")
+            lines.append("")
+
         # Errors
         errors = cycle_result.get("errors", [])
         if errors:
@@ -437,8 +489,44 @@ async def generate_morning_report(
 
         logger.info("Morning report generated for tenant %s (%d chars)", tenant_id[:8], len(report_text))
 
+        # Attempt WhatsApp delivery — condensed version for mobile readability
+        whatsapp_sent = False
+        try:
+            wa_number = db.execute(text("""
+                SELECT phone_number FROM channel_accounts
+                WHERE tenant_id = CAST(:tid AS uuid)
+                  AND channel_type = 'whatsapp'
+                  AND status = 'connected'
+                  AND phone_number IS NOT NULL
+                ORDER BY updated_at DESC
+                LIMIT 1
+            """), {"tid": tenant_id}).scalar()
+
+            if wa_number:
+                from app.services.whatsapp_service import whatsapp_service
+                condensed = _condense_report_for_whatsapp(report_text)
+                result = await whatsapp_service.send_message(
+                    tenant_id=tenant_id,
+                    to=wa_number,
+                    message=condensed,
+                )
+                whatsapp_sent = result.get("status") == "sent"
+                if not whatsapp_sent:
+                    logger.warning(
+                        "WhatsApp delivery failed for tenant %s: %s",
+                        tenant_id[:8], result.get("error"),
+                    )
+                else:
+                    logger.info(
+                        "Morning report sent via WhatsApp to ***%s (tenant %s)",
+                        wa_number[-4:], tenant_id[:8],
+                    )
+        except Exception as wa_err:
+            logger.warning("WhatsApp morning report error for %s: %s", tenant_id[:8], wa_err)
+
         return {
             "sent": True,
+            "whatsapp_sent": whatsapp_sent,
             "report_length": len(report_text),
             "report_preview": report_text[:500],
         }
@@ -447,3 +535,17 @@ async def generate_morning_report(
         return {"sent": False, "error": str(e)}
     finally:
         db.close()
+
+
+def _condense_report_for_whatsapp(report_text: str) -> str:
+    """Return a condensed ≤900 char version of the morning report for WhatsApp."""
+    lines = [ln for ln in report_text.splitlines() if ln.strip()]
+    # Keep the header + key sections, truncate body
+    condensed_lines = []
+    for ln in lines:
+        condensed_lines.append(ln)
+        total = sum(len(l) + 1 for l in condensed_lines)
+        if total >= 800:
+            condensed_lines.append("… (full report in your notifications)")
+            break
+    return "\n".join(condensed_lines)
