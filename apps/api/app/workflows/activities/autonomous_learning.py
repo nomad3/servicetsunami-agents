@@ -190,18 +190,35 @@ async def generate_and_evaluate_candidates(
         proposed = learning_experiment_service.list_candidates(
             db, tenant_uuid, status="proposed"
         )
-        evaluating_stuck = [
-            c for c in learning_experiment_service.list_candidates(db, tenant_uuid, status="evaluating")
-            if all(
-                e.is_significant == "insufficient_data"
-                for e in learning_experiment_service.list_experiments(db, tenant_uuid, candidate_id=c.id)
+        MAX_INSUFFICIENT_DATA_CYCLES = 3
+
+        evaluating_stuck = []
+        for c in learning_experiment_service.list_candidates(db, tenant_uuid, status="evaluating"):
+            offline_experiments = [
+                e for e in learning_experiment_service.list_experiments(db, tenant_uuid, candidate_id=c.id)
                 if e.experiment_type == "offline" and e.status == "completed"
-            )
-            and any(
-                e.experiment_type == "offline" and e.status == "completed"
-                for e in learning_experiment_service.list_experiments(db, tenant_uuid, candidate_id=c.id)
-            )
-        ]
+            ]
+            if not offline_experiments:
+                continue
+            all_insufficient = all(e.is_significant == "insufficient_data" for e in offline_experiments)
+            if not all_insufficient:
+                continue
+
+            # Auto-reject after MAX_INSUFFICIENT_DATA_CYCLES attempts
+            if len(offline_experiments) >= MAX_INSUFFICIENT_DATA_CYCLES:
+                try:
+                    learning_experiment_service.reject_candidate(
+                        db, tenant_uuid, c.id,
+                        reason=f"Auto-rejected: {len(offline_experiments)} consecutive cycles with insufficient data",
+                    )
+                    logger.info("Auto-rejected candidate %s after %d insufficient-data cycles",
+                                str(c.id)[:8], len(offline_experiments))
+                except Exception:
+                    pass
+                continue
+
+            evaluating_stuck.append(c)
+
         candidates_to_evaluate = list(proposed) + evaluating_stuck
 
         evaluated = 0
@@ -237,6 +254,16 @@ async def generate_and_evaluate_candidates(
                     logger.info(
                         "Candidate %s passed evaluation: %s",
                         str(candidate.id)[:8], result.get("conclusion", ""),
+                    )
+                elif result and result.get("is_significant") == "no":
+                    # Conclusive but not significant — auto-reject
+                    learning_experiment_service.reject_candidate(
+                        db, tenant_uuid, candidate.id,
+                        reason=f"Offline evaluation not significant: {result.get('conclusion', '')}",
+                    )
+                    logger.info(
+                        "Auto-rejected candidate %s: not significant",
+                        str(candidate.id)[:8],
                     )
                 elif result and result.get("improvement_pct") is not None:
                     if result["improvement_pct"] < -5.0:

@@ -359,8 +359,8 @@ def generate_routing_candidates(
         ):
             improvement = (best.avg_reward - other.avg_reward) / max(abs(other.avg_reward), 0.01) * 100
             if improvement > 10:  # Only propose if >10% improvement
-                # Dedup: skip if an active candidate already proposes the same routing change
-                existing = (
+                # Dedup: skip if an active or recently rejected candidate proposes the same change
+                existing_active = (
                     db.query(PolicyCandidate)
                     .filter(
                         PolicyCandidate.tenant_id == tenant_id,
@@ -372,7 +372,25 @@ def generate_routing_candidates(
                     )
                     .first()
                 )
-                if existing:
+                if existing_active:
+                    continue
+
+                # Also skip if rejected within the last 7 days (cooldown)
+                cooldown = datetime.utcnow() - timedelta(days=7)
+                recently_rejected = (
+                    db.query(PolicyCandidate)
+                    .filter(
+                        PolicyCandidate.tenant_id == tenant_id,
+                        PolicyCandidate.policy_type == "routing",
+                        PolicyCandidate.decision_point == "chat_response",
+                        PolicyCandidate.status == "rejected",
+                        PolicyCandidate.rejected_at > cooldown,
+                        PolicyCandidate.proposed_policy["platform"].astext == best.platform,
+                        PolicyCandidate.current_policy["platform"].astext == other.platform,
+                    )
+                    .first()
+                )
+                if recently_rejected:
                     continue
 
                 candidate = PolicyCandidate(
