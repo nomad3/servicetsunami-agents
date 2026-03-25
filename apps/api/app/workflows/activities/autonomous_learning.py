@@ -489,8 +489,44 @@ async def generate_morning_report(
 
         logger.info("Morning report generated for tenant %s (%d chars)", tenant_id[:8], len(report_text))
 
+        # Attempt WhatsApp delivery — condensed version for mobile readability
+        whatsapp_sent = False
+        try:
+            wa_number = db.execute(text("""
+                SELECT phone_number FROM channel_accounts
+                WHERE tenant_id = CAST(:tid AS uuid)
+                  AND channel_type = 'whatsapp'
+                  AND status = 'connected'
+                  AND phone_number IS NOT NULL
+                ORDER BY updated_at DESC
+                LIMIT 1
+            """), {"tid": tenant_id}).scalar()
+
+            if wa_number:
+                from app.services.whatsapp_service import whatsapp_service
+                condensed = _condense_report_for_whatsapp(report_text)
+                result = await whatsapp_service.send_message(
+                    tenant_id=tenant_id,
+                    to=wa_number,
+                    message=condensed,
+                )
+                whatsapp_sent = result.get("status") == "sent"
+                if not whatsapp_sent:
+                    logger.warning(
+                        "WhatsApp delivery failed for tenant %s: %s",
+                        tenant_id[:8], result.get("error"),
+                    )
+                else:
+                    logger.info(
+                        "Morning report sent via WhatsApp to ***%s (tenant %s)",
+                        wa_number[-4:], tenant_id[:8],
+                    )
+        except Exception as wa_err:
+            logger.warning("WhatsApp morning report error for %s: %s", tenant_id[:8], wa_err)
+
         return {
             "sent": True,
+            "whatsapp_sent": whatsapp_sent,
             "report_length": len(report_text),
             "report_preview": report_text[:500],
         }
@@ -499,3 +535,17 @@ async def generate_morning_report(
         return {"sent": False, "error": str(e)}
     finally:
         db.close()
+
+
+def _condense_report_for_whatsapp(report_text: str) -> str:
+    """Return a condensed ≤900 char version of the morning report for WhatsApp."""
+    lines = [ln for ln in report_text.splitlines() if ln.strip()]
+    # Keep the header + key sections, truncate body
+    condensed_lines = []
+    for ln in lines:
+        condensed_lines.append(ln)
+        total = sum(len(l) + 1 for l in condensed_lines)
+        if total >= 800:
+            condensed_lines.append("… (full report in your notifications)")
+            break
+    return "\n".join(condensed_lines)

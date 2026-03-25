@@ -292,7 +292,198 @@ async def monitor_regression(tenant_id: str) -> dict:
         db.close()
 
 
+@activity.defn(name="apply_feedback_to_cycle")
+async def apply_feedback_to_cycle(tenant_id: str) -> dict:
+    """Apply unapplied human feedback records to policy candidates and exploration config."""
+    from app.db.session import SessionLocal
+    from app.models.feedback_record import FeedbackRecord
+    from app.models.learning_experiment import PolicyCandidate
+    from sqlalchemy import text
+
+    db = SessionLocal()
+    try:
+        tenant_uuid = uuid.UUID(tenant_id)
+
+        unapplied = (
+            db.query(FeedbackRecord)
+            .filter(
+                FeedbackRecord.tenant_id == tenant_uuid,
+                FeedbackRecord.applied == False,
+            )
+            .order_by(FeedbackRecord.created_at.asc())
+            .limit(50)
+            .all()
+        )
+
+        applied_count = 0
+        for record in unapplied:
+            intent = record.parsed_intent or ""
+            content_lower = record.content.lower()
+            try:
+                if intent == "approve_routing_change":
+                    platform = _extract_platform(content_lower)
+                    if platform:
+                        candidate = (
+                            db.query(PolicyCandidate)
+                            .filter(
+                                PolicyCandidate.tenant_id == tenant_uuid,
+                                PolicyCandidate.status == "evaluating",
+                                PolicyCandidate.proposed_policy.contains(platform),
+                            )
+                            .order_by(PolicyCandidate.created_at.desc())
+                            .first()
+                        )
+                        if candidate:
+                            ev = candidate.evidence or {}
+                            ev["human_approved"] = True
+                            ev["human_approved_at"] = datetime.utcnow().isoformat()
+                            candidate.evidence = ev
+                            logger.info("Human approved candidate %s", str(candidate.id)[:8])
+
+                elif intent in ("reject_platform", "general_rejection"):
+                    platform = _extract_platform(content_lower)
+                    q = db.query(PolicyCandidate).filter(
+                        PolicyCandidate.tenant_id == tenant_uuid,
+                        PolicyCandidate.status == "evaluating",
+                    )
+                    if platform:
+                        q = q.filter(PolicyCandidate.proposed_policy.contains(platform))
+                    for c in q.limit(5).all():
+                        c.status = "rejected"
+                        ev = c.evidence or {}
+                        ev["human_rejected"] = True
+                        ev["human_rejected_reason"] = record.content[:200]
+                        c.evidence = ev
+                        logger.info("Human-rejected candidate %s", str(c.id)[:8])
+
+                elif intent == "request_rollback":
+                    db.execute(text("""
+                        UPDATE learning_experiments
+                        SET status = 'cancelled', conclusion = 'human_rollback_requested'
+                        WHERE tenant_id = CAST(:tid AS uuid)
+                          AND status = 'running'
+                          AND experiment_type = 'split'
+                    """), {"tid": tenant_id})
+                    logger.info("Human rollback: cancelled running rollouts for %s", tenant_id[:8])
+
+                elif intent == "exploration_direction":
+                    dp = _extract_decision_point(content_lower)
+                    if dp:
+                        db.execute(text("""
+                            INSERT INTO decision_point_config
+                                (tenant_id, decision_point, exploration_rate, exploration_mode)
+                            VALUES (CAST(:tid AS uuid), :dp, 0.20, 'targeted')
+                            ON CONFLICT (tenant_id, decision_point) DO UPDATE
+                              SET exploration_rate = LEAST(
+                                      decision_point_config.exploration_rate + 0.05, 0.30),
+                                  exploration_mode = 'targeted',
+                                  updated_at = NOW()
+                        """), {"tid": tenant_id, "dp": dp})
+                        logger.info("Boosted exploration for dp=%s tenant=%s", dp, tenant_id[:8])
+
+                record.applied = True
+                applied_count += 1
+            except Exception as inner_e:
+                logger.warning("Could not apply feedback %s: %s", str(record.id)[:8], inner_e)
+                record.applied = True  # prevent infinite reprocessing
+
+        db.commit()
+        logger.info("Applied %d feedback records for tenant %s", applied_count, tenant_id[:8])
+        return {"feedback_applied": applied_count}
+    except Exception as e:
+        logger.error("apply_feedback_to_cycle failed for %s: %s", tenant_id[:8], e)
+        raise
+    finally:
+        db.close()
+
+
+@activity.defn(name="adjust_exploration_rates")
+async def adjust_exploration_rates(tenant_id: str, metrics: dict) -> dict:
+    """Adjust per-decision-point exploration rates based on stall data and platform performance."""
+    from app.db.session import SessionLocal
+    from sqlalchemy import text
+
+    db = SessionLocal()
+    try:
+        # Stalled: decision points with no promotions in the last 30 days
+        stalled_rows = db.execute(text("""
+            SELECT decision_point
+            FROM policy_candidates
+            WHERE tenant_id = CAST(:tid AS uuid)
+              AND created_at > NOW() - INTERVAL '30 days'
+            GROUP BY decision_point
+            HAVING COUNT(*) FILTER (WHERE status = 'promoted') = 0
+               AND COUNT(*) > 0
+        """), {"tid": tenant_id}).fetchall()
+
+        # Well-performing: recently promoted in last 14 days
+        performing_rows = db.execute(text("""
+            SELECT DISTINCT decision_point
+            FROM policy_candidates
+            WHERE tenant_id = CAST(:tid AS uuid)
+              AND status = 'promoted'
+              AND updated_at > NOW() - INTERVAL '14 days'
+        """), {"tid": tenant_id}).fetchall()
+        performing_dps = {r.decision_point for r in performing_rows}
+
+        stalled_boosted = 0
+        for row in stalled_rows:
+            dp = row.decision_point
+            if dp in performing_dps:
+                continue
+            db.execute(text("""
+                INSERT INTO decision_point_config
+                    (tenant_id, decision_point, exploration_rate, exploration_mode)
+                VALUES (CAST(:tid AS uuid), :dp, 0.20, 'targeted')
+                ON CONFLICT (tenant_id, decision_point) DO UPDATE
+                  SET exploration_rate = LEAST(
+                          decision_point_config.exploration_rate + 0.05, 0.25),
+                      exploration_mode = 'targeted',
+                      updated_at = NOW()
+            """), {"tid": tenant_id, "dp": dp})
+            stalled_boosted += 1
+
+        for dp in performing_dps:
+            db.execute(text("""
+                INSERT INTO decision_point_config
+                    (tenant_id, decision_point, exploration_rate, exploration_mode)
+                VALUES (CAST(:tid AS uuid), :dp, 0.05, 'balanced')
+                ON CONFLICT (tenant_id, decision_point) DO UPDATE
+                  SET exploration_rate = GREATEST(
+                          decision_point_config.exploration_rate - 0.02, 0.05),
+                      updated_at = NOW()
+            """), {"tid": tenant_id, "dp": dp})
+
+        db.commit()
+        logger.info(
+            "Exploration rates: %d stalled boosted, %d performing reduced (tenant %s)",
+            stalled_boosted, len(performing_dps), tenant_id[:8],
+        )
+        return {"stalled_boosted": stalled_boosted, "performing_reduced": len(performing_dps)}
+    except Exception as e:
+        logger.error("adjust_exploration_rates failed for %s: %s", tenant_id[:8], e)
+        raise
+    finally:
+        db.close()
+
+
 # --- Private helpers ---
+
+def _extract_platform(content: str) -> str | None:
+    """Extract a platform name from message content."""
+    for p in ("claude", "codex", "gemini", "openai", "qwen", "local"):
+        if p in content:
+            return p
+    return None
+
+
+def _extract_decision_point(content: str) -> str | None:
+    """Extract a decision point name from message content."""
+    for dp in ("chat_response", "agent_routing", "code_task"):
+        if dp.replace("_", " ") in content or dp in content:
+            return dp
+    return None
+
 
 def _classify_feedback(content_lower: str) -> tuple:
     """Return (feedback_type, parsed_intent) based on message content."""
