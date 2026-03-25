@@ -54,6 +54,44 @@ def _phone_variants(value: str | None) -> set[str]:
     return {item for item in variants if item}
 
 
+def _build_ack_message(user_message: str, task_type: str) -> str:
+    """Build a brief acknowledgment based on the inferred task type."""
+    acks = {
+        "code": "Analyzing code — give me a moment...",
+        "research": "Researching that — checking my sources...",
+        "email": "Checking emails — one moment...",
+        "calendar": "Looking at your calendar...",
+        "sales": "Pulling up pipeline data...",
+        "data": "Querying the data — hang tight...",
+    }
+    return acks.get(task_type, "On it — thinking...")
+
+
+_PROGRESS_MESSAGES = [
+    "Checking memory and knowledge base...",
+    "Analyzing your request...",
+    "Working through the details...",
+    "Almost there — finalizing response...",
+    "Still working on this — it's a complex one...",
+    "Gathering all the context I need...",
+    "Running tools and cross-referencing data...",
+]
+
+def _get_progress_message(tick: int) -> str:
+    """Get a rotating progress message based on elapsed ticks."""
+    return _PROGRESS_MESSAGES[tick % len(_PROGRESS_MESSAGES)]
+
+
+def _build_completion_summary(response_text: str, elapsed_seconds: float):
+    """Build a brief completion note for long-running responses."""
+    if elapsed_seconds < 15 or len(response_text) < 200:
+        return None
+    mins = int(elapsed_seconds // 60)
+    secs = int(elapsed_seconds % 60)
+    time_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
+    return f"Done ({time_str}). Here's what I found:"
+
+
 class WhatsAppService:
     """Manages neonize WhatsApp clients per tenant:account."""
 
@@ -530,9 +568,32 @@ class WhatsAppService:
         # WhatsApp auto-dismisses composing presence after ~5s, so we refresh
         # it every 4s in a background task until the response is ready.
         reply_jid = build_jid(sender_phone)
+
+        # Helper to send a message and track its ID for echo suppression
+        async def _send_and_track(msg: str):
+            try:
+                resp = await client.send_message(reply_jid, msg)
+                if resp and hasattr(resp, 'ID') and resp.ID:
+                    _ids = self._sent_message_ids.setdefault(key, set())
+                    _ids.add(resp.ID)
+                    if len(_ids) > 100:
+                        _ids.pop()
+            except Exception:
+                pass
+
+        # Send immediate acknowledgment before CLI processing
+        try:
+            from app.services.agent_router import _infer_task_type
+            _task_type = _infer_task_type(text or media_caption or "")
+            _ack_msg = _build_ack_message(text or media_caption or "", _task_type)
+            await _send_and_track(_ack_msg)
+        except Exception:
+            pass  # Never block on ack failure
+
         typing_done = asyncio.Event()
 
         async def _keep_typing():
+            _tick = 0
             while not typing_done.is_set():
                 try:
                     await client.send_chat_presence(
@@ -542,6 +603,11 @@ class WhatsAppService:
                     )
                 except Exception:
                     pass
+                # Send a progress message every ~32s (8 ticks * 4s)
+                if _tick > 0 and _tick % 8 == 0:
+                    _prog = _get_progress_message(_tick // 8)
+                    await _send_and_track(_prog)
+                _tick += 1
                 try:
                     await asyncio.wait_for(typing_done.wait(), timeout=4.0)
                     break
@@ -629,6 +695,9 @@ class WhatsAppService:
             else:
                 agent_text = media_caption or text or f"[Sent {media_type}]"
 
+            import time as _time_mod
+            _dispatch_time = _time_mod.monotonic()
+
             response_text = await self._process_through_agent(
                 tenant_id, sender_phone, agent_text, media_parts=media_parts,
             )
@@ -640,6 +709,15 @@ class WhatsAppService:
         if not response_text:
             logger.warning(f"Empty response from agent for {sender_phone}, not sending reply")
         if response_text:
+            # Completion summary for slow responses
+            _elapsed = _time_mod.monotonic() - _dispatch_time
+            _completion = _build_completion_summary(response_text, _elapsed)
+            if _completion:
+                try:
+                    await _send_and_track(_completion)
+                except Exception:
+                    pass
+
             try:
                 # Split long messages — WhatsApp limits to ~4096 chars
                 chunks = [response_text] if len(response_text) <= 4000 else [
