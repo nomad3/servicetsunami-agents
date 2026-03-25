@@ -904,7 +904,8 @@ async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
             )
 
         # Persistent session directory per tenant (not temp — survives across calls)
-        session_dir = os.path.join("/tmp", "st_sessions", task_input.tenant_id)
+        # Must NOT be under /tmp — Codex refuses to create helper binaries in temp dirs
+        session_dir = os.path.join("/home/codeworker/st_sessions", task_input.tenant_id)
         os.makedirs(session_dir, exist_ok=True)
 
         # Save image if provided
@@ -1621,7 +1622,7 @@ async def review_with_codex(input: ProviderReviewInput) -> ProviderReview:
         return ProviderReview(provider="codex", approved=True, verdict="SKIPPED",
                               score=0, issues=[], suggestions=[], summary="Codex credential fetch failed")
 
-    session_dir = os.path.join("/tmp", "st_provider_review", input.tenant_id)
+    session_dir = os.path.join("/home/codeworker/st_provider_review", input.tenant_id)
     os.makedirs(session_dir, exist_ok=True)
     codex_home = _prepare_codex_home(session_dir, auth_payload, "")
 
