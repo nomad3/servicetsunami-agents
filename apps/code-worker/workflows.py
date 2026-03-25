@@ -1387,8 +1387,8 @@ class ChatCliWorkflow:
     """Temporal workflow for chat CLI sessions.
 
     Flexible timeout: Claude CLI may do complex multi-tool work
-    (email scanning, calendar creation, code analysis). Allow up to
-    30 minutes with heartbeat to keep Temporal informed.
+    (email scanning, calendar creation, code analysis, multi-file implementations).
+    Allow up to 150 minutes with heartbeat to keep Temporal informed.
     """
 
     @workflow.run
@@ -1396,8 +1396,8 @@ class ChatCliWorkflow:
         return await workflow.execute_activity(
             execute_chat_cli,
             task_input,
-            start_to_close_timeout=timedelta(minutes=30),
-            schedule_to_close_timeout=timedelta(minutes=45),
+            start_to_close_timeout=timedelta(minutes=150),
+            schedule_to_close_timeout=timedelta(minutes=165),
             heartbeat_timeout=timedelta(seconds=300),
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
