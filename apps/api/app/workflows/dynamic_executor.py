@@ -54,9 +54,15 @@ def _timeout_for(step: dict) -> timedelta:
 
 
 def _heartbeat_for(step: dict) -> Optional[timedelta]:
-    """Only heartbeat long-running step types."""
-    if step.get("type") in ("agent", "workflow"):
-        return timedelta(seconds=60)
+    """Heartbeat only when a step explicitly opts in.
+
+    The current dynamic step activity does not emit periodic heartbeats while
+    blocking on downstream tool or agent calls. Setting a default heartbeat
+    timeout here causes healthy long-running steps to fail after 60 seconds.
+    """
+    heartbeat_seconds = step.get("heartbeat_seconds")
+    if heartbeat_seconds:
+        return timedelta(seconds=heartbeat_seconds)
     return None
 
 

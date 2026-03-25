@@ -22,6 +22,22 @@ API_INTERNAL_KEY = os.environ.get("API_INTERNAL_KEY", "dev_mcp_key")
 MCP_TOOLS_URL = os.environ.get("MCP_TOOLS_URL", "http://mcp-tools:8000")
 
 
+def _http_timeout_for_step(step: dict, default_seconds: float) -> httpx.Timeout:
+    """Derive an HTTP timeout that fits within the workflow step budget."""
+    timeout_seconds = step.get("timeout_seconds")
+    if timeout_seconds is None:
+        step_type = step.get("type", "")
+        timeout_seconds = 60.0 if step_type == "mcp_tool" else default_seconds
+
+    timeout_seconds = max(float(timeout_seconds), 1.0)
+    connect_timeout = min(timeout_seconds, 10.0)
+    return httpx.Timeout(
+        timeout=timeout_seconds,
+        connect=connect_timeout,
+        pool=connect_timeout,
+    )
+
+
 @activity.defn
 async def execute_dynamic_step(
     step: dict,
@@ -105,7 +121,7 @@ async def _call_mcp_tool(step: dict, context: dict, tenant_id: str, run_id: str)
             f"for channel 'workflow'. evidence_pack_id={enforcement.evidence_pack_id}"
         )
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=_http_timeout_for_step(step, default_seconds=60.0)) as client:
         resp = await client.post(
             f"{MCP_TOOLS_URL}/mcp",
             json={

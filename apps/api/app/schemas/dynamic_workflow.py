@@ -29,6 +29,7 @@ class WorkflowStepDef(BaseModel):
     operation: Optional[str] = None
     # Overrides
     timeout_seconds: Optional[int] = None
+    heartbeat_seconds: Optional[int] = None
     max_retries: Optional[int] = None
 
     class Config:
