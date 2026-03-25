@@ -513,13 +513,12 @@ async def start_autonomous_learning(
     tenant_id: str = Depends(_get_tenant_id_from_internal_or_user),
 ):
     """Start the autonomous learning cycle for the current tenant."""
-    from temporalio.client import Client
     from app.workflows.autonomous_learning import AutonomousLearningWorkflow
     workflow_id = f"autonomous-learning-{tenant_id}"
     interval = max(1, min(cycle_interval_hours, 168)) * 3600
 
     try:
-        client = await Client.connect(settings.TEMPORAL_ADDRESS)
+        client = await _get_temporal_client()
         handle = await client.start_workflow(
             AutonomousLearningWorkflow.run,
             args=[tenant_id, interval],
@@ -546,11 +545,10 @@ async def stop_autonomous_learning(
     tenant_id: str = Depends(_get_tenant_id_from_internal_or_user),
 ):
     """Stop the autonomous learning cycle."""
-    from temporalio.client import Client
     workflow_id = f"autonomous-learning-{tenant_id}"
 
     try:
-        client = await Client.connect(settings.TEMPORAL_ADDRESS)
+        client = await _get_temporal_client()
         handle = client.get_workflow_handle(workflow_id)
         await handle.cancel()
         return {"status": "stopped", "workflow_id": workflow_id}
