@@ -54,27 +54,64 @@ def _phone_variants(value: str | None) -> set[str]:
     return {item for item in variants if item}
 
 
+import random as _random
+
 def _build_ack_message(user_message: str, task_type: str) -> str:
-    """Build a brief acknowledgment based on the inferred task type."""
+    """Build a natural, conversational acknowledgment."""
     acks = {
-        "code": "Analyzing code — give me a moment...",
-        "research": "Researching that — checking my sources...",
-        "email": "Checking emails — one moment...",
-        "calendar": "Looking at your calendar...",
-        "sales": "Pulling up pipeline data...",
-        "data": "Querying the data — hang tight...",
+        "code": _random.choice([
+            "Let me look at the code",
+            "Ok checking that out",
+            "Let me dig into the code for you",
+            "On it, pulling up the repo",
+        ]),
+        "research": _random.choice([
+            "Let me look into that",
+            "Good question, let me find out",
+            "Give me a sec, checking my sources",
+            "Ok let me research that for you",
+        ]),
+        "email": _random.choice([
+            "Let me check your emails",
+            "One sec, looking through your inbox",
+            "Ok pulling up your emails",
+        ]),
+        "calendar": _random.choice([
+            "Let me check your calendar",
+            "One sec, looking at your schedule",
+            "Ok checking that",
+        ]),
+        "sales": _random.choice([
+            "Let me pull up the pipeline",
+            "Ok checking the deals",
+            "One sec, looking at the numbers",
+        ]),
+        "data": _random.choice([
+            "Let me check the data",
+            "Ok running that query",
+            "Give me a moment, pulling the numbers",
+        ]),
     }
-    return acks.get(task_type, "On it — thinking...")
+    default = _random.choice([
+        "Ok let me see",
+        "Let me check that for you",
+        "One sec",
+        "Let's find out",
+        "On it",
+        "Give me a moment",
+        "Let me look into that",
+    ])
+    return acks.get(task_type, default)
 
 
 _PROGRESS_MESSAGES = [
-    "Checking memory and knowledge base...",
-    "Analyzing your request...",
-    "Working through the details...",
-    "Almost there — finalizing response...",
-    "Still working on this — it's a complex one...",
-    "Gathering all the context I need...",
-    "Running tools and cross-referencing data...",
+    "Still on it...",
+    "Digging deeper...",
+    "Bear with me, almost there",
+    "Getting closer...",
+    "This one needs a bit more thought",
+    "Putting it all together for you",
+    "Just a bit more...",
 ]
 
 def _get_progress_message(tick: int) -> str:
