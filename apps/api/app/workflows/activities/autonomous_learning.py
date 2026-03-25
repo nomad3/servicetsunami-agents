@@ -255,6 +255,16 @@ async def generate_and_evaluate_candidates(
                         "Candidate %s passed evaluation: %s",
                         str(candidate.id)[:8], result.get("conclusion", ""),
                     )
+                elif result and result.get("is_significant") == "no":
+                    # Conclusive but not significant — auto-reject
+                    learning_experiment_service.reject_candidate(
+                        db, tenant_uuid, candidate.id,
+                        reason=f"Offline evaluation not significant: {result.get('conclusion', '')}",
+                    )
+                    logger.info(
+                        "Auto-rejected candidate %s: not significant",
+                        str(candidate.id)[:8],
+                    )
                 elif result and result.get("improvement_pct") is not None:
                     if result["improvement_pct"] < -5.0:
                         # Auto-reject regressions
