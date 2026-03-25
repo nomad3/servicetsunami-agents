@@ -60,8 +60,14 @@ class AutonomousLearningWorkflow:
             "proactive_actions": 0,
             # Feedback + diagnosis fields
             "feedback_processed": 0,
+            "feedback_applied": 0,
             "diagnosis": {},
             "regressions_detected": 0,
+            # Phase 6 fields
+            "skill_stubs_created": 0,
+            # Cost tracking
+            "cost_usd": 0.0,
+            "budget_exceeded": False,
             "report_sent": False,
             "errors": [],
         }
@@ -180,6 +186,15 @@ class AutonomousLearningWorkflow:
             )
             cycle_result["feedback_processed"] = feedback_result.get("feedback_processed", 0)
 
+            # Apply collected feedback to candidates and exploration config
+            apply_result = await workflow.execute_activity(
+                "apply_feedback_to_cycle",
+                args=[tenant_id],
+                start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=retry_policy,
+            )
+            cycle_result["feedback_applied"] = apply_result.get("feedback_applied", 0)
+
             diagnosis = await workflow.execute_activity(
                 "run_self_diagnosis",
                 args=[tenant_id],
@@ -195,9 +210,44 @@ class AutonomousLearningWorkflow:
                 retry_policy=retry_policy,
             )
             cycle_result["regressions_detected"] = regression_result.get("regressions_detected", 0)
+
+            # Tune per-decision-point exploration rates based on stall/performance data
+            await workflow.execute_activity(
+                "adjust_exploration_rates",
+                args=[tenant_id, cycle_result.get("metrics", {})],
+                start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=retry_policy,
+            )
         except Exception as e:
             workflow.logger.error(f"Step 3d (feedback/diagnosis) failed: {e}")
             cycle_result["errors"].append(f"feedback_diagnosis: {e}")
+
+        # Step 3e: Skill auto-creation from gaps (Phase 6)
+        try:
+            stub_result = await workflow.execute_activity(
+                "auto_create_skill_stubs",
+                args=[tenant_id],
+                start_to_close_timeout=timedelta(minutes=5),
+                retry_policy=retry_policy,
+            )
+            cycle_result["skill_stubs_created"] = stub_result.get("stubs_created", 0)
+        except Exception as e:
+            workflow.logger.error(f"Step 3e (skill stubs) failed: {e}")
+            cycle_result["errors"].append(f"skill_stubs: {e}")
+
+        # Step 3f: Track cycle cost against budget
+        try:
+            cost_result = await workflow.execute_activity(
+                "track_cycle_cost",
+                args=[tenant_id, cycle_result],
+                start_to_close_timeout=timedelta(minutes=2),
+                retry_policy=retry_policy,
+            )
+            cycle_result["cost_usd"] = cost_result.get("cost_usd", 0.0)
+            cycle_result["budget_exceeded"] = cost_result.get("budget_exceeded", False)
+        except Exception as e:
+            workflow.logger.error(f"Step 3f (cost tracking) failed: {e}")
+            cycle_result["errors"].append(f"cost_tracking: {e}")
 
         # Step 4: Generate and send morning report
         try:
@@ -221,6 +271,8 @@ class AutonomousLearningWorkflow:
             f"gaps={cycle_result['skill_gaps_detected']}, "
             f"proactive={cycle_result['proactive_actions']}, "
             f"regressions={cycle_result['regressions_detected']}, "
+            f"stubs={cycle_result['skill_stubs_created']}, "
+            f"cost=${cycle_result['cost_usd']:.4f}, "
             f"report={'sent' if cycle_result['report_sent'] else 'failed'}, "
             f"errors={len(cycle_result['errors'])}"
         )

@@ -113,7 +113,11 @@ from app.workflows.activities.feedback_activities import (
     process_human_feedback,
     run_self_diagnosis,
     monitor_regression,
+    apply_feedback_to_cycle,
+    adjust_exploration_rates,
 )
+from app.workflows.activities.skill_gap_activities import auto_create_skill_stubs
+from app.workflows.activities.cost_tracking_activities import track_cycle_cost
 from app.workflows.activities.skill_activities import execute_skill
 from app.workflows.activities.rl_policy_update import (
     collect_tenant_experiences,
@@ -255,6 +259,11 @@ async def run_orchestration_worker():
             process_human_feedback,
             run_self_diagnosis,
             monitor_regression,
+            apply_feedback_to_cycle,
+            adjust_exploration_rates,
+            # Phase 6: skill auto-creation + cost tracking
+            auto_create_skill_stubs,
+            track_cycle_cost,
             # Goal review activities
             review_goals,
             review_commitments,

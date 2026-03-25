@@ -300,6 +300,102 @@ def submit_feedback(
     return record
 
 
+# --- Decision Point Config ---
+
+class DecisionPointConfigOut(BaseModel):
+    id: uuid.UUID
+    decision_point: str
+    exploration_rate: float
+    exploration_mode: str
+    target_platforms: Optional[list]
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DecisionPointConfigUpdate(BaseModel):
+    exploration_rate: Optional[float] = None
+    exploration_mode: Optional[str] = None
+    target_platforms: Optional[list] = None
+
+
+@router.get("/decision-point-config", response_model=List[DecisionPointConfigOut])
+def list_decision_point_configs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List per-decision-point exploration configuration for the tenant."""
+    from app.models.decision_point_config import DecisionPointConfig
+
+    return (
+        db.query(DecisionPointConfig)
+        .filter(DecisionPointConfig.tenant_id == current_user.tenant_id)
+        .order_by(DecisionPointConfig.decision_point)
+        .all()
+    )
+
+
+@router.patch("/decision-point-config/{decision_point}", response_model=DecisionPointConfigOut)
+def update_decision_point_config(
+    decision_point: str,
+    update: DecisionPointConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update exploration rate/mode for a specific decision point (upsert)."""
+    from app.models.decision_point_config import DecisionPointConfig
+
+    valid_points = {"chat_response", "agent_routing", "code_task"}
+    if decision_point not in valid_points:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid decision_point. Must be one of: {valid_points}",
+        )
+
+    config = (
+        db.query(DecisionPointConfig)
+        .filter(
+            DecisionPointConfig.tenant_id == current_user.tenant_id,
+            DecisionPointConfig.decision_point == decision_point,
+        )
+        .first()
+    )
+
+    if not config:
+        config = DecisionPointConfig(
+            tenant_id=current_user.tenant_id,
+            decision_point=decision_point,
+            exploration_rate=update.exploration_rate or 0.1,
+            exploration_mode=update.exploration_mode or "balanced",
+            target_platforms=update.target_platforms or [],
+        )
+        db.add(config)
+    else:
+        if update.exploration_rate is not None:
+            if not (0.0 <= update.exploration_rate <= 1.0):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="exploration_rate must be between 0.0 and 1.0",
+                )
+            config.exploration_rate = update.exploration_rate
+        if update.exploration_mode is not None:
+            valid_modes = {"off", "balanced", "targeted"}
+            if update.exploration_mode not in valid_modes:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"exploration_mode must be one of: {valid_modes}",
+                )
+            config.exploration_mode = update.exploration_mode
+        if update.target_platforms is not None:
+            config.target_platforms = update.target_platforms
+        config.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(config)
+    return config
+
+
 # --- Private helpers ---
 
 def _infer_intent(content: str, feedback_type: str) -> str:
