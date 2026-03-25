@@ -58,28 +58,39 @@ jobs:
       - name: Unlock keychain
         run: security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" ~/Library/Keychains/login.keychain-db
 
-      - name: Clean up Docker disk
+      - name: Clean up Docker disk (threshold-based)
         run: |
           echo "--- Docker disk before cleanup ---"
           docker system df 2>/dev/null || true
 
-          # Remove dangling images (old builds)
-          docker image prune -f 2>/dev/null || true
+          # Check available space in Docker VM
+          AVAIL_GB=$(docker run --rm --privileged alpine df / 2>/dev/null | tail -1 | awk '{print int($4/1024/1024)}')
+          echo "Available disk: ${AVAIL_GB}GB"
 
-          # Remove unused images not referenced by running containers
-          docker image prune -af 2>/dev/null || true
+          # Only aggressive cleanup if below 15GB free
+          if [ "${AVAIL_GB:-0}" -lt 15 ]; then
+            echo "Low disk (${AVAIL_GB}GB < 15GB) — running aggressive cleanup"
 
-          # Clear build cache (can grow to 20GB+ across deploys)
-          docker builder prune -af 2>/dev/null || true
-          docker buildx prune -af 2>/dev/null || true
+            # Remove dangling images
+            docker image prune -f 2>/dev/null || true
 
-          # Remove any orphaned buildx builder volumes
-          for vol in $(docker volume ls -q | grep buildkit); do
-            if ! docker ps -q --filter "volume=$vol" | grep -q .; then
-              echo "Removing orphaned buildx volume: $vol"
-              docker volume rm "$vol" 2>/dev/null || true
-            fi
-          done
+            # Remove unused images not referenced by running containers
+            docker image prune -af 2>/dev/null || true
+
+            # Clear build cache
+            docker builder prune -af 2>/dev/null || true
+
+            # Remove orphaned buildx volumes
+            for vol in $(docker volume ls -q 2>/dev/null | grep buildkit); do
+              if ! docker ps -q --filter "volume=$vol" 2>/dev/null | grep -q .; then
+                echo "Removing orphaned buildx volume: $vol"
+                docker volume rm "$vol" 2>/dev/null || true
+              fi
+            done
+          else
+            echo "Disk OK (${AVAIL_GB}GB) — only pruning dangling images"
+            docker image prune -f 2>/dev/null || true
+          fi
 
           echo "--- Docker disk after cleanup ---"
           docker system df 2>/dev/null || true
@@ -148,13 +159,12 @@ jobs:
 
       - name: Post-deploy cleanup
         run: |
-          # Clean up after build — remove old images that are no longer in use
+          # Always prune dangling images after build (cheap, removes old layers)
           docker image prune -f 2>/dev/null || true
-          docker builder prune -af 2>/dev/null || true
 
           # Report disk usage
-          DISK_USED=$(docker system df --format '{{.Size}}' 2>/dev/null | head -1 || echo "unknown")
-          echo "Docker disk after deploy: $DISK_USED"
+          AVAIL_GB=$(docker run --rm --privileged alpine df / 2>/dev/null | tail -1 | awk '{print int($4/1024/1024)}')
+          echo "Available disk after deploy: ${AVAIL_GB}GB"
 
       - name: Post-deploy summary
         run: |

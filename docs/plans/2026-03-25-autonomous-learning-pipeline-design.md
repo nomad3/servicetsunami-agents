@@ -139,7 +139,13 @@ Every candidate MUST pass offline evaluation before any live action.
 If offline evaluation returns `insufficient_data`:
 
 - The candidate is NOT rejected (it may become evaluable with more data)
-- If `EXPLORATION_MODE=off`, the cycle temporarily enables `balanced` exploration for that decision point to collect unbiased data
+- If insufficient exploration data exists, the cycle temporarily sets
+  `EXPLORATION_MODE=balanced` globally to collect unbiased data across
+  all platforms. **Note**: the current platform only has global exploration
+  knobs (`EXPLORATION_MODE` / `EXPLORATION_RATE`), not per-decision-point
+  controls. Per-decision-point exploration is a required infrastructure
+  addition for Phase 3 — until then, exploration adjustments affect all
+  decision points in the tenant.
 - Re-evaluated on the next nightly cycle
 - After 3 cycles with insufficient data → auto-reject with reason
 
@@ -462,15 +468,19 @@ Cycle 1 (initial):
   → Collect unbiased data across all platforms
 
 Cycle 2+ (steady state):
-  EXPLORATION_MODE=off
-  → Let RL routing handle most traffic
-  → Rollouts provide controlled treatment data
-  → 10% background exploration prevents stagnation
+  EXPLORATION_MODE=balanced, EXPLORATION_RATE=0.10
+  → RL routing handles 90% of traffic (learned decisions)
+  → 10% randomly explores underrepresented platforms
+  → Rollouts provide additional controlled treatment data
+  → This ensures the RL system always has fresh comparative data
 
-When a decision point is stalled (no improvement in 14 days):
-  → Temporarily increase exploration for that decision point
-  → Collect fresh comparative data
-  → Re-evaluate candidates on next cycle
+When learning is stalled globally (no improvement in 14 days):
+  → Temporarily increase EXPLORATION_RATE to 0.20
+  → Collect more comparative data across all platforms
+  → Revert to 0.10 after one cycle
+  → NOTE: per-decision-point exploration control is a Phase 3
+    infrastructure addition. Until then, exploration adjustments
+    are global.
 ```
 
 ---
