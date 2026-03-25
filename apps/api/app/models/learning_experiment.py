@@ -58,7 +58,7 @@ class LearningExperiment(Base):
     decision_point = Column(String(50), nullable=True)
 
     # Experiment config
-    experiment_type = Column(String(30), nullable=False, default="shadow")
+    experiment_type = Column(String(30), nullable=False, default="split")
     rollout_pct = Column(Float, nullable=False, default=0.0)
     min_sample_size = Column(Integer, nullable=False, default=20)
     max_duration_hours = Column(Integer, nullable=False, default=168)

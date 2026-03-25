@@ -33,7 +33,7 @@ def get_active_rollout(
         .filter(
             LearningExperiment.tenant_id == tenant_id,
             LearningExperiment.status == "running",
-            LearningExperiment.experiment_type.in_(["split", "shadow"]),
+            LearningExperiment.experiment_type == "split",
             PolicyCandidate.decision_point == decision_point,
             PolicyCandidate.status.in_(["evaluating", "promoted"]),
         )
