@@ -184,18 +184,38 @@ async def generate_and_evaluate_candidates(
             len(generated), tenant_id[:8],
         )
 
-        # Step 2: Evaluate all proposed candidates that don't have experiments yet
+        # Step 2: Evaluate candidates that need evaluation
+        # Include both 'proposed' (never evaluated) and 'evaluating' with only
+        # insufficient_data results (re-evaluate with potentially more data)
         proposed = learning_experiment_service.list_candidates(
             db, tenant_uuid, status="proposed"
         )
+        evaluating_stuck = [
+            c for c in learning_experiment_service.list_candidates(db, tenant_uuid, status="evaluating")
+            if all(
+                e.is_significant == "insufficient_data"
+                for e in learning_experiment_service.list_experiments(db, tenant_uuid, candidate_id=c.id)
+                if e.experiment_type == "offline" and e.status == "completed"
+            )
+            and any(
+                e.experiment_type == "offline" and e.status == "completed"
+                for e in learning_experiment_service.list_experiments(db, tenant_uuid, candidate_id=c.id)
+            )
+        ]
+        candidates_to_evaluate = list(proposed) + evaluating_stuck
 
         evaluated = 0
-        for candidate in proposed:
-            # Check if already has an experiment
+        for candidate in candidates_to_evaluate:
+            # Skip if already has a non-insufficient-data offline experiment
             existing_experiments = learning_experiment_service.list_experiments(
                 db, tenant_uuid, candidate_id=candidate.id
             )
-            if existing_experiments:
+            has_conclusive = any(
+                e.experiment_type == "offline" and e.status == "completed"
+                and e.is_significant in ("yes", "no")
+                for e in existing_experiments
+            )
+            if has_conclusive:
                 continue
 
             # Create and run offline evaluation
@@ -269,16 +289,23 @@ async def manage_active_rollouts(tenant_id: str) -> dict:
             experiments = learning_experiment_service.list_experiments(
                 db, tenant_uuid, candidate_id=candidate.id
             )
-            has_significant = any(
+            has_significant_offline = any(
                 e.status == "completed" and e.is_significant == "yes"
+                and e.experiment_type == "offline"
                 for e in experiments
             )
             has_running_rollout = any(
                 e.status == "running" and e.experiment_type == "split"
                 for e in experiments
             )
+            has_completed_rollout = any(
+                e.status in ("completed", "aborted") and e.experiment_type == "split"
+                for e in experiments
+            )
 
-            if has_significant and not has_running_rollout:
+            # Only start a rollout if: passed offline eval, no running rollout,
+            # and never had a completed/aborted rollout (one shot per candidate)
+            if has_significant_offline and not has_running_rollout and not has_completed_rollout:
                 # Try to start a rollout
                 try:
                     policy_rollout_service.start_rollout(
