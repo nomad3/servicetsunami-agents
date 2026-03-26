@@ -336,9 +336,19 @@ async def apply_feedback_to_cycle(tenant_id: str) -> dict:
                             .first()
                         )
                         if candidate:
-                            candidate.status = "promoted"
-                            candidate.promoted_at = datetime.utcnow()
-                            logger.info("Human approved candidate %s", str(candidate.id)[:8])
+                            # Use the proper promotion gate — requires a successful experiment
+                            try:
+                                from app.services import learning_experiment_service
+                                learning_experiment_service.promote_candidate(
+                                    db, tenant_uuid, candidate.id,
+                                )
+                                logger.info("Human approved + promoted candidate %s", str(candidate.id)[:8])
+                            except ValueError as prom_err:
+                                # No successful experiment yet — just log the approval intent
+                                logger.info(
+                                    "Human approved candidate %s but promotion gate not met: %s",
+                                    str(candidate.id)[:8], prom_err,
+                                )
 
                 elif intent in ("reject_platform", "general_rejection"):
                     platform = _extract_platform(content_lower)

@@ -149,30 +149,32 @@ class AutonomousLearningWorkflow:
                 )
                 cycle_result["scenarios_generated"] = scenario_result.get("scenarios_created", 0)
 
-            exec_result = await run_activity(
-                "execute_simulation_scenarios",
-                tenant_id,
-                start_to_close_timeout=simulation_execution_timeout,
-                retry_policy=RetryPolicy(maximum_attempts=1),
-                schedule_slack=timedelta(minutes=15),
-            )
-            cycle_result["simulation_avg_score"] = exec_result.get("avg_score")
-            cycle_result["simulation_executed"] = exec_result.get("executed", 0)
+            # Only execute/classify/detect if scenarios were actually generated
+            if cycle_result.get("scenarios_generated", 0) > 0:
+                exec_result = await run_activity(
+                    "execute_simulation_scenarios",
+                    tenant_id,
+                    start_to_close_timeout=simulation_execution_timeout,
+                    retry_policy=RetryPolicy(maximum_attempts=1),
+                    schedule_slack=timedelta(minutes=15),
+                )
+                cycle_result["simulation_avg_score"] = exec_result.get("avg_score")
+                cycle_result["simulation_executed"] = exec_result.get("executed", 0)
 
-            failure_data = await run_activity(
-                "classify_simulation_failures",
-                tenant_id,
-                start_to_close_timeout=timedelta(minutes=3),
-                retry_policy=retry_policy,
-            )
-            gap_result = await run_activity(
-                "detect_skill_gaps",
-                tenant_id,
-                failure_data,
-                start_to_close_timeout=timedelta(minutes=2),
-                retry_policy=retry_policy,
-            )
-            cycle_result["skill_gaps_detected"] = gap_result.get("gaps_detected", 0)
+                failure_data = await run_activity(
+                    "classify_simulation_failures",
+                    tenant_id,
+                    start_to_close_timeout=timedelta(minutes=3),
+                    retry_policy=retry_policy,
+                )
+                gap_result = await run_activity(
+                    "detect_skill_gaps",
+                    tenant_id,
+                    failure_data,
+                    start_to_close_timeout=timedelta(minutes=2),
+                    retry_policy=retry_policy,
+                )
+                cycle_result["skill_gaps_detected"] = gap_result.get("gaps_detected", 0)
         except Exception as e:
             workflow.logger.error(f"Step 3b (self-simulation) failed: {e}")
             cycle_result["errors"].append(f"self_simulation: {e}")

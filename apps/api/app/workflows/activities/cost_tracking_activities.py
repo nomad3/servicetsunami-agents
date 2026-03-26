@@ -91,7 +91,18 @@ async def track_cycle_cost(tenant_id: str, cycle_result: dict) -> dict:
         budget_exceeded = False
 
         if budget_row:
-            # Reset period if needed
+            # Reset daily spend if the period has rolled over
+            db.execute(text("""
+                UPDATE cost_budgets
+                SET current_spend_usd = 0.0,
+                    current_period_start = DATE_TRUNC('day', NOW()),
+                    updated_at = NOW()
+                WHERE tenant_id = CAST(:tid AS uuid)
+                  AND budget_type = 'daily'
+                  AND current_period_start < DATE_TRUNC('day', NOW())
+            """), {"tid": tenant_id})
+
+            # Add today's cost
             db.execute(text("""
                 UPDATE cost_budgets
                 SET current_spend_usd = current_spend_usd + :cost,

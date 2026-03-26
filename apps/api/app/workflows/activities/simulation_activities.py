@@ -104,16 +104,6 @@ _DEFAULT_PERSONAS = [
     },
 ]
 
-# Map weekday (0=Mon) to persona indices — 4 personas per day, full rotation over week
-_WEEKDAY_PERSONA_INDICES = {
-    0: [0, 1, 2, 3],     # Mon: TechStartup, PE, Vet, Ecommerce
-    1: [4, 5, 6, 7],     # Tue: Marketing, Sales, DevOps, Finance
-    2: [8, 9, 10, 11],   # Wed: Real Estate, Recruitment, Law, Research
-    3: [12, 13, 14, 0],  # Thu: Restaurant, Booking, Accounting, TechStartup
-    4: [1, 3, 5, 7],     # Fri: PE, Ecommerce, Sales, Finance
-    5: [0, 4, 8, 12],    # Sat: Mixed — one from each sector
-    6: [2, 6, 10, 14],   # Sun: Mixed — different sector mix
-}
 
 # Scenario templates per industry
 _SCENARIO_TEMPLATES = {
@@ -397,8 +387,8 @@ async def select_personas_for_cycle(tenant_id: str) -> dict:
         ]
 
         logger.info(
-            "Selected %d personas for tenant %s (weekday=%d)",
-            len(todays_personas), tenant_id[:8], weekday,
+            "Selected %d personas for tenant %s",
+            len(todays_personas), tenant_id[:8],
         )
 
         return {
