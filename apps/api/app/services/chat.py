@@ -288,6 +288,7 @@ def _generate_agentic_response(
             cost_usd=meta.get("cost_usd", 0.0),
             rollout_experiment_id=meta.get("rollout_experiment_id"),
             rollout_arm=meta.get("rollout_arm"),
+            routing_trajectory_id=meta.get("routing_trajectory_id"),
         )
     except Exception:
         pass  # Never block response delivery for scoring

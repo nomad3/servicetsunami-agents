@@ -329,6 +329,9 @@ def route_and_execute(
             metadata["rollout_experiment_id"] = rollout_experiment_id
             metadata["rollout_arm"] = "treatment" if routing_source == "rollout_treatment" else "control"
 
+        # Thread routing trajectory so scorer can backfill the reward
+        metadata["routing_trajectory_id"] = str(trajectory_id)
+
         return response_text, metadata
 
     # Future: gemini_cli and additional providers.
