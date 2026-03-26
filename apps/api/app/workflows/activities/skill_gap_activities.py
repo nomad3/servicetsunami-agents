@@ -4,6 +4,7 @@ Converts high-severity skill gaps into draft custom skills (markdown engine)
 so they appear in the skill marketplace for review and testing.
 """
 
+import json
 import logging
 import uuid
 from datetime import datetime
@@ -177,7 +178,7 @@ async def auto_create_skill_stubs(tenant_id: str) -> dict:
                 SELECT id FROM skills
                 WHERE tenant_id = CAST(:tid AS uuid)
                   AND name = :name
-                  AND status = 'draft'
+                  AND enabled = false
                 LIMIT 1
             """), {"tid": tenant_id, "name": skill_name}).fetchone()
 
@@ -196,27 +197,29 @@ async def auto_create_skill_stubs(tenant_id: str) -> dict:
                 proposed_fix=gap.proposed_fix or "Review simulation failures and implement appropriate logic.",
             )
 
-            # Insert draft skill
+            # Insert draft skill (enabled=false = draft)
             skill_id = str(uuid.uuid4())
+            skill_config = json.dumps({
+                "engine": "markdown",
+                "category": "auto-generated",
+                "version": 1,
+                "prompt_content": prompt_content,
+            })
             db.execute(text("""
                 INSERT INTO skills (
-                    id, tenant_id, name, description, version, engine,
-                    category, status, prompt_content, created_at, updated_at,
-                    is_active, skill_type
+                    id, tenant_id, name, description, skill_type,
+                    config, is_system, enabled, created_at, updated_at
                 ) VALUES (
                     CAST(:id AS uuid),
                     CAST(:tid AS uuid),
                     :name,
                     :description,
-                    1,
-                    'markdown',
-                    'auto-generated',
-                    'draft',
-                    :prompt_content,
-                    NOW(),
-                    NOW(),
+                    'custom',
+                    CAST(:config AS jsonb),
                     FALSE,
-                    'custom'
+                    FALSE,
+                    NOW(),
+                    NOW()
                 )
                 ON CONFLICT DO NOTHING
             """), {
@@ -224,7 +227,7 @@ async def auto_create_skill_stubs(tenant_id: str) -> dict:
                 "tid": tenant_id,
                 "name": skill_name,
                 "description": gap.description[:500] if gap.description else "",
-                "prompt_content": prompt_content,
+                "config": skill_config,
             })
 
             # Move gap to in_progress
