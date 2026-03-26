@@ -81,6 +81,11 @@ class AutonomousLearningWorkflow:
             "regressions_detected": 0,
             # Phase 6 fields
             "skill_stubs_created": 0,
+            # Auto-dream fields
+            "dream_experiences": 0,
+            "dream_insights": 0,
+            "dream_memories": 0,
+            "dream_policies_updated": 0,
             # Cost tracking
             "cost_usd": 0.0,
             "budget_exceeded": False,
@@ -287,6 +292,62 @@ class AutonomousLearningWorkflow:
                 workflow.logger.error(f"Step 3e2 (self-improvement dispatch) failed: {e}")
                 cycle_result["errors"].append(f"self_improvement: {e}")
 
+        # Step 3g: Auto-dream — REM-style RL experience consolidation
+        try:
+            scan_result = await run_activity(
+                "scan_unconsolidated_experiences",
+                tenant_id,
+                start_to_close_timeout=timedelta(minutes=3),
+                retry_policy=retry_policy,
+            )
+            cycle_result["dream_experiences"] = scan_result.get("total", 0)
+
+            if scan_result.get("total", 0) >= 2:
+                patterns = await run_activity(
+                    "extract_decision_patterns",
+                    tenant_id,
+                    scan_result.get("grouped", {}),
+                    start_to_close_timeout=timedelta(minutes=2),
+                    retry_policy=retry_policy,
+                )
+
+                insight_result = await run_activity(
+                    "generate_dream_insights",
+                    tenant_id,
+                    patterns,
+                    start_to_close_timeout=timedelta(minutes=3),
+                    retry_policy=retry_policy,
+                )
+                cycle_result["dream_insights"] = insight_result.get("insights_created", 0)
+                cycle_result["dream_memories"] = insight_result.get("memories_created", 0)
+
+                policy_result = await run_activity(
+                    "consolidate_dream_policies",
+                    tenant_id,
+                    patterns,
+                    start_to_close_timeout=timedelta(minutes=3),
+                    retry_policy=retry_policy,
+                )
+                cycle_result["dream_policies_updated"] = policy_result.get("decision_points_updated", 0)
+
+                import json
+                dream_summary = json.dumps({
+                    "total_experiences": scan_result.get("total", 0),
+                    "total_patterns": sum(len(v) for v in patterns.values()),
+                    **insight_result,
+                    **policy_result,
+                }, default=str)
+                await run_activity(
+                    "log_dream_results",
+                    tenant_id,
+                    dream_summary,
+                    start_to_close_timeout=timedelta(minutes=1),
+                    retry_policy=retry_policy,
+                )
+        except Exception as e:
+            workflow.logger.error(f"Step 3g (auto-dream) failed: {e}")
+            cycle_result["errors"].append(f"auto_dream: {e}")
+
         # Step 3f: Track cycle cost against budget
         try:
             cost_result = await run_activity(
@@ -326,6 +387,9 @@ class AutonomousLearningWorkflow:
             f"proactive={cycle_result['proactive_actions']}, "
             f"regressions={cycle_result['regressions_detected']}, "
             f"stubs={cycle_result['skill_stubs_created']}, "
+            f"dream_insights={cycle_result['dream_insights']} "
+            f"memories={cycle_result['dream_memories']} "
+            f"policies_updated={cycle_result['dream_policies_updated']}, "
             f"cost=${cycle_result['cost_usd']:.4f}, "
             f"report={'sent' if cycle_result['report_sent'] else 'failed'}, "
             f"errors={len(cycle_result['errors'])}"

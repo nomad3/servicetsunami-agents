@@ -120,6 +120,13 @@ from app.workflows.activities.skill_gap_activities import auto_create_skill_stub
 from app.workflows.activities.self_improvement import dispatch_self_improvement_task
 from app.workflows.activities.cost_tracking_activities import track_cycle_cost
 from app.workflows.activities.skill_activities import execute_skill
+from app.workflows.activities.auto_dream_activities import (
+    scan_unconsolidated_experiences,
+    extract_decision_patterns,
+    generate_dream_insights,
+    consolidate_dream_policies,
+    log_dream_results,
+)
 from app.workflows.activities.rl_policy_update import (
     collect_tenant_experiences,
     update_tenant_policy,
@@ -270,6 +277,12 @@ async def run_orchestration_worker():
             review_goals,
             review_commitments,
             create_review_notifications,
+            # Auto-dream RL consolidation activities
+            scan_unconsolidated_experiences,
+            extract_decision_patterns,
+            generate_dream_insights,
+            consolidate_dream_policies,
+            log_dream_results,
             # Dynamic workflow step executor
             execute_dynamic_step,
             finalize_workflow_run,
