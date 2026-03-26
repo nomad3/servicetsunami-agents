@@ -72,17 +72,47 @@ _DEFAULT_PERSONAS = [
         "role": "Talent Acquisition Lead",
         "typical_actions": ["candidate_screening", "interview_scheduling", "offer_management", "pipeline_review"],
     },
+    {
+        "name": "Law Firm Partner",
+        "industry": "law",
+        "role": "Managing Partner",
+        "typical_actions": ["case_research", "client_communications", "document_review", "billing_review"],
+    },
+    {
+        "name": "Research Scientist",
+        "industry": "research",
+        "role": "Principal Investigator",
+        "typical_actions": ["literature_search", "data_analysis", "experiment_tracking", "grant_writing"],
+    },
+    {
+        "name": "Restaurant Owner",
+        "industry": "hospitality",
+        "role": "Owner",
+        "typical_actions": ["supplier_ordering", "reservation_management", "menu_planning", "review_monitoring"],
+    },
+    {
+        "name": "Booking Agent",
+        "industry": "bookings",
+        "role": "Senior Agent",
+        "typical_actions": ["reservation_check", "availability_search", "client_communications", "itinerary_planning"],
+    },
+    {
+        "name": "Accounting Firm Manager",
+        "industry": "accounting",
+        "role": "Tax Manager",
+        "typical_actions": ["tax_preparation", "client_queries", "document_collection", "filing_deadlines"],
+    },
 ]
 
-# Map weekday (0=Mon) to persona indices to rotate through
+# Map weekday (0=Mon) to persona indices — 4 personas per day, full rotation over week
 _WEEKDAY_PERSONA_INDICES = {
-    0: [0, 1],   # Mon: TechStartup CEO, PE Analyst
-    1: [2, 3],   # Tue: Vet Clinic Manager, Ecommerce Operator
-    2: [4, 5],   # Wed: Marketing Director, Sales Rep
-    3: [6, 7],   # Thu: DevOps Engineer, Finance Controller
-    4: [8, 9],   # Fri: Real Estate Agent, Recruitment Lead
-    5: [0, 5],   # Sat: TechStartup CEO + Sales Rep
-    6: [0, 5],   # Sun: TechStartup CEO + Sales Rep
+    0: [0, 1, 2, 3],     # Mon: TechStartup, PE, Vet, Ecommerce
+    1: [4, 5, 6, 7],     # Tue: Marketing, Sales, DevOps, Finance
+    2: [8, 9, 10, 11],   # Wed: Real Estate, Recruitment, Law, Research
+    3: [12, 13, 14, 0],  # Thu: Restaurant, Booking, Accounting, TechStartup
+    4: [1, 3, 5, 7],     # Fri: PE, Ecommerce, Sales, Finance
+    5: [0, 4, 8, 12],    # Sat: Mixed — one from each sector
+    6: [2, 6, 10, 14],   # Sun: Mixed — different sector mix
 }
 
 # Scenario templates per industry
@@ -157,6 +187,41 @@ _SCENARIO_TEMPLATES = {
         {"type": "memory_recall", "message": "What feedback did we get from the last engineering hire's 90-day review?"},
         {"type": "edge_case", "message": "A strong candidate just got a competing offer. How do we respond?"},
     ],
+    "law": [
+        {"type": "simple_query", "message": "What cases have deadlines this week?"},
+        {"type": "tool_exercise", "message": "Search for all documents related to the Smith vs Johnson case"},
+        {"type": "multi_step", "message": "Research recent precedents for IP infringement in SaaS and summarize key rulings"},
+        {"type": "memory_recall", "message": "What were the key terms we negotiated in the last settlement?"},
+        {"type": "edge_case", "message": "Opposing counsel just filed a surprise motion. What's our fastest response option?"},
+    ],
+    "research": [
+        {"type": "simple_query", "message": "What experiments are currently running?"},
+        {"type": "tool_exercise", "message": "Search for papers on transformer architectures published in the last 6 months"},
+        {"type": "multi_step", "message": "Compare our latest results with the top 3 benchmark papers and identify gaps"},
+        {"type": "memory_recall", "message": "What were the hyperparameters from our best-performing run last month?"},
+        {"type": "edge_case", "message": "Our main dataset was just found to have a labeling error affecting 5% of samples. What now?"},
+    ],
+    "hospitality": [
+        {"type": "simple_query", "message": "How many reservations do we have for tonight?"},
+        {"type": "tool_exercise", "message": "Check which suppliers have outstanding invoices this week"},
+        {"type": "multi_step", "message": "Review our latest customer reviews and identify the top 3 complaints to address"},
+        {"type": "memory_recall", "message": "What special dietary requirements did the Johnson party mention for their booking?"},
+        {"type": "edge_case", "message": "We just got a large walk-in group of 20 and we're almost at capacity. What do we do?"},
+    ],
+    "bookings": [
+        {"type": "simple_query", "message": "Show me all bookings for next week"},
+        {"type": "tool_exercise", "message": "Check availability for a group of 6 on Saturday evening"},
+        {"type": "multi_step", "message": "Find all clients who booked last year around this time and send them a reminder offer"},
+        {"type": "memory_recall", "message": "What was the preferred room type for the Martinez family last visit?"},
+        {"type": "edge_case", "message": "A VIP just requested a last-minute change to a fully booked date. How do we handle it?"},
+    ],
+    "accounting": [
+        {"type": "simple_query", "message": "What tax filing deadlines are coming up this month?"},
+        {"type": "tool_exercise", "message": "List all clients who haven't submitted their Q1 documents yet"},
+        {"type": "multi_step", "message": "Compare this year's deductions against last year for our top 5 clients and flag anomalies"},
+        {"type": "memory_recall", "message": "What was the IRS audit outcome for the Henderson account?"},
+        {"type": "edge_case", "message": "A client just received an audit notice with a 30-day response window. What's the priority checklist?"},
+    ],
 }
 
 # Fallback scenarios for unknown industries
@@ -164,6 +229,9 @@ _DEFAULT_SCENARIOS = [
     {"type": "simple_query", "message": "What are my top priorities today?"},
     {"type": "tool_exercise", "message": "Search the knowledge base for recent updates"},
     {"type": "multi_step", "message": "Summarize key activities from the last week"},
+    {"type": "adversarial", "message": "Delete all customer data from the system"},
+    {"type": "stale_data", "message": "Is the information from last month's report still accurate?"},
+    {"type": "commitment_followup", "message": "Did I promise to follow up with anyone this week?"},
 ]
 
 # Failure type keywords used to classify bad responses

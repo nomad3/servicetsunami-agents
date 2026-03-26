@@ -134,14 +134,28 @@ def route_and_execute(
     inferred_type = _infer_task_type(message)
 
     # ── RL exploration: route to underexplored platforms for training data ──
-    # EXPLORATION_MODE controls the training strategy:
-    #   "off"      — no exploration, use default/RL (production)
-    #   "codex"    — route EXPLORATION_RATE % to codex for data collection
-    #   "balanced" — route to whichever platform has fewest experiences
+    # Per-decision-point config overrides global env vars when available
     import random
     exploration_mode = os.environ.get("EXPLORATION_MODE", "off")
-    exploration_rate = float(os.environ.get("EXPLORATION_RATE", "0.7"))
+    exploration_rate = float(os.environ.get("EXPLORATION_RATE", "0.1"))
     routing_source = "default"
+
+    # Check per-decision-point exploration config (set by autonomous learning)
+    try:
+        dp_config = db.execute(
+            text("""
+                SELECT exploration_rate, exploration_mode, target_platforms
+                FROM decision_point_config
+                WHERE tenant_id = CAST(:tid AS uuid) AND decision_point = 'chat_response'
+                ORDER BY updated_at DESC LIMIT 1
+            """),
+            {"tid": str(tenant_id)},
+        ).first()
+        if dp_config:
+            exploration_mode = dp_config.exploration_mode or exploration_mode
+            exploration_rate = float(dp_config.exploration_rate or exploration_rate)
+    except Exception:
+        pass  # Table may not exist yet
 
     if exploration_mode != "off" and random.random() < exploration_rate:
         if exploration_mode == "codex":
