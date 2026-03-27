@@ -71,6 +71,15 @@ const ChatPage = () => {
     }
   }, [agentKits]);
 
+  // Abort any active stream on unmount
+  useEffect(() => {
+    return () => {
+      if (streamAbortRef.current) {
+        streamAbortRef.current.abort();
+      }
+    };
+  }, []);
+
   const loadReferenceData = async () => {
     try {
       const agentKitsResp = await agentKitService.getAll();
@@ -181,6 +190,12 @@ const ChatPage = () => {
   };
 
   const handleSelectSession = (session) => {
+    if (streamAbortRef.current) {
+      streamAbortRef.current.abort();
+      streamAbortRef.current = null;
+      setStreamingText('');
+      setPostingMessage(false);
+    }
     setSelectedSession(session);
     loadMessages(session.id);
   };
