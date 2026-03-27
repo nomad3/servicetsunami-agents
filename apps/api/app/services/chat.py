@@ -309,39 +309,34 @@ def _generate_agentic_response(
     except Exception:
         pass  # Never block response delivery for scoring
 
-    # Post-response knowledge extraction (async, non-blocking)
-    # Extracts entities, relations, and memories from the conversation turn
-    # so Luna learns and remembers across sessions.
+    # ── Post-response memory writes ──
+    # Capture ALL primitives before any background work — ORM objects are
+    # not safe to dereference after the request session commits.
+    _tenant_id = session.tenant_id  # uuid, not ORM lazy
+    _session_id = session.id
+    _user_message = user_message
+    _response_text = response_text
+    _recalled_names = (context or {}).get("recalled_entity_names", [])
+
+    # 1. Synchronous write-through for salient named entities from the turn.
+    #    This guarantees that proper nouns Luna just discussed are immediately
+    #    persisted — no daemon-thread race, no silent no-op.
     try:
-        import threading
-
-        def _extract_knowledge():
-            from app.db.session import SessionLocal as _SL
-            from app.services.knowledge_extraction import KnowledgeExtractionService
-
-            edb = _SL()
-            try:
-                extraction_service = KnowledgeExtractionService()
-                conversation_text = (
-                    f"User: {user_message}\n\nAssistant: {response_text}"
-                )
-                extraction_service.extract_from_content(
-                    edb,
-                    tenant_id=session.tenant_id,
-                    content=conversation_text,
-                    content_type="chat_transcript",
-                )
-                edb.commit()
-            except Exception:
-                edb.rollback()
-            finally:
-                edb.close()
-
-        threading.Thread(target=_extract_knowledge, daemon=True).start()
+        from app.services.knowledge_extraction import KnowledgeExtractionService
+        extraction_service = KnowledgeExtractionService()
+        conversation_text = f"User: {_user_message}\n\nAssistant: {_response_text}"
+        extraction_service.extract_from_content(
+            db,
+            tenant_id=_tenant_id,
+            content=conversation_text,
+            content_type="chat_transcript",
+        )
+        db.commit()
     except Exception:
-        pass  # Never block response delivery for extraction
+        db.rollback()  # don't let extraction failure poison the session
 
-    # Recall feedback: track which recalled entities were actually used in the response
+    # 2. Recall feedback — lightweight, safe in a thread since we only
+    #    use captured primitives.
     try:
         import threading
 
@@ -349,17 +344,16 @@ def _generate_agentic_response(
             from app.db.session import SessionLocal as _SL
             from app.models.memory_activity import MemoryActivity
 
-            recalled_entities = (context or {}).get("recalled_entity_names", [])
-            if not recalled_entities or not response_text:
+            if not _recalled_names or not _response_text:
                 return
 
-            response_lower = response_text.lower()
+            response_lower = _response_text.lower()
             edb = _SL()
             try:
-                for name in recalled_entities:
+                for name in _recalled_names:
                     used = name.lower() in response_lower
                     activity = MemoryActivity(
-                        tenant_id=session.tenant_id,
+                        tenant_id=_tenant_id,
                         event_type="recall_feedback",
                         description=f"Entity '{name}' recalled and {'used' if used else 'unused'} in response",
                         source="chat",
@@ -374,6 +368,6 @@ def _generate_agentic_response(
 
         threading.Thread(target=_recall_feedback, daemon=True).start()
     except Exception:
-        pass  # Never block response delivery for recall feedback
+        pass
 
     return assistant_msg

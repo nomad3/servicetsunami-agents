@@ -123,6 +123,11 @@ def route_and_execute(
     if features and hasattr(features, 'default_cli_platform') and features.default_cli_platform:
         platform = features.default_cli_platform
 
+    # Pin to Claude Code when the session has an active --resume session ID.
+    # Switching to Codex (one-shot) mid-conversation breaks context continuity.
+    _has_claude_session = (db_session_memory or {}).get("claude_code_cli_session_id")
+    _pin_to_claude = bool(_has_claude_session and platform == "claude_code")
+
     trust_profile = safety_trust.get_agent_trust_profile(
         db,
         tenant_id,
@@ -157,7 +162,7 @@ def route_and_execute(
     except Exception:
         pass  # Table may not exist yet
 
-    if exploration_mode != "off" and random.random() < exploration_rate:
+    if exploration_mode != "off" and random.random() < exploration_rate and not _pin_to_claude:
         if exploration_mode == "codex":
             logger.info("RL exploration: routing to codex (training mode, rate=%.0f%%)", exploration_rate * 100)
             platform = "codex"
@@ -175,7 +180,7 @@ def route_and_execute(
                     logger.info("RL exploration: routing to %s (least data: %d experiences)", platform, least["total"])
             except Exception:
                 pass
-    else:
+    elif not _pin_to_claude:
         # ── RL-learned routing: override platform if strong signal ──
         try:
             from app.services.rl_routing import get_routing_recommendation
