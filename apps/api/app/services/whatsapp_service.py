@@ -414,6 +414,12 @@ class WhatsAppService:
             self._statuses[key] = "disconnected"
             self._update_account_status(tenant_id, account_id, "disconnected")
             self._log_event(tenant_id, account_id, "connection_closed")
+            # Mute presence while WhatsApp is disconnected
+            try:
+                from app.services import luna_presence_service
+                luna_presence_service.update_state(tenant_id, privacy="muted")
+            except Exception:
+                pass
             # Schedule auto-reconnect
             asyncio.ensure_future(self._auto_reconnect(tenant_id, account_id))
 
@@ -429,6 +435,12 @@ class WhatsAppService:
             self._qr_codes.pop(key, None)
             self._update_account_status(tenant_id, account_id, "logged_out")
             self._log_event(tenant_id, account_id, "logged_out")
+            # Mute presence when WhatsApp session ends
+            try:
+                from app.services import luna_presence_service
+                luna_presence_service.update_state(tenant_id, privacy="muted")
+            except Exception:
+                pass
 
         # Inbound messages
         @client.event(MessageEv)

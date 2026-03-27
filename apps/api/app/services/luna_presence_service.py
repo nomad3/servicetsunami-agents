@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 _presence_store: Dict[str, dict] = {}
 _lock = threading.Lock()
 
-VALID_STATES = {"idle", "listening", "thinking", "responding", "focused", "alert", "sleep", "handoff", "private_mode", "error"}
+VALID_STATES = {"idle", "listening", "thinking", "responding", "focused", "alert", "sleep", "handoff", "private_mode", "error", "happy"}
 VALID_MOODS = {"calm", "warm", "playful", "serious", "empathetic", "neutral"}
 VALID_PRIVACY = {"open", "passive", "muted", "camera_off", "mic_off", "private"}
 VALID_TOOL_STATUS = {"idle", "running", "waiting", "error"}
@@ -57,12 +57,15 @@ def get_presence(tenant_id) -> dict:
         snap["connected_shells"] = list(snap.get("connected_shells", []))
 
     # Staleness: if last real update is old and state is active, force idle
+    # After 30 min of idle, transition to sleep
     updated_at = snap.get("updated_at")
-    if updated_at and snap["state"] in _ACTIVE_STATES:
+    if updated_at:
         try:
             last = datetime.fromisoformat(updated_at)
             age = (datetime.now(timezone.utc) - last).total_seconds()
-            if age > _STALENESS_SECONDS:
+            if age > 1800 and snap["state"] == "idle":
+                snap["state"] = "sleep"
+            elif age > _STALENESS_SECONDS and snap["state"] in _ACTIVE_STATES:
                 snap["state"] = "idle"
                 snap["tool_status"] = "idle"
         except (ValueError, TypeError):
@@ -121,6 +124,10 @@ def register_shell(tenant_id, shell_name: str) -> dict:
     with _lock:
         if tid not in _presence_store:
             _presence_store[tid] = _default_presence()
+        # Handoff: switching from a different active shell
+        old_shell = _presence_store[tid].get("active_shell")
+        if old_shell and old_shell != shell_name:
+            _presence_store[tid]["state"] = "handoff"
         shells = _presence_store[tid]["connected_shells"]
         if shell_name not in shells:
             shells.append(shell_name)

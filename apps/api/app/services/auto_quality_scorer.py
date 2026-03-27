@@ -188,6 +188,9 @@ async def _score_and_log(
         else:
             derived_mood = "calm"
         luna_presence_service.update_state(tenant_id, mood=derived_mood)
+        # High quality score triggers happy state
+        if adjusted_score >= 85:
+            luna_presence_service.update_state(tenant_id, state="happy")
     except Exception:
         pass
 
