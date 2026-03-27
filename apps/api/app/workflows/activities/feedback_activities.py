@@ -262,7 +262,7 @@ async def monitor_regression(tenant_id: str) -> dict:
 
                 # Create regression notification
                 notification = Notification(
-                    tenant_id=tenant_id,
+                    tenant_id=tenant_uuid,
                     source="autonomous_learning",
                     title=f"Regression Detected — {decision_point} policy reverted",
                     body=(

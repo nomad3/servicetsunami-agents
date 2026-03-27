@@ -38,6 +38,7 @@ def score_and_log_async(
     entities_recalled: list = None,
     rollout_experiment_id: Optional[str] = None,
     rollout_arm: Optional[str] = None,
+    routing_trajectory_id: Optional[str] = None,
 ):
     """Fire-and-forget: score response quality and log RL reward.
 
@@ -51,6 +52,7 @@ def score_and_log_async(
             tokens_used, response_time_ms, cost_usd,
             tools_called or [], entities_recalled or [],
             rollout_experiment_id, rollout_arm,
+            routing_trajectory_id,
         )),
         daemon=True,
     ).start()
@@ -72,6 +74,7 @@ async def _score_and_log(
     entities_recalled: list,
     rollout_experiment_id: Optional[str] = None,
     rollout_arm: Optional[str] = None,
+    routing_trajectory_id: Optional[str] = None,
 ):
     """Score the response with multi-dimensional rubric + consensus council, log as RL reward."""
     from app.services.local_inference import is_available, generate
@@ -256,6 +259,30 @@ async def _score_and_log(
                     )
                 except Exception as e:
                     logger.debug("Rollout reward update failed: %s", e)
+
+            # ── Backfill agent_routing experience with the same reward ──
+            # The routing decision that selected this platform should share credit
+            # for the response quality outcome.
+            if routing_trajectory_id:
+                try:
+                    from sqlalchemy import text as sa_text
+                    db.execute(sa_text("""
+                        UPDATE rl_experiences
+                        SET reward = :reward,
+                            reward_source = 'response_quality_backfill'
+                        WHERE tenant_id = CAST(:tid AS uuid)
+                          AND trajectory_id = CAST(:traj AS uuid)
+                          AND decision_point = 'agent_routing'
+                          AND reward IS NULL
+                    """), {
+                        "reward": reward,
+                        "tid": str(tenant_id),
+                        "traj": routing_trajectory_id,
+                    })
+                    db.commit()
+                    logger.debug("Backfilled agent_routing reward=%.3f for trajectory %s", reward, routing_trajectory_id[:8])
+                except Exception as e:
+                    logger.debug("agent_routing reward backfill failed: %s", e)
 
             # ── Decision gate: trigger provider council for high-value cases ──
             _maybe_trigger_provider_council(

@@ -65,13 +65,15 @@ async def track_cycle_cost(tenant_id: str, cycle_result: dict) -> dict:
         total_tokens = int(rl_cost_row.total_tokens or 0) + sim_tokens
         total_cost_usd = float(rl_cost_row.total_cost or 0.0) + sim_cost
 
-        # Log to cost_tracking_log
+        # Log to cost_tracking_log (upsert: accumulate tokens/cost if cycle reruns today)
         db.execute(text("""
             INSERT INTO cost_tracking_log
                 (tenant_id, cycle_date, activity_name, tokens_used, cost_usd, platform)
             VALUES
                 (CAST(:tid AS uuid), :today, 'learning_cycle', :tokens, :cost, 'mixed')
-            ON CONFLICT DO NOTHING
+            ON CONFLICT (tenant_id, cycle_date, activity_name) DO UPDATE
+                SET tokens_used = cost_tracking_log.tokens_used + EXCLUDED.tokens_used,
+                    cost_usd    = cost_tracking_log.cost_usd + EXCLUDED.cost_usd
         """), {
             "tid": tenant_id,
             "today": today,

@@ -530,7 +530,7 @@ async def generate_morning_report(
 
         # Persist as notification
         notification = Notification(
-            tenant_id=tenant_id,
+            tenant_id=tenant_uuid,
             source="autonomous_learning",
             title=f"Morning Learning Report — {datetime.utcnow().strftime('%Y-%m-%d')}",
             body=report_text,

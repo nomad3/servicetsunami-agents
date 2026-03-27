@@ -62,6 +62,7 @@ from .simulation import SimulationPersona, SimulationScenario, SimulationResult,
 from .proactive_action import ProactiveAction
 from .feedback_record import FeedbackRecord
 from .decision_point_config import DecisionPointConfig
+from .auto_dream_insight import AutoDreamInsight
 
 __all__ = [
     "Tenant", "User",
@@ -96,4 +97,5 @@ __all__ = [
     "ProactiveAction",
     "FeedbackRecord",
     "DecisionPointConfig",
+    "AutoDreamInsight",
 ]

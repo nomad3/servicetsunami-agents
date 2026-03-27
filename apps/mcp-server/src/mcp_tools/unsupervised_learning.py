@@ -48,7 +48,7 @@ async def get_skill_gaps(
         industry: Filter by industry (e.g. 'startups', 'sales', 'marketing')
         limit: Max results to return (default 20)
     """
-    tenant_id = await resolve_tenant_id(ctx)
+    tenant_id = resolve_tenant_id(ctx)
     pool = await _get_pool()
 
     conditions = ["tenant_id = $1"]
@@ -119,7 +119,7 @@ async def get_simulation_summary(
     Args:
         cycle_date: ISO date string (YYYY-MM-DD), defaults to today
     """
-    tenant_id = await resolve_tenant_id(ctx)
+    tenant_id = resolve_tenant_id(ctx)
     pool = await _get_pool()
 
     target_date = cycle_date or date.today().isoformat()
@@ -219,7 +219,7 @@ async def get_proactive_actions(
         status: Filter by status (pending, sent, acknowledged, dismissed). Default: pending
         limit: Max results to return (default 20)
     """
-    tenant_id = await resolve_tenant_id(ctx)
+    tenant_id = resolve_tenant_id(ctx)
     pool = await _get_pool()
 
     rows = await pool.fetch(
@@ -272,7 +272,7 @@ async def dismiss_proactive_action(
     Args:
         action_id: UUID of the proactive action to dismiss
     """
-    tenant_id = await resolve_tenant_id(ctx)
+    tenant_id = resolve_tenant_id(ctx)
     pool = await _get_pool()
 
     result = await pool.fetchrow(
@@ -314,7 +314,7 @@ async def submit_learning_feedback(
         feedback_type: One of: approval, rejection, direction, correction (default: direction)
         report_id: Optional reference to a specific morning report notification
     """
-    tenant_id = await resolve_tenant_id(ctx)
+    tenant_id = resolve_tenant_id(ctx)
     pool = await _get_pool()
 
     valid_types = {"approval", "rejection", "direction", "correction"}
