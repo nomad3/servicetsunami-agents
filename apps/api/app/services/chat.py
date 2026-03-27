@@ -293,4 +293,36 @@ def _generate_agentic_response(
     except Exception:
         pass  # Never block response delivery for scoring
 
+    # Post-response knowledge extraction (async, non-blocking)
+    # Extracts entities, relations, and memories from the conversation turn
+    # so Luna learns and remembers across sessions.
+    try:
+        import threading
+
+        def _extract_knowledge():
+            from app.db.session import SessionLocal as _SL
+            from app.services.knowledge_extraction import KnowledgeExtractionService
+
+            edb = _SL()
+            try:
+                extraction_service = KnowledgeExtractionService()
+                conversation_text = (
+                    f"User: {user_message}\n\nAssistant: {response_text}"
+                )
+                extraction_service.extract_from_content(
+                    edb,
+                    tenant_id=session.tenant_id,
+                    content=conversation_text,
+                    content_type="chat_transcript",
+                )
+                edb.commit()
+            except Exception:
+                edb.rollback()
+            finally:
+                edb.close()
+
+        threading.Thread(target=_extract_knowledge, daemon=True).start()
+    except Exception:
+        pass  # Never block response delivery for extraction
+
     return assistant_msg
