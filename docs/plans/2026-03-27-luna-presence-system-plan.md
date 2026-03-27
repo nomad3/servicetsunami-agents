@@ -7,6 +7,55 @@
 
 ---
 
+## Reuse Audit — What We Already Have
+
+The existing stack has **far more reusable infrastructure than expected**. ~40% of the work is connecting existing pieces, 60% is new UI/visualization.
+
+### SSE Streaming (ready)
+- `chat.py:141-193` has working SSE with `StreamingResponse` — add `presence_state` event type
+- `apps/web/src/services/chat.js` has SSE parser — extend for presence events
+- No WebSocket needed for M1-M2
+
+### State Management (template exists)
+- `ThemeContext.js` is the exact pattern to copy for `LunaPresenceContext`
+- `NotificationBell.js` has polling + badge UI — becomes Luna state indicator
+- `ChatPage.js` has streaming state management — extend for presence
+
+### Scoring → Emotion (already running)
+- `auto_quality_scorer.py` scores every response on 6 dimensions — map to mood:
+  - accuracy > 0.85 → `confident`, < 0.65 → `uncertain`
+  - response_time < 1s → `quick`, > 5s → `thinking`
+- `consensus_reviewer.py` has 3 reviewers including "Persona Reviewer" — sentiment already evaluated
+- `local_inference.py` has Qwen ready for cheap emotion classification
+
+### Animation/CSS (ready)
+- Glassmorphic sidebar: `backdrop-filter: blur(20px)` — Luna avatar container
+- `LoadingSpinner.css` has `pulse` and `shimmer` keyframes — adapt for Luna breathing
+- `animate.css` v4.1 installed — `fadeIn`, `slideUp` ready
+- Full dark/light CSS variable system in `index.css`
+
+### Device/Shell Model (partial)
+- `channel_accounts` already tracks connection lifecycle + status — device registry seed
+- `channel_events` already logs inbound/outbound events — shell event log
+- WhatsApp `ChatPresence` enum from neonize — `composing` / `paused` states
+- `memory_activities` event log — add Luna mood events
+
+### Backend Models to Extend (not create)
+- `ChatSession.memory_context` (JSON) — add `luna_mood`, `luna_emotion`
+- `ChannelAccount.status` — already has connection states
+- `Notification.source` — add `luna_state` source type
+- `MemoryActivity.event_type` — add `luna_mood_inferred`, `luna_emotion_detected`
+
+### What does NOT exist (must build new)
+- Luna face SVG/ASCII renderers
+- LunaAvatar React component
+- Presence API endpoint
+- Emotion classification prompt
+- State machine transition logic
+- Device bridge microservice (M4)
+
+---
+
 ## Stack Reality Check
 
 The current AgentProvision stack uses **JavaScript (not TypeScript)**, React 18, Bootstrap 5, and FastAPI. No WebSocket support exists — only SSE streaming. The master spec assumes TypeScript throughout, but the existing codebase is 100% JS. Plan adapts accordingly:
@@ -29,15 +78,15 @@ The current AgentProvision stack uses **JavaScript (not TypeScript)**, React 18,
 Ship Luna's identity into the existing web UI with a presence state model.
 
 ### Task 1.1 — Presence state model + API endpoint
-- **New file**: `apps/api/app/models/luna_presence.py`
-  - `LunaPresence` table: `id, tenant_id, state, mood, privacy, active_shell, connected_shells (JSON), tool_status, attention_target, updated_at`
+- **Option A (lean)**: Skip new table — store presence in `ChatSession.memory_context` JSON + `ChannelAccount` status fields. Presence is ephemeral state, not historical data.
+- **Option B (full)**: New `luna_presence` table if we want historical presence tracking.
+- **Recommended**: Option A for M1, Option B for M2 if needed.
 - **New file**: `apps/api/app/schemas/luna_presence.py`
   - `LunaPresenceSnapshot` Pydantic model matching the master spec
 - **New file**: `apps/api/app/api/v1/presence.py`
-  - `GET /presence` — current snapshot
+  - `GET /presence` — current snapshot (reads from in-memory cache or session)
   - `PUT /presence` — update state (internal, from agent pipeline)
-  - `GET /presence/stream` — SSE endpoint for real-time state changes
-- **Migration**: `apps/api/migrations/074_add_luna_presence.sql`
+  - `GET /presence/stream` — SSE endpoint (reuse pattern from `chat.py:141-193`)
 - Mount in `apps/api/app/api/v1/routes.py`
 
 ### Task 1.2 — Presence service (backend)
@@ -89,14 +138,29 @@ Ship Luna's identity into the existing web UI with a presence state model.
 ### Task 1.8 — Integrate into Layout + ChatPage
 - **Edit**: `apps/web/src/components/Layout.js`
   - Add `LunaAvatar` (sm, svg) in sidebar header, above navigation
+  - Reuse glassmorphic container from `.sidebar-brand` CSS
   - Add `LunaStateBadge` next to it
 - **Edit**: `apps/web/src/pages/ChatPage.js`
-  - Replace typing spinner with `LunaAvatar` (md) showing `thinking` state
-  - Show `responding` while streaming
+  - Replace `LoadingSpinner` typing indicator with `LunaAvatar` (md) showing `thinking` state
+  - Show `responding` while streaming (hook into existing `isStreaming` state)
   - Show `idle` after response complete
 - **New file**: `apps/web/src/context/LunaPresenceContext.js`
-  - Polls `/api/v1/presence` every 3s (or SSE when available)
-  - Provides `usePresence()` hook to all components
+  - Copy `ThemeContext.js` pattern exactly
+  - Start with polling (follow `NotificationBell.js` pattern, 5s interval)
+  - Later upgrade to SSE via `chat.js` streaming pattern
+  - Provides `useLunaPresence()` hook to all components
+
+### Task 1.9a — Emotion detection from scoring (zero new inference cost)
+- **Edit**: `apps/api/app/services/auto_quality_scorer.py`
+  - After scoring, derive mood from existing rubric dimensions:
+    - `accuracy >= 22/25` → mood `confident`
+    - `helpfulness >= 18/20` → mood `warm`
+    - `tool_usage >= 18/20` → mood `focused`
+    - `overall < 50` → mood `uncertain`
+    - Default → `calm`
+  - Store derived mood in `reward_components["luna_mood"]`
+  - Update presence state via `luna_presence_service.update_state()`
+- No additional Ollama call needed — piggybacks on existing scoring
 
 ### Task 1.9 — Luna design tokens + theme
 - **New file**: `apps/web/src/components/luna/lunaTokens.js`
