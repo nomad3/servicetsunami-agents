@@ -77,6 +77,8 @@ def generate_cli_instructions(
     relevant_memories = memory_context.get("relevant_memories", [])
     relevant_relations = memory_context.get("relevant_relations", [])
 
+    entity_observations = memory_context.get("entity_observations", {})
+
     if relevant_entities:
         lines.append("## Relevant Entities")
         lines.append("")
@@ -84,10 +86,15 @@ def generate_cli_instructions(
             name = entity.get("name", "")
             etype = entity.get("type", "")
             desc = entity.get("description", "")
+            sim = entity.get("similarity")
             summary = f"**{name}** ({etype})"
             if desc:
                 summary += f": {desc}"
             lines.append(f"- {summary}")
+            # Inject observations (facts) for this entity
+            obs = entity_observations.get(name, [])
+            for o in obs[:3]:
+                lines.append(f"  - {o.get('text', '')}")
         lines.append("")
 
     if relevant_memories:
