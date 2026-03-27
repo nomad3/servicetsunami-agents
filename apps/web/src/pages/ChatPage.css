@@ -79,4 +79,16 @@
   .chat-main {
     width: 100% !important;
   }
+  /* Collapse Tamagotchi panel on mobile */
+  .luna-tamagotchi-panel {
+    min-height: 120px !important;
+    padding: 12px 12px 8px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .luna-tamagotchi-panel {
+    min-height: 100px !important;
+    padding: 8px 8px 6px !important;
+  }
 }

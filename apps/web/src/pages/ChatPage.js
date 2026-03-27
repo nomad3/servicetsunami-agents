@@ -456,44 +456,81 @@ const ChatPage = () => {
             {globalError && <Alert variant="danger">{globalError}</Alert>}
             {selectedSession ? (
               <Card className="shadow-sm">
-                <Card.Header className="p-0">
-                  {/* Luna presence banner — avatar + state + session info */}
-                  <div className="d-flex align-items-center gap-3 px-3 py-2"
-                    style={{
-                      background: 'var(--bs-tertiary-bg, rgba(255,255,255,0.03))',
-                      borderBottom: '1px solid var(--bs-border-color, rgba(255,255,255,0.08))',
-                    }}
-                  >
-                    <LunaAvatar
-                      state={postingMessage ? 'thinking' : lunaState}
-                      mood={lunaMood}
-                      size="lg"
-                      animated
-                    />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <h5 className="mb-0">{selectedSession.title || t('agentSession')}</h5>
-                      <small className="text-muted">
-                        {getSessionSubtitle(selectedSession)}
-                      </small>
-                    </div>
-                    {window.speechSynthesis && (
-                      <Button
-                        size="sm"
-                        variant={ttsEnabled ? 'primary' : 'outline-secondary'}
-                        title={ttsEnabled ? 'Voice responses ON — click to turn off' : 'Turn on voice responses'}
-                        onClick={() => {
-                          if (ttsEnabled) window.speechSynthesis.cancel();
-                          setTtsEnabled(v => !v);
-                          setSpeakingMessageId(null);
-                        }}
-                        style={{ fontSize: '1rem' }}
-                      >
-                        {ttsEnabled ? '🔊' : '🔇'}
-                      </Button>
-                    )}
+                {/* ═══ Luna Tamagotchi Panel ═══ */}
+                <div
+                  role="status"
+                  aria-live="polite"
+                  aria-label={`Luna is ${postingMessage ? 'thinking' : lunaState}`}
+                  className="luna-tamagotchi-panel"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '20px 16px 12px',
+                    minHeight: 200,
+                    background: 'radial-gradient(ellipse at 50% 60%, var(--bs-tertiary-bg, rgba(30,45,65,0.6)) 0%, transparent 70%)',
+                    borderBottom: '1px solid var(--bs-border-color, rgba(255,255,255,0.08))',
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {/* Ambient glow layers — cross-fade via opacity (CSS can't transition gradients) */}
+                  {[
+                    { key: 'thinking', color: 'rgba(255,179,71,0.10)', active: postingMessage },
+                    { key: 'listening', color: 'rgba(107,181,255,0.10)', active: !postingMessage && lunaState === 'listening' },
+                    { key: 'responding', color: 'rgba(94,197,176,0.10)', active: !postingMessage && lunaState === 'responding' },
+                    { key: 'idle', color: 'rgba(240,230,211,0.04)', active: !postingMessage && !['listening', 'responding'].includes(lunaState) },
+                  ].map(g => (
+                    <div key={g.key} style={{
+                      position: 'absolute',
+                      top: '50%', left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                      width: 280, height: 280,
+                      borderRadius: '50%',
+                      background: `radial-gradient(circle, ${g.color} 0%, transparent 70%)`,
+                      opacity: g.active ? 1 : 0,
+                      transition: 'opacity 0.8s ease',
+                      pointerEvents: 'none',
+                    }} />
+                  ))}
+                  <LunaAvatar
+                    state={postingMessage ? 'thinking' : lunaState}
+                    mood={lunaMood}
+                    size="xl"
+                    animated
+                  />
+                  <div style={{ marginTop: 4, textAlign: 'center', zIndex: 1 }}>
+                    <h6 className="mb-0" style={{ fontSize: '0.95rem', opacity: 0.9 }}>
+                      {selectedSession.title || t('agentSession')}
+                    </h6>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>
+                      {getSessionSubtitle(selectedSession)}
+                    </small>
                   </div>
-                </Card.Header>
-                <Card.Body style={{ height: '60vh', display: 'flex', flexDirection: 'column' }}>
+                  {/* TTS toggle */}
+                  {window.speechSynthesis && (
+                    <Button
+                      size="sm"
+                      variant={ttsEnabled ? 'primary' : 'outline-secondary'}
+                      title={ttsEnabled ? 'Voice responses ON — click to turn off' : 'Turn on voice responses'}
+                      aria-label={ttsEnabled ? 'Disable voice responses' : 'Enable voice responses'}
+                      onClick={() => {
+                        if (ttsEnabled) window.speechSynthesis.cancel();
+                        setTtsEnabled(v => !v);
+                        setSpeakingMessageId(null);
+                      }}
+                      style={{
+                        position: 'absolute', top: 8, right: 8,
+                        fontSize: '0.8rem', opacity: 0.7,
+                      }}
+                    >
+                      {ttsEnabled ? '🔊' : '🔇'}
+                    </Button>
+                  )}
+                </div>
+                {/* ═══ Chat messages below ═══ */}
+                <Card.Body style={{ height: '45vh', display: 'flex', flexDirection: 'column' }}>
                   <div style={{ flex: 1, overflowY: 'auto' }}>
                     {loadingMessages ? (
                       <div className="d-flex align-items-center gap-2 text-muted">
@@ -505,14 +542,11 @@ const ChatPage = () => {
                         {messages.map((message) => renderMessage(message))}
                         {postingMessage && !streamingText && (
                           <ListGroup.Item className="border-0 py-2">
-                            <div className="d-flex align-items-center gap-3 text-muted" style={{ fontSize: '0.9rem' }}>
-                              <LunaAvatar state={lunaState === 'idle' ? 'thinking' : lunaState} mood={lunaMood} size="md" animated />
-                              <div className="d-flex align-items-center gap-2">
-                                <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px' }} />
-                                <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.2s' }} />
-                                <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.4s' }} />
-                                <span className="ms-1">{t('thinking')}</span>
-                              </div>
+                            <div className="d-flex align-items-center gap-2 text-muted" style={{ fontSize: '0.9rem' }}>
+                              <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px' }} />
+                              <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.2s' }} />
+                              <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.4s' }} />
+                              <span className="ms-1">{t('thinking')}</span>
                             </div>
                           </ListGroup.Item>
                         )}
