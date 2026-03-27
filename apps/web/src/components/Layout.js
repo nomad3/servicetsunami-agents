@@ -19,7 +19,10 @@ import {
 } from 'react-icons/fa';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../App';
+import { useLunaPresence } from '../context/LunaPresenceContext';
 import { useTheme } from '../context/ThemeContext';
+import LunaAvatar from './luna/LunaAvatar';
+import LunaStateBadge from './luna/LunaStateBadge';
 import NotificationBell from './NotificationBell';
 import './Layout.css';
 
@@ -29,6 +32,9 @@ const Layout = ({ children }) => {
   const location = useLocation();
   const { t, i18n } = useTranslation('common');
   const { theme, toggleTheme } = useTheme();
+  const lunaCtx = useLunaPresence();
+  const lunaState = lunaCtx?.presence?.state || 'idle';
+  const lunaMood = lunaCtx?.presence?.mood || 'calm';
 
   const currentLanguage = (i18n.language || 'en').split('-')[0];
   const languageOptions = useMemo(
@@ -91,8 +97,11 @@ const Layout = ({ children }) => {
         <div className="sidebar-header">
           <div className="d-flex align-items-center justify-content-between">
             <Link to="/dashboard" className="brand-link">
-              <img src={`${process.env.PUBLIC_URL}/assets/brand/ap-icon.png`} alt="" width={28} height={28} style={{ borderRadius: 6 }} />
-              <span className="brand-text">{t('brand')}</span>
+              <LunaAvatar state={lunaState} mood={lunaMood} size="sm" animated />
+              <div className="d-flex flex-column">
+                <span className="brand-text">{t('brand')}</span>
+                <LunaStateBadge state={lunaState} size="xs" />
+              </div>
             </Link>
             <div className="d-flex align-items-center gap-1">
               <NotificationBell />

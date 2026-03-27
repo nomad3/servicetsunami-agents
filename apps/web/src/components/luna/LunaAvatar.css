@@ -1,0 +1,426 @@
+/* ═══════════════════════════════════════════
+   Luna Avatar Component Styles
+   ═══════════════════════════════════════════ */
+
+.luna-avatar {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.luna-face-wrap {
+  position: relative;
+  overflow: visible;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.luna-face-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Theme-aware image filter ── */
+[data-bs-theme="dark"] .luna-face-img {
+  filter: invert(0.88) brightness(1.1);
+}
+
+[data-bs-theme="light"] .luna-face-img {
+  filter: brightness(0.9);
+}
+
+/* ── Glow behind face ── */
+.luna-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 120%;
+  height: 120%;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Floating emotes above head ── */
+.luna-emote {
+  font-size: 10px;
+  text-align: center;
+  height: 18px;
+  line-height: 18px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+  color: var(--color-text-secondary, #8b9bb0);
+  opacity: 0.7;
+  text-shadow: 0 0 10px currentColor;
+}
+
+/* ═══════════════════════════════════════════
+   STATE-SPECIFIC GLOW EFFECTS
+   ═══════════════════════════════════════════ */
+
+.luna-glow-idle {
+  background: radial-gradient(circle, rgba(240,230,211,0.08) 0%, transparent 70%);
+}
+
+.luna-glow-listening {
+  background: radial-gradient(circle, rgba(107,181,255,0.2) 0%, transparent 70%);
+}
+
+.luna-glow-thinking {
+  background: radial-gradient(circle, rgba(255,179,71,0.15) 0%, transparent 70%);
+}
+
+.luna-glow-responding {
+  background: radial-gradient(circle, rgba(94,197,176,0.18) 0%, transparent 70%);
+}
+
+.luna-glow-happy {
+  background: radial-gradient(circle, rgba(255,215,100,0.22) 0%, transparent 70%);
+}
+
+.luna-glow-focused {
+  background: radial-gradient(circle, rgba(107,140,255,0.12) 0%, transparent 70%);
+}
+
+.luna-glow-alert {
+  background: radial-gradient(circle, rgba(255,140,50,0.25) 0%, transparent 70%);
+}
+
+.luna-glow-empathetic {
+  background: radial-gradient(circle, rgba(255,180,200,0.15) 0%, transparent 70%);
+}
+
+.luna-glow-sleep {
+  background: radial-gradient(circle, rgba(74,111,165,0.08) 0%, transparent 70%);
+}
+
+.luna-glow-private_mode {
+  background: none;
+}
+
+.luna-glow-error {
+  background: radial-gradient(circle, rgba(255,80,80,0.2) 0%, transparent 70%);
+}
+
+.luna-glow-playful {
+  background: radial-gradient(circle, rgba(180,130,255,0.18) 0%, transparent 70%);
+}
+
+.luna-glow-handoff {
+  background: radial-gradient(circle, rgba(139,155,176,0.1) 0%, transparent 70%);
+}
+
+/* ═══════════════════════════════════════════
+   STATE-SPECIFIC ANIMATIONS (only when animated)
+   ═══════════════════════════════════════════ */
+
+/* IDLE */
+.luna-animated.luna-state-idle .luna-face-img {
+  animation: luna-gentle-blink 4s ease-in-out infinite;
+}
+.luna-animated.luna-state-idle .luna-emote {
+  opacity: 0.3;
+  animation: luna-float-up 3s ease-in-out infinite;
+}
+
+/* LISTENING */
+.luna-animated.luna-state-listening .luna-glow {
+  animation: luna-pulse-glow 1.6s ease-in-out infinite;
+}
+.luna-animated.luna-state-listening .luna-emote {
+  color: #6bb5ff;
+  animation: luna-bounce-emote 0.8s ease-in-out infinite;
+}
+[data-bs-theme="dark"] .luna-animated.luna-state-listening .luna-face-img {
+  filter: invert(0.88) brightness(1.2);
+}
+
+/* THINKING */
+.luna-animated.luna-state-thinking .luna-glow {
+  animation: luna-rotate-glow 3s linear infinite;
+}
+.luna-animated.luna-state-thinking .luna-face-img {
+  animation: luna-think-drift 3s ease-in-out infinite;
+}
+.luna-animated.luna-state-thinking .luna-emote {
+  color: #ffb347;
+  animation: luna-spin-emote 2s ease-in-out infinite;
+}
+
+/* RESPONDING */
+.luna-animated.luna-state-responding .luna-glow {
+  animation: luna-pulse-glow 2s ease-in-out infinite;
+}
+.luna-animated.luna-state-responding .luna-emote {
+  color: #5ec5b0;
+  animation: luna-type-bounce 0.4s ease-in-out infinite alternate;
+}
+[data-bs-theme="dark"] .luna-animated.luna-state-responding .luna-face-img {
+  filter: invert(0.88) brightness(1.25);
+}
+
+/* HAPPY */
+.luna-animated.luna-state-happy .luna-glow {
+  animation: luna-pulse-glow 1.4s ease-in-out infinite;
+}
+.luna-animated.luna-state-happy .luna-face-img {
+  animation: luna-happy-bounce 1.2s ease-in-out infinite;
+}
+.luna-animated.luna-state-happy .luna-emote {
+  color: #ffd764;
+  animation: luna-scatter-emotes 1.5s ease-in-out infinite;
+}
+[data-bs-theme="dark"] .luna-animated.luna-state-happy .luna-face-img {
+  filter: invert(0.88) brightness(1.3);
+}
+
+/* FOCUSED */
+.luna-animated.luna-state-focused .luna-emote {
+  color: #6b8cff;
+  opacity: 0.6;
+}
+[data-bs-theme="dark"] .luna-animated.luna-state-focused .luna-face-img {
+  filter: invert(0.88) brightness(1.0) contrast(1.15);
+}
+
+/* ALERT */
+.luna-animated.luna-state-alert .luna-glow {
+  animation: luna-flash-glow 0.6s ease-in-out infinite;
+}
+.luna-animated.luna-state-alert .luna-face-img {
+  animation: luna-shake 0.3s ease-in-out infinite;
+}
+.luna-animated.luna-state-alert .luna-emote {
+  color: #ff8c32;
+  animation: luna-alert-pop 0.6s ease-in-out infinite;
+}
+[data-bs-theme="dark"] .luna-animated.luna-state-alert .luna-face-img {
+  filter: invert(0.88) brightness(1.15);
+}
+
+/* EMPATHETIC */
+.luna-animated.luna-state-empathetic .luna-glow {
+  animation: luna-pulse-glow 2.5s ease-in-out infinite;
+}
+.luna-animated.luna-state-empathetic .luna-face-img {
+  animation: luna-gentle-tilt 3s ease-in-out infinite;
+}
+.luna-animated.luna-state-empathetic .luna-emote {
+  color: #ffb4c8;
+  animation: luna-float-up 2s ease-in-out infinite;
+}
+
+/* SLEEP */
+.luna-animated.luna-state-sleep .luna-face-img {
+  animation: luna-sleep-breathe 5s ease-in-out infinite;
+  opacity: 0.6;
+}
+.luna-animated.luna-state-sleep .luna-emote {
+  color: #4a6fa5;
+  animation: luna-zzz-float 2s ease-in-out infinite;
+}
+[data-bs-theme="dark"] .luna-animated.luna-state-sleep .luna-face-img {
+  filter: invert(0.88) brightness(0.6);
+}
+[data-bs-theme="light"] .luna-animated.luna-state-sleep .luna-face-img {
+  filter: brightness(0.6);
+}
+
+/* PRIVATE MODE */
+.luna-animated.luna-state-private_mode .luna-face-img {
+  opacity: 0.5;
+}
+.luna-animated.luna-state-private_mode .luna-emote {
+  color: #888;
+  opacity: 0.8;
+}
+[data-bs-theme="dark"] .luna-animated.luna-state-private_mode .luna-face-img {
+  filter: invert(0.88) brightness(0.5);
+}
+[data-bs-theme="light"] .luna-animated.luna-state-private_mode .luna-face-img {
+  filter: brightness(0.5);
+}
+
+/* ERROR */
+.luna-animated.luna-state-error .luna-glow {
+  animation: luna-flash-glow 0.4s ease-in-out infinite;
+}
+.luna-animated.luna-state-error .luna-face-img {
+  animation: luna-error-glitch 0.2s ease-in-out infinite;
+}
+.luna-animated.luna-state-error .luna-emote {
+  color: #ff5050;
+  animation: luna-error-shake 0.15s ease-in-out infinite;
+}
+[data-bs-theme="dark"] .luna-animated.luna-state-error .luna-face-img {
+  filter: invert(0.88) brightness(0.85) hue-rotate(330deg);
+}
+[data-bs-theme="light"] .luna-animated.luna-state-error .luna-face-img {
+  filter: brightness(0.85) hue-rotate(330deg);
+}
+
+/* PLAYFUL */
+.luna-animated.luna-state-playful .luna-glow {
+  animation: luna-rainbow-glow 2s ease-in-out infinite;
+}
+.luna-animated.luna-state-playful .luna-face-img {
+  animation: luna-playful-wiggle 1s ease-in-out infinite;
+}
+.luna-animated.luna-state-playful .luna-emote {
+  color: #b482ff;
+  animation: luna-scatter-emotes 1s ease-in-out infinite;
+}
+[data-bs-theme="dark"] .luna-animated.luna-state-playful .luna-face-img {
+  filter: invert(0.88) brightness(1.25);
+}
+
+/* HANDOFF */
+.luna-animated.luna-state-handoff .luna-emote {
+  color: #8b9bb0;
+  opacity: 0.6;
+}
+
+/* ═══════════════════════════════════════════
+   MOOD SUBTLE MODIFICATIONS
+   ═══════════════════════════════════════════ */
+
+.luna-mood-calm {
+  /* Default — no extra modifications */
+}
+
+.luna-mood-warm .luna-glow {
+  filter: saturate(1.2);
+}
+
+.luna-mood-urgent .luna-glow {
+  filter: saturate(1.4) brightness(1.1);
+}
+
+.luna-mood-curious .luna-emote {
+  opacity: 0.9 !important;
+}
+
+.luna-mood-neutral {
+  filter: saturate(0.85);
+}
+
+/* ═══════════════════════════════════════════
+   KEYFRAME ANIMATIONS
+   ═══════════════════════════════════════════ */
+
+@keyframes luna-gentle-blink {
+  0%, 85%, 100% { transform: scaleY(1); }
+  90% { transform: scaleY(0.92); }
+}
+
+@keyframes luna-pulse-glow {
+  0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  50% { opacity: 0.6; transform: translate(-50%, -50%) scale(1.1); }
+}
+
+@keyframes luna-flash-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes luna-rotate-glow {
+  0% { filter: hue-rotate(0deg); }
+  100% { filter: hue-rotate(30deg); }
+}
+
+@keyframes luna-bounce-emote {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes luna-spin-emote {
+  0% { transform: rotate(0deg); }
+  25% { transform: rotate(15deg); }
+  75% { transform: rotate(-15deg); }
+  100% { transform: rotate(0deg); }
+}
+
+@keyframes luna-type-bounce {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-4px); }
+}
+
+@keyframes luna-scatter-emotes {
+  0%, 100% { transform: scale(1); }
+  25% { transform: scale(1.1) rotate(5deg); }
+  75% { transform: scale(1.1) rotate(-5deg); }
+}
+
+@keyframes luna-think-drift {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(3px) translateY(-2px); }
+}
+
+@keyframes luna-happy-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes luna-shake {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(1deg) translateX(1px); }
+  75% { transform: rotate(-1deg) translateX(-1px); }
+}
+
+@keyframes luna-alert-pop {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+}
+
+@keyframes luna-gentle-tilt {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: rotate(-2deg); }
+}
+
+@keyframes luna-sleep-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.01); }
+}
+
+@keyframes luna-zzz-float {
+  0% { transform: translateY(0); opacity: 0.8; }
+  50% { transform: translateY(-12px) translateX(4px); opacity: 0.4; }
+  100% { transform: translateY(0); opacity: 0.8; }
+}
+
+@keyframes luna-error-glitch {
+  0%, 100% { transform: translateX(0); }
+  33% { transform: translateX(-2px) skewX(2deg); }
+  66% { transform: translateX(2px) skewX(-2deg); }
+}
+
+@keyframes luna-error-shake {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(3px); }
+}
+
+@keyframes luna-playful-wiggle {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(3deg); }
+  75% { transform: rotate(-3deg); }
+}
+
+@keyframes luna-rainbow-glow {
+  0% { filter: hue-rotate(0deg); }
+  50% { filter: hue-rotate(40deg); }
+  100% { filter: hue-rotate(0deg); }
+}
+
+@keyframes luna-float-up {
+  0%, 100% { transform: translateY(0); opacity: 0.5; }
+  50% { transform: translateY(-6px); opacity: 0.8; }
+}
