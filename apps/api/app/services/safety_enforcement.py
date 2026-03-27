@@ -104,6 +104,15 @@ def _apply_agent_autonomy_restrictions(
     result.trust_source = "agent_trust_profile"
 
     if result.autonomy_tier == AutonomyTier.OBSERVE_ONLY:
+        # Allow read-only tools even for observe-only agents — they need to
+        # search/read to build trust evidence. Blocking everything creates a
+        # chicken-and-egg deadlock where the agent can never promote itself.
+        if result.risk_class.value == "read_only" and result.side_effect_level.value == "none":
+            return _escalate_decision(
+                result,
+                PolicyDecision.ALLOW_WITH_LOGGING,
+                f"Agent '{request.agent_slug}' is restricted to observe-only autonomy (read-only allowed).",
+            )
         return _escalate_decision(
             result,
             PolicyDecision.BLOCK,
