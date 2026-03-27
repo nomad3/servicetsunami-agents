@@ -7,6 +7,8 @@ import { useAuth } from '../App';
 import Layout from '../components/Layout';
 import FeedbackActions from '../components/chat/FeedbackActions';
 import ReportVisualization from '../components/chat/ReportVisualization';
+import LunaAvatar from '../components/luna/LunaAvatar';
+import { useLunaPresence } from '../context/LunaPresenceContext';
 import agentKitService from '../services/agentKit';
 import chatService from '../services/chat';
 import './ChatPage.css';
@@ -19,6 +21,9 @@ const initialSessionState = {
 const ChatPage = () => {
   const { t } = useTranslation('chat');
   const auth = useAuth();
+  const lunaCtx = useLunaPresence();
+  const lunaState = lunaCtx?.presence?.state || 'idle';
+  const lunaMood = lunaCtx?.presence?.mood || 'calm';
   const [sessions, setSessions] = useState([]);
   const [agentKits, setAgentKits] = useState([]);
   const [selectedSession, setSelectedSession] = useState(null);
@@ -488,11 +493,14 @@ const ChatPage = () => {
                         {messages.map((message) => renderMessage(message))}
                         {postingMessage && !streamingText && (
                           <ListGroup.Item className="border-0 py-2">
-                            <div className="d-flex align-items-center gap-2 text-muted" style={{ fontSize: '0.9rem' }}>
-                              <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px' }} />
-                              <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.2s' }} />
-                              <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.4s' }} />
-                              <span className="ms-1">{t('thinking')}</span>
+                            <div className="d-flex align-items-center gap-3 text-muted" style={{ fontSize: '0.9rem' }}>
+                              <LunaAvatar state={lunaState === 'idle' ? 'thinking' : lunaState} mood={lunaMood} size="md" animated />
+                              <div className="d-flex align-items-center gap-2">
+                                <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px' }} />
+                                <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.2s' }} />
+                                <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.4s' }} />
+                                <span className="ms-1">{t('thinking')}</span>
+                              </div>
                             </div>
                           </ListGroup.Item>
                         )}

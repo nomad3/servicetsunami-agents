@@ -7,6 +7,7 @@ import base64
 import io
 import inspect
 import logging
+import socket
 import uuid
 from datetime import datetime
 from typing import Dict, Optional
@@ -136,8 +137,24 @@ class WhatsAppService:
         self._lid_phone_cache: Dict[str, str] = {}  # LID→phone cache for resolved numbers
         self._db_url = db_url
 
+    WHATSAPP_CONNECT_TIMEOUT = 5  # seconds for pre-flight check
+
     def _key(self, tenant_id: str, account_id: str = "default") -> str:
         return f"{tenant_id}:{account_id}"
+
+    @staticmethod
+    def _is_whatsapp_reachable(timeout: int = 5) -> bool:
+        """Pre-flight TCP check to web.whatsapp.com:443.
+
+        Neonize's Go code panics (kills process) on TLS handshake timeout,
+        so we verify network connectivity before calling client.connect().
+        """
+        try:
+            sock = socket.create_connection(("web.whatsapp.com", 443), timeout=timeout)
+            sock.close()
+            return True
+        except (OSError, socket.timeout):
+            return False
 
     def _client_name(self, tenant_id: str, account_id: str = "default") -> str:
         import os
@@ -382,6 +399,12 @@ class WhatsAppService:
             self._update_account_status(tenant_id, account_id, "connected", phone=phone)
             self._log_event(tenant_id, account_id, "connection_opened")
             self._save_session_to_db(tenant_id, account_id)
+            # Register whatsapp shell in presence
+            try:
+                from app.services import luna_presence_service
+                luna_presence_service.register_shell(tenant_id, "whatsapp")
+            except Exception:
+                pass
 
         # Disconnected — save session (keys may have rotated), then auto-reconnect
         @client.event(DisconnectedEv)
@@ -442,8 +465,13 @@ class WhatsAppService:
             return
 
         try:
-            await self.reconnect(tenant_id, account_id)
-            logger.info(f"Auto-reconnect initiated for {key}")
+            result = await self.reconnect(tenant_id, account_id)
+            if result.get("status") == "unreachable":
+                logger.warning(f"Auto-reconnect skipped for {key} — network unreachable, will retry")
+                # Schedule another attempt (count already incremented)
+                asyncio.ensure_future(self._auto_reconnect(tenant_id, account_id))
+            else:
+                logger.info(f"Auto-reconnect initiated for {key}")
         except Exception:
             logger.exception(f"Auto-reconnect failed for {key}")
 
@@ -584,6 +612,13 @@ class WhatsAppService:
                         return
         finally:
             db.close()
+
+        # Update presence: listening on whatsapp
+        try:
+            from app.services import luna_presence_service
+            luna_presence_service.update_state(tenant_id, state="listening", active_shell="whatsapp")
+        except Exception:
+            pass
 
         logger.info(f"Inbound DM from {sender_phone} (jid={sender_jid}) in {key}: {text[:100]}")
         self._log_event(
@@ -1031,6 +1066,18 @@ class WhatsAppService:
             finally:
                 db.close()
 
+        # Pre-flight: verify WhatsApp is reachable before connect() —
+        # neonize Go code panics (kills process) on TLS handshake timeout.
+        reachable = await asyncio.get_event_loop().run_in_executor(
+            None, self._is_whatsapp_reachable, self.WHATSAPP_CONNECT_TIMEOUT
+        )
+        if not reachable:
+            logger.warning(f"WhatsApp unreachable, cannot start pairing for {key}")
+            self._statuses[key] = "disconnected"
+            self._update_account_status(tenant_id, account_id, "disconnected",
+                                        error="WhatsApp servers unreachable")
+            return {"error": "WhatsApp servers are currently unreachable. Check network connectivity."}
+
         # Create client and start connection (QR will be emitted via callback)
         client = self._create_client(tenant_id, account_id)
         self._clients[key] = client
@@ -1273,6 +1320,18 @@ class WhatsAppService:
         task = self._tasks.pop(key, None)
         if task and not task.done():
             task.cancel()
+
+        # Pre-flight: verify WhatsApp is reachable before connect() —
+        # neonize Go code panics (kills process) on TLS handshake timeout.
+        reachable = await asyncio.get_event_loop().run_in_executor(
+            None, self._is_whatsapp_reachable, self.WHATSAPP_CONNECT_TIMEOUT
+        )
+        if not reachable:
+            logger.warning(f"WhatsApp unreachable, skipping reconnect for {key}")
+            self._statuses[key] = "disconnected"
+            self._update_account_status(tenant_id, account_id, "disconnected",
+                                        error="WhatsApp servers unreachable — will retry")
+            return {"status": "unreachable"}
 
         # Reconnect (will restore session from DB if auth state exists)
         client = self._create_client(tenant_id, account_id)

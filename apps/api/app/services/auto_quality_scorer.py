@@ -174,6 +174,23 @@ async def _score_and_log(
         platform,
     )
 
+    # Derive mood from quality scores and update presence
+    try:
+        from app.services import luna_presence_service
+        accuracy = breakdown.get("accuracy", 0) if isinstance(breakdown, dict) else 0
+        helpfulness = breakdown.get("helpfulness", 0) if isinstance(breakdown, dict) else 0
+        if adjusted_score < 50:
+            derived_mood = "serious"
+        elif accuracy >= 22:
+            derived_mood = "warm"
+        elif helpfulness >= 18:
+            derived_mood = "warm"
+        else:
+            derived_mood = "calm"
+        luna_presence_service.update_state(tenant_id, mood=derived_mood)
+    except Exception:
+        pass
+
     if not consensus.passed:
         logger.info("Consensus FAILED for agent=%s — issues: %s", agent_slug, "; ".join(consensus.all_issues[:3]))
 

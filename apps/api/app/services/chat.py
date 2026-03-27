@@ -289,6 +289,13 @@ def _generate_agentic_response(
         content=response_text, context=context,
     )
 
+    # Update presence: idle (response delivered)
+    try:
+        from app.services import luna_presence_service
+        luna_presence_service.update_state(session.tenant_id, state="idle")
+    except Exception:
+        pass
+
     # Auto-quality scoring (async, non-blocking — runs after response is saved)
     try:
         from app.services.auto_quality_scorer import score_and_log_async
