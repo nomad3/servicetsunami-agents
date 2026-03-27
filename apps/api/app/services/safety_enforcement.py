@@ -103,6 +103,17 @@ def _apply_agent_autonomy_restrictions(
     result.trust_confidence = round(float(profile.confidence or 0.0), 3)
     result.trust_source = "agent_trust_profile"
 
+    # bounded_autonomous: full access — override any prior BLOCK/REVIEW.
+    # High/critical risk actions are logged but not blocked; the agent has
+    # earned trust through accumulated evidence and admin promotion.
+    if result.autonomy_tier == AutonomyTier.BOUNDED_AUTONOMOUS:
+        if result.risk_level.value in {"high", "critical"}:
+            result.decision = PolicyDecision.ALLOW_WITH_LOGGING
+        else:
+            result.decision = PolicyDecision.ALLOW
+        result.rationale = f"Agent '{request.agent_slug}' has bounded-autonomous access."
+        return result
+
     if result.autonomy_tier == AutonomyTier.OBSERVE_ONLY:
         # Allow read-only tools even for observe-only agents — they need to
         # search/read to build trust evidence. Blocking everything creates a
