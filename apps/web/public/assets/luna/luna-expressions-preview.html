@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Luna Expressions Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0f1923;
+    color: #e0ddd8;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding: 24px;
+  }
+  h1 { text-align: center; margin-bottom: 8px; font-size: 20px; opacity: 0.8; }
+  .subtitle { text-align: center; margin-bottom: 32px; font-size: 13px; opacity: 0.5; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    padding: 16px;
+    text-align: center;
+    backdrop-filter: blur(12px);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+  }
+  .luna-wrap {
+    position: relative;
+    width: 160px;
+    height: 180px;
+    margin: 0 auto 12px;
+    overflow: visible;
+  }
+  .luna-wrap img {
+    width: 140px;
+    height: 140px;
+    object-fit: contain;
+    filter: invert(0.88) brightness(1.1);
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .state-label {
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
+  }
+  .mood-label {
+    font-size: 11px;
+    opacity: 0.4;
+  }
+
+  /* ─── Glow behind face ─── */
+  .glow {
+    position: absolute;
+    bottom: -5%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ─── Floating emotes / effects above the head ─── */
+  .emote {
+    position: absolute;
+    top: 0; left: 50%;
+    transform: translateX(-50%);
+    font-size: 28px;
+    z-index: 10;
+    pointer-events: none;
+    text-shadow: 0 0 20px currentColor;
+  }
+
+  /* ─── Side symbols (floating around face) ─── */
+  .side-left, .side-right {
+    position: absolute;
+    top: 50%;
+    font-size: 18px;
+    z-index: 10;
+    pointer-events: none;
+    opacity: 0.7;
+  }
+  .side-left { left: -8px; transform: translateY(-50%); }
+  .side-right { right: -8px; transform: translateY(-50%); }
+
+  /* ─── Bottom overlay (mouth area effect) ─── */
+  .mouth-fx {
+    position: absolute;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 14px;
+    z-index: 10;
+    pointer-events: none;
+    letter-spacing: 2px;
+  }
+
+  /* ─── Eye overlay area ─── */
+  .eye-fx {
+    position: absolute;
+    bottom: 75px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 20px;
+    z-index: 10;
+    pointer-events: none;
+    width: 80px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* ═══════════════════════════════════════════
+     STATE-SPECIFIC ANIMATIONS & EFFECTS
+     ═══════════════════════════════════════════ */
+
+  /* IDLE */
+  .idle .glow { background: radial-gradient(circle, rgba(240,230,211,0.08) 0%, transparent 70%); }
+  .idle img { animation: gentle-blink 4s ease-in-out infinite; }
+  .idle .emote { font-size: 16px; opacity: 0.3; animation: float-up 3s ease-in-out infinite; }
+
+  /* LISTENING */
+  .listening .glow {
+    background: radial-gradient(circle, rgba(107,181,255,0.2) 0%, transparent 70%);
+    animation: pulse-glow 1.6s ease-in-out infinite;
+  }
+  .listening img { filter: invert(0.88) brightness(1.2); }
+  .listening .emote { color: #6bb5ff; animation: bounce-emote 0.8s ease-in-out infinite; }
+  .listening .side-left, .listening .side-right {
+    color: #6bb5ff;
+    animation: wave-in 1.2s ease-in-out infinite alternate;
+  }
+
+  /* THINKING */
+  .thinking .glow {
+    background: radial-gradient(circle, rgba(255,179,71,0.15) 0%, transparent 70%);
+    animation: rotate-glow 3s linear infinite;
+  }
+  .thinking img {
+    filter: invert(0.88) brightness(1.08);
+    animation: think-drift 3s ease-in-out infinite;
+  }
+  .thinking .emote {
+    color: #ffb347;
+    animation: spin-emote 2s ease-in-out infinite;
+  }
+  .thinking .side-left, .thinking .side-right {
+    color: #ffb347;
+    opacity: 0.5;
+    animation: orbit 2.5s ease-in-out infinite;
+  }
+
+  /* RESPONDING */
+  .responding .glow {
+    background: radial-gradient(circle, rgba(94,197,176,0.18) 0%, transparent 70%);
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+  .responding img { filter: invert(0.88) brightness(1.25); }
+  .responding .emote { color: #5ec5b0; animation: type-bounce 0.4s ease-in-out infinite alternate; }
+  .responding .mouth-fx {
+    color: #5ec5b0;
+    animation: speak-dots 1s steps(3) infinite;
+  }
+
+  /* HAPPY */
+  .happy .glow {
+    background: radial-gradient(circle, rgba(255,215,100,0.22) 0%, transparent 70%);
+    animation: pulse-glow 1.4s ease-in-out infinite;
+  }
+  .happy img {
+    filter: invert(0.88) brightness(1.3);
+    animation: happy-bounce 1.2s ease-in-out infinite;
+  }
+  .happy .emote { color: #ffd764; animation: scatter-emotes 1.5s ease-in-out infinite; }
+  .happy .side-left, .happy .side-right {
+    color: #ffd764;
+    animation: sparkle 0.8s ease-in-out infinite alternate;
+  }
+
+  /* FOCUSED */
+  .focused .glow {
+    background: radial-gradient(circle, rgba(107,140,255,0.12) 0%, transparent 70%);
+  }
+  .focused img {
+    filter: invert(0.88) brightness(1.0) contrast(1.15);
+  }
+  .focused .emote { color: #6b8cff; opacity: 0.6; }
+  .focused .side-left, .focused .side-right {
+    color: #6b8cff;
+    opacity: 0.3;
+    font-size: 10px;
+  }
+
+  /* ALERT */
+  .alert .glow {
+    background: radial-gradient(circle, rgba(255,140,50,0.25) 0%, transparent 70%);
+    animation: flash-glow 0.6s ease-in-out infinite;
+  }
+  .alert img {
+    filter: invert(0.88) brightness(1.15);
+    animation: shake 0.3s ease-in-out infinite;
+  }
+  .alert .emote {
+    color: #ff8c32;
+    font-size: 32px;
+    animation: alert-pop 0.6s ease-in-out infinite;
+  }
+  .alert .side-left, .alert .side-right {
+    color: #ff8c32;
+    font-size: 22px;
+    animation: flash-sides 0.5s ease-in-out infinite alternate;
+  }
+
+  /* EMPATHETIC */
+  .empathetic .glow {
+    background: radial-gradient(circle, rgba(255,180,200,0.15) 0%, transparent 70%);
+    animation: pulse-glow 2.5s ease-in-out infinite;
+  }
+  .empathetic img {
+    filter: invert(0.88) brightness(1.1);
+    animation: gentle-tilt 3s ease-in-out infinite;
+  }
+  .empathetic .emote { color: #ffb4c8; animation: float-up 2s ease-in-out infinite; }
+
+  /* SLEEP */
+  .sleep .glow {
+    background: radial-gradient(circle, rgba(74,111,165,0.08) 0%, transparent 70%);
+  }
+  .sleep img {
+    filter: invert(0.88) brightness(0.6);
+    animation: sleep-breathe 5s ease-in-out infinite;
+    opacity: 0.6;
+  }
+  .sleep .emote {
+    color: #4a6fa5;
+    animation: zzz-float 2s ease-in-out infinite;
+    font-size: 20px;
+  }
+
+  /* PRIVATE */
+  .private .glow { background: none; }
+  .private img {
+    filter: invert(0.88) brightness(0.5);
+    opacity: 0.5;
+  }
+  .private .emote {
+    color: #888;
+    font-size: 36px;
+    opacity: 0.8;
+  }
+
+  /* ERROR */
+  .error .glow {
+    background: radial-gradient(circle, rgba(255,80,80,0.2) 0%, transparent 70%);
+    animation: flash-glow 0.4s ease-in-out infinite;
+  }
+  .error img {
+    filter: invert(0.88) brightness(0.85) hue-rotate(330deg);
+    animation: error-glitch 0.2s ease-in-out infinite;
+  }
+  .error .emote {
+    color: #ff5050;
+    font-size: 30px;
+    animation: error-shake 0.15s ease-in-out infinite;
+  }
+  .error .side-left, .error .side-right {
+    color: #ff5050;
+    animation: flash-sides 0.3s ease-in-out infinite alternate;
+  }
+
+  /* PLAYFUL */
+  .playful .glow {
+    background: radial-gradient(circle, rgba(180,130,255,0.18) 0%, transparent 70%);
+    animation: rainbow-glow 2s ease-in-out infinite;
+  }
+  .playful img {
+    filter: invert(0.88) brightness(1.25);
+    animation: playful-wiggle 1s ease-in-out infinite;
+  }
+  .playful .emote {
+    color: #b482ff;
+    animation: scatter-emotes 1s ease-in-out infinite;
+  }
+  .playful .side-left, .playful .side-right {
+    color: #b482ff;
+    animation: sparkle 0.6s ease-in-out infinite alternate;
+  }
+
+  /* ═══════════════════════════════════════════
+     KEYFRAME ANIMATIONS
+     ═══════════════════════════════════════════ */
+
+  @keyframes gentle-blink {
+    0%, 85%, 100% { transform: translateX(-50%) scaleY(1); }
+    90% { transform: translateX(-50%) scaleY(0.92); }
+  }
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 1; transform: translateX(-50%) scale(1); }
+    50% { opacity: 0.6; transform: translateX(-50%) scale(1.1); }
+  }
+  @keyframes flash-glow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  @keyframes rotate-glow {
+    0% { filter: hue-rotate(0deg); }
+    100% { filter: hue-rotate(30deg); }
+  }
+  @keyframes bounce-emote {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(-6px); }
+  }
+  @keyframes spin-emote {
+    0% { transform: translateX(-50%) rotate(0deg); }
+    25% { transform: translateX(-50%) rotate(15deg); }
+    75% { transform: translateX(-50%) rotate(-15deg); }
+    100% { transform: translateX(-50%) rotate(0deg); }
+  }
+  @keyframes type-bounce {
+    0% { transform: translateX(-50%) translateY(0); }
+    100% { transform: translateX(-50%) translateY(-4px); }
+  }
+  @keyframes scatter-emotes {
+    0%, 100% { transform: translateX(-50%) scale(1); }
+    25% { transform: translateX(-40%) scale(1.1) rotate(5deg); }
+    75% { transform: translateX(-60%) scale(1.1) rotate(-5deg); }
+  }
+  @keyframes sparkle {
+    0% { opacity: 0.3; transform: translateY(-50%) scale(0.8); }
+    100% { opacity: 0.9; transform: translateY(-50%) scale(1.2); }
+  }
+  @keyframes think-drift {
+    0%, 100% { transform: translateX(-50%); }
+    50% { transform: translateX(-47%) translateY(-2px); }
+  }
+  @keyframes orbit {
+    0%, 100% { transform: translateY(-50%) translateX(0); }
+    50% { transform: translateY(-60%) translateX(4px); }
+  }
+  @keyframes happy-bounce {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(-3px); }
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(-50%) rotate(0); }
+    25% { transform: translateX(-48%) rotate(1deg); }
+    75% { transform: translateX(-52%) rotate(-1deg); }
+  }
+  @keyframes alert-pop {
+    0%, 100% { transform: translateX(-50%) scale(1); }
+    50% { transform: translateX(-50%) scale(1.2); }
+  }
+  @keyframes flash-sides {
+    0% { opacity: 0.3; }
+    100% { opacity: 1; }
+  }
+  @keyframes gentle-tilt {
+    0%, 100% { transform: translateX(-50%) rotate(0); }
+    50% { transform: translateX(-50%) rotate(-2deg); }
+  }
+  @keyframes sleep-breathe {
+    0%, 100% { transform: translateX(-50%) scale(1); }
+    50% { transform: translateX(-50%) scale(1.01); }
+  }
+  @keyframes zzz-float {
+    0% { transform: translateX(-50%) translateY(0); opacity: 0.8; }
+    50% { transform: translateX(-40%) translateY(-12px); opacity: 0.4; }
+    100% { transform: translateX(-50%) translateY(0); opacity: 0.8; }
+  }
+  @keyframes error-glitch {
+    0%, 100% { transform: translateX(-50%); }
+    33% { transform: translateX(-52%) skewX(2deg); }
+    66% { transform: translateX(-48%) skewX(-2deg); }
+  }
+  @keyframes error-shake {
+    0%, 100% { transform: translateX(-50%); }
+    50% { transform: translateX(-46%); }
+  }
+  @keyframes playful-wiggle {
+    0%, 100% { transform: translateX(-50%) rotate(0); }
+    25% { transform: translateX(-50%) rotate(3deg); }
+    75% { transform: translateX(-50%) rotate(-3deg); }
+  }
+  @keyframes rainbow-glow {
+    0% { filter: hue-rotate(0deg); }
+    50% { filter: hue-rotate(40deg); }
+    100% { filter: hue-rotate(0deg); }
+  }
+  @keyframes speak-dots {
+    0% { content: "."; }
+    33% { opacity: 0.4; }
+    66% { opacity: 0.8; }
+    100% { opacity: 1; }
+  }
+  @keyframes wave-in {
+    0% { transform: translateY(-50%) scale(0.9); opacity: 0.3; }
+    100% { transform: translateY(-50%) scale(1.1); opacity: 0.8; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Luna Expressions</h1>
+<p class="subtitle">Same base face + effects, emotes, glow, animations per state</p>
+
+<div class="grid">
+
+  <!-- IDLE -->
+  <div class="card">
+    <div class="luna-wrap idle">
+      <div class="glow"></div>
+      <div class="emote">~</div>
+      <img src="luna-base.png" alt="Luna">
+    </div>
+    <div class="state-label">Idle</div>
+    <div class="mood-label">calm ~ at rest</div>
+  </div>
+
+  <!-- LISTENING -->
+  <div class="card">
+    <div class="luna-wrap listening">
+      <div class="glow"></div>
+      <div class="emote">((( )))</div>
+      <div class="side-left">)</div>
+      <div class="side-right">(</div>
+      <img src="luna-base.png" alt="Luna">
+    </div>
+    <div class="state-label">Listening</div>
+    <div class="mood-label">attentive ~ I hear you</div>
+  </div>
+
+  <!-- THINKING -->
+  <div class="card">
+    <div class="luna-wrap thinking">
+      <div class="glow"></div>
+      <div class="emote">? . . .</div>
+      <div class="side-left">~</div>
+      <div class="side-right">~</div>
+      <img src="luna-base.png" alt="Luna">
+    </div>
+    <div class="state-label">Thinking</div>
+    <div class="mood-label">processing ~ hmm</div>
+  </div>
+
+  <!-- RESPONDING -->
+  <div class="card">
+    <div class="luna-wrap responding">
+      <div class="glow"></div>
+      <div class="emote">&gt; _ &lt;</div>
+      <div class="mouth-fx">. . . . .</div>
+      <img src="luna-base.png" alt="Luna">
+    </div>
+    <div class="state-label">Responding</div>
+    <div class="mood-label">speaking ~ delivering</div>
+  </div>
+
+  <!-- HAPPY -->
+  <div class="card">
+    <div class="luna-wrap happy">
+      <div class="glow"></div>
+      <div class="emote">&hearts; &starf; &hearts;</div>
+      <div class="side-left">&starf;</div>
+      <div class="side-right">&starf;</div>
+      <img src="luna-base.png" alt="Luna">
+    </div>
+    <div class="state-label">Happy</div>
+    <div class="mood-label">warm ~ delighted</div>
+  </div>
+
+  <!-- FOCUSED -->
+  <div class="card">
+    <div class="luna-wrap focused">
+      <div class="glow"></div>
+      <div class="emote">&lt;/&gt;</div>
+      <div class="side-left">{</div>
+      <div class="side-right">}</div>
+      <img src="luna-base.png" alt="Luna">
+    </div>
+    <div class="state-label">Focused</div>
+    <div class="mood-label">deep work ~ coding</div>
+  </div>
+
+  <!-- ALERT -->
+  <div class="card">
+    <div class="luna-wrap alert">
+      <div class="glow"></div>
+      <div class="emote">!! &Delta; !!</div>
+      <div class="side-left">&laquo;</div>
+      <div class="side-right">&raquo;</div>
+      <img src="luna-base.png" alt="Luna">
+    </div>
+    <div class="state-label">Alert</div>
+    <div class="mood-label">urgent ~ pay attention</div>
+  </div>
+
+  <!-- EMPATHETIC -->
+  <div class="card">
+    <div class="luna-wrap empathetic">
+      <div class="glow"></div>
+      <div class="emote">&hearts;</div>
+      <img src="luna-base.png" alt="Luna">
+    </div>
+    <div class="state-label">Empathetic</div>
+    <div class="mood-label">understanding ~ soft</div>
+  </div>
+
+  <!-- SLEEP -->
+  <div class="card">
+    <div class="luna-wrap sleep">
+      <div class="glow"></div>
+      <div class="emote">z Z z</div>
+      <img src="luna-base.png" alt="Luna">
+    </div>
+    <div class="state-label">Sleep</div>
+    <div class="mood-label">resting ~ zzz</div>
+  </div>
+
+  <!-- PRIVATE -->
+  <div class="card">
+    <div class="luna-wrap private">
+      <div class="glow"></div>
+      <div class="emote">&block;</div>
+      <img src="luna-base.png" alt="Luna">
+    </div>
+    <div class="state-label">Private</div>
+    <div class="mood-label">not observing</div>
+  </div>
+
+  <!-- ERROR -->
+  <div class="card">
+    <div class="luna-wrap error">
+      <div class="glow"></div>
+      <div class="emote">#!@%&amp;</div>
+      <div class="side-left">&times;</div>
+      <div class="side-right">&times;</div>
+      <img src="luna-base.png" alt="Luna">
+    </div>
+    <div class="state-label">Error</div>
+    <div class="mood-label">something broke</div>
+  </div>
+
+  <!-- PLAYFUL -->
+  <div class="card">
+    <div class="luna-wrap playful">
+      <div class="glow"></div>
+      <div class="emote">~ &starf; ^_^ &starf; ~</div>
+      <div class="side-left">&sim;</div>
+      <div class="side-right">&sim;</div>
+      <img src="luna-base.png" alt="Luna">
+    </div>
+    <div class="state-label">Playful</div>
+    <div class="mood-label">humor ~ light</div>
+  </div>
+
+</div>
+
+</body>
+</html>
