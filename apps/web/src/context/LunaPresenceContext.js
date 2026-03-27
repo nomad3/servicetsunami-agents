@@ -16,22 +16,37 @@ export const LunaPresenceProvider = ({ children }) => {
     attention_target: null,
   });
 
-  // Poll presence every 3 seconds
+  // Poll presence — adaptive: 3s when active, 10s when idle
   useEffect(() => {
     let mounted = true;
+    let intervalId = null;
+
     const poll = async () => {
+      // Skip if not authenticated
+      const token = localStorage.getItem('token');
+      if (!token) return;
       try {
         const res = await api.get('/presence/');
         if (mounted && res.data) {
-          setPresence(res.data);
+          setPresence(prev => {
+            // Adaptive interval: poll faster during active states
+            const newState = res.data.state || 'idle';
+            const isActive = !['idle', 'sleep'].includes(newState);
+            const wasActive = !['idle', 'sleep'].includes(prev.state);
+            if (isActive !== wasActive && intervalId) {
+              clearInterval(intervalId);
+              intervalId = setInterval(poll, isActive ? 3000 : 10000);
+            }
+            return res.data;
+          });
         }
       } catch (e) {
         // Silent — presence is optional
       }
     };
     poll();
-    const interval = setInterval(poll, 3000);
-    return () => { mounted = false; clearInterval(interval); };
+    intervalId = setInterval(poll, 10000); // Start slow, speed up if active
+    return () => { mounted = false; if (intervalId) clearInterval(intervalId); };
   }, []);
 
   return (
