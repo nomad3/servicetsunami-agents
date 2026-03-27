@@ -108,6 +108,14 @@ jobs:
             docker-compose up -d --build "$svc" 2>&1 | tail -3
           done
 
+          # Force restart workers that share the API image — they mount
+          # code via volumes but the Python process caches modules on start.
+          # A restart ensures they pick up the new code.
+          if echo "$SERVICES" | grep -q "api"; then
+            echo "--- Restarting workers to pick up API code changes ---"
+            docker-compose restart orchestration-worker databricks-worker 2>&1 | tail -3
+          fi
+
           # Wait for health
           echo "--- Waiting for services to be healthy ---"
           sleep 20
