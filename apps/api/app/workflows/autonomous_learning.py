@@ -311,10 +311,15 @@ class AutonomousLearningWorkflow:
                     retry_policy=retry_policy,
                 )
 
+                # Generate a stable cycle ID so retries are idempotent
+                import uuid as _uuid
+                dream_cycle_id = str(_uuid.uuid4())
+
                 insight_result = await run_activity(
                     "generate_dream_insights",
                     tenant_id,
                     patterns,
+                    dream_cycle_id,
                     start_to_close_timeout=timedelta(minutes=3),
                     retry_policy=retry_policy,
                 )

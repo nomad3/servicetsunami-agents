@@ -269,7 +269,8 @@ async def _score_and_log(
                     db.execute(sa_text("""
                         UPDATE rl_experiences
                         SET reward = :reward,
-                            reward_source = 'response_quality_backfill'
+                            reward_source = 'response_quality_backfill',
+                            rewarded_at = NOW()
                         WHERE tenant_id = CAST(:tid AS uuid)
                           AND trajectory_id = CAST(:traj AS uuid)
                           AND decision_point = 'agent_routing'

@@ -518,6 +518,15 @@ async def generate_morning_report(
             lines.append(f"Platform Health: {health} (simulation failure rate: {failure_rate:.0%})")
             lines.append("")
 
+        # Dream consolidation
+        dream_insights = cycle_result.get("dream_insights", 0)
+        dream_memories = cycle_result.get("dream_memories", 0)
+        dream_policies = cycle_result.get("dream_policies_updated", 0)
+        if dream_insights or dream_memories or dream_policies:
+            lines.append("Dream Consolidation:")
+            lines.append(f"  {dream_insights} insight(s) extracted, {dream_memories} memory/ies synthesized, {dream_policies} policy/ies updated")
+            lines.append("")
+
         # Errors
         errors = cycle_result.get("errors", [])
         if errors:

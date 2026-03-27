@@ -120,7 +120,7 @@ async def track_cycle_cost(tenant_id: str, cycle_result: dict) -> dict:
             if new_spend >= budget:
                 budget_exceeded = True
                 notification = Notification(
-                    tenant_id=tenant_id,
+                    tenant_id=tenant_uuid,
                     source="autonomous_learning",
                     title="Daily Learning Budget Exceeded",
                     body=(
@@ -140,7 +140,7 @@ async def track_cycle_cost(tenant_id: str, cycle_result: dict) -> dict:
                 )
             elif new_spend >= budget * threshold:
                 notification = Notification(
-                    tenant_id=tenant_id,
+                    tenant_id=tenant_uuid,
                     source="autonomous_learning",
                     title=f"Learning Budget at {threshold:.0%}",
                     body=(

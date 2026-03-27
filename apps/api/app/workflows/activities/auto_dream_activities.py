@@ -40,15 +40,30 @@ _POLICY_ALPHA = 0.15
 
 
 def _extract_action_key(action: dict) -> str:
-    """Return a stable string key from an action JSONB dict."""
+    """Return a stable string key from an action JSONB dict.
+
+    Uses a named field when available; falls back to a hash suffix
+    to avoid collisions when values are truncated.
+    """
+    import hashlib
     for field in ("candidate", "type", "agent_id", "agent_name", "skill_id", "tool_name", "platform"):
         val = action.get(field)
         if val:
-            return str(val)[:150]
-    # Fallback: first key=value pair
+            s = str(val)
+            if len(s) <= 150:
+                return s
+            # Append a short hash to disambiguate truncated keys
+            h = hashlib.sha1(s.encode()).hexdigest()[:8]
+            return f"{s[:140]}#{h}"
+    # Fallback: first key=value pair with hash
     if action:
         k = next(iter(action))
-        return f"{k}={str(action[k])[:100]}"
+        v = str(action[k])
+        raw = f"{k}={v}"
+        if len(raw) <= 150:
+            return raw
+        h = hashlib.sha1(raw.encode()).hexdigest()[:8]
+        return f"{k}={v[:130]}#{h}"
     return "unknown"
 
 
@@ -179,7 +194,7 @@ async def extract_decision_patterns(
 
 @activity.defn
 async def generate_dream_insights(
-    tenant_id: str, patterns: Dict[str, List[Dict]]
+    tenant_id: str, patterns: Dict[str, List[Dict]], dream_cycle_id: str = ""
 ) -> Dict[str, Any]:
     """Write AutoDreamInsight rows to DB.
 
@@ -191,7 +206,7 @@ async def generate_dream_insights(
     db = SessionLocal()
     try:
         tid = uuid.UUID(tenant_id)
-        dream_cycle_id = uuid.uuid4()
+        dream_cycle_id = uuid.UUID(dream_cycle_id) if dream_cycle_id else uuid.uuid4()
         insights_created = 0
         memories_created = 0
 
@@ -344,6 +359,18 @@ async def consolidate_dream_policies(
 
             dp_updated += 1
             total_delta += delta
+
+        # Mark insights as applied for the decision points we just updated
+        if dp_updated > 0:
+            updated_dps = list(patterns.keys())
+            db.query(AutoDreamInsight).filter(
+                AutoDreamInsight.tenant_id == tid,
+                AutoDreamInsight.decision_point.in_(updated_dps),
+                AutoDreamInsight.applied_to_policy == False,
+            ).update(
+                {"applied_to_policy": True},
+                synchronize_session="fetch",
+            )
 
         db.commit()
         logger.info(
