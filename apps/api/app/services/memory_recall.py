@@ -275,19 +275,8 @@ def build_memory_context(
         db, tenant_id, query_embedding, limit=15
     )
 
-    # --- Step 2b: Apply time-based decay to memory similarity scores ---
-    now = datetime.utcnow()
-    for mem in semantic_memories:
-        days_since_access = 0
-        if mem.get("last_accessed_at"):
-            try:
-                last = datetime.fromisoformat(str(mem["last_accessed_at"]))
-                days_since_access = (now - last).days
-            except Exception:
-                pass
-        decay_rate = mem.get("decay_rate", 0.01)  # default 1% per day
-        decay_factor = max(0.1, 1.0 - (decay_rate * days_since_access))
-        mem["similarity"] = mem["similarity"] * decay_factor
+    # Note: time-based decay is applied in SQL (search_memories_semantic)
+    # during top-K selection, so no Python-side decay needed here.
 
     # --- Step 3: Keyword boost ---
     # Entities whose name exactly matches a word in the query get +0.3 similarity

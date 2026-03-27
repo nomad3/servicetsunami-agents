@@ -299,24 +299,32 @@ def search_memories_semantic(
     """
     vector_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
+    # Fetch 3× candidates by raw cosine, then apply time-decay in SQL so
+    # stale memories don't push out fresher ones during top-K selection.
+    # decay_adjusted = similarity * GREATEST(0.1, 1 - decay_rate * days_since_access)
     sql = text(f"""
-        SELECT
-            id,
-            agent_id,
-            memory_type,
-            content,
-            importance,
-            decay_rate,
-            last_accessed_at,
-            1 - (content_embedding <=> CAST('{vector_literal}' AS vector)) AS similarity
-        FROM agent_memories
-        WHERE tenant_id = CAST(:tenant_id AS uuid)
-          AND content_embedding IS NOT NULL
-        ORDER BY content_embedding <=> CAST('{vector_literal}' AS vector)
+        WITH candidates AS (
+            SELECT
+                id, agent_id, memory_type, content, importance,
+                decay_rate, last_accessed_at,
+                1 - (content_embedding <=> CAST('{vector_literal}' AS vector)) AS raw_similarity
+            FROM agent_memories
+            WHERE tenant_id = CAST(:tenant_id AS uuid)
+              AND content_embedding IS NOT NULL
+            ORDER BY content_embedding <=> CAST('{vector_literal}' AS vector)
+            LIMIT :candidate_lim
+        )
+        SELECT *,
+            raw_similarity * GREATEST(0.1,
+                1.0 - COALESCE(decay_rate, 0.01)
+                    * EXTRACT(EPOCH FROM (NOW() - COALESCE(last_accessed_at, NOW()))) / 86400.0
+            ) AS similarity
+        FROM candidates
+        ORDER BY similarity DESC
         LIMIT :lim
     """)
 
-    rows = db.execute(sql, {"tenant_id": str(tenant_id), "lim": limit}).mappings().all()
+    rows = db.execute(sql, {"tenant_id": str(tenant_id), "lim": limit, "candidate_lim": limit * 3}).mappings().all()
     return [
         {
             "id": str(r["id"]),

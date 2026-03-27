@@ -342,6 +342,10 @@ def _generate_agentic_response(
         pass  # Never block response delivery for extraction
 
     # Recall feedback: track which recalled entities were actually used in the response
+    # Capture primitives before spawning the thread — ORM objects are not thread-safe.
+    _feedback_tenant_id = session.tenant_id
+    _feedback_recalled = (context or {}).get("recalled_entity_names", [])
+    _feedback_response = response_text
     try:
         import threading
 
@@ -349,17 +353,16 @@ def _generate_agentic_response(
             from app.db.session import SessionLocal as _SL
             from app.models.memory_activity import MemoryActivity
 
-            recalled_entities = (context or {}).get("recalled_entity_names", [])
-            if not recalled_entities or not response_text:
+            if not _feedback_recalled or not _feedback_response:
                 return
 
-            response_lower = response_text.lower()
+            response_lower = _feedback_response.lower()
             edb = _SL()
             try:
-                for name in recalled_entities:
+                for name in _feedback_recalled:
                     used = name.lower() in response_lower
                     activity = MemoryActivity(
-                        tenant_id=session.tenant_id,
+                        tenant_id=_feedback_tenant_id,
                         event_type="recall_feedback",
                         description=f"Entity '{name}' recalled and {'used' if used else 'unused'} in response",
                         source="chat",
