@@ -457,35 +457,43 @@ const ChatPage = () => {
             {selectedSession ? (
               <Card className="shadow-sm">
                 {/* ═══ Luna Tamagotchi Panel ═══ */}
-                <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '24px 16px 16px',
-                  minHeight: 220,
-                  background: 'radial-gradient(ellipse at 50% 60%, var(--bs-tertiary-bg, rgba(30,45,65,0.6)) 0%, transparent 70%)',
-                  borderBottom: '1px solid var(--bs-border-color, rgba(255,255,255,0.08))',
-                  position: 'relative',
-                  overflow: 'hidden',
-                }}>
-                  {/* Ambient background glow — matches Luna's state */}
-                  <div style={{
-                    position: 'absolute',
-                    top: '50%', left: '50%',
-                    transform: 'translate(-50%, -50%)',
-                    width: 300, height: 300,
-                    borderRadius: '50%',
-                    background: postingMessage
-                      ? 'radial-gradient(circle, rgba(255,179,71,0.08) 0%, transparent 70%)'
-                      : lunaState === 'listening'
-                        ? 'radial-gradient(circle, rgba(107,181,255,0.08) 0%, transparent 70%)'
-                        : lunaState === 'responding'
-                          ? 'radial-gradient(circle, rgba(94,197,176,0.08) 0%, transparent 70%)'
-                          : 'radial-gradient(circle, rgba(240,230,211,0.04) 0%, transparent 70%)',
-                    transition: 'background 1s ease',
-                    pointerEvents: 'none',
-                  }} />
+                <div
+                  role="status"
+                  aria-live="polite"
+                  aria-label={`Luna is ${postingMessage ? 'thinking' : lunaState}`}
+                  className="luna-tamagotchi-panel"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '20px 16px 12px',
+                    minHeight: 200,
+                    background: 'radial-gradient(ellipse at 50% 60%, var(--bs-tertiary-bg, rgba(30,45,65,0.6)) 0%, transparent 70%)',
+                    borderBottom: '1px solid var(--bs-border-color, rgba(255,255,255,0.08))',
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {/* Ambient glow layers — cross-fade via opacity (CSS can't transition gradients) */}
+                  {[
+                    { key: 'thinking', color: 'rgba(255,179,71,0.10)', active: postingMessage },
+                    { key: 'listening', color: 'rgba(107,181,255,0.10)', active: !postingMessage && lunaState === 'listening' },
+                    { key: 'responding', color: 'rgba(94,197,176,0.10)', active: !postingMessage && lunaState === 'responding' },
+                    { key: 'idle', color: 'rgba(240,230,211,0.04)', active: !postingMessage && !['listening', 'responding'].includes(lunaState) },
+                  ].map(g => (
+                    <div key={g.key} style={{
+                      position: 'absolute',
+                      top: '50%', left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                      width: 280, height: 280,
+                      borderRadius: '50%',
+                      background: `radial-gradient(circle, ${g.color} 0%, transparent 70%)`,
+                      opacity: g.active ? 1 : 0,
+                      transition: 'opacity 0.8s ease',
+                      pointerEvents: 'none',
+                    }} />
+                  ))}
                   <LunaAvatar
                     state={postingMessage ? 'thinking' : lunaState}
                     mood={lunaMood}
@@ -493,19 +501,20 @@ const ChatPage = () => {
                     animated
                   />
                   <div style={{ marginTop: 4, textAlign: 'center', zIndex: 1 }}>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 600, opacity: 0.9 }}>
+                    <h6 className="mb-0" style={{ fontSize: '0.95rem', opacity: 0.9 }}>
                       {selectedSession.title || t('agentSession')}
-                    </div>
-                    <div style={{ fontSize: '0.7rem', opacity: 0.5 }}>
+                    </h6>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>
                       {getSessionSubtitle(selectedSession)}
-                    </div>
+                    </small>
                   </div>
-                  {/* TTS toggle — small, top-right corner */}
+                  {/* TTS toggle */}
                   {window.speechSynthesis && (
                     <Button
                       size="sm"
                       variant={ttsEnabled ? 'primary' : 'outline-secondary'}
-                      title={ttsEnabled ? 'Voice ON' : 'Voice OFF'}
+                      title={ttsEnabled ? 'Voice responses ON — click to turn off' : 'Turn on voice responses'}
+                      aria-label={ttsEnabled ? 'Disable voice responses' : 'Enable voice responses'}
                       onClick={() => {
                         if (ttsEnabled) window.speechSynthesis.cancel();
                         setTtsEnabled(v => !v);
@@ -513,7 +522,7 @@ const ChatPage = () => {
                       }}
                       style={{
                         position: 'absolute', top: 8, right: 8,
-                        fontSize: '0.8rem', opacity: 0.6,
+                        fontSize: '0.8rem', opacity: 0.7,
                       }}
                     >
                       {ttsEnabled ? '🔊' : '🔇'}
@@ -533,14 +542,11 @@ const ChatPage = () => {
                         {messages.map((message) => renderMessage(message))}
                         {postingMessage && !streamingText && (
                           <ListGroup.Item className="border-0 py-2">
-                            <div className="d-flex align-items-center gap-3 text-muted" style={{ fontSize: '0.9rem' }}>
-                              <LunaAvatar state={lunaState === 'idle' ? 'thinking' : lunaState} mood={lunaMood} size="md" animated />
-                              <div className="d-flex align-items-center gap-2">
-                                <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px' }} />
-                                <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.2s' }} />
-                                <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.4s' }} />
-                                <span className="ms-1">{t('thinking')}</span>
-                              </div>
+                            <div className="d-flex align-items-center gap-2 text-muted" style={{ fontSize: '0.9rem' }}>
+                              <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px' }} />
+                              <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.2s' }} />
+                              <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.4s' }} />
+                              <span className="ms-1">{t('thinking')}</span>
                             </div>
                           </ListGroup.Item>
                         )}
