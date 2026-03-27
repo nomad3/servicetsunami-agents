@@ -263,15 +263,30 @@ async def auto_create_skill_stubs(tenant_id: str) -> dict:
                         build_skill_creation_task,
                     )
                     import asyncio
+                    import concurrent.futures
                     task_desc = build_skill_creation_task(
                         gap_type=gap.gap_type or "tool_missing",
                         industry=gap.industry or "general",
                         description=gap.description or "",
                     )
-                    loop = asyncio.get_event_loop()
-                    result = loop.run_until_complete(
-                        dispatch_self_improvement_task(tenant_id, task_desc)
-                    )
+                    try:
+                        running_loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        running_loop = None
+
+                    if running_loop is not None and running_loop.is_running():
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                            result = pool.submit(
+                                lambda: asyncio.run(dispatch_self_improvement_task(tenant_id, task_desc))
+                            ).result(timeout=30)
+                    else:
+                        loop = asyncio.new_event_loop()
+                        try:
+                            result = loop.run_until_complete(
+                                dispatch_self_improvement_task(tenant_id, task_desc)
+                            )
+                        finally:
+                            loop.close()
                     if result.get("dispatched"):
                         code_tasks_dispatched += 1
                         logger.info(

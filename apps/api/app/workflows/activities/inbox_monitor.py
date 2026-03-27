@@ -545,7 +545,21 @@ def _dispatch_email_action_triggers(db, tid: uuid.UUID, triggers: List[Dict], te
                     task_queue="servicetsunami-orchestration",
                 )
 
-            asyncio.get_event_loop().run_until_complete(_start())
+            try:
+                running_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                running_loop = None
+
+            if running_loop is not None and running_loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    pool.submit(lambda: asyncio.run(_start())).result(timeout=30)
+            else:
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(_start())
+                finally:
+                    loop.close()
 
             log_activity(
                 db, tid, "action_triggered",
