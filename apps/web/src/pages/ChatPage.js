@@ -32,13 +32,28 @@ const ChatPage = () => {
   const [formErrors, setFormErrors] = useState('');
   const [globalError, setGlobalError] = useState('');
   const [attachedFile, setAttachedFile] = useState(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [speakingMessageId, setSpeakingMessageId] = useState(null);
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
 
   // Auto-scroll to bottom when messages change or typing indicator appears
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, postingMessage]);
+
+  // Auto-speak last assistant message when TTS is enabled
+  useEffect(() => {
+    if (!ttsEnabled || postingMessage || messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (last.role === 'assistant' && last.id && !last.id.startsWith('temp-')) {
+      speakText(last.content, last.id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, ttsEnabled]);
 
   useEffect(() => {
     if (!auth.user) {
@@ -95,6 +110,71 @@ const ChatPage = () => {
       setGlobalError(t('errors.loadMessages'));
     } finally {
       setLoadingMessages(false);
+    }
+  };
+
+  // ── Voice helpers ────────────────────────────────────────────────────────
+
+  const stripMarkdown = (text) => {
+    return text
+      .replace(/#{1,6}\s+/g, '')           // headings
+      .replace(/(\*\*|__)(.*?)\1/g, '$2')  // bold
+      .replace(/(\*|_)(.*?)\1/g, '$2')     // italic
+      .replace(/`{1,3}[^`]*`{1,3}/g, '')   // code
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links
+      .replace(/^[-*+]\s+/gm, '')          // list bullets
+      .replace(/^\d+\.\s+/gm, '')          // numbered list
+      .replace(/>\s+/g, '')                // blockquotes
+      .replace(/\n{2,}/g, '. ')            // paragraph breaks → pause
+      .trim();
+  };
+
+  const speakText = (text, messageId) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    if (speakingMessageId === messageId) {
+      setSpeakingMessageId(null);
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(stripMarkdown(text));
+    utterance.rate = 1.05;
+    utterance.pitch = 1.0;
+    // Prefer a natural-sounding voice if available
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v => /samantha|karen|google us english|zira/i.test(v.name));
+    if (preferred) utterance.voice = preferred;
+    utterance.onend = () => setSpeakingMessageId(null);
+    utterance.onerror = () => setSpeakingMessageId(null);
+    setSpeakingMessageId(messageId);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        const ext = mimeType.includes('webm') ? 'webm' : 'ogg';
+        const file = new File([blob], `voice-message.${ext}`, { type: mimeType });
+        setAttachedFile(file);
+        setIsRecording(false);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch {
+      alert('Microphone access denied. Please allow microphone permissions.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
     }
   };
 
@@ -243,11 +323,21 @@ const ChatPage = () => {
         })}
 
         {message.role === 'assistant' && (
-          <div className="mt-2">
+          <div className="mt-2 d-flex align-items-center gap-2">
             <FeedbackActions
               trajectoryId={message.id}
               stepIndex={0}
             />
+            {window.speechSynthesis && (
+              <button
+                type="button"
+                title={speakingMessageId === message.id ? 'Stop speaking' : 'Read aloud'}
+                onClick={() => speakText(message.content, message.id)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', fontSize: '1rem', opacity: 0.6 }}
+              >
+                {speakingMessageId === message.id ? '🔇' : '🔊'}
+              </button>
+            )}
           </div>
         )}
 
@@ -321,13 +411,28 @@ const ChatPage = () => {
             {selectedSession ? (
               <Card className="shadow-sm">
                 <Card.Header>
-                  <div className="d-flex justify-content-between">
+                  <div className="d-flex justify-content-between align-items-center">
                     <div>
                       <h5 className="mb-0">{selectedSession.title || t('agentSession')}</h5>
                       <small className="text-muted">
                         {getSessionSubtitle(selectedSession)}
                       </small>
                     </div>
+                    {window.speechSynthesis && (
+                      <Button
+                        size="sm"
+                        variant={ttsEnabled ? 'primary' : 'outline-secondary'}
+                        title={ttsEnabled ? 'Voice responses ON — click to turn off' : 'Turn on voice responses'}
+                        onClick={() => {
+                          if (ttsEnabled) window.speechSynthesis.cancel();
+                          setTtsEnabled(v => !v);
+                          setSpeakingMessageId(null);
+                        }}
+                        style={{ fontSize: '1rem' }}
+                      >
+                        {ttsEnabled ? '🔊' : '🔇'}
+                      </Button>
+                    )}
                   </div>
                 </Card.Header>
                 <Card.Body style={{ height: '60vh', display: 'flex', flexDirection: 'column' }}>
@@ -453,13 +558,30 @@ const ChatPage = () => {
                             title={t('attachFile')}
                             onClick={() => fileInputRef.current?.click()}
                             style={{ flex: '0 0 auto' }}
+                            disabled={isRecording}
                           >
                             {'\uD83D\uDCCE'}
                           </Button>
+                          {navigator.mediaDevices && (
+                            <Button
+                              type="button"
+                              variant={isRecording ? 'danger' : 'outline-secondary'}
+                              title={isRecording ? 'Stop recording' : 'Record voice message'}
+                              onClick={isRecording ? stopRecording : startRecording}
+                              style={{ flex: '0 0 auto', position: 'relative' }}
+                            >
+                              {isRecording ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff', display: 'inline-block', animation: 'pulse 1s infinite' }} />
+                                  Stop
+                                </span>
+                              ) : '🎙️'}
+                            </Button>
+                          )}
                           <Button
                             type="submit"
                             variant="primary"
-                            disabled={postingMessage || (!messageDraft.trim() && !attachedFile)}
+                            disabled={postingMessage || (!messageDraft.trim() && !attachedFile) || isRecording}
                             style={{ flex: 1 }}
                           >
                             {postingMessage ? t('sending') : t('send')}
