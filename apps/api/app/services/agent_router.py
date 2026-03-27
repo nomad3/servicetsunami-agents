@@ -16,6 +16,7 @@ from app.services.cli_session_manager import run_agent_session
 from app.services import rl_experience_service
 from app.services.memory_recall import build_memory_context_with_git
 from app.services import safety_trust
+from app.services import luna_presence_service
 
 logger = logging.getLogger(__name__)
 
@@ -316,21 +317,57 @@ def route_and_execute(
 
     # Execute on the selected platform
     if platform in ("claude_code", "gemini_cli", "codex"):
-        response_text, metadata = run_agent_session(
-            db,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            platform=platform,
-            agent_slug=agent_slug,
-            message=message,
-            channel=channel,
-            sender_phone=sender_phone,
-            conversation_summary=conversation_summary,
-            image_b64=image_b64,
-            image_mime=image_mime,
-            db_session_memory=db_session_memory,
-            pre_built_memory_context=pre_built_memory_context,
-        )
+        # Presence session scoping: use chat session ID so concurrent
+        # requests don't clobber each other's state.
+        _presence_sid = str((db_session_memory or {}).get("chat_session_id", ""))
+        try:
+            luna_presence_service.update_state(
+                tenant_id, state="thinking", tool_status="running",
+                session_id=_presence_sid,
+            )
+        except Exception:
+            pass
+        try:
+            response_text, metadata = run_agent_session(
+                db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                platform=platform,
+                agent_slug=agent_slug,
+                message=message,
+                channel=channel,
+                sender_phone=sender_phone,
+                conversation_summary=conversation_summary,
+                image_b64=image_b64,
+                image_mime=image_mime,
+                db_session_memory=db_session_memory,
+                pre_built_memory_context=pre_built_memory_context,
+            )
+        except Exception:
+            # Ensure we never leave Luna stuck in "thinking"
+            try:
+                luna_presence_service.update_state(
+                    tenant_id, state="idle", tool_status="idle",
+                    session_id=_presence_sid,
+                )
+            except Exception:
+                pass
+            raise
+        # Update presence: responding or idle
+        try:
+            if response_text:
+                luna_presence_service.update_state(
+                    tenant_id, state="responding", tool_status="idle",
+                    session_id=_presence_sid,
+                )
+            else:
+                luna_presence_service.update_state(
+                    tenant_id, state="idle", tool_status="idle",
+                    session_id=_presence_sid,
+                )
+        except Exception:
+            pass
+
         metadata = metadata or {}
         if trust_profile:
             metadata.setdefault("agent_trust_score", round(float(trust_profile.trust_score), 3))

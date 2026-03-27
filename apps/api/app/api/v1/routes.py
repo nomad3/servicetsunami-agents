@@ -55,6 +55,7 @@ from app.api.v1 import (
     learning_dashboard,
     branding_domain,
     unsupervised_learning,
+    presence,
 )
 
 router = APIRouter()
@@ -118,3 +119,4 @@ router.include_router(learning.router, prefix="/learning", tags=["learning"])
 router.include_router(learning_dashboard.router, prefix="/learning/dashboard", tags=["learning-dashboard"])
 router.include_router(unsupervised_learning.router, prefix="/unsupervised", tags=["unsupervised-learning"])
 router.include_router(branding_domain.router, tags=["domain-branding"])
+router.include_router(presence.router, tags=["presence"])

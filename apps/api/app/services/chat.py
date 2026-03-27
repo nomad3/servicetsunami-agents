@@ -248,7 +248,10 @@ def _generate_agentic_response(
         conversation_summary=summary,
         image_b64=image_b64,
         image_mime=image_mime,
-        db_session_memory=session.memory_context,
+        db_session_memory={
+            **(session.memory_context or {}),
+            "chat_session_id": str(session.id),
+        },
     )
 
     # Save CLI session ID and recalled entity names for cross-turn continuity
@@ -288,6 +291,16 @@ def _generate_agentic_response(
         db, session=session, role="assistant",
         content=response_text, context=context,
     )
+
+    # Update presence: idle (response delivered), scoped to this session
+    try:
+        from app.services import luna_presence_service
+        luna_presence_service.update_state(
+            session.tenant_id, state="idle",
+            session_id=str(session.id),
+        )
+    except Exception:
+        pass
 
     # Auto-quality scoring (async, non-blocking — runs after response is saved)
     try:
