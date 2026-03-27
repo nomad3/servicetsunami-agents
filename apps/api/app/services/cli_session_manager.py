@@ -494,6 +494,7 @@ def run_agent_session(
 
             existing_session_id = (
                 (db_session_memory or {}).get(f"{platform}_cli_session_id")
+                or (db_session_memory or {}).get("claude_cli_session_id", "")  # legacy key
                 or (db_session_memory or {}).get("cli_session_id", "")
             )
 

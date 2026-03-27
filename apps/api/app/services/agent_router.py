@@ -126,7 +126,8 @@ def route_and_execute(
     # Pin to Claude Code when the session has an active --resume session ID.
     # Switching to Codex (one-shot) mid-conversation breaks context continuity.
     # This overrides the tenant default if a Claude session already exists.
-    _has_claude_session = (db_session_memory or {}).get("claude_code_cli_session_id")
+    _mem = db_session_memory or {}
+    _has_claude_session = _mem.get("claude_code_cli_session_id") or _mem.get("claude_cli_session_id")
     if _has_claude_session:
         platform = "claude_code"
         _pin_to_claude = True
