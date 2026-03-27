@@ -248,7 +248,10 @@ def _generate_agentic_response(
         conversation_summary=summary,
         image_b64=image_b64,
         image_mime=image_mime,
-        db_session_memory=session.memory_context,
+        db_session_memory={
+            **(session.memory_context or {}),
+            "chat_session_id": str(session.id),
+        },
     )
 
     # Save CLI session ID and recalled entity names for cross-turn continuity
