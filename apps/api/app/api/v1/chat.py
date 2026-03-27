@@ -5,6 +5,7 @@ from typing import List, Optional
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -134,6 +135,61 @@ def post_message(
     return chat_schema.ChatTurn(
         user_message=chat_schema.ChatMessage.model_validate(user_message),
         assistant_message=chat_schema.ChatMessage.model_validate(assistant_message)
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/messages/stream",
+    status_code=status.HTTP_200_OK,
+)
+def post_message_stream(
+    session_id: uuid.UUID,
+    payload: chat_schema.ChatMessageCreate,
+    *,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """SSE endpoint: generate the full response then stream it back 2 words at a time."""
+    import json as _json
+    import time as _time
+
+    session = chat_service.get_session(db, session_id=session_id, tenant_id=current_user.tenant_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+
+    user_message, assistant_message = chat_service.post_user_message(
+        db,
+        session=session,
+        user_id=current_user.id,
+        content=payload.content,
+    )
+
+    full_text = assistant_message.content or ""
+    words = full_text.split(" ")
+    chunk_size = 2  # ~2 tokens per SSE event
+
+    def _event_generator():
+        # First event: user message saved
+        yield f"data: {_json.dumps({'type': 'user_saved', 'message': chat_schema.ChatMessage.model_validate(user_message).model_dump(mode='json')})}\n\n"
+
+        # Stream the assistant response 2 words at a time
+        for i in range(0, len(words), chunk_size):
+            chunk = " ".join(words[i:i + chunk_size])
+            if i + chunk_size < len(words):
+                chunk += " "
+            yield f"data: {_json.dumps({'type': 'token', 'text': chunk})}\n\n"
+            _time.sleep(0.02)  # 20ms between chunks — smooth without lag
+
+        # Final event: complete message with ID for feedback/TTS
+        yield f"data: {_json.dumps({'type': 'done', 'message': chat_schema.ChatMessage.model_validate(assistant_message).model_dump(mode='json')})}\n\n"
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

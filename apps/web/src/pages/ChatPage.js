@@ -32,13 +32,30 @@ const ChatPage = () => {
   const [formErrors, setFormErrors] = useState('');
   const [globalError, setGlobalError] = useState('');
   const [attachedFile, setAttachedFile] = useState(null);
+  const [streamingText, setStreamingText] = useState('');
+  const streamAbortRef = useRef(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [speakingMessageId, setSpeakingMessageId] = useState(null);
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
 
   // Auto-scroll to bottom when messages change or typing indicator appears
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, postingMessage]);
+
+  // Auto-speak last assistant message when TTS is enabled
+  useEffect(() => {
+    if (!ttsEnabled || postingMessage || messages.length === 0) return;
+    const last = messages[messages.length - 1];
+    if (last.role === 'assistant' && last.id && !last.id.startsWith('temp-')) {
+      speakText(last.content, last.id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, ttsEnabled]);
 
   useEffect(() => {
     if (!auth.user) {
@@ -53,6 +70,15 @@ const ChatPage = () => {
       setSessionForm(prev => ({ ...prev, agentKitId: agentKits[0].id }));
     }
   }, [agentKits]);
+
+  // Abort any active stream on unmount
+  useEffect(() => {
+    return () => {
+      if (streamAbortRef.current) {
+        streamAbortRef.current.abort();
+      }
+    };
+  }, []);
 
   const loadReferenceData = async () => {
     try {
@@ -98,7 +124,78 @@ const ChatPage = () => {
     }
   };
 
+  // ── Voice helpers ────────────────────────────────────────────────────────
+
+  const stripMarkdown = (text) => {
+    return text
+      .replace(/#{1,6}\s+/g, '')           // headings
+      .replace(/(\*\*|__)(.*?)\1/g, '$2')  // bold
+      .replace(/(\*|_)(.*?)\1/g, '$2')     // italic
+      .replace(/`{1,3}[^`]*`{1,3}/g, '')   // code
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links
+      .replace(/^[-*+]\s+/gm, '')          // list bullets
+      .replace(/^\d+\.\s+/gm, '')          // numbered list
+      .replace(/>\s+/g, '')                // blockquotes
+      .replace(/\n{2,}/g, '. ')            // paragraph breaks → pause
+      .trim();
+  };
+
+  const speakText = (text, messageId) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    if (speakingMessageId === messageId) {
+      setSpeakingMessageId(null);
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(stripMarkdown(text));
+    utterance.rate = 1.05;
+    utterance.pitch = 1.0;
+    // Prefer a natural-sounding voice if available
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v => /samantha|karen|google us english|zira/i.test(v.name));
+    if (preferred) utterance.voice = preferred;
+    utterance.onend = () => setSpeakingMessageId(null);
+    utterance.onerror = () => setSpeakingMessageId(null);
+    setSpeakingMessageId(messageId);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        const ext = mimeType.includes('webm') ? 'webm' : 'ogg';
+        const file = new File([blob], `voice-message.${ext}`, { type: mimeType });
+        setAttachedFile(file);
+        setIsRecording(false);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch {
+      alert('Microphone access denied. Please allow microphone permissions.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
   const handleSelectSession = (session) => {
+    if (streamAbortRef.current) {
+      streamAbortRef.current.abort();
+      streamAbortRef.current = null;
+      setStreamingText('');
+      setPostingMessage(false);
+    }
     setSelectedSession(session);
     loadMessages(session.id);
   };
@@ -131,35 +228,59 @@ const ChatPage = () => {
       }
     }
 
-    try {
-      let response;
-      if (sentFile) {
-        response = await chatService.postMessageWithFile(selectedSession.id, sentText, sentFile);
-      } else {
-        response = await chatService.postMessage(selectedSession.id, sentText);
+    if (sentFile) {
+      // File upload: no streaming, use existing endpoint
+      try {
+        const response = await chatService.postMessageWithFile(selectedSession.id, sentText, sentFile);
+        setMessages((prev) => {
+          const withoutTemp = prev.filter((m) => m.id !== tempUserMsg.id);
+          return [...withoutTemp, response.data.user_message, response.data.assistant_message];
+        });
+      } catch (err) {
+        console.error(err);
+        const detail = err?.response?.data?.detail || err?.response?.data?.error || err?.message || '';
+        const userMsg = detail.includes('timeout') || detail.includes('timed out')
+          ? t('errors.timeout')
+          : detail.includes('connection') || detail.includes('Connection')
+          ? t('errors.connection')
+          : detail
+          ? t('errors.genericDetail', { detail: detail.slice(0, 150) })
+          : t('errors.generic');
+        setGlobalError(userMsg);
+        setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id));
+      } finally {
+        setPostingMessage(false);
       }
-      // Replace temp user message with real ones
-      setMessages((prev) => {
-        const withoutTemp = prev.filter((m) => m.id !== tempUserMsg.id);
-        return [...withoutTemp, response.data.user_message, response.data.assistant_message];
-      });
-    } catch (err) {
-      console.error(err);
-      // Extract meaningful error from API response
-      const detail = err?.response?.data?.detail || err?.response?.data?.error || err?.message || '';
-      const userMsg = detail.includes('timeout') || detail.includes('timed out')
-        ? t('errors.timeout')
-        : detail.includes('connection') || detail.includes('Connection')
-        ? t('errors.connection')
-        : detail
-        ? t('errors.genericDetail', { detail: detail.slice(0, 150) })
-        : t('errors.generic');
-      setGlobalError(userMsg);
-      // Remove the temp user message on error so they can retry
-      setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id));
-    } finally {
-      setPostingMessage(false);
+      return;
     }
+
+    // Text message: stream 2 tokens at a time
+    setStreamingText('');
+    const ctrl = chatService.postMessageStream(
+      selectedSession.id,
+      sentText,
+      // onToken
+      (chunk) => setStreamingText((prev) => prev + chunk),
+      // onUserSaved — swap temp user message with persisted one
+      (userMsg) => setMessages((prev) => {
+        const withoutTemp = prev.filter((m) => m.id !== tempUserMsg.id);
+        return [...withoutTemp, userMsg];
+      }),
+      // onDone — replace streaming bubble with final persisted message
+      (assistantMsg) => {
+        setStreamingText('');
+        setPostingMessage(false);
+        setMessages((prev) => [...prev, assistantMsg]);
+      },
+      // onError
+      (errMsg) => {
+        setStreamingText('');
+        setPostingMessage(false);
+        setGlobalError(errMsg || t('errors.generic'));
+        setMessages((prev) => prev.filter((m) => m.id !== tempUserMsg.id));
+      },
+    );
+    streamAbortRef.current = ctrl;
   };
 
   const handleCreateSessionModal = () => {
@@ -243,11 +364,21 @@ const ChatPage = () => {
         })}
 
         {message.role === 'assistant' && (
-          <div className="mt-2">
+          <div className="mt-2 d-flex align-items-center gap-2">
             <FeedbackActions
               trajectoryId={message.id}
               stepIndex={0}
             />
+            {window.speechSynthesis && (
+              <button
+                type="button"
+                title={speakingMessageId === message.id ? 'Stop speaking' : 'Read aloud'}
+                onClick={() => speakText(message.content, message.id)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', fontSize: '1rem', opacity: 0.6 }}
+              >
+                {speakingMessageId === message.id ? '🔇' : '🔊'}
+              </button>
+            )}
           </div>
         )}
 
@@ -321,13 +452,28 @@ const ChatPage = () => {
             {selectedSession ? (
               <Card className="shadow-sm">
                 <Card.Header>
-                  <div className="d-flex justify-content-between">
+                  <div className="d-flex justify-content-between align-items-center">
                     <div>
                       <h5 className="mb-0">{selectedSession.title || t('agentSession')}</h5>
                       <small className="text-muted">
                         {getSessionSubtitle(selectedSession)}
                       </small>
                     </div>
+                    {window.speechSynthesis && (
+                      <Button
+                        size="sm"
+                        variant={ttsEnabled ? 'primary' : 'outline-secondary'}
+                        title={ttsEnabled ? 'Voice responses ON — click to turn off' : 'Turn on voice responses'}
+                        onClick={() => {
+                          if (ttsEnabled) window.speechSynthesis.cancel();
+                          setTtsEnabled(v => !v);
+                          setSpeakingMessageId(null);
+                        }}
+                        style={{ fontSize: '1rem' }}
+                      >
+                        {ttsEnabled ? '🔊' : '🔇'}
+                      </Button>
+                    )}
                   </div>
                 </Card.Header>
                 <Card.Body style={{ height: '60vh', display: 'flex', flexDirection: 'column' }}>
@@ -340,13 +486,25 @@ const ChatPage = () => {
                     ) : (
                       <ListGroup variant="flush">
                         {messages.map((message) => renderMessage(message))}
-                        {postingMessage && (
+                        {postingMessage && !streamingText && (
                           <ListGroup.Item className="border-0 py-2">
                             <div className="d-flex align-items-center gap-2 text-muted" style={{ fontSize: '0.9rem' }}>
                               <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px' }} />
                               <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.2s' }} />
                               <Spinner animation="grow" size="sm" style={{ width: '8px', height: '8px', animationDelay: '0.4s' }} />
                               <span className="ms-1">{t('thinking')}</span>
+                            </div>
+                          </ListGroup.Item>
+                        )}
+                        {streamingText && (
+                          <ListGroup.Item style={{ background: 'var(--surface-contrast)' }}>
+                            <div className="d-flex justify-content-between align-items-start">
+                              <div>
+                                <Badge bg="primary" className="me-2 text-uppercase">assistant</Badge>
+                                <div className="chat-markdown" style={{ fontSize: '0.9rem', lineHeight: 1.6 }}>
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingText}</ReactMarkdown>
+                                </div>
+                              </div>
                             </div>
                           </ListGroup.Item>
                         )}
@@ -453,13 +611,30 @@ const ChatPage = () => {
                             title={t('attachFile')}
                             onClick={() => fileInputRef.current?.click()}
                             style={{ flex: '0 0 auto' }}
+                            disabled={isRecording}
                           >
                             {'\uD83D\uDCCE'}
                           </Button>
+                          {navigator.mediaDevices && (
+                            <Button
+                              type="button"
+                              variant={isRecording ? 'danger' : 'outline-secondary'}
+                              title={isRecording ? 'Stop recording' : 'Record voice message'}
+                              onClick={isRecording ? stopRecording : startRecording}
+                              style={{ flex: '0 0 auto', position: 'relative' }}
+                            >
+                              {isRecording ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff', display: 'inline-block', animation: 'pulse 1s infinite' }} />
+                                  Stop
+                                </span>
+                              ) : '🎙️'}
+                            </Button>
+                          )}
                           <Button
                             type="submit"
                             variant="primary"
-                            disabled={postingMessage || (!messageDraft.trim() && !attachedFile)}
+                            disabled={postingMessage || (!messageDraft.trim() && !attachedFile) || isRecording}
                             style={{ flex: 1 }}
                           >
                             {postingMessage ? t('sending') : t('send')}

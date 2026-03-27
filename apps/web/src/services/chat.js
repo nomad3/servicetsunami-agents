@@ -11,6 +11,51 @@ const postMessage = (sessionId, content) =>
     content,
   });
 
+const postMessageStream = (sessionId, content, onToken, onUserSaved, onDone, onError) => {
+  const user = JSON.parse(localStorage.getItem('user'));
+  const token = user?.access_token || '';
+  const ctrl = new AbortController();
+
+  fetch(`/api/v1/chat/sessions/${sessionId}/messages/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ content }),
+    signal: ctrl.signal,
+  }).then(async (res) => {
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      onError(err.detail || 'Stream failed');
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop(); // keep incomplete line
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const evt = JSON.parse(line.slice(6));
+          if (evt.type === 'user_saved') onUserSaved(evt.message);
+          else if (evt.type === 'token') onToken(evt.text);
+          else if (evt.type === 'done') onDone(evt.message);
+        } catch { /* ignore parse errors */ }
+      }
+    }
+  }).catch((err) => {
+    if (err.name !== 'AbortError') onError(err.message || 'Stream failed');
+  });
+
+  return ctrl; // caller can abort
+};
+
 const getSessionEntities = (sessionId) => api.get(`/chat/sessions/${sessionId}/entities`);
 
 const postMessageWithFile = (sessionId, content, file) => {
@@ -28,6 +73,7 @@ const chatService = {
   createSession,
   listMessages,
   postMessage,
+  postMessageStream,
   postMessageWithFile,
   getSessionEntities,
 };

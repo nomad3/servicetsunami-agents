@@ -510,10 +510,12 @@ class WhatsAppService:
             media_type = "document"
 
         # Download media if present
+        # Audio can be large — use a longer timeout than images/docs
         if media_type:
+            _download_timeout = 90 if media_type == "audio" else 30
             try:
                 media_bytes = await asyncio.wait_for(
-                    client.download_any(event.Message), timeout=30,
+                    client.download_any(event.Message), timeout=_download_timeout,
                 )
                 logger.info(f"Downloaded {media_type} ({len(media_bytes)} bytes) from {sender_jid}")
             except Exception as e:
@@ -683,8 +685,27 @@ class WhatsAppService:
                         edb.close()
                 except Exception:
                     pass
+            elif media_bytes and media_type == "audio":
+                # Audio (voice notes): transcribe locally with Whisper first
+                try:
+                    from app.services.media_utils import transcribe_audio_bytes, build_media_parts
+                    transcript = transcribe_audio_bytes(media_bytes)
+                    if transcript:
+                        logger.info(f"Whisper transcript ({len(transcript)} chars) for {sender_phone}")
+                        doc_text = transcript
+                    else:
+                        # Whisper failed — fall back to inline_data for multimodal LLMs
+                        logger.warning(f"Whisper transcription empty for {sender_phone}, falling back to inline")
+                        media_parts, _ = build_media_parts(
+                            media_bytes=media_bytes,
+                            mime_type=media_mime,
+                            caption=media_caption or "",
+                            filename="",
+                        )
+                except Exception as e:
+                    logger.warning(f"Audio processing failed for {sender_phone}: {e}")
             elif media_bytes:
-                # Audio/other: send to LLM as media_parts
+                # Other media types: send to LLM as media_parts
                 try:
                     from app.services.media_utils import build_media_parts
                     media_parts, _ = build_media_parts(
@@ -696,14 +717,18 @@ class WhatsAppService:
                 except ValueError as e:
                     logger.warning(f"Media processing failed for {sender_phone}: {e}")
 
-            # If we extracted document text, prepend it to the agent message
+            # If we extracted document/audio text, prepend it to the agent message
             if doc_text:
-                media_filename = ""
-                if msg.documentMessage:
-                    media_filename = msg.documentMessage.fileName or msg.documentMessage.title or ""
-                agent_text = f"[User sent document: {media_filename}]\n\nExtracted content:\n{doc_text[:3000]}"
-                if len(doc_text) > 3000:
-                    agent_text += f"\n\n(Document truncated — {len(doc_text)} chars total, embedded for search)"
+                if media_type == "audio":
+                    # Voice note — send transcript directly, no document wrapper
+                    agent_text = doc_text
+                else:
+                    media_filename = ""
+                    if msg.documentMessage:
+                        media_filename = msg.documentMessage.fileName or msg.documentMessage.title or ""
+                    agent_text = f"[User sent document: {media_filename}]\n\nExtracted content:\n{doc_text[:3000]}"
+                    if len(doc_text) > 3000:
+                        agent_text += f"\n\n(Document truncated — {len(doc_text)} chars total, embedded for search)"
             else:
                 agent_text = media_caption or text or f"[Sent {media_type}]"
 

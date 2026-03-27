@@ -153,15 +153,55 @@ def _build_image_parts(
     ]
 
 
+def transcribe_audio_bytes(audio_bytes: bytes) -> str | None:
+    """
+    Transcribe audio bytes locally using Whisper (no ffmpeg required).
+    Uses soundfile to decode OGG/WAV directly into a numpy array.
+    Returns transcript string, or None if transcription fails.
+    """
+    try:
+        import numpy as np
+        import soundfile as sf
+        import whisper
+
+        buf = io.BytesIO(audio_bytes)
+        data, sr = sf.read(buf, dtype="float32")
+        if len(data.shape) > 1:
+            data = data.mean(axis=1)  # stereo → mono
+
+        # Whisper expects 16 kHz — resample if needed
+        if sr != 16000:
+            try:
+                import librosa
+                data = librosa.resample(data, orig_sr=sr, target_sr=16000)
+            except Exception:
+                pass  # proceed anyway; whisper handles other rates reasonably
+
+        model = whisper.load_model("base")
+        result = model.transcribe(data)
+        text = (result.get("text") or "").strip()
+        return text if text else None
+    except Exception:
+        logger.exception("Local Whisper transcription failed")
+        return None
+
+
 def _build_audio_parts(
     audio_bytes: bytes,
     mime_type: str,
     caption: str,
 ) -> List[Dict]:
-    """Base64-encode audio and return inline_data + text parts."""
+    """Transcribe audio locally with Whisper; fall back to base64 inline_data."""
+    transcript = transcribe_audio_bytes(audio_bytes)
+    if transcript:
+        prompt = f"[Voice message transcription]: {transcript}"
+        if caption:
+            prompt += f"\n[Caption: {caption}]"
+        return [{"text": prompt}]
+
+    # Fallback: send as inline data for the LLM to handle
     b64 = base64.b64encode(audio_bytes).decode("utf-8")
     text = caption if caption else DEFAULT_AUDIO_PROMPT
-
     return [
         {"inline_data": {"mime_type": mime_type, "data": b64}},
         {"text": text},
