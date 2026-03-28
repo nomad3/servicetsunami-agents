@@ -326,6 +326,8 @@ def _generate_agentic_response(
     # Capture ALL primitives before spawning threads — ORM objects are
     # not safe to dereference after the request session commits.
     _tenant_id = session.tenant_id  # uuid, not ORM lazy
+    _session_id = session.id
+    _channel = "whatsapp" if sender_phone else "web"
     _user_message = user_message
     _response_text = response_text
     _recalled_names = (context or {}).get("recalled_entity_names", [])
@@ -396,6 +398,115 @@ def _generate_agentic_response(
                 edb.close()
 
         threading.Thread(target=_recall_feedback, daemon=True).start()
+    except Exception:
+        pass
+
+    # 3. Episode generation — create a conversation episode summary
+    #    when enough new messages have accumulated.
+    try:
+        import threading
+
+        def _maybe_create_episode():
+            from datetime import datetime as _dt
+            from app.db.session import SessionLocal as _SL
+            from app.models.conversation_episode import ConversationEpisode
+            from app.models.chat import ChatMessage as _CM
+            from sqlalchemy import func
+
+            edb = _SL()
+            try:
+                # Check messages since last episode for this session
+                last_episode = edb.query(ConversationEpisode).filter(
+                    ConversationEpisode.session_id == _session_id,
+                ).order_by(ConversationEpisode.created_at.desc()).first()
+
+                since = last_episode.created_at if last_episode else _dt(2020, 1, 1)
+                new_msg_count = edb.query(func.count(_CM.id)).filter(
+                    _CM.session_id == _session_id,
+                    _CM.created_at > since,
+                ).scalar()
+
+                if new_msg_count < 4:
+                    return  # Not enough new messages
+
+                # Fetch the new messages for summarization
+                new_msgs = edb.query(_CM).filter(
+                    _CM.session_id == _session_id,
+                    _CM.created_at > since,
+                ).order_by(_CM.created_at).limit(20).all()
+
+                conversation_text = "\n".join(
+                    f"{'User' if m.role == 'user' else 'Luna'}: {m.content[:300]}"
+                    for m in new_msgs
+                )
+
+                # Summarize using local Qwen
+                from app.services.local_inference import generate_sync
+                prompt = (
+                    "Summarize this conversation in 2-3 sentences. Include key topics "
+                    "discussed, any decisions made, and the user's emotional tone "
+                    "(excited, frustrated, neutral, curious, etc).\n\n"
+                    f"Conversation:\n{conversation_text[:3000]}\n\nSummary:"
+                )
+
+                summary = generate_sync(prompt, model="qwen2.5-coder:1.5b", max_tokens=200, timeout=30)
+                if not summary or len(summary) < 10:
+                    return
+
+                # Extract key entities from summary (capitalized multi-char words)
+                import re
+                _skip = {
+                    'the', 'and', 'but', 'for', 'was', 'are', 'has', 'had',
+                    'not', 'this', 'that', 'they', 'user', 'luna', 'with',
+                }
+                entities = []
+                for word in summary.split():
+                    cleaned = re.sub(r'[^\w]', '', word)
+                    if cleaned and cleaned[0].isupper() and len(cleaned) > 2 and cleaned.lower() not in _skip:
+                        entities.append(cleaned)
+                entities = list(set(entities))[:10]
+
+                # Detect mood from summary keywords
+                mood = "neutral"
+                summary_lower = summary.lower()
+                if any(w in summary_lower for w in ["excited", "enthusiastic", "happy", "great"]):
+                    mood = "positive"
+                elif any(w in summary_lower for w in ["frustrated", "annoyed", "confused", "problem"]):
+                    mood = "frustrated"
+                elif any(w in summary_lower for w in ["curious", "interested", "exploring"]):
+                    mood = "curious"
+
+                # Generate embedding for semantic search
+                from app.services.embedding_service import embed_text
+                embedding = embed_text(summary, task_type="RETRIEVAL_DOCUMENT")
+
+                episode = ConversationEpisode(
+                    tenant_id=_tenant_id,
+                    session_id=_session_id,
+                    summary=summary.strip(),
+                    key_topics=[],
+                    key_entities=entities,
+                    mood=mood,
+                    message_count=new_msg_count,
+                    source_channel=_channel,
+                    embedding=embedding,
+                )
+                edb.add(episode)
+                edb.commit()
+
+                import logging as _log
+                _log.getLogger(__name__).info(
+                    "Created episode for session %s: %d msgs, mood=%s",
+                    str(_session_id)[:8], new_msg_count, mood,
+                )
+            except Exception:
+                import logging as _log
+                _log.getLogger(__name__).debug("Episode generation failed", exc_info=True)
+                edb.rollback()
+            finally:
+                edb.close()
+
+        threading.Thread(target=_maybe_create_episode, daemon=True).start()
     except Exception:
         pass
 

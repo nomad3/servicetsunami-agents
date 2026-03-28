@@ -141,6 +141,19 @@ def generate_cli_instructions(
             lines.append(f"- **{c['entity']}**: {c['attribute']} was '{c.get('current', {}).get('type', '?')}' but new info says '{c.get('conflicting', {}).get('type', '?')}' -- {c.get('reason', '')}")
         lines.append("")
 
+    episodes = memory_context.get("recent_episodes", [])
+    if episodes:
+        lines.append("## Recent Conversations")
+        lines.append("")
+        for ep in episodes:
+            date = ep.get("date", "")
+            mood = ep.get("mood", "")
+            source = ep.get("source", "")
+            mood_tag = f" [{mood}]" if mood and mood != "neutral" else ""
+            source_tag = f" via {source}" if source else ""
+            lines.append(f"- {date}{source_tag}{mood_tag}: {ep.get('summary', '')}")
+        lines.append("")
+
     git_context = memory_context.get("git_context", [])
     if git_context:
         lines.append("## Recent Git Context")

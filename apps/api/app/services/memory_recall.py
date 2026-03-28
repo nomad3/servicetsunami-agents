@@ -409,6 +409,38 @@ def build_memory_context(
         except Exception:
             logger.debug("Failed to fetch disputed assertions", exc_info=True)
 
+    # --- Step 7b: Recall recent episodes ---
+    try:
+        from app.models.conversation_episode import ConversationEpisode
+        from sqlalchemy import text as sa_text
+
+        vector_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
+        episode_sql = sa_text(f"""
+            SELECT id, summary, key_topics, key_entities, mood, source_channel, created_at,
+                   1 - (embedding <=> CAST('{vector_literal}' AS vector)) AS similarity
+            FROM conversation_episodes
+            WHERE tenant_id = CAST(:tid AS uuid)
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> CAST('{vector_literal}' AS vector)
+            LIMIT 5
+        """)
+        episode_rows = db.execute(episode_sql, {"tid": str(tenant_id)}).mappings().all()
+        episodes = [
+            {
+                "summary": r["summary"],
+                "mood": r["mood"],
+                "source": r["source_channel"],
+                "date": r["created_at"].strftime("%b %d") if r["created_at"] else "",
+                "similarity": round(float(r["similarity"]), 4),
+            }
+            for r in episode_rows
+            if float(r["similarity"]) > 0.3
+        ]
+        if episodes:
+            context["recent_episodes"] = episodes[:3]
+    except Exception:
+        logger.debug("Episode recall failed", exc_info=True)
+
     # --- Step 8: Update recall counters on recalled entities ---
     if entity_ids:
         now = datetime.utcnow()
