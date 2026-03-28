@@ -96,7 +96,9 @@ def generate_cli_instructions(
             # Inject observations (facts) for this entity
             obs = entity_observations.get(name, [])
             for o in obs[:3]:
-                lines.append(f"  - {o.get('text', '')}")
+                source = o.get('source_ref', '')
+                source_tag = f" (from {source})" if source else ""
+                lines.append(f"  - {o.get('text', '')}{source_tag}")
         lines.append("")
 
     # Separate dream-learned patterns from regular memories
@@ -129,6 +131,14 @@ def generate_cli_instructions(
             to = relation.get("to", "")
             rtype = relation.get("type", "")
             lines.append(f"- {frm} --{rtype}--> {to}")
+        lines.append("")
+
+    contradictions = memory_context.get("contradictions", [])
+    if contradictions:
+        lines.append("## Conflicting Information (verify with user)")
+        lines.append("")
+        for c in contradictions:
+            lines.append(f"- **{c['entity']}**: {c['attribute']} was '{c.get('current', {}).get('type', '?')}' but new info says '{c.get('conflicting', {}).get('type', '?')}' -- {c.get('reason', '')}")
         lines.append("")
 
     git_context = memory_context.get("git_context", [])

@@ -542,6 +542,8 @@ def create_observation(
     source_agent: str = None,
     entity_id: uuid.UUID = None,
     confidence: float = 1.0,
+    source_channel: str = None,
+    source_ref: str = None,
 ) -> KnowledgeObservation:
     """Create a knowledge observation using the ORM model.
 
@@ -560,6 +562,8 @@ def create_observation(
         source_platform=source_platform,
         source_agent=source_agent,
         confidence=confidence,
+        source_channel=source_channel,
+        source_ref=source_ref,
     )
 
     # Generate and store embedding directly on the model

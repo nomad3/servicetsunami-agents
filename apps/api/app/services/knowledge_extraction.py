@@ -15,8 +15,10 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.chat import ChatSession
@@ -55,6 +57,15 @@ ENTITY_BLOCKLIST: set[str] = {
     # Generic noise
     "user", "usuario", "assistant", "bot", "system",
     "api", "database", "server", "client",
+}
+
+# Map content_type to source_channel for observation attribution
+_SOURCE_CHANNEL_MAP = {
+    "chat_transcript": "chat",
+    "plain_text": "chat",
+    "email": "gmail",
+    "calendar": "calendar",
+    "html": "web",
 }
 
 
@@ -216,6 +227,7 @@ class KnowledgeExtractionService:
                 source_url=source_url,
                 source_agent_id=source_agent_id,
                 collection_task_id=collection_task_id,
+                content_type=content_type,
             )
 
             relations_created = self._persist_relations(db, tenant_id, relations_data)
@@ -445,11 +457,15 @@ class KnowledgeExtractionService:
         source_url: Optional[str],
         source_agent_id: Optional[uuid.UUID],
         collection_task_id: Optional[uuid.UUID],
+        content_type: str = "plain_text",
+        source_ref: Optional[str] = None,
     ) -> List[KnowledgeEntity]:
         """Validate, deduplicate, and persist extracted entities.
 
         Uses EntityValidator for enterprise guardrails (rate limits, dedup,
         content validation) before persisting to the knowledge graph.
+        Checks for contradictions (entity_type mismatch) and logs disputed
+        world state assertions when conflicts are found.
         """
         default_type = entity_schema.get("entity_type", "concept") if entity_schema else "concept"
 
@@ -474,6 +490,24 @@ class KnowledgeExtractionService:
         if result.rejected_entities:
             logger.warning("Rejected %d entities", len(result.rejected_entities))
 
+        # Batch-load existing entities by name to avoid N+1 queries during contradiction check
+        all_names = [
+            item.get("name", "").strip().lower()
+            for item in result.valid_entities
+            if item.get("name", "").strip()
+        ]
+        existing_by_name: Dict[str, KnowledgeEntity] = {}
+        if all_names:
+            rows = db.query(KnowledgeEntity).filter(
+                KnowledgeEntity.tenant_id == tenant_id,
+                func.lower(KnowledgeEntity.name).in_(all_names),
+            ).all()
+            for row in rows:
+                existing_by_name[row.name.lower()] = row
+
+        # Import once outside the loop
+        from app.models.world_state import WorldStateAssertion
+
         # Persist valid entities
         created: List[KnowledgeEntity] = []
         blocked_count = 0
@@ -495,6 +529,33 @@ class KnowledgeExtractionService:
 
             # Category from LLM output (falls back to entity_type)
             category = (item.get("category") or entity_type).lower()
+
+            # --- Contradiction detection: check for entity_type mismatch ---
+            # Uses pre-loaded batch — no extra DB query per entity
+            existing = existing_by_name.get(name.lower())
+            if existing and existing.entity_type != entity_type:
+                try:
+                    dispute = WorldStateAssertion(
+                        tenant_id=tenant_id,
+                        subject_entity_id=existing.id,
+                        subject_slug=name,
+                        attribute_path="entity_type",
+                        value_json={"type": entity_type, "source": content_type},
+                        previous_value_json={"type": existing.entity_type},
+                        confidence=0.5,
+                        source_type=_SOURCE_CHANNEL_MAP.get(content_type, "chat"),
+                        status="disputed",
+                        dispute_reason=f"Existing: {existing.entity_type}, New extraction: {entity_type}",
+                    )
+                    db.add(dispute)
+                    logger.info(
+                        "Contradiction detected for '%s': existing=%s vs new=%s — skipping entity creation",
+                        name, existing.entity_type, entity_type,
+                    )
+                except Exception:
+                    logger.debug("Contradiction check failed for '%s'", name, exc_info=True)
+                # Skip creating a conflicting entity — flag it for user to resolve
+                continue
 
             # Description as a top-level field
             description = item.get("description", "")
@@ -523,6 +584,25 @@ class KnowledgeExtractionService:
             created.append(entity)
 
         if created:
+            db.commit()
+            # Create observations from entity descriptions with source attribution
+            source_ref = f"{source_channel} {datetime.utcnow().strftime('%b %d')}"
+            for entity in created:
+                if entity.description:
+                    try:
+                        from app.services.knowledge import create_observation
+                        create_observation(
+                            db, tenant_id,
+                            observation_text=entity.description,
+                            observation_type="extracted",
+                            source_type=content_type or "conversation",
+                            entity_id=entity.id,
+                            confidence=entity.confidence or 0.8,
+                            source_channel=source_channel,
+                            source_ref=source_ref,
+                        )
+                    except Exception:
+                        logger.debug("Failed to create observation for entity %s", entity.name)
             db.commit()
 
         if blocked_count:

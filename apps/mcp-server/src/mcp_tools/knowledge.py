@@ -622,6 +622,8 @@ async def record_observation(
     entity_id: str = "",
     source_platform: str = "",
     source_agent: str = "",
+    source_channel: str = "",
+    source_ref: str = "",
     ctx: Context = None,
 ) -> dict:
     """Record a raw observation for later entity extraction.
@@ -634,6 +636,8 @@ async def record_observation(
         entity_id: Optional entity UUID to link this observation to.
         source_platform: Platform that generated this observation (e.g. claude_code, gemini_cli, git).
         source_agent: Agent name/id that created this observation.
+        source_channel: Channel where this was learned — chat, gmail, calendar, web (default '').
+        source_ref: Human-readable reference e.g. 'gmail Mar 27' or 'chat Mar 28' (default '').
         ctx: MCP request context (injected automatically).
 
     Returns:
@@ -644,6 +648,8 @@ async def record_observation(
     eid = entity_id or None
     s_platform = source_platform or None
     s_agent = source_agent or None
+    s_channel = source_channel or None
+    s_ref = source_ref or None
 
     async with (await _get_pool()).acquire() as conn:
         pgvector = await _has_pgvector(conn)
@@ -654,11 +660,11 @@ async def record_observation(
                     """
                     INSERT INTO knowledge_observations
                     (id, tenant_id, entity_id, observation_text, observation_type, source_type,
-                     source_platform, source_agent, embedding)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector)
+                     source_platform, source_agent, source_channel, source_ref, embedding)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::vector)
                     """,
                     obs_id, tid, eid, observation_text, observation_type, source_type,
-                    s_platform, s_agent, str(embedding),
+                    s_platform, s_agent, s_channel, s_ref, str(embedding),
                 )
                 return {"observation_id": obs_id}
 
@@ -666,11 +672,11 @@ async def record_observation(
             """
             INSERT INTO knowledge_observations
             (id, tenant_id, entity_id, observation_text, observation_type, source_type,
-             source_platform, source_agent)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             source_platform, source_agent, source_channel, source_ref)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             obs_id, tid, eid, observation_text, observation_type, source_type,
-            s_platform, s_agent,
+            s_platform, s_agent, s_channel, s_ref,
         )
     # connection returned to pool automatically
 

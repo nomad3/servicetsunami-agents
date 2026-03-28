@@ -22,6 +22,8 @@ class KnowledgeObservation(Base):
     source_type = Column(String(50), default="conversation")  # conversation, git_history, git_pr, rl_experience, email, dataset
     source_platform = Column(String(50), nullable=True)  # claude_code, gemini_cli, git, etc.
     source_agent = Column(String(100), nullable=True)
+    source_channel = Column(String(50), nullable=True)  # chat, whatsapp, gmail, calendar, system
+    source_ref = Column(String(500), nullable=True)  # e.g. "WhatsApp Mar 27" or "email from john@..."
 
     confidence = Column(Float, default=1.0)
     embedding = Column(Vector(768), nullable=True)
