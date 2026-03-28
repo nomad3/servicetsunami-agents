@@ -22,3 +22,4 @@ class LunaPresenceUpdate(BaseModel):
     active_shell: Optional[str] = None
     tool_status: Optional[str] = None
     attention_target: Optional[str] = None
+    session_id: Optional[str] = None

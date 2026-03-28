@@ -33,10 +33,8 @@ const postMessageStream = (sessionId, content, onToken, onUserSaved, onDone, onE
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
+
+    const processLines = () => {
       const lines = buf.split('\n');
       buf = lines.pop(); // keep incomplete line
       for (const line of lines) {
@@ -48,6 +46,20 @@ const postMessageStream = (sessionId, content, onToken, onUserSaved, onDone, onE
           else if (evt.type === 'done') onDone(evt.message);
         } catch { /* ignore parse errors */ }
       }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        // Flush any remaining buffered data
+        if (buf.trim()) {
+          buf += '\n';
+          processLines();
+        }
+        break;
+      }
+      buf += decoder.decode(value, { stream: true });
+      processLines();
     }
   }).catch((err) => {
     if (err.name !== 'AbortError') onError(err.message || 'Stream failed');
