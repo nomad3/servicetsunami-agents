@@ -15,6 +15,7 @@ from sqlalchemy import or_, text
 from app.models.knowledge_entity import KnowledgeEntity
 from app.models.knowledge_relation import KnowledgeRelation
 from app.models.agent_memory import AgentMemory
+from app.models.world_state import WorldStateAssertion
 from app.services import embedding_service
 from app.services.rl_experience_service import log_experience
 
@@ -388,7 +389,6 @@ def build_memory_context(
     # --- Check for disputed assertions on recalled entities ---
     if entity_ids:
         try:
-            from app.models.world_state import WorldStateAssertion
             disputed = db.query(WorldStateAssertion).filter(
                 WorldStateAssertion.tenant_id == tenant_id,
                 WorldStateAssertion.subject_entity_id.in_(entity_ids),

@@ -458,6 +458,7 @@ class KnowledgeExtractionService:
         source_agent_id: Optional[uuid.UUID],
         collection_task_id: Optional[uuid.UUID],
         content_type: str = "plain_text",
+        source_ref: Optional[str] = None,
     ) -> List[KnowledgeEntity]:
         """Validate, deduplicate, and persist extracted entities.
 
@@ -489,6 +490,27 @@ class KnowledgeExtractionService:
         if result.rejected_entities:
             logger.warning("Rejected %d entities", len(result.rejected_entities))
 
+        # Resolve source_channel from content_type (fix: was defined but never used)
+        source_channel = _SOURCE_CHANNEL_MAP.get(content_type, "chat")
+
+        # Batch-load existing entities by name to avoid N+1 queries during contradiction check
+        all_names = [
+            item.get("name", "").strip().lower()
+            for item in result.valid_entities
+            if item.get("name", "").strip()
+        ]
+        existing_by_name: Dict[str, KnowledgeEntity] = {}
+        if all_names:
+            rows = db.query(KnowledgeEntity).filter(
+                KnowledgeEntity.tenant_id == tenant_id,
+                func.lower(KnowledgeEntity.name).in_(all_names),
+            ).all()
+            for row in rows:
+                existing_by_name[row.name.lower()] = row
+
+        # Import once outside the loop
+        from app.models.world_state import WorldStateAssertion
+
         # Persist valid entities
         created: List[KnowledgeEntity] = []
         blocked_count = 0
@@ -512,13 +534,10 @@ class KnowledgeExtractionService:
             category = (item.get("category") or entity_type).lower()
 
             # --- Contradiction detection: check for entity_type mismatch ---
-            try:
-                existing = db.query(KnowledgeEntity).filter(
-                    KnowledgeEntity.tenant_id == tenant_id,
-                    func.lower(KnowledgeEntity.name) == name.lower(),
-                ).first()
-                if existing and existing.entity_type != entity_type:
-                    from app.models.world_state import WorldStateAssertion
+            # Uses pre-loaded batch — no extra DB query per entity
+            existing = existing_by_name.get(name.lower())
+            if existing and existing.entity_type != entity_type:
+                try:
                     dispute = WorldStateAssertion(
                         tenant_id=tenant_id,
                         subject_entity_id=existing.id,
@@ -533,11 +552,13 @@ class KnowledgeExtractionService:
                     )
                     db.add(dispute)
                     logger.info(
-                        "Contradiction detected for '%s': existing=%s vs new=%s",
+                        "Contradiction detected for '%s': existing=%s vs new=%s — skipping entity creation",
                         name, existing.entity_type, entity_type,
                     )
-            except Exception:
-                logger.debug("Contradiction check failed for '%s'", name, exc_info=True)
+                except Exception:
+                    logger.debug("Contradiction check failed for '%s'", name, exc_info=True)
+                # Skip creating a conflicting entity — flag it for user to resolve
+                continue
 
             # Description as a top-level field
             description = item.get("description", "")
