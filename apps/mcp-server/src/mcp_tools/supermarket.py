@@ -33,7 +33,7 @@ async def search_product_prices(
 
     **Any custom site** — pass a dict with name + search URL:
       {"name": "Farmacia Cruz Verde", "search_url": "https://www.cruzverde.cl/buscar?q={query}"}
-      The {query} placeholder is replaced with the product name.
+      The {query} placeholder is replaced with the URL-encoded product name.
       Works on most e-commerce sites via schema.org + heuristic extraction.
 
     Args:
@@ -56,7 +56,7 @@ async def search_product_prices(
     logger.info("search_product_prices: tenant=%s products=%s sites=%s",
                 str(resolved_tenant_id)[:8], products, sites)
 
-    if sites is None:
+    if not sites:
         sites = ["lider", "jumbo"]
 
     from src.scrapers.supermarket import search_prices
