@@ -21,6 +21,7 @@ def update_presence(body: LunaPresenceUpdate, current_user=Depends(get_current_u
         current_user.tenant_id,
         state=body.state, mood=body.mood, privacy=body.privacy,
         active_shell=body.active_shell, tool_status=body.tool_status,
+        session_id=body.session_id,
     )
 
 

@@ -11,10 +11,28 @@ const postMessage = (sessionId, content) =>
     content,
   });
 
+const STREAM_INACTIVITY_TIMEOUT_MS = 30000;
+
 const postMessageStream = (sessionId, content, onToken, onUserSaved, onDone, onError) => {
   const user = JSON.parse(localStorage.getItem('user'));
   const token = user?.access_token || '';
   const ctrl = new AbortController();
+  let inactivityTimer = null;
+
+  const resetInactivityTimer = () => {
+    if (inactivityTimer) clearTimeout(inactivityTimer);
+    inactivityTimer = setTimeout(() => {
+      ctrl.abort();
+      onError('Stream timed out — no response received');
+    }, STREAM_INACTIVITY_TIMEOUT_MS);
+  };
+
+  const clearInactivityTimer = () => {
+    if (inactivityTimer) {
+      clearTimeout(inactivityTimer);
+      inactivityTimer = null;
+    }
+  };
 
   fetch(`/api/v1/chat/sessions/${sessionId}/messages/stream`, {
     method: 'POST',
@@ -26,6 +44,7 @@ const postMessageStream = (sessionId, content, onToken, onUserSaved, onDone, onE
     signal: ctrl.signal,
   }).then(async (res) => {
     if (!res.ok) {
+      clearInactivityTimer();
       const err = await res.json().catch(() => ({ detail: res.statusText }));
       onError(err.detail || 'Stream failed');
       return;
@@ -33,23 +52,42 @@ const postMessageStream = (sessionId, content, onToken, onUserSaved, onDone, onE
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
+
+    resetInactivityTimer();
+
+    const processLines = () => {
       const lines = buf.split('\n');
       buf = lines.pop(); // keep incomplete line
       for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
+        if (line.startsWith(':') || !line.startsWith('data: ')) continue; // skip comments/heartbeats
         try {
           const evt = JSON.parse(line.slice(6));
           if (evt.type === 'user_saved') onUserSaved(evt.message);
           else if (evt.type === 'token') onToken(evt.text);
           else if (evt.type === 'done') onDone(evt.message);
-        } catch { /* ignore parse errors */ }
+        } catch (e) {
+          console.warn('[Luna] SSE parse error:', line, e);
+        }
       }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        clearInactivityTimer();
+        // Flush any remaining buffered data
+        if (buf.trim()) {
+          buf += '\n';
+          processLines();
+        }
+        break;
+      }
+      resetInactivityTimer();
+      buf += decoder.decode(value, { stream: true });
+      processLines();
     }
   }).catch((err) => {
+    clearInactivityTimer();
     if (err.name !== 'AbortError') onError(err.message || 'Stream failed');
   });
 
