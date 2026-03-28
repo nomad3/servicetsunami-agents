@@ -20,7 +20,7 @@ on:
 jobs:
   deploy:
     runs-on: self-hosted
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,10 +37,10 @@ jobs:
           echo "$CHANGED" | grep -q "apps/web/" && SERVICES="$SERVICES web"
           echo "$CHANGED" | grep -q "apps/code-worker/" && SERVICES="$SERVICES code-worker"
           echo "$CHANGED" | grep -q "apps/mcp-server/" && SERVICES="$SERVICES mcp-tools"
-          echo "$CHANGED" | grep -q "docker-compose.yml" && SERVICES="api web code-worker mcp-tools orchestration-worker databricks-worker"
+          echo "$CHANGED" | grep -q "docker-compose.yml" && SERVICES="api web code-worker orchestration-worker databricks-worker"
 
-          # Default to all if nothing specific matched
-          [ -z "$SERVICES" ] && SERVICES="api web code-worker mcp-tools orchestration-worker databricks-worker"
+          # Default: skip mcp-tools (12GB image, 10+ min build) unless explicitly changed
+          [ -z "$SERVICES" ] && SERVICES="api web code-worker orchestration-worker databricks-worker"
           echo "services=$SERVICES" >> $GITHUB_OUTPUT
           echo "Deploying: $SERVICES"
 
