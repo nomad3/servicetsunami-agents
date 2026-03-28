@@ -1,10 +1,10 @@
-"""Supermarket price search MCP tool.
+"""Product price search MCP tool.
 
-Uses Playwright to search live prices at Chilean supermarkets (Lider, Jumbo, Santa Isabel).
-Handles anti-bot measures including queue-it virtual waiting rooms.
+Uses Playwright to search live prices on any e-commerce / supermarket site.
+Works with built-in presets (Lider, Jumbo, etc.) or any arbitrary site URL.
 """
 import logging
-from typing import Optional
+from typing import Optional, Union
 
 from mcp.server.fastmcp import Context
 
@@ -15,56 +15,59 @@ logger = logging.getLogger(__name__)
 
 
 @mcp.tool()
-async def search_supermarket_prices(
+async def search_product_prices(
     products: list[str],
-    supermarkets: Optional[list[str]] = None,
+    sites: Optional[list[Union[str, dict]]] = None,
     max_results_per_product: int = 3,
+    currency: str = "$",
     tenant_id: Optional[str] = None,
     ctx: Context = None,
 ) -> dict:
-    """Search live prices for grocery products at Chilean supermarkets.
+    """Search live prices for products on any e-commerce or supermarket site.
 
     Uses a real browser (Playwright) to bypass anti-bot protections and return
-    current prices. Supports Lider, Jumbo, and Santa Isabel.
+    current prices. Two modes:
+
+    **Preset sites** (no config needed):
+      "lider", "jumbo", "santaisabel", "unimarc"
+
+    **Any custom site** — pass a dict with name + search URL:
+      {"name": "Farmacia Cruz Verde", "search_url": "https://www.cruzverde.cl/buscar?q={query}"}
+      The {query} placeholder is replaced with the product name.
+      Works on most e-commerce sites via schema.org + heuristic extraction.
 
     Args:
-        products: List of product names to search (e.g. ["huevo", "leche sin lactosa"]).
-        supermarkets: Which supermarkets to search. Options: "lider", "jumbo", "santaisabel".
-                      Defaults to ["lider", "jumbo"].
-        max_results_per_product: Max results to return per product per supermarket (default 3).
-        tenant_id: Tenant identifier (resolved automatically).
+        products: Product names to search (e.g. ["huevo", "leche sin lactosa"]).
+        sites: Preset keys and/or custom site dicts. Defaults to ["lider", "jumbo"].
+               Examples:
+                 ["lider", "jumbo"]
+                 [{"name": "Paris", "search_url": "https://www.paris.cl/search?text={query}"}]
+                 ["lider", {"name": "Cruz Verde", "search_url": "https://www.cruzverde.cl/buscar?q={query}"}]
+        max_results_per_product: Max results per product per site (default 3).
+        currency: Currency symbol for formatted output (default "$").
+        tenant_id: Resolved automatically.
 
     Returns:
-        Dict with:
-          - results: mapping of product → list of {name, price, price_formatted, supermarket, url}
-          - summary: human-readable price comparison text
-          - errors: list of any products that returned no results
+        - results: {product: [{name, price, price_formatted, site, url}]}
+        - summary: Human-readable price comparison
+        - errors: Products with no results
     """
     resolved_tenant_id = resolve_tenant_id(tenant_id, ctx)
-    logger.info("search_supermarket_prices: tenant=%s products=%s supermarkets=%s",
-                str(resolved_tenant_id)[:8], products, supermarkets)
+    logger.info("search_product_prices: tenant=%s products=%s sites=%s",
+                str(resolved_tenant_id)[:8], products, sites)
 
-    if supermarkets is None:
-        supermarkets = ["lider", "jumbo"]
+    if sites is None:
+        sites = ["lider", "jumbo"]
 
-    from src.scrapers.supermarket import search_prices, SUPERMARKETS
-
-    # Validate supermarket keys
-    valid = [s for s in supermarkets if s in SUPERMARKETS]
-    if not valid:
-        return {
-            "results": {},
-            "summary": f"Supermarkets not supported. Valid options: {list(SUPERMARKETS.keys())}",
-            "errors": products,
-        }
+    from src.scrapers.supermarket import search_prices
 
     raw = await search_prices(
         products=products,
-        supermarkets=valid,
+        sites=sites,
         max_results_per_product=max_results_per_product,
+        currency=currency,
     )
 
-    # Build human-readable summary
     lines = []
     errors = []
     for product, items in raw.items():
@@ -72,21 +75,16 @@ async def search_supermarket_prices(
             errors.append(product)
             lines.append(f"• {product}: sin resultados")
             continue
-        # Sort by price
         items_sorted = sorted(items, key=lambda x: x["price"])
         best = items_sorted[0]
-        line = f"• {product}: mejor precio {best['price_formatted']} en {best['supermarket']}"
+        line = f"• {product}: mejor precio {best['price_formatted']} en {best['site']}"
         if len(items_sorted) > 1:
-            others = ", ".join(
-                f"{i['supermarket']} {i['price_formatted']}" for i in items_sorted[1:]
-            )
+            others = ", ".join(f"{i['site']} {i['price_formatted']}" for i in items_sorted[1:])
             line += f" (también: {others})"
         lines.append(line)
 
-    summary = "\n".join(lines) if lines else "No se encontraron resultados."
-
     return {
         "results": raw,
-        "summary": summary,
+        "summary": "\n".join(lines) if lines else "No se encontraron resultados.",
         "errors": errors,
     }
