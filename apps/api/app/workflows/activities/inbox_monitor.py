@@ -420,6 +420,13 @@ async def create_notifications(tenant_id: str, triaged_items: List[Dict]) -> Dic
             )
             db.add(notif)
             created += 1
+            # High-priority notification triggers alert presence state
+            if item.get("priority") == "high":
+                try:
+                    from app.services import luna_presence_service
+                    luna_presence_service.update_state(tid, state="alert")
+                except Exception:
+                    pass
 
         db.commit()
 

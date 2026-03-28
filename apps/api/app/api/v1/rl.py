@@ -243,6 +243,15 @@ def submit_feedback(
         feedback.trajectory_id, feedback.feedback_type,
         feedback.step_index, feedback.value,
     )
+    # Positive feedback triggers happy presence state
+    try:
+        if feedback.feedback_type == "thumbs_up" or (
+            feedback.feedback_type == "star_rating" and feedback.value and feedback.value >= 4
+        ):
+            from app.services import luna_presence_service
+            luna_presence_service.update_state(current_user.tenant_id, state="happy")
+    except Exception:
+        pass
     return {"updated_experiences": updated}
 
 
