@@ -35,9 +35,45 @@ const HeroSection = ({ onPrimaryCta = noop, onSecondaryCta = noop }) => {
             </div>
           </Col>
           <Col lg={6} className="text-center">
-            <p className="lead text-soft mb-4" style={{ fontSize: '1.15rem', lineHeight: 1.7 }}>
+            {/* Luna avatar as the hero visual */}
+            <div style={{
+              position: 'relative',
+              display: 'inline-block',
+              marginBottom: 16,
+            }}>
+              {/* Ambient glow behind Luna */}
+              <div style={{
+                position: 'absolute',
+                top: '50%', left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: 360, height: 360,
+                borderRadius: '50%',
+                background: 'radial-gradient(circle, rgba(107,181,255,0.12) 0%, rgba(94,197,176,0.06) 40%, transparent 70%)',
+                animation: 'luna-hero-pulse 3s ease-in-out infinite',
+                pointerEvents: 'none',
+              }} />
+              <img
+                src={`${process.env.PUBLIC_URL}/assets/luna/luna-base.png`}
+                alt="Luna — your AI assistant"
+                style={{
+                  width: 240,
+                  height: 240,
+                  objectFit: 'contain',
+                  filter: 'invert(0.88) brightness(1.15)',
+                  position: 'relative',
+                  zIndex: 1,
+                }}
+              />
+            </div>
+            <p className="lead text-soft mb-0" style={{ fontSize: '1.15rem', lineHeight: 1.7 }}>
               {t('hero.lead')}
             </p>
+            <style>{`
+              @keyframes luna-hero-pulse {
+                0%, 100% { opacity: 0.7; transform: translate(-50%, -50%) scale(1); }
+                50% { opacity: 1; transform: translate(-50%, -50%) scale(1.06); }
+              }
+            `}</style>
           </Col>
         </Row>
       </Container>
