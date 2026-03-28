@@ -1,4 +1,4 @@
-"""Auto-quality scorer — rates every agent response using local Ollama model.
+"""Auto-quality scorer — rates every agent response using Claude Haiku or local Ollama.
 
 Uses the agent_response_quality rubric from scoring_rubrics.py for
 multi-dimensional scoring (accuracy, helpfulness, tool_usage, memory_usage,
@@ -7,6 +7,9 @@ efficiency, context_awareness) plus cost efficiency tracking per platform.
 Also runs a 3-agent consensus review council (Accuracy, Helpfulness, Persona
 reviewers) that mirrors the code-worker review pattern — extended to ALL agents.
 Requires 2/3 approval to pass. Consensus results are merged into the RL experience.
+
+Set QUALITY_MODEL=claude-haiku-4-5-20251001 to use Haiku (default).
+Set QUALITY_MODEL=qwen2.5-coder:1.5b to fall back to local Ollama.
 
 Runs asynchronously after each chat response is returned to the user.
 """
@@ -20,6 +23,29 @@ from datetime import timedelta
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+QUALITY_MODEL = os.environ.get("QUALITY_MODEL", "claude-haiku-4-5-20251001")
+_USE_HAIKU = QUALITY_MODEL.startswith("claude-")
+
+
+async def _generate_score(prompt: str, system: str, temperature: float = 0.1, max_tokens: int = 300) -> str:
+    """Generate a score using Haiku or local Ollama depending on QUALITY_MODEL."""
+    if _USE_HAIKU:
+        import anthropic
+        from app.core.config import settings
+        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY.strip())
+        response = await client.messages.create(
+            model=QUALITY_MODEL,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text if response.content else ""
+    else:
+        from app.services.local_inference import generate
+        return await generate(prompt=prompt, model=QUALITY_MODEL, system=system,
+                              temperature=temperature, max_tokens=max_tokens)
 
 
 def score_and_log_async(
@@ -86,13 +112,13 @@ async def _score_and_log(
     prompt_tokens: int = 0,
 ):
     """Score the response with multi-dimensional rubric + consensus council, log as RL reward."""
-    from app.services.local_inference import is_available, generate
+    logger.info("Auto-quality scorer: starting for tenant %s (platform=%s, model=%s)", str(tenant_id)[:8], platform, QUALITY_MODEL)
 
-    logger.info("Auto-quality scorer: starting for tenant %s (platform=%s)", str(tenant_id)[:8], platform)
-
-    if not await is_available():
-        logger.info("Auto-quality scorer: Ollama not available — skipping")
-        return
+    if not _USE_HAIKU:
+        from app.services.local_inference import is_available
+        if not await is_available():
+            logger.info("Auto-quality scorer: Ollama not available — skipping")
+            return
 
     # ── Run single-agent rubric scoring AND 3-agent consensus in parallel ──
     from app.services.scoring_rubrics import get_rubric
@@ -119,9 +145,8 @@ async def _score_and_log(
 
     # Run rubric scorer + consensus council in parallel
     rubric_raw, consensus = await asyncio.gather(
-        generate(
+        _generate_score(
             prompt=prompt,
-            model=os.environ.get("QUALITY_MODEL", "gemma4"),
             system=rubric["system_prompt"],
             temperature=0.1,
             max_tokens=300,
@@ -275,7 +300,7 @@ async def _score_and_log(
                     "breakdown": breakdown,
                     "cost_efficiency": cost_efficiency,
                     "reasoning": reasoning,
-                    "model": os.environ.get("QUALITY_MODEL", "gemma4"),
+                    "model": QUALITY_MODEL,
                     "platform": platform,
                     "tokens_used": tokens_used,
                     "cost_usd": cost_usd,
