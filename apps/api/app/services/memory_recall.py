@@ -185,6 +185,7 @@ def _fetch_top_observations_semantic(
 
     sql = text(f"""
         SELECT observation_text, observation_type, source_type, created_at,
+               source_channel, source_ref,
                1 - (embedding <=> CAST('{vector_literal}' AS vector)) AS similarity
         FROM knowledge_observations
         WHERE entity_id = CAST(:entity_id AS uuid)
@@ -206,13 +207,16 @@ def _fetch_top_observations_semantic(
                 "type": row.observation_type,
                 "source": row.source_type or "",
                 "date": row.created_at.isoformat() if row.created_at else "",
+                "source_channel": row.source_channel or "",
+                "source_ref": row.source_ref or "",
             }
             for row in rows
         ]
 
     # Fallback: fetch most recent observations if none have embeddings
     sql_fallback = text("""
-        SELECT observation_text, observation_type, source_type, created_at
+        SELECT observation_text, observation_type, source_type, created_at,
+               source_channel, source_ref
         FROM knowledge_observations
         WHERE entity_id = CAST(:entity_id AS uuid)
           AND tenant_id = CAST(:tenant_id AS uuid)
@@ -230,6 +234,8 @@ def _fetch_top_observations_semantic(
             "type": row.observation_type,
             "source": row.source_type or "",
             "date": row.created_at.isoformat() if row.created_at else "",
+            "source_channel": row.source_channel or "",
+            "source_ref": row.source_ref or "",
         }
         for row in rows
     ]
@@ -378,6 +384,30 @@ def build_memory_context(
 
     if entity_observations:
         context["entity_observations"] = entity_observations
+
+    # --- Check for disputed assertions on recalled entities ---
+    if entity_ids:
+        try:
+            from app.models.world_state import WorldStateAssertion
+            disputed = db.query(WorldStateAssertion).filter(
+                WorldStateAssertion.tenant_id == tenant_id,
+                WorldStateAssertion.subject_entity_id.in_(entity_ids),
+                WorldStateAssertion.status == "disputed",
+            ).limit(5).all()
+
+            if disputed:
+                context["contradictions"] = [
+                    {
+                        "entity": d.subject_slug,
+                        "attribute": d.attribute_path,
+                        "current": d.previous_value_json,
+                        "conflicting": d.value_json,
+                        "reason": d.dispute_reason,
+                    }
+                    for d in disputed
+                ]
+        except Exception:
+            logger.debug("Failed to fetch disputed assertions", exc_info=True)
 
     # --- Step 8: Update recall counters on recalled entities ---
     if entity_ids:

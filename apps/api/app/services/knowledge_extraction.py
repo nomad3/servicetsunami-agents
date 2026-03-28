@@ -15,8 +15,10 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.chat import ChatSession
@@ -55,6 +57,15 @@ ENTITY_BLOCKLIST: set[str] = {
     # Generic noise
     "user", "usuario", "assistant", "bot", "system",
     "api", "database", "server", "client",
+}
+
+# Map content_type to source_channel for observation attribution
+_SOURCE_CHANNEL_MAP = {
+    "chat_transcript": "chat",
+    "plain_text": "chat",
+    "email": "gmail",
+    "calendar": "calendar",
+    "html": "web",
 }
 
 
@@ -216,6 +227,7 @@ class KnowledgeExtractionService:
                 source_url=source_url,
                 source_agent_id=source_agent_id,
                 collection_task_id=collection_task_id,
+                content_type=content_type,
             )
 
             relations_created = self._persist_relations(db, tenant_id, relations_data)
@@ -445,11 +457,14 @@ class KnowledgeExtractionService:
         source_url: Optional[str],
         source_agent_id: Optional[uuid.UUID],
         collection_task_id: Optional[uuid.UUID],
+        content_type: str = "plain_text",
     ) -> List[KnowledgeEntity]:
         """Validate, deduplicate, and persist extracted entities.
 
         Uses EntityValidator for enterprise guardrails (rate limits, dedup,
         content validation) before persisting to the knowledge graph.
+        Checks for contradictions (entity_type mismatch) and logs disputed
+        world state assertions when conflicts are found.
         """
         default_type = entity_schema.get("entity_type", "concept") if entity_schema else "concept"
 
@@ -495,6 +510,34 @@ class KnowledgeExtractionService:
 
             # Category from LLM output (falls back to entity_type)
             category = (item.get("category") or entity_type).lower()
+
+            # --- Contradiction detection: check for entity_type mismatch ---
+            try:
+                existing = db.query(KnowledgeEntity).filter(
+                    KnowledgeEntity.tenant_id == tenant_id,
+                    func.lower(KnowledgeEntity.name) == name.lower(),
+                ).first()
+                if existing and existing.entity_type != entity_type:
+                    from app.models.world_state import WorldStateAssertion
+                    dispute = WorldStateAssertion(
+                        tenant_id=tenant_id,
+                        subject_entity_id=existing.id,
+                        subject_slug=name,
+                        attribute_path="entity_type",
+                        value_json={"type": entity_type, "source": content_type},
+                        previous_value_json={"type": existing.entity_type},
+                        confidence=0.5,
+                        source_type="extraction_conflict",
+                        status="disputed",
+                        dispute_reason=f"Existing: {existing.entity_type}, New extraction: {entity_type}",
+                    )
+                    db.add(dispute)
+                    logger.info(
+                        "Contradiction detected for '%s': existing=%s vs new=%s",
+                        name, existing.entity_type, entity_type,
+                    )
+            except Exception:
+                logger.debug("Contradiction check failed for '%s'", name, exc_info=True)
 
             # Description as a top-level field
             description = item.get("description", "")
