@@ -19,19 +19,23 @@ const EMOTES = {
 
 const LunaAvatar = ({ state = 'idle', mood = 'calm', size = 'md', animated = true, onClick }) => {
   const sizeMap = { xs: 24, sm: 32, md: 48, lg: 80, xl: 128, xxl: 200 };
+  const emoteSizeMap = { md: 14, lg: 18, xl: 22, xxl: 28 };
+  const emoteHeightMap = { md: 22, lg: 26, xl: 32, xxl: 40 };
   const px = sizeMap[size] || 48;
+  const emoteFontSize = emoteSizeMap[size] || 22;
+  const emoteHeight = emoteHeightMap[size] || 32;
   const showEmote = size !== 'xs' && size !== 'sm';
   const emote = EMOTES[state] || EMOTES.idle;
 
   return (
     <div
       className={`luna-avatar luna-state-${state} luna-mood-${mood} ${animated ? 'luna-animated' : ''}`}
-      style={{ width: px, height: px + (showEmote ? 20 : 0), cursor: onClick ? 'pointer' : 'default' }}
+      style={{ width: px, height: px + (showEmote ? emoteHeight + 4 : 0), cursor: onClick ? 'pointer' : 'default' }}
       onClick={onClick}
       title={`Luna: ${state}`}
     >
       {showEmote && (
-        <div className="luna-emote">{emote}</div>
+        <div className="luna-emote" style={{ fontSize: emoteFontSize, height: emoteHeight, lineHeight: `${emoteHeight}px` }}>{emote}</div>
       )}
       <div className="luna-face-wrap" style={{ width: px, height: px }}>
         <div className={`luna-glow luna-glow-${state}`} />

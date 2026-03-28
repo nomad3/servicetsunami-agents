@@ -51,11 +51,13 @@
 
 /* ── Floating emotes above head ── */
 .luna-emote {
-  font-size: 10px;
+  font-size: 22px;
+  font-weight: 700;
   text-align: center;
-  height: 18px;
-  line-height: 18px;
+  height: 32px;
+  line-height: 32px;
   white-space: nowrap;
+  text-shadow: 0 0 12px currentColor, 0 0 24px currentColor;
   pointer-events: none;
   z-index: 10;
   color: var(--color-text-secondary, #8b9bb0);

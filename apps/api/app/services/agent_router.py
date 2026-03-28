@@ -307,6 +307,13 @@ def route_and_execute(
     except Exception:
         logger.debug("Failed to log agent_routing RL experience — continuing")
 
+    # Playful mood for short casual messages
+    if inferred_type == "general" and len(message) < 50:
+        try:
+            luna_presence_service.update_state(tenant_id, mood="playful")
+        except Exception:
+            pass
+
     logger.info(
         "Routing: tenant=%s agent=%s platform=%s channel=%s task_type=%s entities=%d trust=%s tier=%s",
         str(tenant_id)[:8], agent_slug, platform, channel, inferred_type,
@@ -321,8 +328,9 @@ def route_and_execute(
         # requests don't clobber each other's state.
         _presence_sid = str((db_session_memory or {}).get("chat_session_id", ""))
         try:
+            _presence_state = "focused" if inferred_type == "code" else "thinking"
             luna_presence_service.update_state(
-                tenant_id, state="thinking", tool_status="running",
+                tenant_id, state=_presence_state, tool_status="running",
                 session_id=_presence_sid,
             )
         except Exception:
@@ -344,10 +352,10 @@ def route_and_execute(
                 pre_built_memory_context=pre_built_memory_context,
             )
         except Exception:
-            # Ensure we never leave Luna stuck in "thinking"
+            # CLI failure — set error state briefly, then idle
             try:
                 luna_presence_service.update_state(
-                    tenant_id, state="idle", tool_status="idle",
+                    tenant_id, state="error", tool_status="error",
                     session_id=_presence_sid,
                 )
             except Exception:
@@ -363,7 +371,7 @@ def route_and_execute(
             else:
                 luna_presence_service.update_state(
                     tenant_id, state="idle", tool_status="idle",
-                    session_id=_presence_sid,
+                    mood="empathetic", session_id=_presence_sid,
                 )
         except Exception:
             pass
