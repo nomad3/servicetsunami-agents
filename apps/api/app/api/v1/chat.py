@@ -157,22 +157,52 @@ def post_message_stream(
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
 
-    user_message, assistant_message = chat_service.post_user_message(
-        db,
-        session=session,
-        user_id=current_user.id,
-        content=payload.content,
-    )
+    # Run generation in a background thread so we can immediately stream
+    # heartbeat comments — prevents Cloudflare 524 on slow/long responses.
+    import threading as _threading
 
-    full_text = assistant_message.content or ""
-    words = full_text.split(" ")
+    result: dict = {}
+    done_event = _threading.Event()
+
+    def _generate():
+        try:
+            user_msg, assistant_msg = chat_service.post_user_message(
+                db,
+                session=session,
+                user_id=current_user.id,
+                content=payload.content,
+            )
+            result["user_message"] = user_msg
+            result["assistant_message"] = assistant_msg
+        except Exception as exc:
+            result["error"] = str(exc)
+        finally:
+            done_event.set()
+
+    _threading.Thread(target=_generate, daemon=True).start()
+
     chunk_size = 2  # ~2 tokens per SSE event
 
     def _event_generator():
+        # Send heartbeat comments immediately so Cloudflare sees data flowing.
+        # These are ignored by the SSE parser (lines starting with ':').
+        heartbeat_interval = 3  # seconds
+        while not done_event.wait(timeout=heartbeat_interval):
+            yield ": heartbeat\n\n"
+
+        if "error" in result:
+            yield f"data: {_json.dumps({'type': 'error', 'detail': result['error']})}\n\n"
+            return
+
+        user_message = result["user_message"]
+        assistant_message = result["assistant_message"]
+
         # First event: user message saved
         yield f"data: {_json.dumps({'type': 'user_saved', 'message': chat_schema.ChatMessage.model_validate(user_message).model_dump(mode='json')})}\n\n"
 
         # Stream the assistant response 2 words at a time
+        full_text = assistant_message.content or ""
+        words = full_text.split(" ")
         for i in range(0, len(words), chunk_size):
             chunk = " ".join(words[i:i + chunk_size])
             if i + chunk_size < len(words):

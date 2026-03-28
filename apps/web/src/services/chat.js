@@ -59,7 +59,7 @@ const postMessageStream = (sessionId, content, onToken, onUserSaved, onDone, onE
       const lines = buf.split('\n');
       buf = lines.pop(); // keep incomplete line
       for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
+        if (line.startsWith(':') || !line.startsWith('data: ')) continue; // skip comments/heartbeats
         try {
           const evt = JSON.parse(line.slice(6));
           if (evt.type === 'user_saved') onUserSaved(evt.message);
