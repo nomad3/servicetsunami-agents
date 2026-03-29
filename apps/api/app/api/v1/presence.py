@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Depends
 
 from app.api.deps import get_current_user
-from app.schemas.luna_presence import LunaPresenceUpdate
+from app.schemas.luna_presence import LunaPresenceUpdate, ShellRegisterRequest, ShellDeregisterRequest
 from app.services import luna_presence_service
 
 logger = logging.getLogger(__name__)
@@ -26,10 +26,12 @@ def update_presence(body: LunaPresenceUpdate, current_user=Depends(get_current_u
 
 
 @router.post("/shell/register")
-def register_shell(shell_name: str, current_user=Depends(get_current_user)):
-    return luna_presence_service.register_shell(current_user.tenant_id, shell_name)
+def register_shell(body: ShellRegisterRequest, current_user=Depends(get_current_user)):
+    return luna_presence_service.register_shell(
+        current_user.tenant_id, body.shell, capabilities=body.capabilities,
+    )
 
 
 @router.post("/shell/deregister")
-def deregister_shell(shell_name: str, current_user=Depends(get_current_user)):
-    return luna_presence_service.deregister_shell(current_user.tenant_id, shell_name)
+def deregister_shell(body: ShellDeregisterRequest, current_user=Depends(get_current_user)):
+    return luna_presence_service.deregister_shell(current_user.tenant_id, body.shell)

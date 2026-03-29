@@ -39,6 +39,7 @@ def _default_presence() -> dict:
         "privacy": "open",
         "active_shell": None,
         "connected_shells": [],
+        "shell_capabilities": {},  # {shell_name: {cap: bool, ...}}
         "tool_status": "idle",
         "attention_target": None,
         "session_id": None,
@@ -118,7 +119,7 @@ def update_state(tenant_id, state: Optional[str] = None, mood: Optional[str] = N
         return dict(p)
 
 
-def register_shell(tenant_id, shell_name: str) -> dict:
+def register_shell(tenant_id, shell_name: str, capabilities: Optional[dict] = None) -> dict:
     tid = str(tenant_id)
     now = datetime.now(timezone.utc).isoformat()
     with _lock:
@@ -133,8 +134,13 @@ def register_shell(tenant_id, shell_name: str) -> dict:
             shells.append(shell_name)
         _presence_store[tid]["active_shell"] = shell_name
         _presence_store[tid]["updated_at"] = now
+        # Store capabilities for this shell
+        if capabilities:
+            caps = _presence_store[tid].setdefault("shell_capabilities", {})
+            caps[shell_name] = capabilities
         snap = dict(_presence_store[tid])
         snap["connected_shells"] = list(shells)
+        snap["shell_capabilities"] = dict(snap.get("shell_capabilities", {}))
         return snap
 
 
@@ -149,7 +155,11 @@ def deregister_shell(tenant_id, shell_name: str) -> dict:
             shells.remove(shell_name)
         if _presence_store[tid]["active_shell"] == shell_name:
             _presence_store[tid]["active_shell"] = shells[0] if shells else None
+        # Remove capabilities for this shell
+        caps = _presence_store[tid].get("shell_capabilities", {})
+        caps.pop(shell_name, None)
         _presence_store[tid]["updated_at"] = now
         snap = dict(_presence_store[tid])
         snap["connected_shells"] = list(shells)
+        snap["shell_capabilities"] = dict(caps)
         return snap

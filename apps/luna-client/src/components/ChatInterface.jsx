@@ -5,15 +5,32 @@ import LunaAvatar from './luna/LunaAvatar';
 import { useLunaStream } from '../hooks/useLunaStream';
 import { apiJson } from '../api';
 
+const PRESENCE_POLL_INTERVAL = 15000; // 15s
+
 export default function ChatInterface() {
   const [sessions, setSessions] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [emotion, setEmotion] = useState(null);
+  const [presence, setPresence] = useState(null);
   const emotionTimer = useRef(null);
   const messagesEnd = useRef(null);
   const { send, streaming, chunks } = useLunaStream();
+
+  // Poll presence for handoff detection
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const snap = await apiJson('/api/v1/presence/');
+        if (!cancelled) setPresence(snap);
+      } catch {}
+    };
+    poll();
+    const id = setInterval(poll, PRESENCE_POLL_INTERVAL);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   // Load sessions on mount
   useEffect(() => {
@@ -38,6 +55,16 @@ export default function ChatInterface() {
     setEmotion(em);
     clearTimeout(emotionTimer.current);
     emotionTimer.current = setTimeout(() => setEmotion(null), 10000);
+  };
+
+  const handleScreenshot = async () => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const base64 = await invoke('capture_screenshot');
+      setInput('[Screenshot captured]');
+    } catch (err) {
+      console.error('Screenshot failed:', err);
+    }
   };
 
   const handleSend = async () => {
@@ -101,10 +128,22 @@ export default function ChatInterface() {
           <span className="luna-status">{effectiveState === 'thinking' ? 'Thinking...' : 'Luna'}</span>
         </div>
 
+        {/* Handoff banner */}
+        {presence?.state === 'handoff' && (
+          <div className="handoff-banner">Continuing from another device...</div>
+        )}
+
         {/* Messages */}
         <div className="messages-area">
           {messages.map(msg => (
             <div key={msg.id} className={`message message-${msg.role}`}>
+              {msg.role === 'assistant' && msg.context?.recalled_entity_names?.length > 0 && (
+                <div className="memory-context">
+                  {msg.context.recalled_entity_names.map((name, i) => (
+                    <span key={i} className="memory-tag">{name}</span>
+                  ))}
+                </div>
+              )}
               {msg.role === 'assistant' ? (
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
               ) : (
@@ -130,6 +169,9 @@ export default function ChatInterface() {
             onChange={e => setInput(e.target.value)}
             disabled={streaming}
           />
+          <button type="button" className="luna-btn screenshot-btn" onClick={handleScreenshot} title="Capture screenshot">
+            {'\uD83D\uDCF7'}
+          </button>
           <button type="submit" className="luna-btn send-btn" disabled={streaming || !input.trim()}>
             {streaming ? '...' : 'Send'}
           </button>

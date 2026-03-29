@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
 
 
@@ -23,3 +23,12 @@ class LunaPresenceUpdate(BaseModel):
     tool_status: Optional[str] = None
     attention_target: Optional[str] = None
     session_id: Optional[str] = None
+
+
+class ShellRegisterRequest(BaseModel):
+    shell: str
+    capabilities: Optional[Dict[str, bool]] = None
+
+
+class ShellDeregisterRequest(BaseModel):
+    shell: str
