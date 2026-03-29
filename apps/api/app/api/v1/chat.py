@@ -20,6 +20,37 @@ from app.services.enhanced_chat import get_enhanced_chat_service
 router = APIRouter()
 
 
+@router.get("/episodes", response_model=List[dict])
+def list_recent_episodes(
+    *,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+    limit: int = 10,
+):
+    """Return recent conversation episodes for context continuity."""
+    from app.models.conversation_episode import ConversationEpisode
+
+    episodes = (
+        db.query(ConversationEpisode)
+        .filter(ConversationEpisode.tenant_id == current_user.tenant_id)
+        .order_by(ConversationEpisode.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": str(e.id),
+            "summary": e.summary,
+            "mood": e.mood,
+            "key_entities": e.key_entities or [],
+            "source_channel": e.source_channel,
+            "message_count": e.message_count,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in episodes
+    ]
+
+
 @router.get("/sessions", response_model=List[chat_schema.ChatSession])
 def list_sessions(
     *,

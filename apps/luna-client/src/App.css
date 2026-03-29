@@ -67,6 +67,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
 .luna-header {
@@ -477,6 +478,186 @@
   border-radius: 10px;
   font-size: 11px;
   font-weight: 500;
+}
+
+/* Memory panel */
+.memory-toggle {
+  background: none;
+  font-size: 18px;
+  padding: 4px 8px;
+}
+
+.memory-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 280px;
+  height: 100%;
+  background: var(--surface-elevated);
+  border-left: 1px solid var(--color-border);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 16px rgba(0,0,0,0.2);
+}
+
+.memory-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.memory-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.episode-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-page);
+  margin-bottom: 8px;
+}
+
+.episode-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.episode-mood {
+  font-weight: 700;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+
+.mood-positive { background: rgba(94,197,176,0.2); color: var(--color-accent); }
+.mood-frustrated { background: rgba(239,68,68,0.2); color: #ef4444; }
+.mood-curious { background: rgba(59,130,246,0.2); color: #3b82f6; }
+.mood-neutral { background: rgba(255,255,255,0.08); color: var(--color-text-muted); }
+
+.episode-channel {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+}
+
+.episode-time {
+  margin-left: auto;
+}
+
+.episode-summary {
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0 0 6px 0;
+  color: var(--color-text);
+}
+
+.episode-entities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Trust badge */
+.trust-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.06);
+  font-size: 11px;
+  cursor: default;
+}
+
+.trust-icon {
+  font-size: 13px;
+}
+
+.trust-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Action approval */
+.action-approval-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.action-approval-card {
+  background: var(--surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+}
+
+.action-approval-card h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  color: var(--color-text);
+}
+
+.action-type {
+  display: inline-block;
+  padding: 3px 10px;
+  background: rgba(245,158,11,0.15);
+  color: #f59e0b;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.action-desc {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text);
+  margin: 0 0 12px 0;
+}
+
+.action-details {
+  background: rgba(0,0,0,0.3);
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  overflow-x: auto;
+  margin-bottom: 16px;
+  color: var(--color-text-muted);
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.luna-btn-secondary {
+  background: var(--surface-page);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
 }
 
 /* Responsive */
