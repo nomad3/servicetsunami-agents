@@ -517,12 +517,14 @@ async def prune_stale_knowledge(tenant_id: str) -> Dict[str, Any]:
         archived_memories = result.rowcount
 
         # Find and merge duplicate entities (same name, different case)
+        # Group by (name, entity_type) to avoid merging homonyms
+        # e.g. "Apple" (person) and "Apple" (company) are NOT duplicates
         dupes = db.execute(text("""
-            SELECT lower(name) as lname, count(*) as cnt,
+            SELECT lower(name) as lname, entity_type, count(*) as cnt,
                    array_agg(id ORDER BY recall_count DESC NULLS LAST) as ids
             FROM knowledge_entities
             WHERE tenant_id = CAST(:tid AS uuid) AND status != 'archived'
-            GROUP BY lower(name)
+            GROUP BY lower(name), entity_type
             HAVING count(*) > 1
             LIMIT 20
         """), {"tid": tenant_id}).mappings().all()
@@ -533,16 +535,31 @@ async def prune_stale_knowledge(tenant_id: str) -> Dict[str, Any]:
                 continue
             keep_id = ids[0]  # Keep the one with highest recall_count
             for merge_id in ids[1:]:
+                params = {"keep": str(keep_id), "merge": str(merge_id)}
                 # Move observations to the kept entity
                 db.execute(text("""
                     UPDATE knowledge_observations SET entity_id = CAST(:keep AS uuid)
                     WHERE entity_id = CAST(:merge AS uuid)
-                """), {"keep": str(keep_id), "merge": str(merge_id)})
+                """), params)
+                # Move relations (both directions)
+                db.execute(text("""
+                    UPDATE knowledge_relations SET from_entity_id = CAST(:keep AS uuid)
+                    WHERE from_entity_id = CAST(:merge AS uuid)
+                """), params)
+                db.execute(text("""
+                    UPDATE knowledge_relations SET to_entity_id = CAST(:keep AS uuid)
+                    WHERE to_entity_id = CAST(:merge AS uuid)
+                """), params)
+                # Move world state assertions
+                db.execute(text("""
+                    UPDATE world_state_assertions SET subject_entity_id = CAST(:keep AS uuid)
+                    WHERE subject_entity_id = CAST(:merge AS uuid)
+                """), params)
                 # Archive the duplicate
                 db.execute(text("""
                     UPDATE knowledge_entities SET status = 'archived'
                     WHERE id = CAST(:merge AS uuid)
-                """), {"merge": str(merge_id)})
+                """), params)
                 merged_duplicates += 1
 
         db.commit()
@@ -583,11 +600,12 @@ async def learn_user_preferences(tenant_id: str) -> Dict[str, Any]:
         from app.models.user_preference import UserPreference
 
         # Analyze recent RL experiences for response length preference
+        # The scorer logs response_length (integer) into state, not response_text
         length_data = db.execute(text("""
             SELECT
                 CASE
-                    WHEN length(state->>'response_text') < 200 THEN 'short'
-                    WHEN length(state->>'response_text') < 800 THEN 'medium'
+                    WHEN (state->>'response_length')::int < 200 THEN 'short'
+                    WHEN (state->>'response_length')::int < 800 THEN 'medium'
                     ELSE 'detailed'
                 END as response_length,
                 AVG(reward) as avg_reward,
@@ -597,6 +615,7 @@ async def learn_user_preferences(tenant_id: str) -> Dict[str, Any]:
               AND decision_point = 'response_generation'
               AND reward IS NOT NULL
               AND archived_at IS NULL
+              AND state->>'response_length' IS NOT NULL
               AND created_at > NOW() - INTERVAL '14 days'
             GROUP BY 1
             HAVING COUNT(*) >= 3

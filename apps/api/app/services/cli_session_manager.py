@@ -163,8 +163,11 @@ def generate_cli_instructions(
             import uuid as _uuid
             _tid = _uuid.UUID(tenant_name) if len(tenant_name) > 30 else None
             if _tid:
+                # Filter to tenant-level preferences (user_id IS NULL) to avoid
+                # leaking one user's preferences to another user on the same tenant
                 prefs = _pdb.query(UserPreference).filter(
                     UserPreference.tenant_id == _tid,
+                    UserPreference.user_id.is_(None),
                     UserPreference.confidence >= 0.3,
                 ).order_by(UserPreference.confidence.desc()).limit(10).all()
                 if prefs:
