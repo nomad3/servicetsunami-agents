@@ -100,6 +100,59 @@ Internet -> Cloudflare Tunnel
 +-----------------------------------------------------------------------+
 ```
 
+## Luna Memory System (v2)
+
+Luna remembers like a person, not a database. Seven memory modules work together across a hybrid semantic + keyword recall engine with pgvector.
+
+| Module | What Luna does | How |
+|--------|---------------|-----|
+| **Hybrid Recall** | Finds relevant knowledge for every message | pgvector cosine search + keyword boost + session boost |
+| **Source Attribution** | Remembers WHERE she learned things | `"Phoebe desk robot (from chat Mar 27)"` |
+| **Contradiction Detection** | Flags conflicting facts | `"Phoebe was 'contact' but new info says 'product'"` |
+| **Episodic Memory** | Remembers conversation stories, not just entities | `"Yesterday we discussed desk robots, you liked Phoebe"` |
+| **Emotional Memory** | Remembers how you FEEL about things | Sentiment tags: `[excited]`, `[frustrated]`, `[curious]` |
+| **Anticipatory Context** | Knows time of day and upcoming events | `"Good morning! You have Sprint Planning at 10:30 AM"` |
+| **Active Forgetting** | Prunes noise, merges duplicates nightly | Health scoring + 30-day archival + duplicate merge |
+| **User Preferences** | Learns your communication style | Response length, tone, format from RL feedback patterns |
+
+**Memory recall pipeline** (every message):
+1. Embed user message (nomic-embed-text-v1.5, 768-dim)
+2. Semantic search: top 10 entities + top 5 memories + top 3 episodes
+3. Keyword boost (+0.3 for name matches) + session boost (+0.2 for recent turns)
+4. Memory decay (time-weighted, SQL-side during top-K selection)
+5. Fetch observations with source attribution + sentiment per entity
+6. Check for contradictions (disputed world state assertions)
+7. Inject time context + upcoming calendar events
+8. Inject user preferences (learned from RL feedback)
+9. All injected into CLAUDE.md as structured sections
+
+**Dream cycle** (nightly via Temporal):
+- Consolidate RL patterns into policy weights
+- Generate dream insights + synthesize agent memories
+- Prune stale entities (health < 0.1, age > 30d)
+- Merge duplicate entities (same name + type, different case)
+- Learn user preferences from response quality patterns
+
+## Luna Presence System
+
+Luna has a visual identity across the platform. Her face reacts to what she's doing in real-time.
+
+| State | Trigger | Visual |
+|-------|---------|--------|
+| idle | Response delivered | `~` faint glow |
+| listening | WhatsApp inbound | `((·))` blue pulse |
+| thinking | CLI dispatch | `? ...` amber shimmer |
+| responding | Response received | `> _ <` green glow |
+| happy | Score >= 85 or thumbs up | Hearts + stars, golden |
+| focused | Code task | `</>` cool blue |
+| alert | High-priority notification | `!! triangle !!` amber flash |
+| error | CLI failure | `#!@%&` red glitch |
+| sleep | 30 min idle | `z Z z` dim |
+| empathetic | Failed response | Heart, warm pink |
+| playful | Casual message | `~ stars ^_^ stars ~` purple |
+
+Tamagotchi-style chat header: 200px animated avatar with ambient glow, session-scoped presence state, adaptive polling (3s active / 10s idle).
+
 ## Auto Quality Scoring & RL
 
 Every agent response is automatically scored by a local Qwen model across 6 dimensions:
@@ -195,12 +248,30 @@ Luna is evolving from a chat client into an AI-first native operating system.
 |-------|------|--------|
 | **Phase 0** | Consolidate the brain (AgentProvision as system of record) | Done |
 | **Phase 1** | Desktop presence (menu bar, shortcuts, notifications, screenshot) | Done |
-| **Phase 2** | Memory-led native (episodic recall, cross-device continuity) | In progress |
+| **Phase 2** | Memory-led native (episodic recall, cross-device continuity) | Done |
 | **Phase 3** | Mobile companion (iOS/Android, BLE wearable relay) | Planned |
 | **Phase 4** | Local actions (automations, file ops, system commands with trust gates) | Planned |
 | **Phase 5** | Embodied devices (camera, desk robot, ambient capture) | Planned |
 
-See `docs/plans/2026-03-29-luna-native-operating-system-plan.md` for the full master plan.
+### Memory v2 Milestones (all shipped)
+
+| Phase | Modules | PRs |
+|-------|---------|-----|
+| Phase 1 | Source Attribution + Contradiction Detection | #80 |
+| Phase 2 | Episodic Memory (conversation stories) | #81, #85 |
+| Phase 3 | Active Forgetting + User Preferences | #87 |
+| Phase 4 | Emotional Memory + Anticipatory Context | #90 |
+
+### Presence System (shipped)
+
+| Component | PRs |
+|-----------|-----|
+| Presence API + LunaAvatar + state integration | #70 |
+| Tamagotchi chat header (200px) | #73, #74 |
+| All 13 states wired + bigger emotes | #75 |
+| Luna on landing page hero | #76 |
+
+See `docs/plans/` for full design documents and implementation plans.
 
 ## Stack
 
