@@ -24,20 +24,22 @@ class ForceHTTPSRedirectMiddleware(BaseHTTPMiddleware):
 app.add_middleware(ForceHTTPSRedirectMiddleware)
 
 # Set up CORS middleware
+import os as _os
+_extra_origins = [o.strip() for o in _os.environ.get("CORS_EXTRA_ORIGINS", "").split(",") if o.strip()]
 origins = [
     "https://agentprovision.com",
     "https://app.agentprovision.com",
     "https://servicetsunami.com",
     "https://www.agentprovision.com",
-    "http://localhost:3000", # For local development
-    "http://127.0.0.1:3000", # For local development
-    "http://localhost:8002", # Docker web service
-    "http://127.0.0.1:8002", # Docker web service
-    "http://localhost:5173", # Luna Client dev (Vite)
-    "http://localhost:8009", # Luna Client Docker
-    "tauri://localhost", # Luna Client Tauri (macOS/iOS/Android)
-    "https://luna.servicetsunami.com", # Luna Client production
-]
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8002",
+    "http://127.0.0.1:8002",
+    "http://localhost:5173",  # Luna Client dev (Vite)
+    "http://localhost:8009",  # Luna Client Docker
+    "tauri://localhost",      # Luna Client Tauri (macOS/iOS/Android)
+    "https://luna.servicetsunami.com",
+] + _extra_origins
 
 app.add_middleware(
     CORSMiddleware,
