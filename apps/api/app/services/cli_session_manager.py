@@ -17,7 +17,7 @@ from app.services.skill_manager import skill_manager
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_CLI_PLATFORMS = {"claude_code", "codex"}
+SUPPORTED_CLI_PLATFORMS = {"claude_code", "codex", "gemini_cli"}
 
 
 def generate_cli_instructions(
@@ -362,9 +362,11 @@ def run_agent_session(
     session_token = credentials.get("session_token")
     auth_json = credentials.get("auth_json")
 
+    oauth_token = credentials.get("oauth_token")
     subscription_missing = (
         (platform == "claude_code" and not session_token)
         or (platform == "codex" and not (session_token or auth_json))
+        or (platform == "gemini_cli" and not (oauth_token or session_token))
     )
     if subscription_missing:
         logger.warning(
@@ -408,8 +410,9 @@ def run_agent_session(
             return local_response, metadata
 
         # 3. Friendly error
+        platform_label = {"claude_code": "Claude Code", "codex": "Codex", "gemini_cli": "Gemini CLI"}.get(platform, platform)
         err = (
-            f"{'Claude Code' if platform == 'claude_code' else 'Codex'} subscription is not connected "
+            f"{platform_label} subscription is not connected "
             "and the local model is unavailable. Please connect your account in Settings → Integrations."
         )
         metadata["error"] = err

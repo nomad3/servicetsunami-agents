@@ -136,6 +136,38 @@ def score_entity(
     return result
 
 
+@router.post("/entities/score/batch")
+def score_entities_batch(
+    limit: int = 50,
+    rubric_id: str = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Score all unscored entities for the tenant."""
+    from app.models.knowledge_entity import KnowledgeEntity as KE
+
+    entities = (
+        db.query(KE)
+        .filter(
+            KE.tenant_id == current_user.tenant_id,
+            KE.score.is_(None),
+            KE.status != "archived",
+        )
+        .limit(limit)
+        .all()
+    )
+
+    results = []
+    for entity in entities:
+        result = service.score_entity(
+            db, entity.id, current_user.tenant_id, rubric_id=rubric_id,
+        )
+        if result:
+            results.append(result)
+
+    return {"scored": len(results), "results": results}
+
+
 @router.put("/entities/{entity_id}/status", response_model=KnowledgeEntity)
 def update_entity_status(
     entity_id: uuid.UUID,

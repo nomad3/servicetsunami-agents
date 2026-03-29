@@ -86,7 +86,66 @@ def get_memory_stats_endpoint(
 ):
     """Get memory overview stats for the current tenant."""
     from app.services.memory_activity import get_memory_stats
-    return get_memory_stats(db, current_user.tenant_id)
+    stats = get_memory_stats(db, current_user.tenant_id)
+
+    # Add episodes count and observations count
+    try:
+        from app.models.conversation_episode import ConversationEpisode
+        from app.models.knowledge_observation import KnowledgeObservation
+        from sqlalchemy import func as sqla_func
+
+        stats["total_episodes"] = db.query(sqla_func.count(ConversationEpisode.id)).filter(
+            ConversationEpisode.tenant_id == current_user.tenant_id
+        ).scalar() or 0
+
+        stats["total_observations"] = db.query(sqla_func.count(KnowledgeObservation.id)).filter(
+            KnowledgeObservation.tenant_id == current_user.tenant_id
+        ).scalar() or 0
+    except Exception:
+        stats.setdefault("total_episodes", 0)
+        stats.setdefault("total_observations", 0)
+
+    return stats
+
+
+@router.get("/episodes")
+def list_episodes(
+    source_channel: Optional[str] = None,
+    mood: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List conversation episodes for the current tenant."""
+    from app.models.conversation_episode import ConversationEpisode
+
+    query = db.query(ConversationEpisode).filter(
+        ConversationEpisode.tenant_id == current_user.tenant_id
+    )
+    if source_channel:
+        query = query.filter(ConversationEpisode.source_channel == source_channel)
+    if mood:
+        query = query.filter(ConversationEpisode.mood == mood)
+
+    episodes = query.order_by(
+        ConversationEpisode.created_at.desc()
+    ).offset(skip).limit(limit).all()
+
+    return [
+        {
+            "id": str(e.id),
+            "summary": e.summary,
+            "mood": e.mood,
+            "outcome": e.outcome,
+            "key_topics": e.key_topics or [],
+            "key_entities": e.key_entities or [],
+            "source_channel": e.source_channel,
+            "message_count": e.message_count,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in episodes
+    ]
 
 
 @router.get("/search")

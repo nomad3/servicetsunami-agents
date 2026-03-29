@@ -780,10 +780,17 @@
 
 /* ── Memories Tab ────────────────────────────────────────────── */
 
+.memories-tab-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
 .memories-subtitle {
   font-size: 0.9rem;
   color: var(--color-muted);
-  margin-bottom: 1rem;
+  margin: 0;
 }
 
 .memory-type-group {
@@ -1067,4 +1074,161 @@
 
 .relation-card-delete:hover {
   color: #f87171;
+}
+
+/* ── Episodes Tab ──────────────────────────────────────────── */
+
+.episodes-tab-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.episodes-tab-subtitle {
+  font-size: 0.9rem;
+  color: var(--color-muted);
+  margin: 0;
+}
+
+.episodes-filters {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.episodes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.episode-card {
+  background: var(--surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  transition: border-color 0.2s;
+}
+
+.episode-card:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.episode-card-header {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.episode-card-mood {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(100, 130, 170, 0.08);
+  margin-top: 2px;
+}
+
+.episode-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.episode-card-summary {
+  font-size: 0.88rem;
+  color: var(--color-foreground);
+  line-height: 1.5;
+  margin-bottom: 0.4rem;
+}
+
+.episode-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.episode-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.episode-badge.channel {
+  background: rgba(100, 130, 170, 0.12);
+  color: var(--color-muted);
+}
+
+.episode-msg-count {
+  font-size: 0.72rem;
+  color: var(--color-muted);
+}
+
+.episode-outcome {
+  font-size: 0.72rem;
+  color: var(--color-soft);
+  font-style: italic;
+}
+
+.episode-date {
+  font-size: 0.72rem;
+  color: var(--color-muted);
+  margin-left: auto;
+}
+
+.episode-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+  padding-left: 2.75rem;
+}
+
+.episode-tag {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.episode-tag.topic {
+  background: rgba(96, 165, 250, 0.12);
+  color: #60a5fa;
+}
+
+.episode-tag.entity {
+  background: rgba(52, 211, 153, 0.12);
+  color: #34d399;
+}
+
+/* ── Activity Feed Filters ─────────────────────────────────── */
+
+.activity-feed-filters {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.activity-feed-filters .filter-select {
+  background: var(--surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-foreground);
+  font-size: 0.8rem;
+  padding: 0.45rem 0.6rem;
+  min-width: 130px;
+}
+
+.activity-feed-filters .filter-select:focus {
+  border-color: #60a5fa;
+  box-shadow: none;
 }

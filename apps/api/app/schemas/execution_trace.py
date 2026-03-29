@@ -8,14 +8,16 @@ StepType = Literal[
     "dispatched", "memory_recall", "executing", "skill_call",
     "delegated", "approval_requested", "approval_granted",
     "entity_persist", "evaluation",
-    "completed", "failed"
+    "completed", "failed",
+    "chat_response",
 ]
 
 
 class ExecutionTraceCreate(BaseModel):
-    task_id: uuid.UUID
+    task_id: Optional[uuid.UUID] = None
+    session_id: Optional[uuid.UUID] = None
     step_type: StepType
-    step_order: int
+    step_order: int = 0
     agent_id: Optional[uuid.UUID] = None
     skill_id: Optional[uuid.UUID] = None
     details: Optional[dict] = None

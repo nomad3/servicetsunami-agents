@@ -346,6 +346,36 @@ def _generate_agentic_response(
         content=response_text, context=context,
     )
 
+    # Create execution trace for audit trail
+    try:
+        from app.models.execution_trace import ExecutionTrace
+        meta = context if isinstance(context, dict) else {}
+        input_tokens = int(meta.get("input_tokens", 0) or 0)
+        output_tokens = int(meta.get("output_tokens", 0) or 0)
+        duration_ms = int(meta.get("duration_ms", 0) or 0)
+        cost_usd = meta.get("cost_usd")
+        trace = ExecutionTrace(
+            tenant_id=session.tenant_id,
+            session_id=session.id,
+            step_type="chat_response",
+            step_order=0,
+            details={
+                "agent_slug": agent_slug or "luna",
+                "platform": meta.get("platform", "unknown"),
+                "channel": "whatsapp" if sender_phone else "web",
+                "user_message": user_message[:500],
+                "response_preview": response_text[:500] if response_text else "",
+            },
+            duration_ms=duration_ms if duration_ms else None,
+            input_tokens=input_tokens if input_tokens else None,
+            output_tokens=output_tokens if output_tokens else None,
+            cost_usd=cost_usd,
+        )
+        db.add(trace)
+        db.commit()
+    except Exception:
+        pass  # Never block response for tracing
+
     # Update presence: idle (response delivered), scoped to this session
     try:
         from app.services import luna_presence_service

@@ -141,6 +141,17 @@ export const memoryService = {
     return response.data;
   },
 
+  // ── Episodes ─────────────────────────────────────────────────────
+  async getEpisodes({ sourceChannel, mood, skip = 0, limit = 30 } = {}) {
+    const params = new URLSearchParams();
+    if (sourceChannel) params.append('source_channel', sourceChannel);
+    if (mood) params.append('mood', mood);
+    params.append('skip', skip);
+    params.append('limit', limit);
+    const response = await api.get(`/memories/episodes?${params.toString()}`);
+    return response.data;
+  },
+
   // ── Stats ──────────────────────────────────────────────────────
   async getMemoryStats() {
     const response = await api.get('/memories/stats');

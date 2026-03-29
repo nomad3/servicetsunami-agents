@@ -11,10 +11,11 @@ class ExecutionTrace(Base):
     __tablename__ = "execution_traces"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    task_id = Column(UUID(as_uuid=True), ForeignKey("agent_tasks.id"), nullable=False, index=True)
+    task_id = Column(UUID(as_uuid=True), ForeignKey("agent_tasks.id"), nullable=True, index=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("chat_sessions.id"), nullable=True, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     step_type = Column(String, nullable=False)
-    step_order = Column(Integer, nullable=False)
+    step_order = Column(Integer, nullable=False, default=0)
     agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)
     details = Column(JSON, nullable=True)
     duration_ms = Column(Integer, nullable=True)
@@ -37,6 +38,7 @@ class ExecutionTrace(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     task = relationship("AgentTask")
+    session = relationship("ChatSession", foreign_keys=[session_id])
     tenant = relationship("Tenant")
     agent = relationship("Agent")
     skill = relationship("Skill")

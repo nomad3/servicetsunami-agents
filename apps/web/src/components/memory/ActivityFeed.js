@@ -1,20 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { Spinner } from 'react-bootstrap';
 import { FaHistory } from 'react-icons/fa';
-import { getActivityEventConfig, ALL_ACTIVITY_SOURCES } from './constants';
+import { getActivityEventConfig, ACTIVITY_EVENT_CONFIG, ALL_ACTIVITY_SOURCES } from './constants';
 import { memoryService } from '../../services/memory';
 
 const ActivityFeed = () => {
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sourceFilter, setSourceFilter] = useState('');
+  const [eventTypeFilter, setEventTypeFilter] = useState('');
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
   const PAGE_SIZE = 30;
 
   useEffect(() => {
     loadActivities(true);
-  }, [sourceFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sourceFilter, eventTypeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadActivities = async (reset = true) => {
     try {
@@ -22,6 +23,7 @@ const ActivityFeed = () => {
       const skip = reset ? 0 : offset;
       const data = await memoryService.getActivityFeed({
         source: sourceFilter || undefined,
+        eventType: eventTypeFilter || undefined,
         skip,
         limit: PAGE_SIZE,
       });
@@ -64,16 +66,28 @@ const ActivityFeed = () => {
     <div className="activity-feed-tab">
       <div className="activity-feed-header">
         <p className="activity-feed-subtitle">Luna's activity log</p>
-        <select
-          className="filter-select"
-          value={sourceFilter}
-          onChange={(e) => setSourceFilter(e.target.value)}
-        >
-          <option value="">All Sources</option>
-          {ALL_ACTIVITY_SOURCES.map(s => (
-            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
-          ))}
-        </select>
+        <div className="activity-feed-filters">
+          <select
+            className="filter-select"
+            value={eventTypeFilter}
+            onChange={(e) => setEventTypeFilter(e.target.value)}
+          >
+            <option value="">All Events</option>
+            {Object.entries(ACTIVITY_EVENT_CONFIG).map(([key, cfg]) => (
+              <option key={key} value={key}>{cfg.label}</option>
+            ))}
+          </select>
+          <select
+            className="filter-select"
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+          >
+            <option value="">All Sources</option>
+            {ALL_ACTIVITY_SOURCES.map(s => (
+              <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {loading && activities.length === 0 ? (

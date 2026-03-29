@@ -1,22 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { Spinner } from 'react-bootstrap';
 import { FaBrain } from 'react-icons/fa';
-import { getMemoryTypeConfig } from './constants';
+import { getMemoryTypeConfig, ALL_MEMORY_TYPES } from './constants';
 import MemoryCard from './MemoryCard';
 import { memoryService } from '../../services/memory';
 
 const MemoriesTab = () => {
   const [memories, setMemories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [typeFilter, setTypeFilter] = useState('');
 
   useEffect(() => {
     loadMemories();
-  }, []);
+  }, [typeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadMemories = async () => {
     try {
       setLoading(true);
-      const data = await memoryService.getTenantMemories({ limit: 100 });
+      const data = await memoryService.getTenantMemories({
+        memoryType: typeFilter || undefined,
+        limit: 100,
+      });
       setMemories(data || []);
     } catch (err) {
       console.error('Failed to load memories:', err);
@@ -65,7 +69,20 @@ const MemoriesTab = () => {
 
   return (
     <div className="memories-tab">
-      <p className="memories-subtitle">What Luna knows about you</p>
+      <div className="memories-tab-header">
+        <p className="memories-subtitle">What Luna knows about you</p>
+        <select
+          className="filter-select"
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+        >
+          <option value="">All Types</option>
+          {ALL_MEMORY_TYPES.map(t => {
+            const cfg = getMemoryTypeConfig(t);
+            return <option key={t} value={t}>{cfg.label}</option>;
+          })}
+        </select>
+      </div>
       {sortedTypes.map(type => {
         const cfg = getMemoryTypeConfig(type);
         const TypeIcon = cfg.icon;

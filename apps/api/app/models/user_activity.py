@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Float, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from app.db.base_class import Base
+from app.db.base import Base
 
 
 class UserActivity(Base):
@@ -11,6 +11,7 @@ class UserActivity(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
     event_type = Column(String(50), nullable=False)  # app_switch, clipboard_copy, file_open, url_visit
     source_shell = Column(String(100))  # desktop-abc123, mobile, web
     app_name = Column(String(255))  # "Xcode", "Slack", "Chrome"

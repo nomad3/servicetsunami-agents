@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Spinner } from 'react-bootstrap';
-import { FaBrain, FaUsers, FaProjectDiagram, FaCalendarDay } from 'react-icons/fa';
+import { FaBrain, FaUsers, FaProjectDiagram, FaCalendarDay, FaComments, FaEye } from 'react-icons/fa';
 import { getActivityEventConfig } from './constants';
 import { memoryService } from '../../services/memory';
 
@@ -41,6 +41,8 @@ const OverviewTab = () => {
     { label: 'Entities', value: stats?.total_entities || 0, icon: FaUsers, color: '#60a5fa' },
     { label: 'Memories', value: stats?.total_memories || 0, icon: FaBrain, color: '#f472b6' },
     { label: 'Relations', value: stats?.total_relations || 0, icon: FaProjectDiagram, color: '#a78bfa' },
+    { label: 'Observations', value: stats?.total_observations || 0, icon: FaEye, color: '#fbbf24' },
+    { label: 'Episodes', value: stats?.total_episodes || 0, icon: FaComments, color: '#38bdf8' },
     { label: 'Learned Today', value: stats?.learned_today || 0, icon: FaCalendarDay, color: '#34d399' },
   ];
 
@@ -84,6 +86,8 @@ const OverviewTab = () => {
             { label: 'Entities', value: stats?.total_entities || 0, max: 100, color: '#60a5fa' },
             { label: 'Relations', value: stats?.total_relations || 0, max: 50, color: '#a78bfa' },
             { label: 'Memories', value: stats?.total_memories || 0, max: 50, color: '#f472b6' },
+            { label: 'Observations', value: stats?.total_observations || 0, max: 200, color: '#fbbf24' },
+            { label: 'Episodes', value: stats?.total_episodes || 0, max: 50, color: '#38bdf8' },
           ].map((bar) => (
             <div key={bar.label} className="health-bar-row">
               <span className="health-bar-label">{bar.label}</span>
