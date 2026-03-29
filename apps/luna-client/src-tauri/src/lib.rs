@@ -97,6 +97,125 @@ async fn read_clipboard() -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Resolve the real tool/app from generic process names.
+/// - Terminal/iTerm2: checks window title for running commands (claude, docker, npm, etc.)
+/// - Electron: extracts real app name from window title
+fn resolve_app_context(app_name: &str, window_title: &str) -> String {
+    let lower_title = window_title.to_lowercase();
+
+    // Terminal emulators: detect what's running inside
+    if matches!(app_name, "Terminal" | "iTerm2" | "Alacritty" | "kitty" | "Warp" | "Hyper") {
+        let tools = [
+            ("claude", "Claude Code"),
+            ("codex", "Codex CLI"),
+            ("npm run", "npm"),
+            ("pnpm", "pnpm"),
+            ("cargo", "Cargo"),
+            ("docker", "Docker CLI"),
+            ("kubectl", "kubectl"),
+            ("python", "Python"),
+            ("node ", "Node.js"),
+            ("vim", "Vim"),
+            ("nvim", "Neovim"),
+            ("ssh ", "SSH"),
+            ("git ", "Git"),
+            ("psql", "PostgreSQL CLI"),
+        ];
+        for (pattern, label) in tools {
+            if lower_title.contains(pattern) {
+                return format!("{} ({})", label, app_name);
+            }
+        }
+        return app_name.to_string();
+    }
+
+    // Electron apps: extract real name from window title
+    if app_name == "Electron" {
+        if let Some(dash_pos) = window_title.find(" - ") {
+            return window_title[..dash_pos].trim().to_string();
+        }
+        if !window_title.is_empty() {
+            return window_title.to_string();
+        }
+    }
+
+    // Chrome/Safari: include page title for context
+    if matches!(app_name, "Google Chrome" | "Safari" | "Firefox" | "Arc") {
+        if !window_title.is_empty() {
+            return format!("{} ({})", app_name, truncate_str(&window_title, 60));
+        }
+    }
+
+    app_name.to_string()
+}
+
+/// Get deeper subprocess context: what project/repo is the user working on,
+/// what commands are running in their terminal sessions.
+fn get_subprocess_context() -> serde_json::Value {
+    use std::process::Command;
+
+    // Get foreground terminal processes (children of Terminal/iTerm)
+    // `ps` shows all processes with their command, we filter for interesting ones
+    let ps_output = Command::new("sh")
+        .args(["-c", "ps -eo pid,ppid,comm,args 2>/dev/null | grep -E 'claude|docker|cargo|npm|node|python|git|kubectl|uvicorn|vite' | grep -v grep | head -10"])
+        .output();
+
+    let mut processes = Vec::new();
+    if let Ok(output) = ps_output {
+        let text = String::from_utf8_lossy(&output.stdout);
+        for line in text.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 4 {
+                let comm = parts[2];
+                let args = parts[3..].join(" ");
+                // Extract project context from args (look for paths)
+                let project = extract_project_from_args(&args);
+                processes.push(serde_json::json!({
+                    "command": comm,
+                    "args": truncate_str(&args, 120),
+                    "project": project,
+                }));
+            }
+        }
+    }
+
+    // Get the current git repo if we're in one (from the most recent terminal cwd)
+    let git_output = Command::new("sh")
+        .args(["-c", "lsof -c Terminal -c iTerm2 -a -d cwd 2>/dev/null | tail -1 | awk '{print $NF}'"])
+        .output();
+
+    let cwd = match git_output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => String::new(),
+    };
+
+    serde_json::json!({
+        "active_processes": processes,
+        "terminal_cwd": cwd,
+    })
+}
+
+/// Extract project name from command args (looks for repo paths)
+fn extract_project_from_args(args: &str) -> String {
+    // Look for common project path patterns
+    for part in args.split_whitespace() {
+        if part.contains("/GitHub/") || part.contains("/Projects/") || part.contains("/src/") {
+            // Extract the repo/project name from the path
+            let segments: Vec<&str> = part.split('/').collect();
+            for (i, seg) in segments.iter().enumerate() {
+                if (*seg == "GitHub" || *seg == "Projects") && i + 1 < segments.len() {
+                    return segments[i + 1].to_string();
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn truncate_str(s: &str, max: usize) -> &str {
+    if s.len() <= max { s } else { &s[..max] }
+}
+
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::with_capacity(data.len() * 4 / 3 + 4);
@@ -258,37 +377,67 @@ pub fn run() {
                     }
                 }
             });
-            // Activity tracker — monitors app switches for workflow pattern detection
+            // Activity tracker — monitors app switches + window context for pattern detection
+            // Captures: app name, window title, and for terminals/Electron apps, the
+            // actual tool/project running inside (e.g., "claude" in Terminal, real app
+            // name from Electron window titles).
             let activity_handle = app.handle().clone();
             let activity_running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
             let activity_flag = activity_running.clone();
             std::thread::spawn(move || {
-                let mut last_app = String::new();
+                let mut last_context = String::new(); // "app:title" composite key
                 let mut last_switch = std::time::Instant::now();
                 while activity_flag.load(std::sync::atomic::Ordering::Relaxed) {
                     std::thread::sleep(std::time::Duration::from_secs(5));
-                    if let Ok(output) = std::process::Command::new("osascript")
+
+                    // Get frontmost app
+                    let app_name = match std::process::Command::new("osascript")
                         .args(["-e", "tell application \"System Events\" to get name of first application process whose frontmost is true"])
                         .output()
                     {
-                        let current = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                        if !current.is_empty() && current != last_app {
-                            let duration_secs = last_switch.elapsed().as_secs();
-                            let timestamp = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs();
-                            let event = serde_json::json!({
-                                "type": "app_switch",
-                                "from_app": last_app,
-                                "to_app": current,
-                                "duration_secs": duration_secs,
-                                "timestamp": timestamp,
-                            });
-                            let _ = tauri::Emitter::emit(&activity_handle, "activity-event", &event);
-                            last_app = current;
-                            last_switch = std::time::Instant::now();
-                        }
+                        Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+                        Err(_) => continue,
+                    };
+                    if app_name.is_empty() { continue; }
+
+                    // Get window title
+                    let safe_name = app_name.replace('\\', "\\\\").replace('"', "\\\"");
+                    let window_title = match std::process::Command::new("osascript")
+                        .args(["-e", &format!(
+                            "tell application \"System Events\" to get name of front window of application process \"{}\"",
+                            safe_name
+                        )])
+                        .output()
+                    {
+                        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+                        _ => String::new(),
+                    };
+
+                    // Resolve the real tool for terminals and Electron apps
+                    let resolved_app = resolve_app_context(&app_name, &window_title);
+
+                    // Only emit on context change (app + title)
+                    let context_key = format!("{}:{}", resolved_app, window_title);
+                    if context_key != last_context {
+                        let duration_secs = last_switch.elapsed().as_secs();
+                        let timestamp = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs();
+                        // Get subprocess context for deeper insight
+                        let subprocess = get_subprocess_context();
+                        let event = serde_json::json!({
+                            "type": "app_switch",
+                            "from_app": last_context.split(':').next().unwrap_or(""),
+                            "to_app": resolved_app,
+                            "window_title": window_title,
+                            "subprocess": subprocess,
+                            "duration_secs": duration_secs,
+                            "timestamp": timestamp,
+                        });
+                        let _ = tauri::Emitter::emit(&activity_handle, "activity-event", &event);
+                        last_context = context_key;
+                        last_switch = std::time::Instant::now();
                     }
                 }
             });
