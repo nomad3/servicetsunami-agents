@@ -416,11 +416,19 @@ def _generate_agentic_response(
             edb = _SL()
             try:
                 # Check messages since last episode for this session
+                # Dedup: skip if an episode was created in the last 5 minutes
                 last_episode = edb.query(ConversationEpisode).filter(
                     ConversationEpisode.session_id == _session_id,
                 ).order_by(ConversationEpisode.created_at.desc()).first()
 
                 since = last_episode.created_at if last_episode else _dt(2020, 1, 1)
+
+                # Time gap guard — avoid duplicate episodes from rapid messages
+                if last_episode:
+                    age_seconds = (_dt.utcnow() - last_episode.created_at).total_seconds()
+                    if age_seconds < 300:  # 5 minute cooldown
+                        return
+
                 new_msg_count = edb.query(func.count(_CM.id)).filter(
                     _CM.session_id == _session_id,
                     _CM.created_at > since,
@@ -440,8 +448,10 @@ def _generate_agentic_response(
                     for m in new_msgs
                 )
 
-                # Summarize using local Qwen
-                from app.services.local_inference import generate_sync
+                # Summarize using local Qwen (background priority — does NOT
+                # set _foreground_active, so auto-scorer is not starved)
+                import asyncio as _aio
+                from app.services.local_inference import generate
                 prompt = (
                     "Summarize this conversation in 2-3 sentences. Include key topics "
                     "discussed, any decisions made, and the user's emotional tone "
@@ -449,7 +459,10 @@ def _generate_agentic_response(
                     f"Conversation:\n{conversation_text[:3000]}\n\nSummary:"
                 )
 
-                summary = generate_sync(prompt, model="qwen2.5-coder:1.5b", max_tokens=200, timeout=30)
+                summary = _aio.run(generate(
+                    prompt, model="qwen2.5-coder:1.5b", max_tokens=200,
+                    timeout=45, priority="background",
+                ))
                 if not summary or len(summary) < 10:
                     return
 

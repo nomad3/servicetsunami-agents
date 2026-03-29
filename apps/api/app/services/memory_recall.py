@@ -457,7 +457,6 @@ def build_memory_context(
 
     # --- Step 7b: Recall recent episodes ---
     try:
-        from app.models.conversation_episode import ConversationEpisode
         from sqlalchemy import text as sa_text
 
         vector_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
