@@ -57,6 +57,8 @@ from app.api.v1 import (
     branding_domain,
     unsupervised_learning,
     presence,
+    devices,
+    robot,
 )
 
 router = APIRouter()
@@ -122,3 +124,5 @@ router.include_router(unsupervised_learning.router, prefix="/unsupervised", tags
 router.include_router(branding_domain.router, tags=["domain-branding"])
 router.include_router(presence.router, tags=["presence"])
 router.include_router(activities.router, tags=["activities"])
+router.include_router(devices.router, tags=["devices"])
+router.include_router(robot.router, tags=["robot"])

@@ -66,6 +66,7 @@ from .auto_dream_insight import AutoDreamInsight
 from .conversation_episode import ConversationEpisode
 from .user_preference import UserPreference
 from .user_activity import UserActivity
+from .device_registry import DeviceRegistry
 
 __all__ = [
     "Tenant", "User",
@@ -104,4 +105,5 @@ __all__ = [
     "ConversationEpisode",
     "UserPreference",
     "UserActivity",
+    "DeviceRegistry",
 ]
