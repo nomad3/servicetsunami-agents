@@ -101,15 +101,17 @@ def robot_interact(
         db, session=session, user_id=user_id, content=message,
     )
 
-    # Derive emotion and motion hint from presence state
-    try:
-        from app.services import luna_presence_service
-        presence = luna_presence_service.get_presence(tenant_id)
-        emotion = presence.get("mood", "calm")
-        motion_hint = presence.get("state", "idle")
-    except Exception:
-        emotion = "calm"
-        motion_hint = "idle"
+    # Derive emotion from the response itself (not global presence state)
+    response_text = (assistant_msg.content or "") if assistant_msg else ""
+    response_lower = response_text.lower()
+    emotion = "calm"
+    if any(w in response_lower for w in ["great", "awesome", "excellent", "happy", "love"]):
+        emotion = "happy"
+    elif any(w in response_lower for w in ["sorry", "unfortunately", "error", "failed", "issue"]):
+        emotion = "empathetic"
+    elif any(w in response_lower for w in ["interesting", "curious", "let me check", "looking"]):
+        emotion = "focused"
+    motion_hint = "speaking" if response_text else "idle"
 
     return {
         "text": assistant_msg.content if assistant_msg else "",
@@ -140,7 +142,7 @@ def vision_analyze(
         )
         db.commit()
     except Exception:
-        pass
+        logger.exception("Failed to store vision observation")
 
     return {
         "description": f"Image received ({len(body.image_b64)} bytes b64). Vision analysis pending — local vision model not yet configured.",
@@ -169,7 +171,7 @@ def ambient_ingest(
         )
         db.commit()
     except Exception:
-        pass
+        logger.exception("Failed to store ambient observation")
 
     return {
         "status": "ingested",
