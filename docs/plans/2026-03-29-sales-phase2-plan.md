@@ -5,6 +5,21 @@
 **Date**: 2026-03-29
 **Context**: Phase 1 delivered tool scaffolding (qualify_lead, draft_outreach, update_pipeline_stage, generate_proposal, schedule_followup) and Temporal workflow infrastructure. All 5 ProspectingPipelineWorkflow activities are stubs. No inbound lead capture. No actual message sending from the sales flow.
 
+## Ideal Customer Profile (ICP)
+
+**Primary use case**: Luna as always-on **business and technical support agent** — replaces 2-3 support/ops headcount at a fraction of the cost.
+
+**Target segments:**
+- Vet clinics, medical practices, law offices, accounting firms (professional services needing client support)
+- SaaS startups needing tier-1 technical support on WhatsApp + email
+- Agencies and e-commerce businesses in LATAM (WhatsApp-heavy operations)
+
+**Profile:** 5–200 employees · Founder or ops lead decision-maker · $500–5K/month budget · Pain: manual support overload, no AI yet · Geography: LATAM + US
+
+**Proof point:** Brett Boorstin (BB Cardiology) — first external customer. Vet cardiologist using Luna for cardiac report automation and client support.
+
+**Pitch:** *"Your business, always on. Luna handles support and sales conversations 24/7 on WhatsApp, email, and web — trained on your knowledge base, connected to your tools."*
+
 ## Code Review Corrections (2026-03-29)
 
 Issues found by reviewing the actual codebase before implementation:
