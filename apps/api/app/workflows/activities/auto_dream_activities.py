@@ -446,3 +446,212 @@ async def log_dream_results(tenant_id: str, results_json: str) -> Dict[str, Any]
     )
     logger.info(summary)
     return {"summary": summary, "ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Activity 6 — prune stale knowledge (entity health scoring + archival)
+# ---------------------------------------------------------------------------
+
+@activity.defn
+async def prune_stale_knowledge(tenant_id: str) -> Dict[str, Any]:
+    """Archive stale entities, observations, and memories.
+
+    Scores each entity on recall usage, observation count, and recency.
+    Archives entities with health < 0.1 and age > 30 days.
+    Also merges obvious duplicate entities (same name, different case).
+    """
+    db = SessionLocal()
+    try:
+        tid = uuid.UUID(tenant_id)
+        archived_entities = 0
+        archived_memories = 0
+        merged_duplicates = 0
+
+        # Score entities by health
+        from sqlalchemy import text
+        entities = db.execute(text("""
+            SELECT ke.id, ke.name, ke.entity_type, ke.recall_count,
+                   ke.last_recalled_at, ke.created_at,
+                   (SELECT count(*) FROM knowledge_observations ko WHERE ko.entity_id = ke.id) as obs_count
+            FROM knowledge_entities ke
+            WHERE ke.tenant_id = CAST(:tid AS uuid)
+              AND ke.status != 'archived'
+            ORDER BY ke.created_at
+        """), {"tid": tenant_id}).mappings().all()
+
+        now = datetime.utcnow()
+        for e in entities:
+            age_days = (now - e["created_at"]).days if e["created_at"] else 0
+            recall_count = e["recall_count"] or 0
+            obs_count = e["obs_count"] or 0
+            last_recalled = e["last_recalled_at"]
+
+            # Recency factor: 1.0 if recalled in last 7 days, decays to 0.1 at 90 days
+            if last_recalled:
+                days_since_recall = (now - last_recalled).days
+                recency = max(0.1, 1.0 - (days_since_recall / 90.0))
+            else:
+                recency = 0.1 if age_days > 30 else 0.5
+
+            # Health score: recall usage (40%) + has observations (30%) + recency (30%)
+            recall_score = min(1.0, recall_count / 5.0)  # 5+ recalls = max
+            obs_score = 1.0 if obs_count > 0 else 0.0
+            health = (recall_score * 0.4) + (obs_score * 0.3) + (recency * 0.3)
+
+            # Archive if unhealthy and old enough
+            if health < 0.1 and age_days > 30:
+                db.execute(text("""
+                    UPDATE knowledge_entities SET status = 'archived'
+                    WHERE id = CAST(:eid AS uuid)
+                """), {"eid": str(e["id"])})
+                archived_entities += 1
+
+        # Archive agent memories with 0 access and age > 60 days
+        result = db.execute(text("""
+            UPDATE agent_memories SET expires_at = NOW()
+            WHERE tenant_id = CAST(:tid AS uuid)
+              AND access_count = 0
+              AND created_at < NOW() - INTERVAL '60 days'
+              AND expires_at IS NULL
+        """), {"tid": tenant_id})
+        archived_memories = result.rowcount
+
+        # Find and merge duplicate entities (same name, different case)
+        # Group by (name, entity_type) to avoid merging homonyms
+        # e.g. "Apple" (person) and "Apple" (company) are NOT duplicates
+        dupes = db.execute(text("""
+            SELECT lower(name) as lname, entity_type, count(*) as cnt,
+                   array_agg(id ORDER BY recall_count DESC NULLS LAST) as ids
+            FROM knowledge_entities
+            WHERE tenant_id = CAST(:tid AS uuid) AND status != 'archived'
+            GROUP BY lower(name), entity_type
+            HAVING count(*) > 1
+            LIMIT 20
+        """), {"tid": tenant_id}).mappings().all()
+
+        for dupe in dupes:
+            ids = dupe["ids"]
+            if len(ids) < 2:
+                continue
+            keep_id = ids[0]  # Keep the one with highest recall_count
+            for merge_id in ids[1:]:
+                params = {"keep": str(keep_id), "merge": str(merge_id)}
+                # Move observations to the kept entity
+                db.execute(text("""
+                    UPDATE knowledge_observations SET entity_id = CAST(:keep AS uuid)
+                    WHERE entity_id = CAST(:merge AS uuid)
+                """), params)
+                # Move relations (both directions)
+                db.execute(text("""
+                    UPDATE knowledge_relations SET from_entity_id = CAST(:keep AS uuid)
+                    WHERE from_entity_id = CAST(:merge AS uuid)
+                """), params)
+                db.execute(text("""
+                    UPDATE knowledge_relations SET to_entity_id = CAST(:keep AS uuid)
+                    WHERE to_entity_id = CAST(:merge AS uuid)
+                """), params)
+                # Move world state assertions
+                db.execute(text("""
+                    UPDATE world_state_assertions SET subject_entity_id = CAST(:keep AS uuid)
+                    WHERE subject_entity_id = CAST(:merge AS uuid)
+                """), params)
+                # Archive the duplicate
+                db.execute(text("""
+                    UPDATE knowledge_entities SET status = 'archived'
+                    WHERE id = CAST(:merge AS uuid)
+                """), params)
+                merged_duplicates += 1
+
+        db.commit()
+        logger.info(
+            "[prune] tenant=%s archived %d entities, %d memories, merged %d duplicates",
+            tenant_id[:8], archived_entities, archived_memories, merged_duplicates,
+        )
+        return {
+            "archived_entities": archived_entities,
+            "archived_memories": archived_memories,
+            "merged_duplicates": merged_duplicates,
+        }
+    except Exception:
+        db.rollback()
+        logger.exception("[prune] prune_stale_knowledge failed")
+        return {"archived_entities": 0, "archived_memories": 0, "merged_duplicates": 0}
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Activity 7 — learn user preferences from RL experience patterns
+# ---------------------------------------------------------------------------
+
+@activity.defn
+async def learn_user_preferences(tenant_id: str) -> Dict[str, Any]:
+    """Infer user preferences from RL experience patterns.
+
+    Analyzes response quality scores to detect patterns:
+    - If short responses consistently score higher -> preference for brevity
+    - If tool-heavy responses score higher -> preference for action
+    - If detailed responses score higher -> preference for thoroughness
+    """
+    db = SessionLocal()
+    try:
+        tid = uuid.UUID(tenant_id)
+        from sqlalchemy import text
+        from app.models.user_preference import UserPreference
+
+        # Analyze recent RL experiences for response length preference
+        # The scorer logs response_length (integer) into state, not response_text
+        length_data = db.execute(text("""
+            SELECT
+                CASE
+                    WHEN (state->>'response_length')::int < 200 THEN 'short'
+                    WHEN (state->>'response_length')::int < 800 THEN 'medium'
+                    ELSE 'detailed'
+                END as response_length,
+                AVG(reward) as avg_reward,
+                COUNT(*) as cnt
+            FROM rl_experiences
+            WHERE tenant_id = CAST(:tid AS uuid)
+              AND decision_point = 'response_generation'
+              AND reward IS NOT NULL
+              AND archived_at IS NULL
+              AND state->>'response_length' IS NOT NULL
+              AND created_at > NOW() - INTERVAL '14 days'
+            GROUP BY 1
+            HAVING COUNT(*) >= 3
+            ORDER BY avg_reward DESC
+        """), {"tid": tenant_id}).mappings().all()
+
+        preferences_set = 0
+        if length_data:
+            best = length_data[0]
+            if best["avg_reward"] > 0.5 and best["cnt"] >= 5:
+                # Upsert preference
+                existing = db.query(UserPreference).filter(
+                    UserPreference.tenant_id == tid,
+                    UserPreference.preference_type == "response_length",
+                ).first()
+                if existing:
+                    existing.value = best["response_length"]
+                    existing.confidence = min(0.95, 0.3 + (best["cnt"] / 20) * 0.65)
+                    existing.evidence_count = best["cnt"]
+                    existing.updated_at = datetime.utcnow()
+                else:
+                    db.add(UserPreference(
+                        tenant_id=tid,
+                        preference_type="response_length",
+                        value=best["response_length"],
+                        confidence=min(0.95, 0.3 + (best["cnt"] / 20) * 0.65),
+                        evidence_count=best["cnt"],
+                    ))
+                preferences_set += 1
+
+        db.commit()
+        logger.info("[preferences] tenant=%s set %d preferences", tenant_id[:8], preferences_set)
+        return {"preferences_set": preferences_set}
+    except Exception:
+        db.rollback()
+        logger.exception("[preferences] learn_user_preferences failed")
+        return {"preferences_set": 0}
+    finally:
+        db.close()

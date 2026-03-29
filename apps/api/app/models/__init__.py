@@ -64,6 +64,7 @@ from .feedback_record import FeedbackRecord
 from .decision_point_config import DecisionPointConfig
 from .auto_dream_insight import AutoDreamInsight
 from .conversation_episode import ConversationEpisode
+from .user_preference import UserPreference
 
 __all__ = [
     "Tenant", "User",
@@ -100,4 +101,5 @@ __all__ = [
     "DecisionPointConfig",
     "AutoDreamInsight",
     "ConversationEpisode",
+    "UserPreference",
 ]

@@ -154,6 +154,33 @@ def generate_cli_instructions(
             lines.append(f"- {date}{source_tag}{mood_tag}: {ep.get('summary', '')}")
         lines.append("")
 
+    # User preferences (learned from feedback)
+    try:
+        from app.db.session import SessionLocal as _SL
+        from app.models.user_preference import UserPreference
+        _pdb = _SL()
+        try:
+            import uuid as _uuid
+            _tid = _uuid.UUID(tenant_name) if len(tenant_name) > 30 else None
+            if _tid:
+                # Filter to tenant-level preferences (user_id IS NULL) to avoid
+                # leaking one user's preferences to another user on the same tenant
+                prefs = _pdb.query(UserPreference).filter(
+                    UserPreference.tenant_id == _tid,
+                    UserPreference.user_id.is_(None),
+                    UserPreference.confidence >= 0.3,
+                ).order_by(UserPreference.confidence.desc()).limit(10).all()
+                if prefs:
+                    lines.append("## User Preferences (learned from feedback)")
+                    lines.append("")
+                    for p in prefs:
+                        lines.append(f"- {p.preference_type}: {p.value} (confidence: {p.confidence:.0%})")
+                    lines.append("")
+        finally:
+            _pdb.close()
+    except Exception:
+        pass
+
     git_context = memory_context.get("git_context", [])
     if git_context:
         lines.append("## Recent Git Context")

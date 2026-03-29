@@ -86,6 +86,12 @@ class AutonomousLearningWorkflow:
             "dream_insights": 0,
             "dream_memories": 0,
             "dream_policies_updated": 0,
+            # Active forgetting fields
+            "pruned_entities": 0,
+            "pruned_memories": 0,
+            "merged_duplicates": 0,
+            # User preference fields
+            "preferences_set": 0,
             # Cost tracking
             "cost_usd": 0.0,
             "budget_exceeded": False,
@@ -353,6 +359,34 @@ class AutonomousLearningWorkflow:
             workflow.logger.error(f"Step 3g (auto-dream) failed: {e}")
             cycle_result["errors"].append(f"auto_dream: {e}")
 
+        # Step 3h: Prune stale knowledge (active forgetting)
+        try:
+            prune_result = await run_activity(
+                "prune_stale_knowledge",
+                tenant_id,
+                start_to_close_timeout=timedelta(minutes=3),
+                retry_policy=retry_policy,
+            )
+            cycle_result["pruned_entities"] = prune_result.get("archived_entities", 0)
+            cycle_result["pruned_memories"] = prune_result.get("archived_memories", 0)
+            cycle_result["merged_duplicates"] = prune_result.get("merged_duplicates", 0)
+        except Exception as e:
+            workflow.logger.error(f"Step 3h (prune) failed: {e}")
+            cycle_result["errors"].append(f"prune: {e}")
+
+        # Step 3i: Learn user preferences from RL patterns
+        try:
+            pref_result = await run_activity(
+                "learn_user_preferences",
+                tenant_id,
+                start_to_close_timeout=timedelta(minutes=3),
+                retry_policy=retry_policy,
+            )
+            cycle_result["preferences_set"] = pref_result.get("preferences_set", 0)
+        except Exception as e:
+            workflow.logger.error(f"Step 3i (preferences) failed: {e}")
+            cycle_result["errors"].append(f"preferences: {e}")
+
         # Step 3f: Track cycle cost against budget
         try:
             cost_result = await run_activity(
@@ -395,6 +429,9 @@ class AutonomousLearningWorkflow:
             f"dream_insights={cycle_result['dream_insights']} "
             f"memories={cycle_result['dream_memories']} "
             f"policies_updated={cycle_result['dream_policies_updated']}, "
+            f"pruned={cycle_result['pruned_entities']}e/{cycle_result['pruned_memories']}m "
+            f"merged={cycle_result['merged_duplicates']}, "
+            f"prefs={cycle_result['preferences_set']}, "
             f"cost=${cycle_result['cost_usd']:.4f}, "
             f"report={'sent' if cycle_result['report_sent'] else 'failed'}, "
             f"errors={len(cycle_result['errors'])}"

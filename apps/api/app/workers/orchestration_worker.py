@@ -126,6 +126,8 @@ from app.workflows.activities.auto_dream_activities import (
     generate_dream_insights,
     consolidate_dream_policies,
     log_dream_results,
+    prune_stale_knowledge,
+    learn_user_preferences,
 )
 from app.workflows.activities.rl_policy_update import (
     collect_tenant_experiences,
@@ -283,6 +285,9 @@ async def run_orchestration_worker():
             generate_dream_insights,
             consolidate_dream_policies,
             log_dream_results,
+            # Active forgetting + user preference activities
+            prune_stale_knowledge,
+            learn_user_preferences,
             # Dynamic workflow step executor
             execute_dynamic_step,
             finalize_workflow_run,
