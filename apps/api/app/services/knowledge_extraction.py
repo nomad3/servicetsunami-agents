@@ -341,6 +341,7 @@ class KnowledgeExtractionService:
             '- "description": string (1-2 sentence description of who/what this entity is)\n'
             '- "confidence": number between 0.0 and 1.0\n'
             '- "attributes": object (optional extra key-value pairs like email, phone, company, role, url, address)\n'
+            '- "sentiment": string (the user\'s emotional attitude toward this entity: positive, negative, neutral, excited, frustrated, or curious)\n'
             "\nIMPORTANT RULES:\n"
             "- DO NOT extract platform/tool names (WhatsApp, Gmail, Slack, Luna, etc.) as entities\n"
             "- DO NOT extract generic terms (user, assistant, bot, agent, system, workflow, etc.)\n"
@@ -583,14 +584,24 @@ class KnowledgeExtractionService:
             db.add(entity)
             created.append(entity)
 
+        # Build a lookup of entity name → sentiment from extracted data
+        _sentiment_map: Dict[str, str] = {}
+        for item in result.valid_entities:
+            _name = (item.get("name") or "").strip().lower()
+            _sent = item.get("sentiment")
+            if _name and _sent:
+                _sentiment_map[_name] = _sent
+
         if created:
             db.commit()
             # Create observations from entity descriptions with source attribution
+            source_channel = _SOURCE_CHANNEL_MAP.get(content_type, "chat")
             source_ref = f"{source_channel} {datetime.utcnow().strftime('%b %d')}"
             for entity in created:
                 if entity.description:
                     try:
                         from app.services.knowledge import create_observation
+                        sentiment = _sentiment_map.get(entity.name.lower(), "neutral")
                         create_observation(
                             db, tenant_id,
                             observation_text=entity.description,
@@ -600,6 +611,7 @@ class KnowledgeExtractionService:
                             confidence=entity.confidence or 0.8,
                             source_channel=source_channel,
                             source_ref=source_ref,
+                            sentiment=sentiment,
                         )
                     except Exception:
                         logger.debug("Failed to create observation for entity %s", entity.name)

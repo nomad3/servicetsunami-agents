@@ -544,6 +544,7 @@ def create_observation(
     confidence: float = 1.0,
     source_channel: str = None,
     source_ref: str = None,
+    sentiment: str = None,
 ) -> KnowledgeObservation:
     """Create a knowledge observation using the ORM model.
 
@@ -564,6 +565,7 @@ def create_observation(
         confidence=confidence,
         source_channel=source_channel,
         source_ref=source_ref,
+        sentiment=sentiment,
     )
 
     # Generate and store embedding directly on the model

@@ -186,7 +186,7 @@ def _fetch_top_observations_semantic(
 
     sql = text(f"""
         SELECT observation_text, observation_type, source_type, created_at,
-               source_channel, source_ref,
+               source_channel, source_ref, sentiment,
                1 - (embedding <=> CAST('{vector_literal}' AS vector)) AS similarity
         FROM knowledge_observations
         WHERE entity_id = CAST(:entity_id AS uuid)
@@ -210,6 +210,7 @@ def _fetch_top_observations_semantic(
                 "date": row.created_at.isoformat() if row.created_at else "",
                 "source_channel": row.source_channel or "",
                 "source_ref": row.source_ref or "",
+                "sentiment": row.sentiment or "",
             }
             for row in rows
         ]
@@ -217,7 +218,7 @@ def _fetch_top_observations_semantic(
     # Fallback: fetch most recent observations if none have embeddings
     sql_fallback = text("""
         SELECT observation_text, observation_type, source_type, created_at,
-               source_channel, source_ref
+               source_channel, source_ref, sentiment
         FROM knowledge_observations
         WHERE entity_id = CAST(:entity_id AS uuid)
           AND tenant_id = CAST(:tenant_id AS uuid)
@@ -237,6 +238,7 @@ def _fetch_top_observations_semantic(
             "date": row.created_at.isoformat() if row.created_at else "",
             "source_channel": row.source_channel or "",
             "source_ref": row.source_ref or "",
+            "sentiment": row.sentiment or "",
         }
         for row in rows
     ]
@@ -397,6 +399,49 @@ def build_memory_context(
         for eid, ename in extra:
             entity_map[eid] = ename
 
+    # --- Step 0: Time-aware anticipatory context ---
+    now = datetime.utcnow()
+    hour = now.hour
+    weekday = now.strftime("%A")  # Monday, Tuesday, etc.
+
+    time_context: Dict[str, str] = {}
+    if hour < 10:
+        time_context["time_of_day"] = "morning"
+        time_context["greeting_hint"] = f"Good morning! It's {weekday}."
+    elif hour < 14:
+        time_context["time_of_day"] = "midday"
+    elif hour < 18:
+        time_context["time_of_day"] = "afternoon"
+    else:
+        time_context["time_of_day"] = "evening"
+        time_context["greeting_hint"] = f"Good evening! It's {weekday}."
+
+    # --- Step 0b: Calendar context (upcoming events) ---
+    upcoming_events_list: List[Dict[str, str]] = []
+    try:
+        from sqlalchemy import text as _text
+        upcoming = db.execute(_text("""
+            SELECT title, start_time, description
+            FROM channel_events
+            WHERE tenant_id = CAST(:tid AS uuid)
+              AND start_time > NOW()
+              AND start_time < NOW() + INTERVAL '4 hours'
+            ORDER BY start_time
+            LIMIT 3
+        """), {"tid": str(tenant_id)}).mappings().all()
+
+        if upcoming:
+            upcoming_events_list = [
+                {
+                    "title": e["title"],
+                    "time": e["start_time"].strftime("%I:%M %p") if e["start_time"] else "",
+                    "description": (e["description"] or "")[:100],
+                }
+                for e in upcoming
+            ]
+    except Exception:
+        pass  # channel_events table may not exist or have no data
+
     # --- Step 7: Build context ---
     recalled_entity_names = [e["name"] for e in top_entities]
     context: Dict[str, Any] = {
@@ -431,6 +476,12 @@ def build_memory_context(
 
     if entity_observations:
         context["entity_observations"] = entity_observations
+
+    # Inject anticipatory context
+    if time_context:
+        context["time_context"] = time_context
+    if upcoming_events_list:
+        context["upcoming_events"] = upcoming_events_list
 
     # --- Check for disputed assertions on recalled entities ---
     if entity_ids:

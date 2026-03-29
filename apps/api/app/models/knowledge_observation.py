@@ -24,6 +24,7 @@ class KnowledgeObservation(Base):
     source_agent = Column(String(100), nullable=True)
     source_channel = Column(String(50), nullable=True)  # chat, whatsapp, gmail, calendar, system
     source_ref = Column(String(500), nullable=True)  # e.g. "WhatsApp Mar 27" or "email from john@..."
+    sentiment = Column(String(20), nullable=True)  # positive, negative, neutral, excited, frustrated, curious
 
     confidence = Column(Float, default=1.0)
     embedding = Column(Vector(768), nullable=True)

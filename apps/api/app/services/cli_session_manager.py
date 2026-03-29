@@ -64,6 +64,21 @@ def generate_cli_instructions(
     lines.append(f"You are {agent_slug}, an AI agent with full access to email, calendar, knowledge graph, Jira, and code tools.")
     lines.append("")
 
+    # Time and calendar context
+    time_ctx = memory_context.get("time_context", {})
+    upcoming = memory_context.get("upcoming_events", [])
+
+    if time_ctx or upcoming:
+        lines.append("## Today's Context")
+        lines.append("")
+        if time_ctx.get("greeting_hint"):
+            lines.append(f"- {time_ctx['greeting_hint']}")
+        if upcoming:
+            lines.append("- Upcoming:")
+            for evt in upcoming:
+                lines.append(f"  - {evt['time']}: {evt['title']}")
+        lines.append("")
+
     lines.append("# Agent Instructions")
     lines.append("")
     lines.append(skill_body.strip())
@@ -96,9 +111,11 @@ def generate_cli_instructions(
             # Inject observations (facts) for this entity
             obs = entity_observations.get(name, [])
             for o in obs[:3]:
+                sentiment = o.get('sentiment', '')
+                sentiment_tag = f" [{sentiment}]" if sentiment and sentiment != "neutral" else ""
                 source = o.get('source_ref', '')
                 source_tag = f" (from {source})" if source else ""
-                lines.append(f"  - {o.get('text', '')}{source_tag}")
+                lines.append(f"  - {o.get('text', '')}{sentiment_tag}{source_tag}")
         lines.append("")
 
     # Separate dream-learned patterns from regular memories
