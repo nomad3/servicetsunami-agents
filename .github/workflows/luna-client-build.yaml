@@ -50,10 +50,18 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/luna-v* ]]; then
             VERSION=$(echo "${{ github.ref_name }}" | sed 's/luna-v//')
           else
-            # Auto-version from tauri.conf.json + short SHA
+            # Auto-increment: MAJOR.MINOR from tauri.conf.json, PATCH = commits since last luna-v* tag
             BASE=$(python3 -c "import json; print(json.load(open('apps/luna-client/src-tauri/tauri.conf.json'))['version'])")
-            SHORT_SHA=$(git rev-parse --short HEAD)
-            VERSION="${BASE}-${SHORT_SHA}"
+            MAJOR=$(echo "$BASE" | cut -d. -f1)
+            MINOR=$(echo "$BASE" | cut -d. -f2)
+            # Count commits since last luna-v* tag (or all commits if no tag exists)
+            LAST_TAG=$(git describe --tags --match "luna-v*" --abbrev=0 2>/dev/null || echo "")
+            if [ -n "$LAST_TAG" ]; then
+              PATCH=$(git rev-list "${LAST_TAG}..HEAD" --count)
+            else
+              PATCH=$(git rev-list HEAD --count -- apps/luna-client/)
+            fi
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
