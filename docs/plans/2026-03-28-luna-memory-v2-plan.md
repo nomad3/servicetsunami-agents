@@ -1,6 +1,7 @@
 # Luna Memory v2 — Advanced Memory System Plan
 
 **Date**: 2026-03-28
+**Master Plan**: `2026-03-29-luna-native-operating-system-plan.md`
 **Prerequisite**: Memory v1 (merged: PR #68, #70, #75)
 **Goal**: Luna remembers like a person, not a database
 

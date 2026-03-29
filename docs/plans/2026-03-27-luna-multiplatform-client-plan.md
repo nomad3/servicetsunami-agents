@@ -1,6 +1,7 @@
 # Luna Multi-Platform Client — Implementation Plan
 
 **Date**: 2026-03-27
+**Master Plan**: `2026-03-29-luna-native-operating-system-plan.md`
 **Design Doc**: `2026-03-27-luna-multiplatform-client-design.md`
 **Status**: Ready to implement
 

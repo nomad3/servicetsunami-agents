@@ -1,6 +1,7 @@
 # Luna Presence System — Implementation Plan
 
 **Date**: 2026-03-27
+**Master Plan**: `2026-03-29-luna-native-operating-system-plan.md`
 **Master Spec**: User-provided Luna Presence System brief
 **Design Docs**: `2026-03-27-luna-multiplatform-client-design.md`, `luna-necklace-design.md`, `luna-desk-robot-design.md`
 **Status**: Ready to implement
