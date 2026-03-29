@@ -9,12 +9,12 @@ ingress:
   - hostname: agentprovision.com
     path: /api/*
     service: http://api:8000
-  - hostname: luna.servicetsunami.com
+  - hostname: luna.agentprovision.com
     path: /api/*
     service: http://api:8000
 
   # Luna PWA client
-  - hostname: luna.servicetsunami.com
+  - hostname: luna.agentprovision.com
     service: http://luna-client:80
 
   # Web SPA (catch-all per domain)

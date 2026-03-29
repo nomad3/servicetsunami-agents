@@ -38,7 +38,7 @@ origins = [
     "http://localhost:5173",  # Luna Client dev (Vite)
     "http://localhost:8009",  # Luna Client Docker
     "tauri://localhost",      # Luna Client Tauri (macOS/iOS/Android)
-    "https://luna.servicetsunami.com",
+    "https://luna.agentprovision.com",
 ] + _extra_origins
 
 app.add_middleware(

@@ -6,7 +6,7 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-ARG VITE_API_BASE_URL=https://luna.servicetsunami.com
+ARG VITE_API_BASE_URL=https://luna.agentprovision.com
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 COPY package.json package-lock.json* ./
