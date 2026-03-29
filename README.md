@@ -100,6 +100,127 @@ Internet -> Cloudflare Tunnel
 +-----------------------------------------------------------------------+
 ```
 
+## Luna Memory System (v2)
+
+Luna remembers like a person, not a database. Seven memory modules work together.
+
+```
+User Message: "Tell me about the desk robot project"
+    |
+    v
++-------------------+     +--------------------------+
+| Embed (768-dim)   |---->| pgvector cosine search   |
+| nomic-embed-text  |     +--------------------------+
++-------------------+              |
+                     +-------------+-------------+-------------+
+                     |             |             |             |
+               +-----v-----+ +----v------+ +----v-----+ +----v---------+
+               | Entities  | | Memories  | | Episodes | | Contradicts  |
+               | top 10    | | top 5     | | top 3    | | (disputed)   |
+               | +keyword  | | +decay    | | +mood    | |              |
+               | +session  | | +scorer   | | +source  | |              |
+               | boost     | | confidence| |          | |              |
+               +-----------+ +-----------+ +----------+ +--------------+
+                     |             |             |             |
+               +-----v-------------v-------------v-------------v------+
+               |                  Memory Context                       |
+               |  entities: Phoebe [excited] (from chat Mar 27)        |
+               |  episodes: "Yesterday discussed desk robots..."       |
+               |  conflicts: "Phoebe was 'contact', now 'product'"     |
+               |  time: "Good morning! It's Monday"                    |
+               |  calendar: "Sprint Planning at 10:30 AM"              |
+               |  preferences: "response_length: short (72%)"          |
+               |  dream patterns: "codex works well for routing"       |
+               +-------------------------+----------------------------+
+                                         |
+                                         v
+                                   CLAUDE.md injection
+                                   (Luna's instructions)
+```
+
+```
+Nightly Dream Cycle (Temporal workflow)
+    |
+    +---> Scan RL experiences (last 24h)
+    |         |
+    |         v
+    +---> Extract decision patterns (avg reward per action)
+    |         |
+    |         v
+    +---> Generate dream insights + synthesize memories
+    |         |
+    |         v
+    +---> Consolidate RL policy weights
+    |         |
+    |         v
+    +---> Prune stale entities (health < 0.1, age > 30d)
+    |         |
+    |         v
+    +---> Merge duplicate entities (same name+type)
+    |         |
+    |         v
+    +---> Learn user preferences (response patterns)
+    |         |
+    |         v
+    +---> Morning report via WhatsApp
+```
+
+| Module | What Luna does | Example |
+|--------|---------------|---------|
+| **Source Attribution** | Remembers WHERE she learned things | `"from chat Mar 27"` |
+| **Contradiction Detection** | Flags conflicting facts for user | `"was 'contact' but now 'product'"` |
+| **Episodic Memory** | Remembers conversation stories | `"Yesterday discussed desk robots, you were excited"` |
+| **Emotional Memory** | Tags sentiment on knowledge | `[excited]`, `[frustrated]`, `[curious]` |
+| **Anticipatory Context** | Time/calendar-aware proactive context | `"Good morning! Sprint Planning at 10:30"` |
+| **Active Forgetting** | Prunes noise, merges duplicates nightly | Health scoring + archival + dedup |
+| **User Preferences** | Learns communication style from RL | `"prefers short responses (72% confidence)"` |
+
+## Luna Presence System
+
+Luna's face reacts to what she's doing. Tamagotchi-style chat header with ambient glow.
+
+```
++------------------------------------------+
+|                                          |
+|         ◜   ◝    ? ...                   |  <-- 200px avatar
+|            ·        (thinking emote)     |      with state glow
+|         ╰────╯                           |
+|                                          |
+|         Session Title                    |
+|         Luna General Assistant           |
++------------------------------------------+
+|  User: tell me about Phoebe             |  <-- chat scrolls
+|                                          |      independently
+|  Luna: Phoebe is the desk robot...      |
+|                                          |
+|  [input box]                    [Send]   |
++------------------------------------------+
+```
+
+```
+State Machine:
+
+idle ──> listening ──> thinking ──> responding ──> idle
+  |                      |              |
+  +──> sleep (30m)       +──> focused   +──> happy (score>=85)
+  |                      |              +──> empathetic (failed)
+  +──> private (muted)   +──> error     +──> playful (casual)
+                         +──> alert (high-priority notification)
+                         +──> handoff (device switch)
+```
+
+| State | Trigger | Emote |
+|-------|---------|-------|
+| idle | Response delivered | `~` |
+| listening | WhatsApp inbound | `((·))` |
+| thinking | CLI dispatch | `? ...` |
+| responding | Response received | `> _ <` |
+| happy | Score >= 85 or thumbs up | hearts + stars |
+| focused | Code task | `</>` |
+| alert | High-priority notification | `!! triangle !!` |
+| error | CLI failure | `#!@%&` |
+| sleep | 30 min idle | `z Z z` |
+
 ## Auto Quality Scoring & RL
 
 Every agent response is automatically scored by a local Qwen model across 6 dimensions:
@@ -195,7 +316,7 @@ Luna is evolving from a chat client into an AI-first native operating system.
 |-------|------|--------|
 | **Phase 0** | Consolidate the brain (AgentProvision as system of record) | Done |
 | **Phase 1** | Desktop presence (menu bar, shortcuts, notifications, screenshot) | Done |
-| **Phase 2** | Memory-led native (episodic recall, cross-device continuity) | In progress |
+| **Phase 2** | Memory-led native (episodic recall, cross-device continuity) | Done |
 | **Phase 3** | Mobile companion (iOS/Android, BLE wearable relay) | Planned |
 | **Phase 4** | Local actions (automations, file ops, system commands with trust gates) | Planned |
 | **Phase 5** | Embodied devices (camera, desk robot, ambient capture) | Planned |

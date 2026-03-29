@@ -8,12 +8,13 @@ on:
       - 'apps/web/**'
       - 'apps/code-worker/**'
       - 'apps/mcp-server/**'
+      - 'apps/luna-client/**'
       - 'docker-compose.yml'
       - '.github/workflows/local-deploy.yaml'
   workflow_dispatch:
     inputs:
       services:
-        description: 'Services to rebuild (comma-separated: api,web,code-worker,mcp-tools,orchestration-worker,databricks-worker)'
+        description: 'Services to rebuild (comma-separated: api,web,luna-client,code-worker,mcp-tools,orchestration-worker,databricks-worker)'
         required: false
         default: 'all'
 
@@ -37,10 +38,11 @@ jobs:
           echo "$CHANGED" | grep -q "apps/web/" && SERVICES="$SERVICES web"
           echo "$CHANGED" | grep -q "apps/code-worker/" && SERVICES="$SERVICES code-worker"
           echo "$CHANGED" | grep -q "apps/mcp-server/" && SERVICES="$SERVICES mcp-tools"
-          echo "$CHANGED" | grep -q "docker-compose.yml" && SERVICES="api web code-worker orchestration-worker databricks-worker"
+          echo "$CHANGED" | grep -q "apps/luna-client/" && SERVICES="$SERVICES luna-client"
+          echo "$CHANGED" | grep -q "docker-compose.yml" && SERVICES="api web luna-client code-worker orchestration-worker databricks-worker"
 
           # Default: skip mcp-tools (12GB image, 10+ min build) unless explicitly changed
-          [ -z "$SERVICES" ] && SERVICES="api web code-worker orchestration-worker databricks-worker"
+          [ -z "$SERVICES" ] && SERVICES="api web luna-client code-worker orchestration-worker databricks-worker"
           echo "services=$SERVICES" >> $GITHUB_OUTPUT
           echo "Deploying: $SERVICES"
 
@@ -50,7 +52,7 @@ jobs:
         run: |
           INPUT="${{ github.event.inputs.services }}"
           if [ "$INPUT" = "all" ]; then
-            echo "services=api web code-worker mcp-tools orchestration-worker databricks-worker" >> $GITHUB_OUTPUT
+            echo "services=api web luna-client code-worker mcp-tools orchestration-worker databricks-worker" >> $GITHUB_OUTPUT
           else
             echo "services=$(echo $INPUT | tr ',' ' ')" >> $GITHUB_OUTPUT
           fi
@@ -185,7 +187,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Service | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
-          for svc in api web code-worker mcp-tools orchestration-worker databricks-worker; do
+          for svc in api web luna-client code-worker mcp-tools orchestration-worker databricks-worker; do
             STATUS=$(docker inspect --format='{{.State.Status}}' servicetsunami-agents-${svc}-1 2>/dev/null || echo "not found")
             echo "| $svc | $STATUS |" >> $GITHUB_STEP_SUMMARY
           done
