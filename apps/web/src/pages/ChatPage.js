@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Badge, Button, Card, Col, Container, Form, ListGroup, Modal, Row, Spinner } from 'react-bootstrap';
+import { FaCopy } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -399,6 +400,14 @@ const ChatPage = () => {
               trajectoryId={message.id}
               stepIndex={0}
             />
+            <button
+              type="button"
+              title="Copy response"
+              onClick={() => navigator.clipboard.writeText(message.content)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', opacity: 0.6 }}
+            >
+              <FaCopy size={14} />
+            </button>
             {window.speechSynthesis && (
               <button
                 type="button"

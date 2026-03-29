@@ -40,7 +40,7 @@ async def get_device_status(device_id: str, tenant_id: str = "", ctx: Context = 
     pool = await _get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT * FROM device_registry WHERE device_id = $1 AND tenant_id = $2",
+            "SELECT device_id, device_name, device_type, status, capabilities, last_heartbeat, created_at FROM device_registry WHERE device_id = $1 AND tenant_id = $2",
             device_id, tid,
         )
     if not row:

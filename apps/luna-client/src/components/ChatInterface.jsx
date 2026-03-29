@@ -12,10 +12,26 @@ export default function ChatInterface({ handoff, requestAction }) {
   const [input, setInput] = useState('');
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [emotion, setEmotion] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
   const emotionTimer = useRef(null);
   const messagesEnd = useRef(null);
   const activeSessionRef = useRef(null); // guards async callbacks
   const { send, streaming, chunks } = useLunaStream();
+
+  const handleCopy = async (text, msgId) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setCopiedId(msgId);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   // Load sessions on mount
   useEffect(() => {
@@ -184,6 +200,16 @@ export default function ChatInterface({ handoff, requestAction }) {
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
               ) : (
                 <p>{msg.content}</p>
+              )}
+              {msg.role === 'assistant' && (
+                <button
+                  className="luna-btn luna-btn-sm copy-btn"
+                  onClick={() => handleCopy(msg.content, msg.id)}
+                  title="Copy response"
+                  style={{ marginTop: 4, fontSize: '0.75rem', opacity: 0.6 }}
+                >
+                  {copiedId === msg.id ? 'Copied!' : 'Copy'}
+                </button>
               )}
             </div>
           ))}
