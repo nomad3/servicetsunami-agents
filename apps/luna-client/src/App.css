@@ -294,6 +294,23 @@
 .luna-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .luna-btn-sm { padding: 6px 12px; font-size: 13px; }
 
+/* Theme toggle */
+.theme-toggle {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+.theme-toggle:hover {
+  background: rgba(255,255,255,0.08);
+}
+[data-theme="light"] .theme-toggle:hover {
+  background: rgba(0,0,0,0.06);
+}
+
 /* Notifications */
 .nav-actions {
   display: flex;

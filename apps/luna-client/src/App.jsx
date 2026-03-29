@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import ChatInterface from './components/ChatInterface';
 import LoginForm from './components/LoginForm';
@@ -9,10 +9,21 @@ import { useShellPresence } from './hooks/useShellPresence';
 import { useTrustProfile } from './hooks/useTrustProfile';
 import './App.css';
 
+function useTheme() {
+  const [theme, setTheme] = useState(() => localStorage.getItem('luna_theme') || 'dark');
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('luna_theme', theme);
+  }, [theme]);
+  const toggle = useCallback(() => setTheme(t => t === 'dark' ? 'light' : 'dark'), []);
+  return { theme, toggle };
+}
+
 function AuthenticatedApp() {
   const { logout } = useAuth();
   const { handoff } = useShellPresence();
   const { trust, needsConfirmation } = useTrustProfile();
+  const { theme, toggle: toggleTheme } = useTheme();
   const [pendingAction, setPendingAction] = useState(null);
   const pendingResolve = React.useRef(null);
 
@@ -39,6 +50,9 @@ function AuthenticatedApp() {
       <nav className="luna-nav">
         <span className="luna-brand">Luna</span>
         <div className="nav-actions">
+          <button className="theme-toggle" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+            {theme === 'dark' ? '\u2600' : '\u263E'}
+          </button>
           <TrustBadge trust={trust} />
           <NotificationBell />
           <button className="luna-btn luna-btn-sm" onClick={logout}>Logout</button>
