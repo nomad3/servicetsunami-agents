@@ -5,32 +5,16 @@ import LunaAvatar from './luna/LunaAvatar';
 import { useLunaStream } from '../hooks/useLunaStream';
 import { apiJson } from '../api';
 
-const PRESENCE_POLL_INTERVAL = 15000; // 15s
-
-export default function ChatInterface() {
+export default function ChatInterface({ handoff }) {
   const [sessions, setSessions] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [emotion, setEmotion] = useState(null);
-  const [presence, setPresence] = useState(null);
   const emotionTimer = useRef(null);
   const messagesEnd = useRef(null);
+  const activeSessionRef = useRef(null); // guards async callbacks
   const { send, streaming, chunks } = useLunaStream();
-
-  // Poll presence for handoff detection
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const snap = await apiJson('/api/v1/presence/');
-        if (!cancelled) setPresence(snap);
-      } catch {}
-    };
-    poll();
-    const id = setInterval(poll, PRESENCE_POLL_INTERVAL);
-    return () => { cancelled = true; clearInterval(id); };
-  }, []);
 
   // Load sessions on mount
   useEffect(() => {
@@ -42,8 +26,12 @@ export default function ChatInterface() {
 
   const selectSession = useCallback(async (id) => {
     setActiveSession(id);
+    activeSessionRef.current = id;
     const msgs = await apiJson(`/api/v1/chat/sessions/${id}/messages`);
-    setMessages(msgs);
+    // Only apply if still the active session
+    if (activeSessionRef.current === id) {
+      setMessages(msgs);
+    }
   }, []);
 
   useEffect(() => {
@@ -59,11 +47,11 @@ export default function ChatInterface() {
 
   const handleScreenshot = async () => {
     if (!activeSession) return;
+    const targetSession = activeSession;
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const base64 = await invoke('capture_screenshot');
 
-      // Convert base64 to blob and upload via file upload endpoint
       const byteChars = atob(base64);
       const byteArray = new Uint8Array(byteChars.length);
       for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
@@ -79,18 +67,21 @@ export default function ChatInterface() {
       setMessages(prev => [...prev, { id: tempId, role: 'user', content: '[Screenshot sent]' }]);
       setInput('');
 
-      const res = await fetch(`${API_BASE}/api/v1/chat/sessions/${activeSession}/messages/upload`, {
+      const res = await fetch(`${API_BASE}/api/v1/chat/sessions/${targetSession}/messages/upload`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
       if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
       const data = await res.json();
-      setMessages(prev => [
-        ...prev.map(m => m.id === tempId ? data.user_message : m),
-        data.assistant_message,
-      ]);
-      applyEmotion(data.assistant_message?.emotion || data.assistant_message?.context?.emotion);
+      // Only update if still on the same session
+      if (activeSessionRef.current === targetSession) {
+        setMessages(prev => [
+          ...prev.map(m => m.id === tempId ? data.user_message : m),
+          data.assistant_message,
+        ]);
+        applyEmotion(data.assistant_message?.emotion || data.assistant_message?.context?.emotion);
+      }
     } catch (err) {
       console.error('Screenshot failed:', err);
     }
@@ -99,18 +90,19 @@ export default function ChatInterface() {
   const handleSend = async () => {
     if (!input.trim() || !activeSession || streaming) return;
     const text = input;
+    const targetSession = activeSession;
     setInput('');
 
-    // Show user message immediately (optimistic)
     const tempId = `temp-${Date.now()}`;
     setMessages(prev => [...prev, { id: tempId, role: 'user', content: text }]);
 
-    await send(activeSession, text, {
+    await send(targetSession, text, {
       onUserSaved: (msg) => {
-        // Replace optimistic message with server-persisted one
+        if (activeSessionRef.current !== targetSession) return;
         setMessages(prev => prev.map(m => m.id === tempId ? msg : m));
       },
       onDone: (msg) => {
+        if (activeSessionRef.current !== targetSession) return;
         setMessages(prev => [...prev, msg]);
         applyEmotion(msg.emotion || msg.context?.emotion);
       },
@@ -158,7 +150,7 @@ export default function ChatInterface() {
         </div>
 
         {/* Handoff banner */}
-        {presence?.state === 'handoff' && (
+        {handoff && (
           <div className="handoff-banner">Continuing from another device...</div>
         )}
 

@@ -30,6 +30,10 @@ _ACTIVE_STATES = {"listening", "thinking", "responding", "focused"}
 # and state is still active, force back to idle.
 _STALENESS_SECONDS = 120
 
+# Shell liveness: shells that haven't heartbeated in this many seconds
+# are pruned from connected_shells.
+_SHELL_TTL_SECONDS = 30
+
 
 def _default_presence() -> dict:
     now = datetime.now(timezone.utc).isoformat()
@@ -40,6 +44,7 @@ def _default_presence() -> dict:
         "active_shell": None,
         "connected_shells": [],
         "shell_capabilities": {},  # {shell_name: {cap: bool, ...}}
+        "shell_heartbeats": {},  # {shell_name: iso_timestamp}
         "tool_status": "idle",
         "attention_target": None,
         "session_id": None,
@@ -47,18 +52,46 @@ def _default_presence() -> dict:
     }
 
 
+def _prune_dead_shells(p: dict) -> None:
+    """Remove shells that haven't heartbeated within TTL. Caller must hold _lock."""
+    heartbeats = p.get("shell_heartbeats", {})
+    if not heartbeats:
+        return
+    now = datetime.now(timezone.utc)
+    dead = []
+    for shell_name, ts in heartbeats.items():
+        try:
+            last = datetime.fromisoformat(ts)
+            if (now - last).total_seconds() > _SHELL_TTL_SECONDS:
+                dead.append(shell_name)
+        except (ValueError, TypeError):
+            dead.append(shell_name)
+
+    shells = p["connected_shells"]
+    caps = p.get("shell_capabilities", {})
+    for name in dead:
+        if name in shells:
+            shells.remove(name)
+        caps.pop(name, None)
+        heartbeats.pop(name, None)
+        if p.get("active_shell") == name:
+            p["active_shell"] = shells[0] if shells else None
+
+
 def get_presence(tenant_id) -> dict:
-    """Return current presence snapshot. Applies staleness check."""
+    """Return current presence snapshot. Applies staleness check + shell pruning."""
     tid = str(tenant_id)
     with _lock:
         if tid not in _presence_store:
             _presence_store[tid] = _default_presence()
+        # Prune dead shells before returning
+        _prune_dead_shells(_presence_store[tid])
         snap = dict(_presence_store[tid])
-        # Copy connected_shells to avoid shared list reference
+        # Copy mutable fields to avoid shared references
         snap["connected_shells"] = list(snap.get("connected_shells", []))
 
     # Staleness: if last real update is old and state is active, force idle
-    # Handoff clears after 10s. After 30 min of idle, transition to sleep.
+    # Handoff clears after 30s. After 30 min of idle, transition to sleep.
     updated_at = snap.get("updated_at")
     if updated_at:
         try:
@@ -69,11 +102,13 @@ def get_presence(tenant_id) -> dict:
             elif age > _STALENESS_SECONDS and snap["state"] in _ACTIVE_STATES:
                 snap["state"] = "idle"
                 snap["tool_status"] = "idle"
-            elif age > 10 and snap["state"] == "handoff":
+            elif age > 30 and snap["state"] == "handoff":
                 snap["state"] = "idle"
         except (ValueError, TypeError):
             pass
 
+    # Don't expose internal tracking fields
+    snap.pop("shell_heartbeats", None)
     snap["timestamp"] = datetime.now(timezone.utc).isoformat()
     return snap
 
@@ -115,6 +150,8 @@ def update_state(tenant_id, state: Optional[str] = None, mood: Optional[str] = N
             changed = True
         if active_shell is not None:
             p["active_shell"] = active_shell
+            # Record heartbeat for this shell
+            p.setdefault("shell_heartbeats", {})[active_shell] = now
         if tool_status and tool_status in VALID_TOOL_STATUS:
             p["tool_status"] = tool_status
             changed = True
@@ -134,22 +171,28 @@ def register_shell(tenant_id, shell_name: str, capabilities: Optional[dict] = No
     with _lock:
         if tid not in _presence_store:
             _presence_store[tid] = _default_presence()
+        p = _presence_store[tid]
+        # Prune dead shells before evaluating handoff
+        _prune_dead_shells(p)
         # Handoff: switching from a different active shell
-        old_shell = _presence_store[tid].get("active_shell")
+        old_shell = p.get("active_shell")
         if old_shell and old_shell != shell_name:
-            _presence_store[tid]["state"] = "handoff"
-        shells = _presence_store[tid]["connected_shells"]
+            p["state"] = "handoff"
+            p["updated_at"] = now
+        shells = p["connected_shells"]
         if shell_name not in shells:
             shells.append(shell_name)
-        _presence_store[tid]["active_shell"] = shell_name
-        _presence_store[tid]["updated_at"] = now
+        p["active_shell"] = shell_name
+        # Record heartbeat
+        p.setdefault("shell_heartbeats", {})[shell_name] = now
         # Store capabilities for this shell
         if capabilities:
-            caps = _presence_store[tid].setdefault("shell_capabilities", {})
+            caps = p.setdefault("shell_capabilities", {})
             caps[shell_name] = capabilities
-        snap = dict(_presence_store[tid])
+        snap = dict(p)
         snap["connected_shells"] = list(shells)
         snap["shell_capabilities"] = dict(snap.get("shell_capabilities", {}))
+        snap.pop("shell_heartbeats", None)
         return snap
 
 
@@ -159,16 +202,18 @@ def deregister_shell(tenant_id, shell_name: str) -> dict:
     with _lock:
         if tid not in _presence_store:
             _presence_store[tid] = _default_presence()
-        shells = _presence_store[tid]["connected_shells"]
+        p = _presence_store[tid]
+        shells = p["connected_shells"]
         if shell_name in shells:
             shells.remove(shell_name)
-        if _presence_store[tid]["active_shell"] == shell_name:
-            _presence_store[tid]["active_shell"] = shells[0] if shells else None
-        # Remove capabilities for this shell
-        caps = _presence_store[tid].get("shell_capabilities", {})
-        caps.pop(shell_name, None)
-        _presence_store[tid]["updated_at"] = now
-        snap = dict(_presence_store[tid])
+        if p["active_shell"] == shell_name:
+            p["active_shell"] = shells[0] if shells else None
+        # Remove capabilities and heartbeat for this shell
+        p.get("shell_capabilities", {}).pop(shell_name, None)
+        p.get("shell_heartbeats", {}).pop(shell_name, None)
+        p["updated_at"] = now
+        snap = dict(p)
         snap["connected_shells"] = list(shells)
-        snap["shell_capabilities"] = dict(caps)
+        snap["shell_capabilities"] = dict(snap.get("shell_capabilities", {}))
+        snap.pop("shell_heartbeats", None)
         return snap
