@@ -19,11 +19,39 @@ function useTheme() {
   return { theme, toggle };
 }
 
+function useUpdateBanner() {
+  const [updateVersion, setUpdateVersion] = useState(null);
+  useEffect(() => {
+    let unlisten;
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen('update-available', (event) => {
+          setUpdateVersion(event.payload);
+        });
+      } catch {} // Not in Tauri (PWA mode)
+    })();
+    return () => { unlisten?.(); };
+  }, []);
+  const dismiss = useCallback(() => setUpdateVersion(null), []);
+  const restart = useCallback(async () => {
+    try {
+      const { relaunch } = await import('@tauri-apps/plugin-updater');
+      await relaunch();
+    } catch {
+      // Fallback: just reload
+      window.location.reload();
+    }
+  }, []);
+  return { updateVersion, dismiss, restart };
+}
+
 function AuthenticatedApp() {
   const { logout } = useAuth();
   const { handoff } = useShellPresence();
   const { trust, needsConfirmation } = useTrustProfile();
   const { theme, toggle: toggleTheme } = useTheme();
+  const { updateVersion, dismiss: dismissUpdate, restart: restartForUpdate } = useUpdateBanner();
   const [pendingAction, setPendingAction] = useState(null);
   const pendingResolve = React.useRef(null);
 
@@ -58,6 +86,13 @@ function AuthenticatedApp() {
           <button className="luna-btn luna-btn-sm" onClick={logout}>Logout</button>
         </div>
       </nav>
+      {updateVersion && (
+        <div className="update-banner">
+          <span>Luna {updateVersion} is available</span>
+          <button className="luna-btn luna-btn-sm" onClick={restartForUpdate}>Restart to update</button>
+          <button className="update-dismiss" onClick={dismissUpdate}>&times;</button>
+        </div>
+      )}
       <ChatInterface handoff={handoff} requestAction={requestAction} />
       <ActionApproval
         action={pendingAction}

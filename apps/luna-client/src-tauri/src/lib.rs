@@ -147,6 +147,30 @@ pub fn run() {
                 setup_global_shortcut(app)?;
             }
 
+            // Check for updates on startup + every 30 minutes
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    let h = handle.clone();
+                    tauri::async_runtime::block_on(async move {
+                        match tauri_plugin_updater::UpdaterExt::updater(&h).check().await {
+                            Ok(Some(update)) => {
+                                log::info!("Update available: {}", update.version);
+                                // Emit event to frontend so it can show a banner
+                                let _ = tauri::Emitter::emit(&h, "update-available", update.version.clone());
+                            }
+                            Ok(None) => {
+                                log::info!("No update available");
+                            }
+                            Err(e) => {
+                                log::debug!("Update check failed: {}", e);
+                            }
+                        }
+                    });
+                    std::thread::sleep(std::time::Duration::from_secs(1800)); // 30 min
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![get_platform, get_arch, capture_screenshot])
