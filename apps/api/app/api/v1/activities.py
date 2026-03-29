@@ -25,6 +25,7 @@ class ActivityTrackRequest(BaseModel):
     to_app: Optional[str] = Field(None, max_length=255)
     app_name: Optional[str] = Field(None, max_length=255)
     window_title: Optional[str] = Field(None, max_length=500)
+    subprocess: Optional[dict] = None  # {active_processes, terminal_cwd} from native client
     duration_secs: Optional[float] = None
     timestamp: Optional[int] = None
 
