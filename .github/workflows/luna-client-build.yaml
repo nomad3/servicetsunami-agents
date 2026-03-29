@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -29,6 +31,7 @@ jobs:
 
       - name: Install Rust (if needed)
         run: |
+          source "$HOME/.cargo/env" 2>/dev/null || true
           if ! command -v cargo &> /dev/null; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
@@ -37,13 +40,31 @@ jobs:
           cargo --version
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" 2>/dev/null || true
+        run: |
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          cargo install tauri-cli --version "^2" 2>/dev/null || true
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/luna-v* ]]; then
+            VERSION=$(echo "${{ github.ref_name }}" | sed 's/luna-v//')
+          else
+            # Auto-version from tauri.conf.json + short SHA
+            BASE=$(python3 -c "import json; print(json.load(open('apps/luna-client/src-tauri/tauri.conf.json'))['version'])")
+            SHORT_SHA=$(git rev-parse --short HEAD)
+            VERSION="${BASE}-${SHORT_SHA}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
 
       - name: Build Tauri (macOS ARM64)
         working-directory: apps/luna-client
         env:
           VITE_API_BASE_URL: https://luna.agentprovision.com
-        run: cargo tauri build --target aarch64-apple-darwin
+        run: |
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          cargo tauri build --target aarch64-apple-darwin
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -55,20 +76,20 @@ jobs:
           retention-days: 30
 
       - name: Generate updater manifest
-        if: startsWith(github.ref, 'refs/tags/luna-v')
         working-directory: apps/luna-client
         run: |
-          VERSION=$(echo "${{ github.ref_name }}" | sed 's/luna-v//')
+          VERSION="${{ steps.version.outputs.version }}"
           DMG_PATH=$(ls src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Luna_*.dmg)
           DMG_NAME=$(basename "$DMG_PATH")
+          TAG="luna-v${VERSION}"
 
-          # Generate signature if signing key is available
           SIG=""
           if [ -n "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
+            source "$HOME/.cargo/env" 2>/dev/null || true
             SIG=$(cargo tauri signer sign "$DMG_PATH" --private-key "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" 2>/dev/null | tail -1 || echo "")
           fi
 
-          cat > latest.json << MANIFEST
+          cat > latest.json <<EOF
           {
             "version": "$VERSION",
             "notes": "Luna $VERSION",
@@ -76,17 +97,33 @@ jobs:
             "platforms": {
               "darwin-aarch64": {
                 "signature": "$SIG",
-                "url": "https://github.com/nomad3/servicetsunami-agents/releases/download/${{ github.ref_name }}/$DMG_NAME"
+                "url": "https://github.com/nomad3/servicetsunami-agents/releases/download/${TAG}/${DMG_NAME}"
               }
             }
           }
-          MANIFEST
+          EOF
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/luna-v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            apps/luna-client/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Luna_*.dmg
-            apps/luna-client/latest.json
-          generate_release_notes: true
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: apps/luna-client
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="luna-v${VERSION}"
+          DMG_PATH=$(ls src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Luna_*.dmg)
+
+          # Create tag if it doesn't exist
+          git tag "$TAG" 2>/dev/null || true
+          git push origin "$TAG" 2>/dev/null || true
+
+          # Create release (or update if exists)
+          gh release create "$TAG" \
+            --title "Luna $VERSION" \
+            --generate-notes \
+            "$DMG_PATH" \
+            latest.json \
+            --latest 2>/dev/null || \
+          gh release upload "$TAG" \
+            "$DMG_PATH" \
+            latest.json \
+            --clobber 2>/dev/null || true
