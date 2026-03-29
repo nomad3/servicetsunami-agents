@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "Luna mobile (iOS) permissions",
+  "windows": ["main"],
+  "platforms": ["iOS", "android"],
+  "permissions": [
+    "core:default",
+    "notification:default",
+    "shell:default",
+    "opener:default",
+    "haptics:default"
+  ]
+}

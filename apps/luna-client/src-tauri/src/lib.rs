@@ -1,7 +1,9 @@
+use tauri::Manager;
+
+#[cfg(desktop)]
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    Manager,
 };
 
 #[tauri::command]
@@ -14,33 +16,47 @@ fn get_arch() -> String {
     std::env::consts::ARCH.to_string()
 }
 
+/// Screenshot capture — desktop only (uses macOS screencapture binary).
+/// On iOS returns an error; the frontend should use the native share sheet instead.
 #[tauri::command]
 async fn capture_screenshot() -> Result<String, String> {
-    use std::process::Command;
+    #[cfg(desktop)]
+    {
+        use std::process::Command;
 
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let path = format!("/tmp/luna-screenshot-{}.png", timestamp);
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let path = format!("/tmp/luna-screenshot-{}.png", timestamp);
 
-    // macOS screencapture command
-    let output = Command::new("screencapture")
-        .args(["-x", "-C", &path]) // -x: no sound, -C: capture cursor
-        .output()
-        .map_err(|e| format!("Screenshot failed: {}", e))?;
+        let output = Command::new("screencapture")
+            .args(["-x", "-C", &path])
+            .output()
+            .map_err(|e| format!("Screenshot failed: {}", e))?;
 
-    if !output.status.success() {
-        return Err("Screenshot capture failed".to_string());
+        if !output.status.success() {
+            return Err("Screenshot capture failed".to_string());
+        }
+
+        let bytes = std::fs::read(&path)
+            .map_err(|e| format!("Failed to read screenshot: {}", e))?;
+        let _ = std::fs::remove_file(&path);
+
+        return Ok(base64_encode(&bytes));
     }
 
-    // Read file and base64 encode
-    let bytes = std::fs::read(&path)
-        .map_err(|e| format!("Failed to read screenshot: {}", e))?;
-    let _ = std::fs::remove_file(&path); // cleanup
+    #[cfg(mobile)]
+    Err("Screenshot not available on mobile — use the system share sheet".to_string())
+}
 
-    let encoded = base64_encode(&bytes);
-    Ok(encoded)
+/// Haptic feedback trigger — mobile only, no-op on desktop.
+#[tauri::command]
+async fn haptic_feedback(style: String) -> Result<(), String> {
+    log::info!("Haptic feedback: {}", style);
+    // tauri-plugin-haptics exposes its own invoke commands (ImpactFeedback etc.)
+    // This command lets the frontend check if it's on mobile before calling those.
+    Ok(())
 }
 
 #[tauri::command]
@@ -105,6 +121,7 @@ fn base64_encode(data: &[u8]) -> String {
     result
 }
 
+#[cfg(desktop)]
 fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_item = MenuItem::with_id(app, "open", "Open Luna", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit Luna", true, None::<&str>)?;
@@ -140,6 +157,7 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(desktop)]
 fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
@@ -164,12 +182,26 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_opener::init());
+
+    // Desktop-only plugins
+    #[cfg(desktop)]
+    {
+        builder = builder
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+            .plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    // Mobile-only plugins
+    #[cfg(mobile)]
+    {
+        builder = builder.plugin(tauri_plugin_haptics::init());
+    }
+
+    builder
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -179,40 +211,34 @@ pub fn run() {
                 )?;
             }
 
-            // System tray (desktop only)
             #[cfg(desktop)]
             {
                 setup_tray(app)?;
                 setup_global_shortcut(app)?;
-            }
 
-            // Check for updates on startup + every 30 minutes
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                loop {
-                    let h = handle.clone();
-                    tauri::async_runtime::block_on(async move {
-                        let updater = match tauri_plugin_updater::UpdaterExt::updater(&h) {
-                            Ok(u) => u,
-                            Err(e) => { log::debug!("Updater init failed: {}", e); return; }
-                        };
-                        match updater.check().await {
-                            Ok(Some(update)) => {
-                                log::info!("Update available: {}", update.version);
-                                // Emit event to frontend so it can show a banner
-                                let _ = tauri::Emitter::emit(&h, "update-available", update.version.clone());
+                // Auto-updater: check on startup + every 30 min
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    loop {
+                        let h = handle.clone();
+                        tauri::async_runtime::block_on(async move {
+                            let updater = match tauri_plugin_updater::UpdaterExt::updater(&h) {
+                                Ok(u) => u,
+                                Err(e) => { log::debug!("Updater init failed: {}", e); return; }
+                            };
+                            match updater.check().await {
+                                Ok(Some(update)) => {
+                                    log::info!("Update available: {}", update.version);
+                                    let _ = tauri::Emitter::emit(&h, "update-available", update.version.clone());
+                                }
+                                Ok(None) => log::info!("No update available"),
+                                Err(e) => log::debug!("Update check failed: {}", e),
                             }
-                            Ok(None) => {
-                                log::info!("No update available");
-                            }
-                            Err(e) => {
-                                log::debug!("Update check failed: {}", e);
-                            }
-                        }
-                    });
-                    std::thread::sleep(std::time::Duration::from_secs(1800)); // 30 min
-                }
-            });
+                        });
+                        std::thread::sleep(std::time::Duration::from_secs(1800));
+                    }
+                });
+            }
 
             // Clipboard watcher — emits 'clipboard-changed' when clipboard text changes
             // Uses AtomicBool so the thread can be signalled to stop on app exit.
@@ -277,7 +303,14 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_platform, get_arch, capture_screenshot, get_active_app, read_clipboard])
+        .invoke_handler(tauri::generate_handler![
+            get_platform,
+            get_arch,
+            capture_screenshot,
+            get_active_app,
+            read_clipboard,
+            haptic_feedback,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Luna");
 }
