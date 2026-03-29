@@ -153,7 +153,11 @@ pub fn run() {
                 loop {
                     let h = handle.clone();
                     tauri::async_runtime::block_on(async move {
-                        match tauri_plugin_updater::UpdaterExt::updater(&h).check().await {
+                        let updater = match tauri_plugin_updater::UpdaterExt::updater(&h) {
+                            Ok(u) => u,
+                            Err(e) => { log::debug!("Updater init failed: {}", e); return; }
+                        };
+                        match updater.check().await {
                             Ok(Some(update)) => {
                                 log::info!("Update available: {}", update.version);
                                 // Emit event to frontend so it can show a banner
