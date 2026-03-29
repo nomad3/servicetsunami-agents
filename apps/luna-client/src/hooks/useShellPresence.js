@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { apiFetch } from '../api';
 
 const SHELL_TYPE = 'desktop';
@@ -26,10 +26,11 @@ export function useShellPresence() {
   const registered = useRef(false);
   const intervalRef = useRef(null);
   const shellId = useRef(getShellId());
+  const [handoff, setHandoff] = useState(false);
 
   const register = useCallback(async () => {
     try {
-      await apiFetch('/api/v1/presence/shell/register', {
+      const res = await apiFetch('/api/v1/presence/shell/register', {
         method: 'POST',
         body: JSON.stringify({
           shell: shellId.current,
@@ -37,6 +38,11 @@ export function useShellPresence() {
         }),
       });
       registered.current = true;
+      const snap = await res.json();
+      if (snap.state === 'handoff') {
+        setHandoff(true);
+        setTimeout(() => setHandoff(false), 5000);
+      }
     } catch (err) {
       console.warn('Shell register failed:', err.message);
     }
@@ -83,5 +89,5 @@ export function useShellPresence() {
     };
   }, [register, deregister, heartbeat]);
 
-  return { register, deregister };
+  return { register, deregister, handoff };
 }

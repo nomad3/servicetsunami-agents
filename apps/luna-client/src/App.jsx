@@ -8,7 +8,7 @@ import './App.css';
 
 function AuthenticatedApp() {
   const { logout } = useAuth();
-  useShellPresence();
+  const { handoff } = useShellPresence();
 
   return (
     <div className="luna-app">
@@ -19,7 +19,7 @@ function AuthenticatedApp() {
           <button className="luna-btn luna-btn-sm" onClick={logout}>Logout</button>
         </div>
       </nav>
-      <ChatInterface />
+      <ChatInterface handoff={handoff} />
     </div>
   );
 }

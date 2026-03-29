@@ -7,17 +7,19 @@ export function useNotifications() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState([]);
   const intervalRef = useRef(null);
-  const unreadRef = useRef(0);
+  const unreadRef = useRef(-1); // -1 = not yet initialized
+  const initializedRef = useRef(false);
 
   const fetchCount = useCallback(async () => {
     try {
       const data = await apiJson('/api/v1/notifications/count');
       const newCount = data.unread || 0;
 
-      // If count increased, show native notification
-      if (newCount > unreadRef.current && unreadRef.current > 0) {
+      // Show native notification when count increases (skip first poll)
+      if (initializedRef.current && newCount > unreadRef.current) {
         showNativeNotification(newCount - unreadRef.current);
       }
+      initializedRef.current = true;
       unreadRef.current = newCount;
       setUnreadCount(newCount);
     } catch {}
@@ -34,16 +36,24 @@ export function useNotifications() {
     try {
       await apiJson(`/api/v1/notifications/${id}/read`, { method: 'PATCH' });
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      const next = Math.max(0, unreadRef.current - 1);
+      unreadRef.current = next;
+      setUnreadCount(next);
     } catch {}
   }, []);
 
   const dismiss = useCallback(async (id) => {
     try {
+      const target = notifications.find(n => n.id === id);
       await apiJson(`/api/v1/notifications/${id}`, { method: 'DELETE' });
       setNotifications(prev => prev.filter(n => n.id !== id));
+      if (target && !target.read) {
+        const next = Math.max(0, unreadRef.current - 1);
+        unreadRef.current = next;
+        setUnreadCount(next);
+      }
     } catch {}
-  }, []);
+  }, [notifications]);
 
   useEffect(() => {
     fetchCount();
@@ -55,7 +65,6 @@ export function useNotifications() {
 }
 
 async function showNativeNotification(count) {
-  // Try Tauri native notification first
   try {
     const { sendNotification, isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
     let permitted = await isPermissionGranted();
@@ -70,7 +79,6 @@ async function showNativeNotification(count) {
       });
     }
   } catch {
-    // Fallback to web Notification API (for PWA mode)
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification('Luna', { body: `${count} new notification${count > 1 ? 's' : ''}` });
     }
