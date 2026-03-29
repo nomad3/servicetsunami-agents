@@ -550,9 +550,13 @@ async def prune_stale_knowledge(tenant_id: str) -> Dict[str, Any]:
                     UPDATE knowledge_relations SET to_entity_id = CAST(:keep AS uuid)
                     WHERE to_entity_id = CAST(:merge AS uuid)
                 """), params)
-                # Move world state assertions
+                # Move world state assertions + snapshots
                 db.execute(text("""
                     UPDATE world_state_assertions SET subject_entity_id = CAST(:keep AS uuid)
+                    WHERE subject_entity_id = CAST(:merge AS uuid)
+                """), params)
+                db.execute(text("""
+                    UPDATE world_state_snapshots SET subject_entity_id = CAST(:keep AS uuid)
                     WHERE subject_entity_id = CAST(:merge AS uuid)
                 """), params)
                 # Archive the duplicate
