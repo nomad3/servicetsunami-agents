@@ -47,5 +47,12 @@
       "minimumSystemVersion": "11.0"
     }
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/nomad3/servicetsunami-agents/releases/latest/download/latest.json"
+      ],
+      "dialog": true
+    }
+  }
 }

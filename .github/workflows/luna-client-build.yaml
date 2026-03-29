@@ -6,6 +6,8 @@ on:
     paths:
       - 'apps/luna-client/**'
       - '.github/workflows/luna-client-build.yaml'
+    tags:
+      - 'luna-v*'
   workflow_dispatch:
 
 jobs:
@@ -52,9 +54,39 @@ jobs:
             apps/luna-client/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Luna_*.dmg
           retention-days: 30
 
-      - name: Create GitHub Release (on tag)
+      - name: Generate updater manifest
+        if: startsWith(github.ref, 'refs/tags/luna-v')
+        working-directory: apps/luna-client
+        run: |
+          VERSION=$(echo "${{ github.ref_name }}" | sed 's/luna-v//')
+          DMG_PATH=$(ls src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Luna_*.dmg)
+          DMG_NAME=$(basename "$DMG_PATH")
+
+          # Generate signature if signing key is available
+          SIG=""
+          if [ -n "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
+            SIG=$(cargo tauri signer sign "$DMG_PATH" --private-key "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" 2>/dev/null | tail -1 || echo "")
+          fi
+
+          cat > latest.json << MANIFEST
+          {
+            "version": "$VERSION",
+            "notes": "Luna $VERSION",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "$SIG",
+                "url": "https://github.com/nomad3/servicetsunami-agents/releases/download/${{ github.ref_name }}/$DMG_NAME"
+              }
+            }
+          }
+          MANIFEST
+
+      - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/luna-v')
         uses: softprops/action-gh-release@v2
         with:
-          files: apps/luna-client/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Luna_*.dmg
+          files: |
+            apps/luna-client/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Luna_*.dmg
+            apps/luna-client/latest.json
           generate_release_notes: true
