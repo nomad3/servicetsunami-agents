@@ -15,7 +15,7 @@ export default function LoginForm() {
     try {
       await login(email, password);
     } catch (err) {
-      setError('Invalid credentials');
+      setError(err.message || 'Invalid credentials');
     } finally {
       setLoading(false);
     }
