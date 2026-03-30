@@ -11,6 +11,7 @@ def test_server_has_tools():
 
     # Core tools that must always be present
     expected_tools = [
+        "check_aremko_availability",
         "search_knowledge",
         "find_entities",
         "create_entity",
