@@ -20,3 +20,4 @@ from src.mcp_tools import mcp_servers  # noqa: F401
 from src.mcp_tools import dynamic_workflows  # noqa: F401
 from src.mcp_tools import unsupervised_learning  # noqa: F401
 from src.mcp_tools import supermarket  # noqa: F401
+from src.mcp_tools import aremko  # noqa: F401

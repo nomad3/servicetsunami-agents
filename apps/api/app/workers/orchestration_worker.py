@@ -69,6 +69,12 @@ from app.workflows.activities.memory_consolidation import (
     log_consolidation_results,
 )
 from app.workflows.competitor_monitor import CompetitorMonitorWorkflow
+from app.workflows.aremko_monitor import AremkoMonitorWorkflow
+from app.workflows.activities.aremko_monitor import (
+    fetch_aremko_snapshot,
+    detect_aremko_changes,
+    create_aremko_notifications,
+)
 from app.workflows.activities.competitor_monitor import (
     fetch_competitors,
     scrape_competitor_activity,
@@ -188,6 +194,7 @@ async def run_orchestration_worker():
             AutoActionWorkflow,
             InboxMonitorWorkflow,
             CompetitorMonitorWorkflow,
+            AremkoMonitorWorkflow,
             ProspectingPipelineWorkflow,
             RLPolicyUpdateWorkflow,
             MemoryConsolidationWorkflow,
@@ -228,6 +235,9 @@ async def run_orchestration_worker():
             log_monitor_cycle,
             fetch_competitors,
             scrape_competitor_activity,
+            fetch_aremko_snapshot,
+            detect_aremko_changes,
+            create_aremko_notifications,
             check_ad_libraries,
             analyze_competitor_changes,
             store_competitor_observations,
