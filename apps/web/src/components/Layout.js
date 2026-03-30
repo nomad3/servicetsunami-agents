@@ -21,7 +21,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../App';
 import { useLunaPresence } from '../context/LunaPresenceContext';
 import { useTheme } from '../context/ThemeContext';
-import LunaAvatar from './luna/LunaAvatar';
+// LunaAvatar removed
 import LunaStateBadge from './luna/LunaStateBadge';
 import NotificationBell from './NotificationBell';
 import './Layout.css';
@@ -97,7 +97,6 @@ const Layout = ({ children }) => {
         <div className="sidebar-header">
           <div className="d-flex align-items-center justify-content-between">
             <Link to="/dashboard" className="brand-link">
-              <LunaAvatar state={lunaState} mood={lunaMood} size="sm" animated />
               <div className="d-flex flex-column">
                 <span className="brand-text">{t('brand')}</span>
                 <LunaStateBadge state={lunaState} size="xs" />

@@ -7,7 +7,7 @@ import { useAuth } from '../App';
 import Layout from '../components/Layout';
 import FeedbackActions from '../components/chat/FeedbackActions';
 import ReportVisualization from '../components/chat/ReportVisualization';
-import LunaAvatar from '../components/luna/LunaAvatar';
+// LunaAvatar removed
 import { useLunaPresence } from '../context/LunaPresenceContext';
 import agentKitService from '../services/agentKit';
 import chatService from '../services/chat';
@@ -481,57 +481,18 @@ const ChatPage = () => {
             {globalError && <Alert variant="danger">{globalError}</Alert>}
             {selectedSession ? (
               <Card className="shadow-sm">
-                {/* ═══ Luna Tamagotchi Panel ═══ */}
+                {/* ═══ Session Header ═══ */}
                 <div
-                  role="status"
-                  aria-live="polite"
-                  aria-label={`Luna is ${responseEmotion || (postingMessage ? 'thinking' : lunaState)}`}
                   className="luna-tamagotchi-panel"
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    padding: '24px 16px 16px',
-                    minHeight: 280,
-                    background: 'radial-gradient(ellipse at 50% 60%, var(--bs-tertiary-bg, rgba(30,45,65,0.6)) 0%, transparent 70%)',
+                    padding: '16px',
                     borderBottom: '1px solid var(--bs-border-color, rgba(255,255,255,0.08))',
-                    position: 'relative',
-                    overflow: 'hidden',
                   }}
                 >
-                  {/* Ambient glow layers — cross-fade via opacity (CSS can't transition gradients) */}
-                  {(() => {
-                    const effectiveState = responseEmotion || (postingMessage ? 'thinking' : lunaState);
-                    return [
-                      { key: 'thinking', color: 'rgba(255,179,71,0.10)', active: effectiveState === 'thinking' },
-                      { key: 'listening', color: 'rgba(107,181,255,0.10)', active: effectiveState === 'listening' },
-                      { key: 'responding', color: 'rgba(94,197,176,0.10)', active: effectiveState === 'responding' },
-                      { key: 'happy', color: 'rgba(255,215,0,0.12)', active: effectiveState === 'happy' || effectiveState === 'playful' },
-                      { key: 'empathetic', color: 'rgba(255,105,180,0.10)', active: effectiveState === 'empathetic' },
-                      { key: 'focused', color: 'rgba(138,43,226,0.08)', active: effectiveState === 'focused' },
-                      { key: 'alert', color: 'rgba(255,69,0,0.10)', active: effectiveState === 'alert' || effectiveState === 'error' },
-                      { key: 'idle', color: 'rgba(240,230,211,0.04)', active: !['thinking', 'listening', 'responding', 'happy', 'playful', 'empathetic', 'focused', 'alert', 'error'].includes(effectiveState) },
-                    ];
-                  })().map(g => (
-                    <div key={g.key} style={{
-                      position: 'absolute',
-                      top: '50%', left: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      width: 340, height: 340,
-                      borderRadius: '50%',
-                      background: `radial-gradient(circle, ${g.color} 0%, transparent 70%)`,
-                      opacity: g.active ? 1 : 0,
-                      transition: 'opacity 0.8s ease',
-                      pointerEvents: 'none',
-                    }} />
-                  ))}
-                  <LunaAvatar
-                    state={responseEmotion || (postingMessage ? 'thinking' : lunaState)}
-                    mood={lunaMood}
-                    size="xxl"
-                    animated
-                  />
                   <div style={{ marginTop: 4, textAlign: 'center', zIndex: 1 }}>
                     <h6 className="mb-0" style={{ fontSize: '0.95rem', opacity: 0.9 }}>
                       {selectedSession.title || t('agentSession')}
@@ -632,18 +593,6 @@ const ChatPage = () => {
                     )}
                   </div>
                   {/* Floating mini avatar — shows emotion reaction */}
-                  {responseEmotion && (
-                    <div style={{
-                      position: 'absolute',
-                      bottom: 80,
-                      right: 16,
-                      zIndex: 10,
-                      transition: 'all 0.3s ease',
-                      opacity: 1,
-                    }}>
-                      <LunaAvatar state={responseEmotion} mood={lunaMood} size="sm" animated />
-                    </div>
-                  )}
                   <Form onSubmit={handleMessageSubmit} className="pt-3">
                     <input
                       type="file"
