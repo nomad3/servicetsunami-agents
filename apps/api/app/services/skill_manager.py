@@ -22,7 +22,7 @@ BUNDLED_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 # Base writable skills directory
 SKILLS_BASE = Path(os.environ.get("DATA_STORAGE_PATH", str(BUNDLED_SKILLS_DIR.parent))) / "skills"
 
-VALID_CATEGORIES = {"sales", "marketing", "data", "coding", "communication", "automation", "general", "productivity"}
+VALID_CATEGORIES = {"sales", "marketing", "data", "coding", "communication", "automation", "general", "productivity", "infrastructure", "devops", "support"}
 
 # Map external category names to our valid set
 CATEGORY_MAP = {

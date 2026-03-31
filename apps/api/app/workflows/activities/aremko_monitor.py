@@ -1,12 +1,14 @@
 """Temporal activities for AremkoMonitorWorkflow.
 
-Fetches live availability from aremko.cl/ventas/, compares snapshots to detect
-changes, and creates notifications via the standard notifications table.
+Fetches live availability from aremko.cl using the curated service catalog
+(5 cabañas, 8 tinajas, masaje relajación/descontracturante only).
+Compares snapshots to detect changes and creates notifications.
+CLOSED TUESDAYS — skips Tuesday dates automatically.
 """
 import logging
 import uuid
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import httpx
 from temporalio import activity
@@ -18,28 +20,48 @@ logger = logging.getLogger(__name__)
 
 AREMKO_BASE_URL = "https://www.aremko.cl/ventas"
 
+# Curated catalog — matches src/tools/aremko_availability.py in mcp-server
+TINAJAS = {
+    "Tina Hornopiren":           1,
+    "Tina Tronador":             10,
+    "Tina Osorno":               11,
+    "Tina Calbuco":              12,
+    "Tina Hidromasaje Puntiagudo": 13,
+    "Tina Hidromasaje Llaima":   14,
+    "Tina Hidromasaje Villarrica": 15,
+    "Tina Hidromasaje Puyehue":  16,
+}
+
+MASAJES = {
+    "Masaje Relajación o Descontracturante": 53,
+}
+
+CABANAS = {
+    "Cabaña Arrayan":    9,
+    "Cabaña Laurel":     8,
+    "Cabaña Tepa":       7,
+    "Cabaña Torre":      3,
+    "Cabaña Acantilado": 6,
+}
+
 SERVICES = {
-    "tinajas": {
-        "Llaima": 1, "Hornopiren": 2, "Puntiagudo": 3, "Calbuco": 4,
-        "Osorno": 5, "Tronador": 6, "Villarrica": 7, "Puyehue": 8,
-    },
-    "masajes": {
-        "Relajacion": 11, "Deportivo": 12, "Piedras Calientes": 13,
-        "Thai": 14, "Drenaje Linfatico": 15, "Reflexologia": 16,
-    },
-    "cabanas": {
-        "Rio": 21, "Bosque": 22,
-    },
+    "tinajas": TINAJAS,
+    "masajes": MASAJES,
+    "cabanas": CABANAS,
 }
 
 
-def _get_dates(days_ahead: int) -> list[str]:
+def _is_tuesday(d: date) -> bool:
+    return d.weekday() == 1
+
+
+def _get_dates(days_ahead: int) -> list[date]:
     today = date.today()
-    return [(today + timedelta(days=i)).isoformat() for i in range(days_ahead)]
+    return [today + timedelta(days=i) for i in range(days_ahead)]
 
 
 def _fetch_hours_sync(service_id: int, fecha: str) -> list[str]:
-    """Synchronous HTTP call (run via activity thread)."""
+    """Synchronous HTTP call — runs in activity thread."""
     try:
         with httpx.Client(timeout=10.0) as client:
             resp = client.get(
@@ -51,17 +73,19 @@ def _fetch_hours_sync(service_id: int, fecha: str) -> list[str]:
             if data.get("success"):
                 return data.get("horas_disponibles", [])
     except Exception as e:
-        logger.warning("aremko fetch servicio_id=%d fecha=%s: %s", service_id, fecha, e)
+        logger.warning("aremko fetch id=%d fecha=%s: %s", service_id, fecha, e)
     return []
 
 
 @activity.defn(name="fetch_aremko_snapshot")
 async def fetch_aremko_snapshot(tenant_id: str, days_ahead: int = 3) -> dict:
-    """Fetch availability snapshot for all Aremko services across next N days.
+    """Fetch availability snapshot for all curated Aremko services across next N days.
 
-    Returns a nested dict: snapshot[date][category][service_name] = [hours]
+    Skips Tuesdays (Aremko is closed). Returns nested dict:
+    snapshot[date_str][category][service_name] = [hours]
     """
     import asyncio
+
     dates = _get_dates(days_ahead)
     snapshot: Dict[str, Dict[str, Dict[str, list]]] = {}
 
@@ -69,17 +93,22 @@ async def fetch_aremko_snapshot(tenant_id: str, days_ahead: int = 3) -> dict:
         return fecha, category, name, _fetch_hours_sync(sid, fecha)
 
     tasks = [
-        fetch_one(fecha, category, name, sid)
-        for fecha in dates
+        fetch_one(d.isoformat(), category, name, sid)
+        for d in dates
+        if not _is_tuesday(d)
         for category, services in SERVICES.items()
         for name, sid in services.items()
     ]
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    # Mark closed Tuesdays in snapshot
+    for d in dates:
+        if _is_tuesday(d):
+            snapshot[d.isoformat()] = {"closed": True}
 
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     for result in results:
         if isinstance(result, Exception):
-            logger.warning("fetch_aremko_snapshot task error: %s", result)
+            logger.warning("fetch_aremko_snapshot error: %s", result)
             continue
         fecha, category, name, hours = result
         snapshot.setdefault(fecha, {}).setdefault(category, {})[name] = hours
@@ -87,15 +116,15 @@ async def fetch_aremko_snapshot(tenant_id: str, days_ahead: int = 3) -> dict:
     total_slots = sum(
         len(h)
         for day in snapshot.values()
+        if not day.get("closed")
         for cat in day.values()
+        if isinstance(cat, dict)
         for h in cat.values()
+        if isinstance(h, list)
     )
 
-    logger.info(
-        "fetch_aremko_snapshot: tenant=%s dates=%s total_slots=%d",
-        tenant_id[:8], dates, total_slots,
-    )
-    return {"snapshot": snapshot, "dates": dates, "total_slots": total_slots}
+    logger.info("fetch_aremko_snapshot: tenant=%s days=%d total_slots=%d", tenant_id[:8], days_ahead, total_slots)
+    return {"snapshot": snapshot, "dates": [d.isoformat() for d in dates], "total_slots": total_slots}
 
 
 @activity.defn(name="detect_aremko_changes")
@@ -104,20 +133,23 @@ async def detect_aremko_changes(
     old_snapshot: dict,
     new_snapshot: dict,
 ) -> dict:
-    """Compare two availability snapshots and return meaningful changes.
+    """Compare two snapshots and return meaningful changes.
 
     Detects:
-    - Services that became fully booked (had slots → no slots)
-    - Services that got new availability (no slots → has slots)
-    - Large slot count changes (> 2 slots gained or lost)
+    - fully_booked: had slots → no slots
+    - now_available: no slots → has slots
+    - slots_gained: > 2 new slots appeared
+    - slots_lost: > 2 slots disappeared
     """
     changes = []
-
     all_dates = set(old_snapshot.keys()) | set(new_snapshot.keys())
 
     for fecha in all_dates:
         old_day = old_snapshot.get(fecha, {})
         new_day = new_snapshot.get(fecha, {})
+
+        if old_day.get("closed") or new_day.get("closed"):
+            continue
 
         for category in SERVICES:
             old_cat = old_day.get(category, {})
@@ -134,17 +166,15 @@ async def detect_aremko_changes(
                 gained = new_hours - old_hours
                 lost = old_hours - new_hours
 
-                # Fully booked
                 if old_hours and not new_hours:
                     changes.append({
                         "type": "fully_booked",
                         "date": fecha,
                         "category": category,
                         "service": service_name,
-                        "message": f"{service_name} ({category}) se llenó para el {fecha}.",
+                        "message": f"{service_name} se llenó para el {fecha}.",
                         "priority": "medium",
                     })
-                # New availability
                 elif not old_hours and new_hours:
                     changes.append({
                         "type": "now_available",
@@ -153,12 +183,11 @@ async def detect_aremko_changes(
                         "service": service_name,
                         "new_slots": sorted(new_hours),
                         "message": (
-                            f"{service_name} ({category}) tiene nueva disponibilidad el {fecha}: "
+                            f"{service_name} tiene nueva disponibilidad el {fecha}: "
                             f"{', '.join(sorted(new_hours))}"
                         ),
                         "priority": "high",
                     })
-                # Significant slot changes
                 elif len(gained) > 2:
                     changes.append({
                         "type": "slots_gained",
@@ -166,10 +195,7 @@ async def detect_aremko_changes(
                         "category": category,
                         "service": service_name,
                         "gained": sorted(gained),
-                        "message": (
-                            f"{service_name} ({category}) ganó {len(gained)} horarios el {fecha}: "
-                            f"{', '.join(sorted(gained))}"
-                        ),
+                        "message": f"{service_name} ganó {len(gained)} horarios el {fecha}: {', '.join(sorted(gained))}",
                         "priority": "low",
                     })
                 elif len(lost) > 2:
@@ -179,13 +205,11 @@ async def detect_aremko_changes(
                         "category": category,
                         "service": service_name,
                         "lost": sorted(lost),
-                        "message": f"{service_name} ({category}) perdió {len(lost)} horarios el {fecha}.",
+                        "message": f"{service_name} perdió {len(lost)} horarios el {fecha}.",
                         "priority": "low",
                     })
 
-    logger.info(
-        "detect_aremko_changes: tenant=%s changes=%d", tenant_id[:8], len(changes)
-    )
+    logger.info("detect_aremko_changes: tenant=%s changes=%d", tenant_id[:8], len(changes))
     return {"changes": changes}
 
 
@@ -195,9 +219,7 @@ async def create_aremko_notifications(tenant_id: str, changes: list) -> dict:
     if not changes:
         return {"created": 0}
 
-    priority_map = {"high": "high", "medium": "medium", "low": "low"}
     created = 0
-
     with SessionLocal() as db:
         tid = uuid.UUID(tenant_id)
         for change in changes:
@@ -207,7 +229,7 @@ async def create_aremko_notifications(tenant_id: str, changes: list) -> dict:
                     source="system",
                     title=f"Aremko: {change['service']} — {change['type'].replace('_', ' ')}",
                     body=change["message"],
-                    priority=priority_map.get(change.get("priority", "low"), "low"),
+                    priority=change.get("priority", "low"),
                     reference_id=f"aremko-{change['category']}-{change['service']}-{change['date']}-{change['type']}",
                     metadata={
                         "category": change["category"],
@@ -219,7 +241,7 @@ async def create_aremko_notifications(tenant_id: str, changes: list) -> dict:
                 db.add(notif)
                 created += 1
             except Exception as e:
-                logger.warning("create_aremko_notifications: skipped — %s", e)
+                logger.warning("create_aremko_notifications skip: %s", e)
         try:
             db.commit()
         except Exception as e:
