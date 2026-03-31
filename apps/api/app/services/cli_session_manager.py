@@ -300,6 +300,7 @@ def generate_mcp_config(tenant_id: str, internal_key: str, db: Session = None) -
                 .filter(
                     MCPServerConnector.tenant_id == tenant_id,
                     MCPServerConnector.status == "connected",
+                    MCPServerConnector.enabled.is_(True),
                 )
                 .all()
             )
