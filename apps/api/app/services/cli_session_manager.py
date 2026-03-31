@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.integration_config import IntegrationConfig
+from app.models.mcp_server_connector import MCPServerConnector
 from app.services.memory_recall import build_memory_context_with_git
 from app.services.orchestration.credential_vault import retrieve_credentials_for_skill
 from app.services.skill_manager import skill_manager
@@ -269,12 +270,16 @@ def generate_cli_instructions(
     return "\n".join(lines)
 
 
-def generate_mcp_config(tenant_id: str, internal_key: str) -> dict:
-    """Generate MCP config JSON for a CLI session."""
+def generate_mcp_config(tenant_id: str, internal_key: str, db: Session = None) -> dict:
+    """Generate MCP config JSON for a CLI session.
+
+    Includes the built-in ServiceTsunami MCP server plus any external MCP servers
+    connected to this tenant via MCPServerConnector.
+    """
     mcp_tools_url = os.environ.get("MCP_TOOLS_URL", "http://mcp-tools:8000")
     mcp_url = f"{mcp_tools_url}/mcp"
 
-    return {
+    config = {
         "mcpServers": {
             "servicetsunami": {
                 "type": "http",
@@ -286,6 +291,51 @@ def generate_mcp_config(tenant_id: str, internal_key: str) -> dict:
             }
         }
     }
+
+    # Inject tenant's external MCP server connectors
+    if db:
+        try:
+            connectors = (
+                db.query(MCPServerConnector)
+                .filter(
+                    MCPServerConnector.tenant_id == tenant_id,
+                    MCPServerConnector.status == "connected",
+                )
+                .all()
+            )
+            # Map connector transport to CLI config type
+            transport_map = {"streamable-http": "http", "sse": "sse"}
+
+            for conn in connectors:
+                # Skip stdio connectors — they need command config, not URL
+                if conn.transport == "stdio":
+                    logger.warning("Skipping stdio connector '%s' — not supported in CLI MCP config", conn.name)
+                    continue
+
+                server_entry = {
+                    "type": transport_map.get(conn.transport, "http"),
+                    "url": conn.server_url,
+                }
+                # Add auth headers if configured
+                headers = {}
+                if conn.auth_type == "bearer" and conn.auth_token:
+                    headers["Authorization"] = f"Bearer {conn.auth_token}"
+                elif conn.auth_type == "api_key" and conn.auth_token:
+                    header_name = conn.auth_header or "X-API-Key"
+                    headers[header_name] = conn.auth_token
+                if conn.custom_headers:
+                    headers.update(conn.custom_headers)
+                if headers:
+                    server_entry["headers"] = headers
+
+                # Use connector name as the MCP server key (slugified)
+                server_key = conn.name.lower().replace(" ", "-").replace("_", "-")
+                config["mcpServers"][server_key] = server_entry
+                logger.info("Injected external MCP server '%s' (%s) for tenant %s", conn.name, conn.server_url, str(tenant_id)[:8])
+        except Exception as e:
+            logger.warning("Failed to load tenant MCP connectors: %s", e)
+
+    return config
 
 
 def _get_cli_platform_credentials(
@@ -533,7 +583,7 @@ def run_agent_session(
     )
 
     internal_key = settings.MCP_API_KEY or "dev_mcp_key"
-    mcp_config = generate_mcp_config(str(tenant_id), internal_key)
+    mcp_config = generate_mcp_config(str(tenant_id), internal_key, db=db)
 
     logger.info(
         "Dispatching ChatCliWorkflow: platform=%s skill=%s tenant=%s channel=%s",
