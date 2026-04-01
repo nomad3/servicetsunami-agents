@@ -300,34 +300,27 @@ def discover_tools(db: Session, connector: MCPServerConnector, timeout: int = 15
         duration_ms = int((time.time() - start) * 1000)
 
         tools = data.get("result", {}).get("tools", [])
-            # Cache discovered tools
-            tool_list = [
-                {
-                    "name": t.get("name"),
-                    "description": t.get("description", ""),
-                    "input_schema": t.get("inputSchema", {}),
-                }
-                for t in tools
-            ]
-            connector.tools_discovered = tool_list
-            connector.tool_count = len(tool_list)
-            connector.status = "connected"
-            connector.last_health_check = datetime.utcnow()
-            connector.last_error = None
-            db.commit()
-            return {
-                "status": "connected",
-                "tool_count": len(tool_list),
-                "tools": tool_list,
-                "duration_ms": duration_ms,
+        # Cache discovered tools
+        tool_list = [
+            {
+                "name": t.get("name"),
+                "description": t.get("description", ""),
+                "input_schema": t.get("inputSchema", {}),
             }
-        else:
-            error_msg = f"HTTP {resp.status_code}: {resp.text[:300]}"
-            connector.status = "error"
-            connector.last_error = error_msg
-            connector.last_health_check = datetime.utcnow()
-            db.commit()
-            return {"status": "error", "error": error_msg, "duration_ms": duration_ms}
+            for t in tools
+        ]
+        connector.tools_discovered = tool_list
+        connector.tool_count = len(tool_list)
+        connector.status = "connected"
+        connector.last_health_check = datetime.utcnow()
+        connector.last_error = None
+        db.commit()
+        return {
+            "status": "connected",
+            "tool_count": len(tool_list),
+            "tools": tool_list,
+            "duration_ms": duration_ms,
+        }
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
         error_msg = str(e)
@@ -415,44 +408,34 @@ def call_tool(
         result = data.get("result", {})
         # Extract text content from MCP response
         content = result.get("content", [])
-            result_data = {}
-            if content:
-                for item in content:
-                    if item.get("type") == "text":
-                        try:
-                            import json
-                            result_data = json.loads(item["text"])
-                        except (json.JSONDecodeError, KeyError):
-                            result_data = {"text": item.get("text", "")}
-                        break
-                if not result_data:
-                    result_data = {"content": content}
-            else:
-                result_data = result
-
-            log_call(
-                db, connector.tenant_id, connector.id, tool_name,
-                arguments=arguments, result=result_data, success=True,
-                duration_ms=duration_ms,
-            )
-            connector.call_count = (connector.call_count or 0) + 1
-            db.commit()
-            return {
-                "success": True,
-                "tool_name": tool_name,
-                "result": result_data,
-                "duration_ms": duration_ms,
-            }
+        result_data = {}
+        if content:
+            for item in content:
+                if item.get("type") == "text":
+                    try:
+                        import json
+                        result_data = json.loads(item["text"])
+                    except (json.JSONDecodeError, KeyError):
+                        result_data = {"text": item.get("text", "")}
+                    break
+            if not result_data:
+                result_data = {"content": content}
         else:
-            error_msg = f"HTTP {resp.status_code}: {resp.text[:500]}"
-            log_call(
-                db, connector.tenant_id, connector.id, tool_name,
-                arguments=arguments, success=False, error_message=error_msg,
-                duration_ms=duration_ms,
-            )
-            connector.error_count = (connector.error_count or 0) + 1
-            db.commit()
-            return {"success": False, "tool_name": tool_name, "error": error_msg, "duration_ms": duration_ms}
+            result_data = result
+
+        log_call(
+            db, connector.tenant_id, connector.id, tool_name,
+            arguments=arguments, result=result_data, success=True,
+            duration_ms=duration_ms,
+        )
+        connector.call_count = (connector.call_count or 0) + 1
+        db.commit()
+        return {
+            "success": True,
+            "tool_name": tool_name,
+            "result": result_data,
+            "duration_ms": duration_ms,
+        }
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
         error_msg = str(e)
@@ -500,23 +483,16 @@ def health_check(db: Session, connector: MCPServerConnector, timeout: int = 10) 
         duration_ms = int((time.time() - start) * 1000)
 
         server_info = data.get("result", {}).get("serverInfo", {})
-            connector.status = "connected"
-            connector.last_health_check = datetime.utcnow()
-            connector.last_error = None
-            db.commit()
-            return {
-                "status": "connected",
-                "server_info": server_info,
-                "protocol_version": data.get("result", {}).get("protocolVersion"),
-                "duration_ms": duration_ms,
-            }
-        else:
-            error_msg = f"HTTP {resp.status_code}: {resp.text[:300]}"
-            connector.status = "error"
-            connector.last_error = error_msg
-            connector.last_health_check = datetime.utcnow()
-            db.commit()
-            return {"status": "error", "error": error_msg, "duration_ms": duration_ms}
+        connector.status = "connected"
+        connector.last_health_check = datetime.utcnow()
+        connector.last_error = None
+        db.commit()
+        return {
+            "status": "connected",
+            "server_info": server_info,
+            "protocol_version": data.get("result", {}).get("protocolVersion"),
+            "duration_ms": duration_ms,
+        }
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
         error_msg = str(e)
