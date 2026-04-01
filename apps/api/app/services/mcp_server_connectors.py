@@ -158,12 +158,12 @@ def _sse_jsonrpc_call(
 ) -> dict:
     """Execute a JSON-RPC call over MCP SSE transport.
 
-    MCP SSE protocol is asynchronous:
-    1. GET /mcp/sse → SSE stream (must stay open)
-    2. Server sends event: endpoint with data: /mcp/messages?session_id=xxx
-    3. Client POSTs JSON-RPC to that session URL → 202 Accepted
-    4. Server sends the JSON-RPC response as an SSE event: message
-    5. Client reads response from the SSE stream, then closes
+    MCP SSE protocol:
+    1. GET /sse → SSE stream, receive session-specific messages URL
+    2. POST initialize → receive server capabilities
+    3. POST notifications/initialized
+    4. POST the actual JSON-RPC request
+    5. Read response from SSE message event matching the request ID
     """
     import urllib.parse
     import threading
@@ -173,21 +173,20 @@ def _sse_jsonrpc_call(
     clean_headers["Accept"] = "text/event-stream"
 
     messages_url = None
-    response_data = {}
+    responses = []  # Collect all JSON-RPC responses
     error_holder = [None]
-    rpc_id = str(rpc_body.get("id", 1))
+    target_id = rpc_body.get("id")
 
     def _run_sse():
-        nonlocal messages_url, response_data
+        nonlocal messages_url
         try:
-            with httpx.Client(timeout=httpx.Timeout(timeout, read=timeout)) as client:
+            with httpx.Client(timeout=httpx.Timeout(timeout * 2, read=timeout * 2)) as client:
                 with client.stream("GET", base_url, headers=clean_headers) as resp:
                     resp.raise_for_status()
                     buffer = ""
                     current_event = ""
                     for chunk in resp.iter_raw():
                         buffer += chunk.decode("utf-8", errors="replace")
-                        # Process complete lines
                         while "\n" in buffer:
                             line, buffer = buffer.split("\n", 1)
                             line = line.rstrip("\r")
@@ -196,7 +195,6 @@ def _sse_jsonrpc_call(
                             elif line.startswith("data: "):
                                 data_str = line[6:].strip()
                                 if current_event == "endpoint":
-                                    # Resolve the messages URL
                                     if data_str.startswith("/"):
                                         parsed = urllib.parse.urlparse(base_url)
                                         messages_url = f"{parsed.scheme}://{parsed.netloc}{data_str}"
@@ -206,21 +204,20 @@ def _sse_jsonrpc_call(
                                         b = base_url.rsplit("/", 1)[0]
                                         messages_url = f"{b}/{data_str}"
                                 elif current_event == "message":
-                                    # JSON-RPC response
                                     try:
-                                        response_data.update(_json.loads(data_str))
+                                        msg = _json.loads(data_str)
+                                        responses.append(msg)
+                                        # Stop once we have the target response
+                                        if msg.get("id") == target_id:
+                                            return
                                     except _json.JSONDecodeError:
                                         pass
-                                    return  # Got our response, done
                             elif line == "":
                                 current_event = ""
-                        # Exit if we got the response
-                        if response_data:
-                            return
         except Exception as e:
             error_holder[0] = e
 
-    # Run SSE in background thread
+    # Run SSE listener in background
     sse_thread = threading.Thread(target=_run_sse, daemon=True)
     sse_thread.start()
 
@@ -230,25 +227,53 @@ def _sse_jsonrpc_call(
         time.sleep(0.05)
         if error_holder[0]:
             raise error_holder[0]
-
     if not messages_url:
         raise RuntimeError(f"SSE endpoint at {base_url} did not return a messages URL within {timeout}s")
 
-    # POST the JSON-RPC request
-    with httpx.Client(timeout=float(timeout), follow_redirects=True) as client:
-        resp = client.post(messages_url, json=rpc_body, headers=headers)
-        # 202 Accepted is the expected SSE response — result comes via stream
-        if resp.status_code not in (200, 202):
-            raise RuntimeError(f"MCP POST failed: HTTP {resp.status_code}: {resp.text[:200]}")
+    post_client = httpx.Client(timeout=float(timeout), follow_redirects=True)
 
-    # Wait for SSE response
+    # MCP handshake: initialize
+    init_rpc = {
+        "jsonrpc": "2.0", "id": 0, "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "servicetsunami", "version": "1.0.0"},
+        },
+    }
+    resp = post_client.post(messages_url, json=init_rpc, headers=headers)
+    if resp.status_code not in (200, 202):
+        raise RuntimeError(f"MCP initialize failed: HTTP {resp.status_code}")
+
+    # Wait for init response
+    init_deadline = time.time() + 5
+    while time.time() < init_deadline:
+        if any(r.get("id") == 0 for r in responses):
+            break
+        time.sleep(0.1)
+
+    # Send initialized notification
+    post_client.post(messages_url, json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=headers)
+    time.sleep(0.2)
+
+    # Send the actual request
+    resp = post_client.post(messages_url, json=rpc_body, headers=headers)
+    if resp.status_code not in (200, 202):
+        raise RuntimeError(f"MCP POST failed: HTTP {resp.status_code}: {resp.text[:200]}")
+
+    post_client.close()
+
+    # Wait for the target response
     sse_thread.join(timeout=timeout)
     if error_holder[0]:
         raise error_holder[0]
-    if not response_data:
-        raise RuntimeError("No JSON-RPC response received from SSE stream")
 
-    return response_data
+    # Find the response matching our request ID
+    for r in responses:
+        if r.get("id") == target_id:
+            return r
+
+    raise RuntimeError("No JSON-RPC response received from SSE stream")
 
 
 # ---------------------------------------------------------------------------
