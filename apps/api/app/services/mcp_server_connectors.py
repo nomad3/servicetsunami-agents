@@ -166,15 +166,17 @@ def _get_sse_messages_url(base_url: str, headers: Dict[str, str], timeout: float
     clean_headers = {k: v for k, v in headers.items() if k != "Content-Type"}
     clean_headers["Accept"] = "text/event-stream"
 
-    with httpx.Client(timeout=httpx.Timeout(timeout, read=5.0)) as client:
+    with httpx.Client(timeout=httpx.Timeout(timeout, read=timeout)) as client:
         with client.stream("GET", base_url, headers=clean_headers) as resp:
             resp.raise_for_status()
-            # Read raw bytes and parse SSE — iter_lines can hang on open streams
-            buffer = b""
-            for chunk in resp.iter_bytes(1024):
-                buffer += chunk
-                text = buffer.decode("utf-8", errors="replace")
-                for line in text.split("\n"):
+            # Read byte-by-byte to avoid blocking on small SSE chunks.
+            # The endpoint event is typically <100 bytes but iter_bytes(1024)
+            # would block waiting to fill the buffer on a keep-alive stream.
+            buffer = ""
+            for chunk in resp.iter_raw():
+                buffer += chunk.decode("utf-8", errors="replace")
+                # Check for complete SSE data line
+                for line in buffer.split("\n"):
                     if line.startswith("data: "):
                         endpoint_path = line[6:].strip()
                         if endpoint_path.startswith("/"):
