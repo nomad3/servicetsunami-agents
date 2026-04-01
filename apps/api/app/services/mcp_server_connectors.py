@@ -163,21 +163,28 @@ def _get_sse_messages_url(base_url: str, headers: Dict[str, str], timeout: float
     """
     import urllib.parse
 
-    with httpx.Client(timeout=timeout) as client:
-        with client.stream("GET", base_url, headers={k: v for k, v in headers.items() if k != "Content-Type"}) as resp:
+    clean_headers = {k: v for k, v in headers.items() if k != "Content-Type"}
+    clean_headers["Accept"] = "text/event-stream"
+
+    with httpx.Client(timeout=httpx.Timeout(timeout, read=5.0)) as client:
+        with client.stream("GET", base_url, headers=clean_headers) as resp:
             resp.raise_for_status()
-            for line in resp.iter_lines():
-                if line.startswith("data: "):
-                    endpoint_path = line[6:].strip()
-                    # Resolve relative path against base URL
-                    if endpoint_path.startswith("/"):
-                        parsed = urllib.parse.urlparse(base_url)
-                        return f"{parsed.scheme}://{parsed.netloc}{endpoint_path}"
-                    elif endpoint_path.startswith("http"):
-                        return endpoint_path
-                    else:
-                        base = base_url.rsplit("/", 1)[0]
-                        return f"{base}/{endpoint_path}"
+            # Read raw bytes and parse SSE — iter_lines can hang on open streams
+            buffer = b""
+            for chunk in resp.iter_bytes(1024):
+                buffer += chunk
+                text = buffer.decode("utf-8", errors="replace")
+                for line in text.split("\n"):
+                    if line.startswith("data: "):
+                        endpoint_path = line[6:].strip()
+                        if endpoint_path.startswith("/"):
+                            parsed = urllib.parse.urlparse(base_url)
+                            return f"{parsed.scheme}://{parsed.netloc}{endpoint_path}"
+                        elif endpoint_path.startswith("http"):
+                            return endpoint_path
+                        else:
+                            base = base_url.rsplit("/", 1)[0]
+                            return f"{base}/{endpoint_path}"
     raise RuntimeError(f"SSE endpoint at {base_url} did not return a messages URL")
 
 
