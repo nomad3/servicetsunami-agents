@@ -241,7 +241,7 @@ def discover_tools(db: Session, connector: MCPServerConnector, timeout: int = 15
     start = time.time()
     try:
         url = _resolve_post_url(connector, headers, timeout=float(timeout))
-        with httpx.Client(timeout=float(timeout)) as client:
+        with httpx.Client(timeout=float(timeout), follow_redirects=True) as client:
             resp = client.post(url, json=rpc_body, headers=headers)
         duration_ms = int((time.time() - start) * 1000)
 
@@ -351,7 +351,7 @@ def call_tool(
     start = time.time()
     try:
         url = _resolve_post_url(connector, headers, timeout=float(timeout))
-        with httpx.Client(timeout=float(timeout)) as client:
+        with httpx.Client(timeout=float(timeout), follow_redirects=True) as client:
             resp = client.post(url, json=rpc_body, headers=headers)
         duration_ms = int((time.time() - start) * 1000)
 
@@ -435,7 +435,7 @@ def health_check(db: Session, connector: MCPServerConnector, timeout: int = 10) 
     start = time.time()
     try:
         url = _resolve_post_url(connector, headers, timeout=float(timeout))
-        with httpx.Client(timeout=float(timeout)) as client:
+        with httpx.Client(timeout=float(timeout), follow_redirects=True) as client:
             resp = client.post(url, json=rpc_body, headers=headers)
         duration_ms = int((time.time() - start) * 1000)
 
