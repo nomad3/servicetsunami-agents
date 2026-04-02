@@ -26,18 +26,39 @@ class _DummyClient:
         return False
 
     async def post(self, url, headers=None, json=None):
-        self._recorder["url"] = url
-        self._recorder["headers"] = headers
-        self._recorder["json"] = json
-        return _DummyResponse(self._payload)
+        self._recorder.setdefault("calls", []).append(
+            {
+                "url": url,
+                "headers": headers,
+                "json": json,
+            }
+        )
+        if callable(self._payload):
+            payload = self._payload(url, json)
+        else:
+            payload = self._payload
+        return _DummyResponse(payload)
 
 
 @pytest.mark.asyncio
 async def test_create_aremko_reservation_defaults_location(monkeypatch):
     recorder = {}
 
+    def _payload(url, json_payload):
+        if url.endswith("/reservas/validar/"):
+            return {
+                "success": True,
+                "disponibilidad": [
+                    {
+                        "servicio_id": 12,
+                        "disponible": True,
+                    }
+                ],
+            }
+        return {"success": True, "reservation_id": "RES-1234"}
+
     def _client_factory(*args, **kwargs):
-        return _DummyClient(recorder, {"success": True, "reservation_id": "RES-1234"})
+        return _DummyClient(recorder, _payload)
 
     monkeypatch.setattr(aremko.httpx, "AsyncClient", _client_factory)
 
@@ -56,9 +77,49 @@ async def test_create_aremko_reservation_defaults_location(monkeypatch):
         ctx=SimpleNamespace(),
     )
 
-    assert recorder["json"]["cliente"]["region_id"] == aremko.DEFAULT_REGION_ID
-    assert recorder["json"]["cliente"]["comuna_id"] == aremko.DEFAULT_COMUNA_ID
+    create_call = recorder["calls"][1]
+    assert create_call["json"]["cliente"]["region_id"] == aremko.DEFAULT_REGION_ID
+    assert create_call["json"]["cliente"]["comuna_id"] == aremko.DEFAULT_COMUNA_ID
     assert result["success"] is True
     assert result["location"]["used_default_location"] is True
     assert result["location"]["region_id"] == aremko.DEFAULT_REGION_ID
     assert result["location"]["comuna_id"] == aremko.DEFAULT_COMUNA_ID
+
+
+@pytest.mark.asyncio
+async def test_create_aremko_reservation_stops_when_validation_fails(monkeypatch):
+    async def _validation_failure(*args, **kwargs):
+        return {
+            "success": False,
+            "disponibilidad": [
+                {
+                    "servicio_id": 12,
+                    "disponible": False,
+                    "motivo": "Horario no disponible",
+                }
+            ],
+        }
+
+    def _client_factory(*args, **kwargs):
+        raise AssertionError("create endpoint should not be called when validation fails")
+
+    monkeypatch.setattr(aremko, "validate_aremko_reservation", _validation_failure)
+    monkeypatch.setattr(aremko.httpx, "AsyncClient", _client_factory)
+
+    result = await aremko.create_aremko_reservation(
+        nombre="Luna Test",
+        email="test@example.com",
+        telefono="+56900000000",
+        servicios=[{
+            "servicio_id": 12,
+            "fecha": "2026-04-02",
+            "hora": "13:00",
+            "cantidad_personas": 4,
+        }],
+        tenant_id="test-tenant",
+        ctx=SimpleNamespace(),
+    )
+
+    assert result["success"] is False
+    assert "disponibilidad no fue confirmada" in result["error"]
+    assert result["validation"]["disponibilidad"][0]["disponible"] is False

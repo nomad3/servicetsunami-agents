@@ -278,9 +278,9 @@ async def create_aremko_reservation(
         nombre: Customer full name. Required.
         email: Customer email. Required.
         telefono: Customer phone with country code (e.g. "+56912345678"). Required.
+        servicios: List of service dicts with servicio_id, fecha, hora, cantidad_personas. Required.
         region_id: Region ID from get_aremko_regions (e.g. Los Lagos = 14). Optional.
         comuna_id: Comuna ID from get_aremko_regions (e.g. Puerto Varas = 25). Optional.
-        servicios: List of service dicts with servicio_id, fecha, hora, cantidad_personas. Required.
         documento_identidad: RUT/DNI (optional).
         notas: Internal notes for the reservation. Default: "Reserva creada por Luna via WhatsApp".
         tenant_id: Resolved automatically.
@@ -291,6 +291,21 @@ async def create_aremko_reservation(
         total price, and discounts applied.
     """
     resolve_tenant_id(ctx) or tenant_id
+
+    validation = await validate_aremko_reservation(
+        servicios=servicios,
+        tenant_id=tenant_id,
+        ctx=ctx,
+    )
+    availability = validation.get("disponibilidad") or []
+    has_unavailable_service = any(not item.get("disponible", False) for item in availability)
+    if not validation.get("success") or has_unavailable_service:
+        return {
+            "success": False,
+            "error": "La reserva no pudo crearse porque la disponibilidad no fue confirmada.",
+            "validation": validation,
+            "fallback": f"Contactar directamente: WhatsApp {CONTACT_WHATSAPP}",
+        }
 
     resolved_region_id = region_id or DEFAULT_REGION_ID
     resolved_comuna_id = comuna_id or DEFAULT_COMUNA_ID
