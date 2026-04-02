@@ -45,6 +45,8 @@ LUNA_HEADERS = {
 CONTACT_WHATSAPP = "+56 9 5336 1647"
 CONTACT_EMAIL = "reservas@aremko.cl"
 CONTACT_WEB = "www.aremko.cl"
+DEFAULT_REGION_ID = 14  # Los Lagos
+DEFAULT_COMUNA_ID = 25  # Puerto Varas
 
 
 def _is_tuesday(d: date) -> bool:
@@ -259,9 +261,9 @@ async def create_aremko_reservation(
     nombre: str,
     email: str,
     telefono: str,
-    region_id: int,
-    comuna_id: int,
     servicios: list,
+    region_id: Optional[int] = None,
+    comuna_id: Optional[int] = None,
     documento_identidad: str = "",
     notas: str = "Reserva creada por Luna via WhatsApp",
     tenant_id: Optional[str] = None,
@@ -276,9 +278,9 @@ async def create_aremko_reservation(
         nombre: Customer full name. Required.
         email: Customer email. Required.
         telefono: Customer phone with country code (e.g. "+56912345678"). Required.
-        region_id: Region ID from get_aremko_regions (e.g. Los Lagos = 14). Required.
-        comuna_id: Comuna ID from get_aremko_regions (e.g. Puerto Varas = 25). Required.
         servicios: List of service dicts with servicio_id, fecha, hora, cantidad_personas. Required.
+        region_id: Region ID from get_aremko_regions (e.g. Los Lagos = 14). Optional.
+        comuna_id: Comuna ID from get_aremko_regions (e.g. Puerto Varas = 25). Optional.
         documento_identidad: RUT/DNI (optional).
         notas: Internal notes for the reservation. Default: "Reserva creada por Luna via WhatsApp".
         tenant_id: Resolved automatically.
@@ -290,6 +292,25 @@ async def create_aremko_reservation(
     """
     resolve_tenant_id(ctx) or tenant_id
 
+    validation = await validate_aremko_reservation(
+        servicios=servicios,
+        tenant_id=tenant_id,
+        ctx=ctx,
+    )
+    availability = validation.get("disponibilidad") or []
+    has_unavailable_service = any(not item.get("disponible", False) for item in availability)
+    if not validation.get("success") or has_unavailable_service:
+        return {
+            "success": False,
+            "error": "La reserva no pudo crearse porque la disponibilidad no fue confirmada.",
+            "validation": validation,
+            "fallback": f"Contactar directamente: WhatsApp {CONTACT_WHATSAPP}",
+        }
+
+    resolved_region_id = region_id or DEFAULT_REGION_ID
+    resolved_comuna_id = comuna_id or DEFAULT_COMUNA_ID
+    used_default_location = region_id is None or comuna_id is None
+
     idempotency_key = f"luna-{uuid.uuid4().hex[:12]}-{int(time.time())}"
 
     payload = {
@@ -298,8 +319,8 @@ async def create_aremko_reservation(
             "nombre": nombre,
             "email": email,
             "telefono": telefono,
-            "region_id": region_id,
-            "comuna_id": comuna_id,
+            "region_id": resolved_region_id,
+            "comuna_id": resolved_comuna_id,
         },
         "servicios": servicios,
         "metodo_pago": "pendiente",
@@ -322,6 +343,15 @@ async def create_aremko_reservation(
 
             # Enrich successful response with contact/arrival info
             if data.get("success"):
+                data["location"] = {
+                    "region_id": resolved_region_id,
+                    "comuna_id": resolved_comuna_id,
+                    "used_default_location": used_default_location,
+                }
+                if used_default_location:
+                    data["location_note"] = (
+                        "Se usó ubicación por defecto Los Lagos / Puerto Varas para completar la reserva."
+                    )
                 data["instrucciones_llegada"] = (
                     "• Llega 10 minutos antes\n"
                     "• Trae toallas y traje de baño\n"
