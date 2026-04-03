@@ -52,26 +52,22 @@ def _trigger_databricks_sync(db: Session, dataset: Dataset, tenant_id: uuid.UUID
     })
     db.commit()
 
-    # Start Temporal workflow (async, non-blocking)
+    # Start dynamic workflow (async, non-blocking)
     try:
-        from app.services import workflows
+        from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
 
-        # Start workflow asynchronously
         asyncio.create_task(
-            workflows.start_workflow(
-                workflow_type='DatasetSyncWorkflow',
-                workflow_id=f"dataset-sync-{dataset.id}",
-                task_queue="servicetsunami-databricks",
-                tenant_id=tenant_id,
-                arguments=[str(dataset.id), str(tenant_id)]
+            start_dynamic_workflow_by_name(
+                "Dataset Sync (Bronze/Silver)", str(tenant_id),
+                input_data={"dataset_id": str(dataset.id)},
             )
         )
 
-        logger.info(f"Databricks sync workflow started for dataset {dataset.id}")
+        logger.info(f"Dataset sync dynamic workflow started for dataset {dataset.id}")
 
     except Exception as e:
         # Don't fail dataset upload if workflow start fails
-        logger.error(f"Failed to start Databricks sync workflow: {e}")
+        logger.error(f"Failed to start dataset sync workflow: {e}")
         dataset.metadata_["sync_status"] = "failed"
         dataset.metadata_["last_sync_error"] = str(e)
         db.commit()

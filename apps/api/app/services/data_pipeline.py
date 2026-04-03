@@ -6,9 +6,7 @@ import uuid
 from app.models.data_pipeline import DataPipeline
 from app.models.pipeline_run import PipelineRun
 from app.schemas.data_pipeline import DataPipelineCreate, DataPipelineBase
-from temporalio.client import Client
 from app.core.config import settings
-from app.workflows.data_source_sync import DataSourceSyncWorkflow
 from app.services import data_source as data_source_service
 from app.services import connectors as connector_service
 import requests
@@ -124,24 +122,21 @@ async def _execute_connector_sync(db: Session, pipeline: DataPipeline, config: d
         "last_watermark": config.get("last_watermark"),
     }
 
-    # Connect to Temporal
-    client = await Client.connect(settings.TEMPORAL_ADDRESS)
+    # Start dynamic workflow
+    from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
 
-    # Generate a unique workflow ID
-    workflow_id = f"sync-{connector_id}-{uuid.uuid4()}"
-
-    # Start the workflow
-    handle = await client.start_workflow(
-        DataSourceSyncWorkflow.run,
-        args=[str(connector_id), connector.type, str(pipeline.tenant_id), sync_config],
-        id=workflow_id,
-        task_queue="servicetsunami-databricks",
+    temporal_wf_id = await start_dynamic_workflow_by_name(
+        "Data Source Sync", str(pipeline.tenant_id),
+        input_data={
+            "connector_id": str(connector_id),
+            "connector_type": connector.type,
+            "sync_config": sync_config,
+        },
     )
 
     return {
         "status": "started",
-        "workflow_id": workflow_id,
-        "run_id": handle.result_run_id,
+        "workflow_id": temporal_wf_id,
         "connector_type": connector.type,
         "table_name": sync_config.get("table_name")
     }

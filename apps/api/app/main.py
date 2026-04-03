@@ -100,10 +100,10 @@ async def startup_whatsapp():
 async def startup_proactive_workflows():
     """Auto-start long-running Temporal workflows for all active tenants.
 
-    Launches per-tenant instances of:
-      - AutonomousLearningWorkflow (nightly dream/RL cycle + morning report)
-      - InboxMonitorWorkflow (Gmail/Calendar monitoring every 15 min)
-      - CompetitorMonitorWorkflow (competitor intelligence, daily)
+    Launches per-tenant dynamic workflow instances of:
+      - Autonomous Learning (nightly dream/RL cycle + morning report)
+      - Inbox Monitor (Gmail/Calendar monitoring every 15 min)
+      - Competitor Monitor (competitor intelligence, daily)
 
     Uses workflow_id_reuse_policy to skip tenants that already have a
     running instance (idempotent on restart).
@@ -118,13 +118,8 @@ async def startup_proactive_workflows():
         # Give Temporal a few seconds to be ready
         await asyncio.sleep(5)
         try:
-            from temporalio.client import Client
-            from temporalio.common import WorkflowIDReusePolicy
-            from app.workflows.autonomous_learning import AutonomousLearningWorkflow
-            from app.workflows.inbox_monitor import InboxMonitorWorkflow
-            from app.workflows.competitor_monitor import CompetitorMonitorWorkflow
+            from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
 
-            client = await Client.connect("temporal:7233")
             db = _SL()
             try:
                 from sqlalchemy import text
@@ -138,39 +133,21 @@ async def startup_proactive_workflows():
             for (tid,) in tenants:
                 # Autonomous learning (nightly)
                 try:
-                    await client.start_workflow(
-                        AutonomousLearningWorkflow.run,
-                        tid,
-                        id=f"autonomous-learning-{tid}",
-                        task_queue="servicetsunami-orchestration",
-                        id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
-                    )
+                    await start_dynamic_workflow_by_name("Autonomous Learning", tid)
                     launched += 1
                 except Exception:
-                    pass  # already running
+                    pass  # already running or template not found
 
                 # Inbox monitor (every 15 min)
                 try:
-                    await client.start_workflow(
-                        InboxMonitorWorkflow.run,
-                        tid,
-                        id=f"inbox-monitor-{tid}",
-                        task_queue="servicetsunami-orchestration",
-                        id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
-                    )
+                    await start_dynamic_workflow_by_name("Inbox Monitor", tid)
                     launched += 1
                 except Exception:
                     pass
 
                 # Competitor monitor (daily)
                 try:
-                    await client.start_workflow(
-                        CompetitorMonitorWorkflow.run,
-                        tid,
-                        id=f"competitor-monitor-{tid}",
-                        task_queue="servicetsunami-orchestration",
-                        id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
-                    )
+                    await start_dynamic_workflow_by_name("Competitor Monitor", tid)
                     launched += 1
                 except Exception:
                     pass

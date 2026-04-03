@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from temporalio.client import Client
 
 from app.api import deps
 from app.core.config import settings
@@ -8,7 +7,6 @@ from app.models.user import User
 from app.services.chat_import import chat_import_service
 from app.services.integration_status import get_connected_integrations, get_tool_mapping
 from app.models.chat import ChatSession, ChatMessage
-from app.workflows.knowledge_extraction import KnowledgeExtractionWorkflow
 
 router = APIRouter()
 
@@ -96,19 +94,17 @@ async def import_chatgpt_history(
 
     db.commit()
 
-    # Trigger knowledge extraction via Temporal Workflow
+    # Trigger knowledge extraction via dynamic workflow
     try:
-        temporal_client = await Client.connect(settings.TEMPORAL_ADDRESS)
+        from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
 
         for session_id in session_ids:
-            await temporal_client.start_workflow(
-                KnowledgeExtractionWorkflow.run,
-                args=[str(session_id), str(current_user.tenant_id)],
-                id=f"knowledge-extraction-{session_id}",
-                task_queue="servicetsunami-databricks",
+            await start_dynamic_workflow_by_name(
+                "Knowledge Extraction", str(current_user.tenant_id),
+                input_data={"session_id": str(session_id)},
             )
     except Exception as e:
-        print(f"Failed to start Temporal workflow: {e}")
+        print(f"Failed to start dynamic workflow: {e}")
 
     return {"message": f"Successfully imported {imported_count} chat sessions from ChatGPT. Knowledge extraction started."}
 
@@ -169,19 +165,17 @@ async def import_claude_history(
 
     db.commit()
 
-    # Trigger knowledge extraction via Temporal Workflow
+    # Trigger knowledge extraction via dynamic workflow
     try:
-        temporal_client = await Client.connect(settings.TEMPORAL_ADDRESS)
+        from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
 
         for session_id in session_ids:
-            await temporal_client.start_workflow(
-                KnowledgeExtractionWorkflow.run,
-                args=[str(session_id), str(current_user.tenant_id)],
-                id=f"knowledge-extraction-{session_id}",
-                task_queue="servicetsunami-databricks", # Using the existing worker queue
+            await start_dynamic_workflow_by_name(
+                "Knowledge Extraction", str(current_user.tenant_id),
+                input_data={"session_id": str(session_id)},
             )
     except Exception as e:
         # Log error but don't fail the import response
-        print(f"Failed to start Temporal workflow: {e}")
+        print(f"Failed to start dynamic workflow: {e}")
 
     return {"message": f"Successfully imported {imported_count} chat sessions from Claude. Knowledge extraction started."}

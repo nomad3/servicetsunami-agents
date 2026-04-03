@@ -10,12 +10,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, status, Body
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
-from temporalio.client import Client
 
 from app.api import deps
 from app.core.config import settings
 from app.models.chat import ChatSession
-from app.workflows.remedia_order import RemediaOrderWorkflow, RemediaOrderInput
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -100,7 +98,7 @@ async def create_remedia_order(
     payment_provider: str = Body(..., embed=True),
     _auth=Depends(_verify_internal_key),
 ):
-    """Start a RemediaOrderWorkflow via Temporal for durable order tracking.
+    """Start a Remedia Order workflow via dynamic workflow launcher.
 
     Returns immediately with workflow_id. The workflow handles:
     order creation → confirmation → payment monitoring → delivery tracking.
@@ -114,35 +112,30 @@ async def create_remedia_order(
 
     chat_session_id = str(session.id) if session else None
 
-    workflow_input = RemediaOrderInput(
-        phone_number=phone_number,
-        tenant_id=tenant_id,
-        token=token,
-        pharmacy_id=pharmacy_id,
-        items=items,
-        payment_provider=payment_provider,
-        chat_session_id=chat_session_id,
-    )
-
-    workflow_id = f"remedia-order-{phone_number}-{uuid.uuid4().hex[:8]}"
+    order_data = {
+        "phone_number": phone_number,
+        "token": token,
+        "pharmacy_id": pharmacy_id,
+        "items": items,
+        "payment_provider": payment_provider,
+        "chat_session_id": chat_session_id,
+    }
 
     try:
-        client = await Client.connect(settings.TEMPORAL_ADDRESS)
-        await client.start_workflow(
-            RemediaOrderWorkflow.run,
-            workflow_input,
-            id=workflow_id,
-            task_queue="servicetsunami-orchestration",
+        from app.services.dynamic_workflow_launcher import start_dynamic_workflow
+        temporal_wf_id = await start_dynamic_workflow(
+            db, "Remedia Order", uuid.UUID(tenant_id),
+            input_data=order_data,
         )
 
         logger.info(
-            f"Started RemediaOrderWorkflow {workflow_id} for phone={phone_number} "
+            f"Started Remedia Order workflow {temporal_wf_id} for phone={phone_number} "
             f"pharmacy={pharmacy_id} payment={payment_provider}"
         )
 
         return {
             "success": True,
-            "workflow_id": workflow_id,
+            "workflow_id": temporal_wf_id,
             "message": "Pedido en proceso. Recibirás confirmación por WhatsApp.",
             "pharmacy_id": pharmacy_id,
             "items": items,
@@ -150,7 +143,7 @@ async def create_remedia_order(
         }
 
     except Exception as e:
-        logger.exception("Failed to start RemediaOrderWorkflow")
+        logger.exception("Failed to start Remedia Order workflow")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to start order workflow: {str(e)}",

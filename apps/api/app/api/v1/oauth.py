@@ -566,18 +566,10 @@ def oauth_callback(
     if provider == "google":
         try:
             import asyncio
-            from temporalio.client import Client as TemporalClient
-            from app.workflows.inbox_monitor import InboxMonitorWorkflow
+            from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
 
             async def _start_monitor():
-                tc = await TemporalClient.connect(settings.TEMPORAL_ADDRESS)
-                wf_id = f"inbox-monitor-{tenant_id}"
-                await tc.start_workflow(
-                    InboxMonitorWorkflow.run,
-                    args=[str(tenant_id), 900],  # 15 min interval
-                    id=wf_id,
-                    task_queue="servicetsunami-orchestration",
-                )
+                await start_dynamic_workflow_by_name("Inbox Monitor", str(tenant_id))
                 logger.info("Auto-started inbox monitor for tenant=%s", tenant_id)
 
             try:

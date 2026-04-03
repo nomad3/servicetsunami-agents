@@ -10,19 +10,8 @@ from typing import Dict, Any
 import uuid
 import logging
 
-from temporalio.client import Client
-
-from app.core.config import settings
-from app.workflows.deal_pipeline import DealPipelineWorkflow
-
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-TASK_QUEUE = "servicetsunami-orchestration"
-
-
-async def _get_temporal_client() -> Client:
-    return await Client.connect(settings.TEMPORAL_ADDRESS)
 
 
 @router.post("/hca")
@@ -64,25 +53,22 @@ async def receive_hca_webhook(request: Request) -> Dict[str, Any]:
         # High-score prospects: trigger research + outreach pipeline
         if score >= 70 and prospect_id:
             try:
-                client = await _get_temporal_client()
-                workflow_id = f"hca-high-scorer-{prospect_id}-{uuid.uuid4().hex[:8]}"
-                await client.start_workflow(
-                    DealPipelineWorkflow.run,
-                    {
-                        "tenant_id": data.get("tenant_id", "default"),
-                        "industry": data.get("industry", ""),
-                        "criteria": {},
-                        "score_threshold": 70,
-                        "outreach_type": "cold_email",
-                        # Skip discovery — we already have the prospect
-                        "skip_discovery": True,
-                        "prospect_ids": [str(prospect_id)],
-                    },
-                    id=workflow_id,
-                    task_queue=TASK_QUEUE,
+                from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
+                prospect_data = {
+                    "tenant_id": data.get("tenant_id", "default"),
+                    "industry": data.get("industry", ""),
+                    "criteria": {},
+                    "score_threshold": 70,
+                    "outreach_type": "cold_email",
+                    "skip_discovery": True,
+                    "prospect_ids": [str(prospect_id)],
+                }
+                temporal_wf_id = await start_dynamic_workflow_by_name(
+                    "Deal Pipeline", data.get("tenant_id", "default"),
+                    input_data=prospect_data,
                 )
-                triggered_workflow = workflow_id
-                logger.info(f"Started DealPipelineWorkflow {workflow_id} for high-scorer {company_name}")
+                triggered_workflow = temporal_wf_id
+                logger.info(f"Started Deal Pipeline workflow {temporal_wf_id} for high-scorer {company_name}")
             except Exception as exc:
                 logger.error(f"Failed to start workflow for prospect {prospect_id}: {exc}")
 

@@ -353,18 +353,12 @@ async def trigger_backfill(
     current_user: User = Depends(get_current_user),
 ):
     """Start an embedding backfill workflow (admin only)."""
-    from temporalio.client import Client
-    from app.core.config import settings as app_settings
+    from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
 
-    client = await Client.connect(app_settings.TEMPORAL_ADDRESS)
-    workflow_id = f"embedding-backfill-{current_user.tenant_id}"
-    handle = await client.start_workflow(
-        "EmbeddingBackfillWorkflow",
-        str(current_user.tenant_id),
-        id=workflow_id,
-        task_queue="servicetsunami-databricks",
+    temporal_wf_id = await start_dynamic_workflow_by_name(
+        "Embedding Backfill", str(current_user.tenant_id),
     )
-    return {"workflow_id": workflow_id, "run_id": handle.result_run_id}
+    return {"workflow_id": temporal_wf_id, "status": "started"}
 
 
 # ---------------------------------------------------------------------------
@@ -376,18 +370,12 @@ async def start_consolidation(
     current_user: User = Depends(get_current_user),
 ):
     """Start the nightly memory consolidation workflow."""
-    from temporalio.client import Client
-    from app.core.config import settings as app_settings
+    from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
 
-    client = await Client.connect(app_settings.TEMPORAL_ADDRESS)
-    workflow_id = f"memory-consolidation-{current_user.tenant_id}"
-    handle = await client.start_workflow(
-        "MemoryConsolidationWorkflow",
-        str(current_user.tenant_id),
-        id=workflow_id,
-        task_queue="servicetsunami-orchestration",
+    temporal_wf_id = await start_dynamic_workflow_by_name(
+        "Memory Consolidation", str(current_user.tenant_id),
     )
-    return {"workflow_id": workflow_id, "status": "started"}
+    return {"workflow_id": temporal_wf_id, "status": "started"}
 
 
 @router.post("/consolidation/stop")

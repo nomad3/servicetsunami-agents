@@ -336,28 +336,22 @@ async def start_inbox_monitor(
     tenant_id: str = Depends(_get_tenant_id_from_internal_or_user),
 ):
     """Start the proactive inbox monitor for the current tenant."""
-    from temporalio.client import Client
-    from app.workflows.inbox_monitor import InboxMonitorWorkflow
-    workflow_id = f"inbox-monitor-{tenant_id}"
+    from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
     interval = max(5, min(check_interval_minutes, 60)) * 60  # Clamp 5-60 min → seconds
 
     try:
-        client = await Client.connect(settings.TEMPORAL_ADDRESS)
-        handle = await client.start_workflow(
-            InboxMonitorWorkflow.run,
-            args=[tenant_id, interval],
-            id=workflow_id,
-            task_queue="servicetsunami-orchestration",
+        temporal_wf_id = await start_dynamic_workflow_by_name(
+            "Inbox Monitor", tenant_id,
+            input_data={"check_interval_seconds": interval},
         )
         return {
             "status": "started",
-            "workflow_id": workflow_id,
-            "run_id": handle.result_run_id,
+            "workflow_id": temporal_wf_id,
             "interval_minutes": check_interval_minutes,
         }
     except Exception as e:
         if "already started" in str(e).lower() or "already running" in str(e).lower():
-            return {"status": "already_running", "workflow_id": workflow_id}
+            return {"status": "already_running", "workflow_id": f"inbox-monitor-{tenant_id}"}
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -417,8 +411,7 @@ async def start_competitor_monitor(
     tenant_id: str = Depends(_get_tenant_id_from_internal_or_user),
 ):
     """Start the competitor monitor workflow for the current tenant."""
-    from temporalio.client import Client
-    from app.workflows.competitor_monitor import CompetitorMonitorWorkflow
+    from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
 
     # Allow tenant_id and interval from JSON body
     if body and body.get("tenant_id"):
@@ -430,25 +423,19 @@ async def start_competitor_monitor(
     # Clamp interval: minimum 1 hour, maximum 7 days
     check_interval_seconds = max(3600, min(check_interval_seconds, 604800))
 
-    workflow_id = f"competitor-monitor-{tenant_id}"
-
     try:
-        client = await Client.connect(settings.TEMPORAL_ADDRESS)
-        handle = await client.start_workflow(
-            CompetitorMonitorWorkflow.run,
-            args=[tenant_id, check_interval_seconds, None],
-            id=workflow_id,
-            task_queue="servicetsunami-orchestration",
+        temporal_wf_id = await start_dynamic_workflow_by_name(
+            "Competitor Monitor", tenant_id,
+            input_data={"check_interval_seconds": check_interval_seconds},
         )
         return {
             "status": "started",
-            "workflow_id": workflow_id,
-            "run_id": handle.result_run_id,
+            "workflow_id": temporal_wf_id,
             "check_interval_hours": check_interval_seconds // 3600,
         }
     except Exception as e:
         if "already started" in str(e).lower() or "already running" in str(e).lower():
-            return {"status": "already_running", "workflow_id": workflow_id}
+            return {"status": "already_running", "workflow_id": f"competitor-monitor-{tenant_id}"}
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -513,28 +500,22 @@ async def start_autonomous_learning(
     tenant_id: str = Depends(_get_tenant_id_from_internal_or_user),
 ):
     """Start the autonomous learning cycle for the current tenant."""
-    from temporalio.client import Client
-    from app.workflows.autonomous_learning import AutonomousLearningWorkflow
-    workflow_id = f"autonomous-learning-{tenant_id}"
+    from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
     interval = max(1, min(cycle_interval_hours, 168)) * 3600
 
     try:
-        client = await Client.connect(settings.TEMPORAL_ADDRESS)
-        handle = await client.start_workflow(
-            AutonomousLearningWorkflow.run,
-            args=[tenant_id, interval],
-            id=workflow_id,
-            task_queue="servicetsunami-orchestration",
+        temporal_wf_id = await start_dynamic_workflow_by_name(
+            "Autonomous Learning", tenant_id,
+            input_data={"cycle_interval_seconds": interval},
         )
         return {
             "status": "started",
-            "workflow_id": workflow_id,
-            "run_id": handle.result_run_id,
+            "workflow_id": temporal_wf_id,
             "interval_hours": cycle_interval_hours,
         }
     except Exception as e:
         if "already started" in str(e).lower() or "already running" in str(e).lower():
-            return {"status": "already_running", "workflow_id": workflow_id}
+            return {"status": "already_running", "workflow_id": f"autonomous-learning-{tenant_id}"}
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -594,28 +575,22 @@ async def start_goal_review(
     tenant_id: str = Depends(_get_tenant_id_from_internal_or_user),
 ):
     """Start the periodic goal review workflow for the current tenant."""
-    from temporalio.client import Client
-    from app.workflows.goal_review import GoalReviewWorkflow
-    workflow_id = f"goal-review-{tenant_id}"
+    from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
     interval = max(1, min(review_interval_hours, 48)) * 3600
 
     try:
-        client = await Client.connect(settings.TEMPORAL_ADDRESS)
-        handle = await client.start_workflow(
-            GoalReviewWorkflow.run,
-            args=[tenant_id, interval],
-            id=workflow_id,
-            task_queue="servicetsunami-orchestration",
+        temporal_wf_id = await start_dynamic_workflow_by_name(
+            "Goal Review", tenant_id,
+            input_data={"review_interval_seconds": interval},
         )
         return {
             "status": "started",
-            "workflow_id": workflow_id,
-            "run_id": handle.result_run_id,
+            "workflow_id": temporal_wf_id,
             "interval_hours": review_interval_hours,
         }
     except Exception as e:
         if "already started" in str(e).lower() or "already running" in str(e).lower():
-            return {"status": "already_running", "workflow_id": workflow_id}
+            return {"status": "already_running", "workflow_id": f"goal-review-{tenant_id}"}
         raise HTTPException(status_code=500, detail=str(e))
 
 
