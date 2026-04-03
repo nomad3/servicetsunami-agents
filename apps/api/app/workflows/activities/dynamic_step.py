@@ -78,6 +78,37 @@ async def execute_dynamic_step(
         _log_step(run_id, step_id, step_type, "completed", duration_ms=duration_ms,
                   output=result, tokens=result.get("tokens_used", 0) if isinstance(result, dict) else 0)
 
+        # Log RL experience for individual step execution
+        try:
+            from app.db.session import SessionLocal
+            from app.services.rl_experience_service import log_experience
+            rl_db = SessionLocal()
+            try:
+                log_experience(
+                    db=rl_db,
+                    tenant_id=uuid.UUID(tenant_id),
+                    trajectory_id=uuid.UUID(run_id),
+                    step_index=hash(step_id) % 1000,
+                    decision_point="workflow_step",
+                    state={
+                        "run_id": run_id,
+                        "step_id": step_id,
+                        "step_type": step_type,
+                        "duration_ms": duration_ms,
+                    },
+                    action={
+                        "step_type": step_type,
+                        "tool": step.get("tool"),
+                        "agent": step.get("agent"),
+                        "tokens_used": result.get("tokens_used", 0) if isinstance(result, dict) else 0,
+                    },
+                    state_text=f"Workflow step {step_id} ({step_type}) completed in {duration_ms}ms",
+                )
+            finally:
+                rl_db.close()
+        except Exception as rl_err:
+            logger.debug("RL experience logging failed for step %s: %s", step_id, rl_err)
+
         return result
 
     except Exception as e:
@@ -408,6 +439,30 @@ async def finalize_workflow_run(
                 if error:
                     run.error = error
                 db.commit()
+
+                # Log RL experience for workflow execution
+                try:
+                    from app.services.rl_experience_service import log_experience
+                    log_experience(
+                        db=db,
+                        tenant_id=run.tenant_id,
+                        trajectory_id=uuid.UUID(run_id),
+                        step_index=0,
+                        decision_point="workflow_execution",
+                        state={
+                            "workflow_id": str(run.workflow_id),
+                            "run_id": run_id,
+                            "steps_completed": steps_completed,
+                            "total_tokens": total_tokens,
+                            "total_cost": total_cost,
+                        },
+                        action={"status": status, "error": error or None},
+                        state_text=f"Workflow run {run_id} finished with status={status}, "
+                                   f"{steps_completed} steps, {total_tokens} tokens, ${total_cost:.4f}",
+                    )
+                except Exception as rl_err:
+                    logger.debug("RL experience logging failed for run %s: %s", run_id, rl_err)
+
                 logger.info("Finalized workflow run %s: status=%s steps=%d", run_id, status, steps_completed)
                 return {"finalized": True, "status": status}
             else:
