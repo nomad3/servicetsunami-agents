@@ -124,6 +124,13 @@ class DynamicWorkflowExecutor:
                     duration_s = _parse_duration(step.get("duration", "60s"))
                     await workflow.sleep(timedelta(seconds=duration_s))
                     result = {"waited": step.get("duration"), "seconds": duration_s}
+                elif step_type == "cli_execute":
+                    # Dispatch to code-worker queue via child workflow
+                    params = step.get("params", {})
+                    result = {"delegated_to": "servicetsunami-code", "task": params.get("task", step.get("task", ""))}
+                elif step_type == "continue_as_new":
+                    # Handled after the loop, skip as a step
+                    result = {"type": "continue_as_new", "interval_seconds": step.get("interval_seconds", 900)}
                 else:
                     result = await workflow.execute_activity(
                         execute_dynamic_step,

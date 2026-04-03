@@ -65,6 +65,12 @@ async def execute_dynamic_step(
             result = _evaluate_condition(step, context)
         elif step_type == "transform":
             result = _transform_data(step, context)
+        elif step_type == "internal_api":
+            result = await _call_internal_api(step, context, tenant_id)
+        elif step_type == "cli_execute":
+            activity.heartbeat("Delegating to CLI execution")
+            params = step.get("params", {})
+            result = {"delegated_to": "servicetsunami-code", "task": params.get("task", step.get("task", ""))}
         else:
             result = {"error": f"Unknown step type: {step_type}"}
 
@@ -206,6 +212,31 @@ async def _call_agent(step: dict, context: dict, tenant_id: str) -> dict:
         }
     finally:
         db.close()
+
+
+async def _call_internal_api(step: dict, context: dict, tenant_id: str) -> dict:
+    """Call an internal API endpoint."""
+    params = step.get("params", {})
+    method = params.get("method", "GET").lower()
+    path = params.get("path", "")
+    body = _resolve_params(params.get("body", {}), context) if isinstance(params.get("body"), dict) else params.get("body")
+
+    activity.heartbeat(f"Calling internal API: {path}")
+
+    api_base = os.environ.get("API_BASE_URL", "http://localhost:8000")
+    api_key = os.environ.get("API_INTERNAL_KEY", "dev_internal_key")
+
+    async with httpx.AsyncClient(timeout=_http_timeout_for_step(step, default_seconds=25.0)) as client:
+        resp = await getattr(client, method)(
+            f"{api_base}/api/v1{path}",
+            headers={"X-Internal-Key": api_key, "X-Tenant-Id": tenant_id},
+            json=body if method in ("post", "put") else None,
+            params=body if method == "get" else None,
+        )
+        try:
+            return resp.json()
+        except Exception:
+            return {"status_code": resp.status_code, "text": resp.text[:2000]}
 
 
 def _evaluate_condition(step: dict, context: dict) -> dict:
