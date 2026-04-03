@@ -230,7 +230,7 @@ export default function WorkflowBuilder() {
 
       {/* Main layout */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <StepPalette />
+        <StepPalette mcpTools={Object.keys(toolMapping).filter(k => k)} />
         <WorkflowCanvas
           nodes={nodes} edges={edges}
           onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}

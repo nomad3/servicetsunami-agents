@@ -47,9 +47,7 @@ export default function TestConsole({ results, onClose }) {
               color: '#cbd5e1', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6,
             }}>
               <Badge bg="secondary" style={{ fontSize: 10 }}>{i + 1}</Badge>
-              <span>{step.type}</span>
-              {step.tool && <Badge bg="info" style={{ fontSize: 10 }}>{step.tool}</Badge>}
-              {step.agent && <Badge bg="primary" style={{ fontSize: 10 }}>{step.agent}</Badge>}
+              <span>{typeof step === 'string' ? step : (step.type || JSON.stringify(step))}</span>
               <FiCheckCircle style={{ color: '#22c55e', marginLeft: 'auto' }} size={12} />
             </ListGroup.Item>
           ))}

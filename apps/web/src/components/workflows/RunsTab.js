@@ -35,8 +35,9 @@ export default function RunsTab({ workflows = [] }) {
   const handleRunClick = async (runId) => {
     setSelectedRunId(runId);
     try {
-      const detail = await dynamicWorkflowService.getRun(runId);
-      setRunDetail(detail);
+      const resp = await dynamicWorkflowService.getRun(runId);
+      // API returns {run: {...}, steps: [...]}
+      setRunDetail({ ...resp.run, step_logs: resp.steps });
     } catch (err) {
       console.error('Failed to load run detail:', err);
     }

@@ -137,37 +137,87 @@ export function flowToDefinition(nodes, edges) {
   const triggerNode = nodes.find((n) => n.type === 'triggerNode');
   const triggerConfig = triggerNode?.data?.trigger || { type: 'manual' };
 
+  // Build adjacency: parent -> [child1, child2, ...]
   const children = {};
   edges.forEach((e) => {
     if (!children[e.source]) children[e.source] = [];
     children[e.source].push(e.target);
   });
 
-  const parents = {};
-  edges.forEach((e) => {
-    parents[e.target] = e.source;
-  });
+  const visited = new Set();
 
-  function buildSteps(parentId) {
-    const childIds = children[parentId] || [];
+  // Walk a linear chain from startId, collecting steps sequentially
+  function walkChain(startId) {
     const steps = [];
+    let currentId = startId;
 
-    childIds.forEach((childId) => {
-      const node = nodes.find((n) => n.id === childId);
-      if (!node || node.id.startsWith('merge-')) return;
+    while (currentId) {
+      if (visited.has(currentId)) break;
+      visited.add(currentId);
+
+      const node = nodes.find((n) => n.id === currentId);
+      if (!node || node.id.startsWith('merge-')) break;
+      if (node.type === 'triggerNode') {
+        // Skip trigger, follow its child
+        const nextIds = children[currentId] || [];
+        currentId = nextIds[0] || null;
+        continue;
+      }
 
       const step = { ...(node.data?.step || {}), id: node.id };
 
-      if (['for_each', 'parallel'].includes(step.type)) {
-        step.steps = buildSteps(childId);
+      // For for_each/parallel: children are sub-steps, not sequential successors
+      if (step.type === 'for_each') {
+        step.steps = walkChain(currentId + '-child-start');
+        // If no special child-start, use direct children as sub-steps
+        if (step.steps.length === 0) {
+          const subIds = children[currentId] || [];
+          // For for_each created by definitionToFlow, children ARE the sub-steps in sequence
+          visited.delete(currentId); // allow revisit for sub-step collection
+          const subSteps = [];
+          subIds.forEach((subId) => {
+            if (!visited.has(subId)) {
+              const chain = walkChain(subId);
+              subSteps.push(...chain);
+            }
+          });
+          step.steps = subSteps;
+        }
+      } else if (step.type === 'parallel') {
+        const subIds = children[currentId] || [];
+        step.steps = subIds
+          .filter((id) => !id.startsWith('merge-'))
+          .map((subId) => {
+            const subNode = nodes.find((n) => n.id === subId);
+            if (!subNode) return null;
+            visited.add(subId);
+            return { ...(subNode.data?.step || {}), id: subId };
+          })
+          .filter(Boolean);
+        // Find merge node to continue after
+        const mergeId = `merge-${currentId}`;
+        const mergeChildren = children[mergeId] || [];
+        currentId = mergeChildren[0] || null;
+        steps.push(step);
+        continue;
       }
 
       steps.push(step);
-    });
+
+      // Follow the chain: next sequential node
+      const nextIds = children[currentId] || [];
+      // For non-container nodes, follow the first (only) child
+      currentId = nextIds.length === 1 ? nextIds[0] : null;
+
+      // If multiple children and not parallel/for_each, just take first (linear)
+      if (nextIds.length > 1 && !['for_each', 'parallel', 'condition'].includes(step.type)) {
+        currentId = nextIds[0];
+      }
+    }
 
     return steps;
   }
 
-  const steps = buildSteps(triggerNode?.id || 'trigger-root');
+  const steps = walkChain(triggerNode?.id || 'trigger-root');
   return { definition: { steps }, triggerConfig };
 }

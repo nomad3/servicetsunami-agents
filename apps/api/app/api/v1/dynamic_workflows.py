@@ -93,6 +93,22 @@ def list_workflows_internal(
     return q.order_by(DynamicWorkflow.updated_at.desc()).all()
 
 
+@router.get("/internal/{workflow_id}", response_model=DynamicWorkflowInDB)
+def get_workflow_internal(
+    workflow_id: uuid.UUID,
+    db: Session = Depends(deps.get_db),
+    tenant_id: uuid.UUID = Depends(verify_internal_key),
+):
+    """Get a single workflow (internal, no JWT required)."""
+    wf = db.query(DynamicWorkflow).filter(
+        DynamicWorkflow.id == workflow_id,
+        DynamicWorkflow.tenant_id == tenant_id,
+    ).first()
+    if not wf:
+        raise HTTPException(404, "Workflow not found")
+    return wf
+
+
 @router.put("/internal/{workflow_id}", response_model=DynamicWorkflowInDB)
 def update_workflow_internal(
     workflow_id: uuid.UUID,

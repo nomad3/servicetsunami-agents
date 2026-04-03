@@ -27,12 +27,27 @@ export default function RunTreeView({ run, onBack }) {
   const [edges, setEdges] = useEdgesState([]);
   const [selectedStep, setSelectedStep] = useState(null);
 
+  // Normalize API response: {run: {...}, steps: [...]} -> flat object with step_logs
+  const normalizeRunResp = (resp) => {
+    if (resp.run) return { ...resp.run, step_logs: resp.steps || [] };
+    return resp;
+  };
+
   useEffect(() => {
     async function load() {
       try {
-        const detail = await dynamicWorkflowService.getRun(run.id);
+        const resp = await dynamicWorkflowService.getRun(run.id);
+        const detail = normalizeRunResp(resp);
         setRunDetail(detail);
-        applyRunStatus(detail);
+        // Also fetch the workflow definition for tree rendering
+        if (detail.workflow_id) {
+          try {
+            const wf = await dynamicWorkflowService.get(detail.workflow_id);
+            applyRunStatus(detail, wf.definition, wf.trigger_config);
+          } catch {
+            applyRunStatus(detail, { steps: [] }, null);
+          }
+        }
       } catch (err) {
         console.error('Failed to load run:', err);
       }
@@ -44,19 +59,26 @@ export default function RunTreeView({ run, onBack }) {
     if (runDetail?.status !== 'running') return;
     const interval = setInterval(async () => {
       try {
-        const detail = await dynamicWorkflowService.getRun(run.id);
+        const resp = await dynamicWorkflowService.getRun(run.id);
+        const detail = normalizeRunResp(resp);
         setRunDetail(detail);
-        applyRunStatus(detail);
+        if (detail.workflow_id) {
+          try {
+            const wf = await dynamicWorkflowService.get(detail.workflow_id);
+            applyRunStatus(detail, wf.definition, wf.trigger_config);
+          } catch {
+            applyRunStatus(detail, { steps: [] }, null);
+          }
+        }
         if (detail.status !== 'running') clearInterval(interval);
       } catch {}
     }, 3000);
     return () => clearInterval(interval);
   }, [runDetail?.status, run.id]);
 
-  const applyRunStatus = (detail) => {
+  const applyRunStatus = (detail, wfDef, triggerConfig) => {
     if (!detail) return;
-    const wfDef = detail.definition || detail.workflow_definition || { steps: [] };
-    const { nodes: baseNodes, edges: baseEdges } = definitionToFlow(wfDef, detail.trigger_config);
+    const { nodes: baseNodes, edges: baseEdges } = definitionToFlow(wfDef || { steps: [] }, triggerConfig);
 
     const stepLogs = detail.step_logs || [];
     const statusMap = {};

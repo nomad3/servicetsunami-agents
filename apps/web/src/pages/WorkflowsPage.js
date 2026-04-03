@@ -49,6 +49,9 @@ import Layout from '../components/Layout';
 import TaskTimeline from '../components/TaskTimeline';
 import taskService from '../services/taskService';
 import DynamicWorkflowsTab from '../components/workflows/DynamicWorkflowsTab';
+import TemplatesTab from '../components/workflows/TemplatesTab';
+import RunsTab from '../components/workflows/RunsTab';
+import dynamicWorkflowService from '../services/dynamicWorkflowService';
 import './WorkflowsPage.css';
 
 // ===========================================================================
@@ -1517,38 +1520,63 @@ const ExecutionsTab = () => {
 const WorkflowsPage = () => {
   const { t } = useTranslation('workflows');
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeMainTab = searchParams.get('tab') || 'executions';
+  const activeMainTab = searchParams.get('tab') || 'workflows';
+  const [dynamicWorkflows, setDynamicWorkflows] = useState([]);
 
   const setTab = (tab) => {
     setSearchParams({ tab });
   };
 
+  // Load dynamic workflows for RunsTab
+  useEffect(() => {
+    dynamicWorkflowService.list().then(setDynamicWorkflows).catch(() => {});
+  }, []);
+
   return (
     <Layout>
       <div style={{ padding: '1.5rem' }}>
-        <div style={{ marginBottom: '0.5rem' }}>
-          <h4 style={{ color: 'var(--color-foreground)', marginBottom: '0.25rem', fontWeight: 600 }}>
-            {t('title')}
-          </h4>
-          <p style={{ color: 'var(--color-muted)', fontSize: '0.85rem', margin: 0 }}>
-            {t('subtitle')}
-          </p>
+        <div style={{ marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h4 style={{ color: 'var(--color-foreground)', marginBottom: '0.25rem', fontWeight: 600 }}>
+              {t('title')}
+            </h4>
+            <p style={{ color: 'var(--color-muted)', fontSize: '0.85rem', margin: 0 }}>
+              {t('subtitle')}
+            </p>
+          </div>
+          <Button variant="primary" size="sm" href="/workflows/builder">
+            + New Workflow
+          </Button>
         </div>
 
         <div className="workflows-tabs">
           <button
-            className={`workflows-tab-btn ${activeMainTab === 'executions' ? 'active' : ''}`}
-            onClick={() => setTab('executions')}
-          >
-            <FaStream size={12} style={{ marginRight: '0.4rem' }} />
-            {t('tabs.executions')}
-          </button>
-          <button
-            className={`workflows-tab-btn ${activeMainTab === 'dynamic' ? 'active' : ''}`}
-            onClick={() => setTab('dynamic')}
+            className={`workflows-tab-btn ${activeMainTab === 'workflows' ? 'active' : ''}`}
+            onClick={() => setTab('workflows')}
           >
             <FaBolt size={12} style={{ marginRight: '0.4rem' }} />
             My Workflows
+          </button>
+          <button
+            className={`workflows-tab-btn ${activeMainTab === 'templates' ? 'active' : ''}`}
+            onClick={() => setTab('templates')}
+          >
+            <FaLayerGroup size={12} style={{ marginRight: '0.4rem' }} />
+            Templates
+          </button>
+          <button
+            className={`workflows-tab-btn ${activeMainTab === 'runs' ? 'active' : ''}`}
+            onClick={() => setTab('runs')}
+          >
+            <FaStream size={12} style={{ marginRight: '0.4rem' }} />
+            Runs
+          </button>
+          <button
+            className={`workflows-tab-btn ${activeMainTab === 'executions' ? 'active' : ''}`}
+            onClick={() => setTab('executions')}
+          >
+            <FaCog size={12} style={{ marginRight: '0.4rem' }} />
+            {t('tabs.executions')}
           </button>
           <button
             className={`workflows-tab-btn ${activeMainTab === 'designs' ? 'active' : ''}`}
@@ -1559,8 +1587,10 @@ const WorkflowsPage = () => {
           </button>
         </div>
 
+        {activeMainTab === 'workflows' && <DynamicWorkflowsTab />}
+        {activeMainTab === 'templates' && <TemplatesTab />}
+        {activeMainTab === 'runs' && <RunsTab workflows={dynamicWorkflows} />}
         {activeMainTab === 'executions' && <ExecutionsTab />}
-        {activeMainTab === 'dynamic' && <DynamicWorkflowsTab />}
         {activeMainTab === 'designs' && <DesignsTab />}
       </div>
     </Layout>

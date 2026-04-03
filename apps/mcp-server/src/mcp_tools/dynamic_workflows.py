@@ -26,6 +26,8 @@ async def _api_call(method: str, path: str, tenant_id: str, json_data: dict = No
         )
         if resp.status_code in (200, 201):
             return resp.json()
+        if resp.status_code == 204:
+            return {"status": "success"}
         return {"error": f"API returned {resp.status_code}: {resp.text[:200]}"}
 
 
