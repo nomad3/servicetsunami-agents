@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 
+from app.models.rl_experience import RLExperience
 from app.models.rl_policy_state import RLPolicyState
 from app.models.tenant_features import TenantFeatures
 from app.services import rl_experience_service
@@ -147,6 +148,42 @@ def get_exploration_rate(db: Session, tenant_id: uuid.UUID, decision_point: str)
             return overrides[decision_point]["exploration_rate"]
         return features.rl_settings.get("exploration_rate", 0.1)
     return 0.1
+
+
+def get_exploration_rate_with_decay(
+    db: Session,
+    tenant_id: uuid.UUID,
+    decision_point: str,
+) -> float:
+    """Get exploration rate with automatic decay as sample count grows.
+
+    Formula: base_rate * max(0.05, 1.0 - sample_count / (min_samples * 4))
+
+    At 30 samples (min_samples): 0.25 * 0.75 = 0.1875
+    At 120 samples: 0.25 * 0.05 = 0.0125 (floor)
+    """
+    base_rate = get_exploration_rate(db, tenant_id, decision_point)
+
+    min_samples = 30  # default
+    # Check for per-decision override in tenant RL settings
+    features = db.query(TenantFeatures).filter(
+        TenantFeatures.tenant_id == tenant_id
+    ).first()
+    if features and features.rl_settings:
+        overrides = features.rl_settings.get("per_decision_overrides", {})
+        if decision_point in overrides:
+            min_samples = overrides[decision_point].get(
+                "min_samples_before_exploit", min_samples
+            )
+
+    # Count samples for this decision point
+    sample_count = db.query(RLExperience).filter(
+        RLExperience.tenant_id == tenant_id,
+        RLExperience.decision_point == decision_point,
+    ).count()
+
+    decay_factor = max(0.05, 1.0 - sample_count / (min_samples * 4))
+    return base_rate * decay_factor
 
 
 def score_candidates(
