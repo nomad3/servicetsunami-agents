@@ -1249,6 +1249,215 @@ NATIVE_TEMPLATES = [
             ],
         },
     },
+    # ── Tier 4 infrastructure workflow migrations ─────────────────────
+    {
+        "name": "Task Execution",
+        "description": "Full agent task orchestration: dispatch to best agent, recall relevant memories, execute task via CLI orchestrator, persist extracted entities to knowledge graph, evaluate results and log RL score",
+        "tier": "native",
+        "public": True,
+        "tags": ["orchestration", "tasks", "agents", "rl"],
+        "trigger_config": {"type": "event", "event_type": "task_created"},
+        "definition": {
+            "steps": [
+                {
+                    "id": "dispatch_task",
+                    "type": "internal_api",
+                    "method": "POST",
+                    "path": "/api/v1/tasks/dispatch",
+                    "body": {
+                        "task_id": "{{input.task_id}}",
+                        "tenant_id": "{{input.tenant_id}}",
+                        "task_data": "{{input.task_data}}",
+                    },
+                    "output": "dispatch_result",
+                },
+                {
+                    "id": "recall_memory",
+                    "type": "internal_api",
+                    "method": "GET",
+                    "path": "/api/v1/knowledge/recall",
+                    "body": {
+                        "tenant_id": "{{input.tenant_id}}",
+                        "agent_id": "{{dispatch_result.agent_id}}",
+                        "query": "{{input.task_data.objective}}",
+                    },
+                    "output": "memory",
+                },
+                {
+                    "id": "execute_task",
+                    "type": "agent",
+                    "agent": "{{dispatch_result.agent_id}}",
+                    "prompt": (
+                        "Execute this task.\n\n"
+                        "Objective: {{input.task_data.objective}}\n"
+                        "Context: {{input.task_data}}\n\n"
+                        "Relevant memories:\n{{memory.memories}}\n\n"
+                        "Complete the task and return your output."
+                    ),
+                    "output": "execute_result",
+                },
+                {
+                    "id": "persist_entities",
+                    "type": "internal_api",
+                    "method": "POST",
+                    "path": "/api/v1/knowledge/extract-and-store",
+                    "body": {
+                        "tenant_id": "{{input.tenant_id}}",
+                        "agent_id": "{{dispatch_result.agent_id}}",
+                        "content": "{{execute_result}}",
+                    },
+                    "output": "entities_persisted",
+                },
+                {
+                    "id": "evaluate_and_log_rl",
+                    "type": "internal_api",
+                    "method": "POST",
+                    "path": "/api/v1/rl/evaluate",
+                    "body": {
+                        "task_id": "{{input.task_id}}",
+                        "tenant_id": "{{input.tenant_id}}",
+                        "agent_id": "{{dispatch_result.agent_id}}",
+                        "output": "{{execute_result}}",
+                    },
+                    "output": "evaluation",
+                },
+            ],
+        },
+    },
+    {
+        "name": "Knowledge Extraction",
+        "description": "Extract knowledge from a chat session: fetch session content, extract entities/relations/observations via agent, store in knowledge graph, embed for vector search",
+        "tier": "native",
+        "public": True,
+        "tags": ["knowledge", "extraction", "entities", "embeddings"],
+        "trigger_config": {"type": "event", "event_type": "session_completed"},
+        "definition": {
+            "steps": [
+                {
+                    "id": "fetch_session",
+                    "type": "internal_api",
+                    "method": "GET",
+                    "path": "/api/v1/chat/sessions/{{input.session_id}}/messages",
+                    "body": {"tenant_id": "{{input.tenant_id}}"},
+                    "output": "session_content",
+                },
+                {
+                    "id": "extract_entities",
+                    "type": "agent",
+                    "agent": "luna",
+                    "prompt": (
+                        "Extract knowledge entities from this chat session.\n\n"
+                        "Session content:\n{{session_content}}\n\n"
+                        "Extract: people, companies, projects, dates, decisions, action items, "
+                        "and relationships between entities. Return structured JSON."
+                    ),
+                    "output": "extracted",
+                },
+                {
+                    "id": "store_entities",
+                    "type": "internal_api",
+                    "method": "POST",
+                    "path": "/api/v1/knowledge/entities/batch",
+                    "body": {
+                        "tenant_id": "{{input.tenant_id}}",
+                        "entities": "{{extracted.entities}}",
+                        "relations": "{{extracted.relations}}",
+                        "observations": "{{extracted.observations}}",
+                    },
+                    "output": "stored",
+                },
+                {
+                    "id": "embed_entities",
+                    "type": "internal_api",
+                    "method": "POST",
+                    "path": "/api/v1/knowledge/embeddings/backfill",
+                    "body": {
+                        "tenant_id": "{{input.tenant_id}}",
+                        "target": "entities",
+                        "entity_ids": "{{stored.entity_ids}}",
+                    },
+                    "output": "embedded",
+                },
+            ],
+        },
+    },
+    {
+        "name": "Code Task",
+        "description": "Autonomous coding via Claude Code CLI: execute a code task description in an isolated worker, producing a branch with commits and a PR",
+        "tier": "native",
+        "public": True,
+        "tags": ["code", "cli", "github", "autonomous"],
+        "trigger_config": {"type": "manual"},
+        "definition": {
+            "steps": [
+                {
+                    "id": "run_code",
+                    "type": "cli_execute",
+                    "task": "{{input.task_description}}",
+                    "context": "{{input.context}}",
+                    "output": "code_result",
+                },
+            ],
+        },
+    },
+    {
+        "name": "RL Policy Update",
+        "description": "Nightly RL batch job: gather experiences per decision point, update tenant policy for each active decision point, anonymize and aggregate into global baseline, archive old experiences",
+        "tier": "native",
+        "public": True,
+        "tags": ["rl", "policy", "learning", "batch"],
+        "trigger_config": {"type": "cron", "schedule": "0 3 * * *", "timezone": "UTC"},
+        "definition": {
+            "steps": [
+                {
+                    "id": "gather_experiences",
+                    "type": "internal_api",
+                    "method": "GET",
+                    "path": "/api/v1/rl/experiences/stats",
+                    "body": {"tenant_id": "{{input.tenant_id}}"},
+                    "output": "experience_stats",
+                },
+                {
+                    "id": "update_policies",
+                    "type": "for_each",
+                    "collection": "{{experience_stats.decision_points}}",
+                    "as": "decision_point",
+                    "steps": [
+                        {
+                            "id": "update_policy",
+                            "type": "internal_api",
+                            "method": "POST",
+                            "path": "/api/v1/rl/policy/update",
+                            "body": {
+                                "tenant_id": "{{input.tenant_id}}",
+                                "decision_point": "{{decision_point}}",
+                            },
+                            "output": "policy_update_result",
+                        },
+                    ],
+                },
+                {
+                    "id": "aggregate_global",
+                    "type": "internal_api",
+                    "method": "POST",
+                    "path": "/api/v1/rl/global/aggregate",
+                    "body": {"decision_points": "{{experience_stats.decision_points}}"},
+                    "output": "aggregation_result",
+                },
+                {
+                    "id": "archive_old",
+                    "type": "internal_api",
+                    "method": "POST",
+                    "path": "/api/v1/rl/experiences/archive",
+                    "body": {
+                        "tenant_id": "{{input.tenant_id}}",
+                        "retention_days": 90,
+                    },
+                    "output": "archive_result",
+                },
+            ],
+        },
+    },
 ]
 
 
