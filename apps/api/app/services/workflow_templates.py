@@ -1465,6 +1465,16 @@ def seed_native_templates(db, tenant_id=None):
     """Seed native workflow templates. Idempotent — skips existing."""
     import uuid
     from app.models.dynamic_workflow import DynamicWorkflow
+    from app.models.tenant import Tenant
+
+    # Resolve tenant: explicit > first in DB (native templates are public, tenant is just the owner)
+    if tenant_id:
+        owner_id = uuid.UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
+    else:
+        first_tenant = db.query(Tenant.id).first()
+        if not first_tenant:
+            return 0  # No tenants yet — skip seeding
+        owner_id = first_tenant.id
 
     created = 0
     for tmpl in NATIVE_TEMPLATES:
@@ -1477,7 +1487,7 @@ def seed_native_templates(db, tenant_id=None):
 
         wf = DynamicWorkflow(
             id=uuid.uuid4(),
-            tenant_id=uuid.UUID(tenant_id) if tenant_id else uuid.UUID("00000000-0000-0000-0000-000000000000"),
+            tenant_id=owner_id,
             name=tmpl["name"],
             description=tmpl["description"],
             definition=tmpl["definition"],

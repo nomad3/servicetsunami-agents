@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Badge, Button, Card, Col, Form, Modal, Row, Spinner } from 'react-bootstrap';
 import {
-  FaBolt, FaCheck, FaClock, FaCog, FaPause, FaPlay, FaPlus, FaRocket,
+  FaBolt, FaCheck, FaClock, FaCog, FaEdit, FaPause, FaPlay, FaPlus, FaRocket,
   FaStore, FaTimesCircle, FaTrash,
 } from 'react-icons/fa';
+import { useNavigate } from 'react-router-dom';
 import dynamicWorkflowService from '../../services/dynamicWorkflowService';
 
 const statusColors = {
@@ -31,7 +32,7 @@ const triggerLabels = {
 
 // ── Workflow Card ────────────────────────────────────────────────
 
-function WorkflowCard({ workflow, onRun, onToggle, onDelete, onSelect }) {
+function WorkflowCard({ workflow, onRun, onToggle, onDelete, onSelect, onEdit }) {
   const StatusIcon = statusIcons[workflow.status] || FaCog;
   const stepCount = workflow.definition?.steps?.length || 0;
   const trigger = workflow.trigger_config?.type || 'manual';
@@ -65,6 +66,9 @@ function WorkflowCard({ workflow, onRun, onToggle, onDelete, onSelect }) {
                 <FaPlay size={10} />
               </Button>
             ) : null}
+            <Button size="sm" variant="outline-secondary" onClick={(e) => { e.stopPropagation(); onEdit(workflow.id); }} title="Edit in builder">
+              <FaEdit size={10} />
+            </Button>
             <Button size="sm" variant="outline-primary" onClick={(e) => { e.stopPropagation(); onRun(workflow.id); }} title="Run now">
               <FaRocket size={10} />
             </Button>
@@ -238,6 +242,7 @@ function CreateWorkflowModal({ show, onHide, onCreate }) {
 // ── Main Tab ─────────────────────────────────────────────────────
 
 export default function DynamicWorkflowsTab() {
+  const navigate = useNavigate();
   const [workflows, setWorkflows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -349,6 +354,7 @@ export default function DynamicWorkflowsTab() {
                 onToggle={handleToggle}
                 onDelete={handleDelete}
                 onSelect={handleSelect}
+                onEdit={(id) => navigate(`/workflows/builder/${id}`)}
               />
             </Col>
           ))}
