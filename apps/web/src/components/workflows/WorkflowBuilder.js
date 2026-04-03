@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Badge, Spinner } from 'react-bootstrap';
 import { useNodesState, useEdgesState } from 'reactflow';
 import { FiSave, FiPlay, FiPower, FiCode, FiArrowLeft } from 'react-icons/fi';
+import './WorkflowBuilder.css';
 
 import WorkflowCanvas from './WorkflowCanvas';
 import StepPalette from './StepPalette';
