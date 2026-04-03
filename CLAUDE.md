@@ -139,8 +139,19 @@ Scores are logged as RL experiences (`rl_experience` table) with reward componen
 
 **Marketing Intelligence & Ads Platform**: Integrates with Meta Ads, Google Ads, and TikTok Ads via manual API tokens stored in the integration registry. MCP tools in `apps/mcp-server/src/mcp_tools/ads.py` (12 tools) manage campaigns (list, insights, pause) and search public ad libraries. Competitor tools in `competitor.py` (5 tools) manage competitor entities in the knowledge graph.
 
-**Temporal workflows**: Durable workflow execution across four task queues:
-- `servicetsunami-orchestration`: `TaskExecutionWorkflow`, `ChannelHealthMonitorWorkflow`, `FollowUpWorkflow`, `InboxMonitorWorkflow`, `CompetitorMonitorWorkflow`.
+**Dynamic Workflows System**: JSON-defined workflows interpreted at runtime by a single `DynamicWorkflowExecutor` Temporal workflow. No per-workflow Python code needed — the executor walks a JSON `definition.steps[]` array and dispatches each step as a Temporal activity.
+- **Visual Builder**: ReactFlow tree canvas at `/workflows/builder/:id` with drag-and-drop step palette, node inspector panel, test console (dry_run validation), integration awareness layer. 6 custom node types: Trigger, Step, Condition (diamond with then/else), ForEach, Parallel, Approval.
+- **Step types**: `mcp_tool`, `agent`, `condition`, `for_each`, `parallel`, `wait`, `transform`, `human_approval`, `webhook_trigger`, `workflow`, `continue_as_new` (infinite-duration), `cli_execute` (dispatches CodeTaskWorkflow on servicetsunami-code queue), `internal_api` (calls internal API endpoints).
+- **Triggers**: `cron`, `interval`, `webhook`, `event`, `manual`, `agent`.
+- **25 native templates**: 5 original + 20 migrated from static workflows across 4 tiers (linear, branching, continue_as_new, infrastructure).
+- **Luna full CRUD**: 8 MCP tools for workflow management via chat (create, list, update, delete, run, get_status, activate, install_template).
+- **Integration awareness**: `GET /integrations/status` returns connected integrations per tenant. `GET /integrations/tool-mapping` maps MCP tools to required integrations. Activation gate blocks workflows with disconnected integrations.
+- **RL wiring**: Every workflow run logs `workflow_execution` RL experience, every step logs `workflow_step` RL experience, creation events logged as `workflow_creation`.
+- **Memory wiring**: Workflow lifecycle events (created, activated, failed) logged to `memory_activities`.
+- **Internal auth**: MCP tools use `/internal/*` endpoints with `X-Internal-Key` + `X-Tenant-Id` headers (accepts both `API_INTERNAL_KEY` and `MCP_API_KEY`).
+
+**Temporal workflows** (static — being migrated to dynamic): Durable workflow execution across four task queues:
+- `servicetsunami-orchestration`: `TaskExecutionWorkflow`, `ChannelHealthMonitorWorkflow`, `FollowUpWorkflow`, `InboxMonitorWorkflow`, `CompetitorMonitorWorkflow`, `DynamicWorkflowExecutor`.
 - `servicetsunami-databricks`: `DatasetSyncWorkflow`, `KnowledgeExtractionWorkflow`, `AgentKitExecutionWorkflow`, `DataSourceSyncWorkflow`.
 - `servicetsunami-code`: `CodeTaskWorkflow` (Claude Code CLI execution in isolated code-worker pod).
 - `servicetsunami-business`: Industry-specific flows:
@@ -242,6 +253,7 @@ Core domain models (all inherit from SQLAlchemy Base, include `tenant_id` Foreig
 - `notification.py`: Proactive alerts from inbox monitor, system events
 - `memory_activity.py`: Audit log for knowledge graph operations
 - `rl_experience.py`: Reinforcement learning experiences with decision_point, state, action, reward, reward_components (JSONB), reward_source, embedded state_text
+- `dynamic_workflow.py`: Dynamic workflow definitions (`DynamicWorkflow`), execution runs (`WorkflowRun`), and step logs (`WorkflowStepLog`). JSON definition with step types, trigger config, marketplace fields (tier, installs, rating), execution stats.
 
 ### Services (`apps/api/app/services/`)
 
@@ -267,6 +279,9 @@ Business logic layer (one service per model):
 - `rl_reward_service.py`: Reward assignment and aggregation for RL experiences
 - `rl_policy_engine.py`: Policy updates from accumulated RL experiences
 - `local_inference.py`: Local Ollama-based inference for scoring, summarization, extraction, triage (zero cloud cost)
+- `dynamic_workflows.py`: Workflow definition validation (`validate_workflow_definition`) for dry_run test console. Checks step ID uniqueness, tool name validity, template variable references.
+- `integration_status.py`: `TOOL_INTEGRATION_MAP` (MCP tool → integration name), `get_connected_integrations()`, `check_workflow_integrations()` for activation gate.
+- `workflow_templates.py`: 25 native workflow templates (Daily Briefing, Lead Pipeline, Competitor Watch, Code Review, Weekly Report + 20 migrated static workflows).
 - `orchestration/`: Orchestration services package
   - `credential_vault.py`: Fernet-encrypted credential storage with CRUD helpers
   - `task_dispatcher.py`: Agent selection and task dispatch
@@ -289,7 +304,7 @@ FastAPI routers mounted at `/api/v1`. All routes use dependency injection via `d
 
 Organized in 3-section navigation:
 - **INSIGHTS**: `DashboardPage.js`, `DatasetsPage.js`
-- **AI OPERATIONS**: `ChatPage.js`, `AgentsPage.js`, `WorkflowsPage.js`, `MemoryPage.js` (labeled "Knowledge Base" in sidebar)
+- **AI OPERATIONS**: `ChatPage.js`, `AgentsPage.js`, `WorkflowsPage.js` (tabs: My Workflows, Templates, Runs, Executions, Designs + builder at `/workflows/builder/:id`), `MemoryPage.js` (labeled "Knowledge Base" in sidebar)
 - **WORKSPACE**: `IntegrationsPage.js`, `NotebooksPage.js`, `VectorStoresPage.js`, `ToolsPage.js`
 - **SETTINGS**: `SettingsPage.js`, `LLMSettingsPage.js`, `BrandingPage.js`
 - **AUTH**: `RegisterPage.js`, `AgentWizardPage.js`
@@ -301,6 +316,17 @@ Organized in 3-section navigation:
 - `TaskTimeline.js`: Execution trace timeline with step icons and duration badges
 - `IntegrationsPanel.js`: Integration enablement grid with dynamic credential forms from registry and test execution button
 - `NotificationBell.js`: Real-time notification indicator with dropdown for inbox monitor alerts
+- `workflows/WorkflowBuilder.js`: Visual workflow builder — ReactFlow tree canvas, toolbar, state management, save/test/activate
+- `workflows/WorkflowCanvas.js`: ReactFlow canvas with custom node types, dagre auto-layout, drag-drop
+- `workflows/WorkflowAdapter.js`: Bidirectional converter between workflow JSON definitions and ReactFlow nodes/edges
+- `workflows/StepPalette.js`: Left sidebar with draggable step types (triggers, MCP tools, agents, logic, flow)
+- `workflows/StepInspector.js`: Right panel for node configuration (tool picker, param editor, expression builder)
+- `workflows/TestConsole.js`: Bottom panel showing dry_run validation results
+- `workflows/TemplatesTab.js`: Template marketplace (native + community, one-click install)
+- `workflows/RunsTab.js`: Unified execution history with status filters
+- `workflows/RunTreeView.js`: Read-only execution tree with live status colors (polling), step detail panel
+- `workflows/RunStepDetail.js`: Step audit detail (input/output, tokens, cost, platform, errors)
+- `workflows/nodes/`: 6 custom ReactFlow nodes (TriggerNode, StepNode, ConditionNode, ForEachNode, ParallelNode, ApprovalNode) + Ocean theme CSS
 
 ## Environment Configuration
 
@@ -468,4 +494,6 @@ PRs created by the code agent include structured body with full audit trail:
   - `2026-03-13-multi-model-abstraction-layer-design.md`: Multi-LLM provider switching via integration registry
   - `2026-03-13-multi-model-abstraction-layer-plan.md`: 10-task implementation plan for multi-model support
   - `2026-03-22-local-ollama-mcp-bridge-plan.md`: Local Qwen3:4b → Ollama tool calling → MCP bridge for free-tier tenants
+  - `2026-04-03-dynamic-workflows-visual-builder-design.md`: Dynamic workflows visual builder, migration strategy, RL lifecycle design
+  - `2026-04-03-dynamic-workflows-visual-builder-plan.md`: 25-task implementation plan for visual builder + migration
 - `LLM_INTEGRATION_README.md`, `TOOL_FRAMEWORK_README.md`, `DATABRICKS_SYNC_README.md`: Feature docs
