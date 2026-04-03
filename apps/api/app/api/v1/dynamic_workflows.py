@@ -1,5 +1,6 @@
 """Dynamic workflows API — CRUD, execution, and template marketplace."""
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -11,6 +12,7 @@ from app.api import deps
 from app.core.config import settings
 from app.models.dynamic_workflow import DynamicWorkflow, WorkflowRun, WorkflowStepLog
 from app.services.integration_status import check_workflow_integrations
+from app.services.memory_activity import log_activity
 from app.schemas.dynamic_workflow import (
     DynamicWorkflowCreate,
     DynamicWorkflowInDB,
@@ -19,6 +21,8 @@ from app.schemas.dynamic_workflow import (
     WorkflowRunRequest,
     WorkflowStepLogInDB,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -60,6 +64,19 @@ def create_workflow_internal(
     db.add(wf)
     db.commit()
     db.refresh(wf)
+
+    try:
+        log_activity(
+            db=db,
+            tenant_id=tenant_id,
+            event_type="workflow_created",
+            description=f"Workflow '{wf.name}' created (internal)",
+            source="dynamic_workflows",
+            event_metadata={"workflow_id": str(wf.id), "name": wf.name, "tags": wf.tags},
+        )
+    except Exception as e:
+        logger.debug("Memory activity logging failed for workflow creation: %s", e)
+
     return wf
 
 
@@ -223,6 +240,19 @@ def activate_workflow_internal(
     wf.status = "active"
     wf.updated_at = datetime.utcnow()
     db.commit()
+
+    try:
+        log_activity(
+            db=db,
+            tenant_id=tenant_id,
+            event_type="workflow_activated",
+            description=f"Workflow '{wf.name}' activated (internal)",
+            source="dynamic_workflows",
+            event_metadata={"workflow_id": str(wf.id), "name": wf.name},
+        )
+    except Exception as e:
+        logger.debug("Memory activity logging failed for workflow activation: %s", e)
+
     return {"status": "active", "id": str(wf.id)}
 
 
@@ -339,6 +369,19 @@ def create_workflow(
     db.add(wf)
     db.commit()
     db.refresh(wf)
+
+    try:
+        log_activity(
+            db=db,
+            tenant_id=current_user.tenant_id,
+            event_type="workflow_created",
+            description=f"Workflow '{wf.name}' created",
+            source="dynamic_workflows",
+            event_metadata={"workflow_id": str(wf.id), "name": wf.name, "tags": wf.tags, "created_by": str(current_user.id)},
+        )
+    except Exception as e:
+        logger.debug("Memory activity logging failed for workflow creation: %s", e)
+
     return wf
 
 
@@ -451,6 +494,19 @@ def activate_workflow(
     wf.status = "active"
     wf.updated_at = datetime.utcnow()
     db.commit()
+
+    try:
+        log_activity(
+            db=db,
+            tenant_id=current_user.tenant_id,
+            event_type="workflow_activated",
+            description=f"Workflow '{wf.name}' activated",
+            source="dynamic_workflows",
+            event_metadata={"workflow_id": str(wf.id), "name": wf.name, "activated_by": str(current_user.id)},
+        )
+    except Exception as e:
+        logger.debug("Memory activity logging failed for workflow activation: %s", e)
+
     return {"status": "active", "id": str(wf.id)}
 
 
