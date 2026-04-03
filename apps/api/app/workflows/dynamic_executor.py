@@ -49,6 +49,9 @@ def _timeout_for(step: dict) -> timedelta:
         "wait": timedelta(days=7),
         "human_approval": timedelta(days=30),
         "workflow": timedelta(minutes=30),
+        "cli_execute": timedelta(minutes=30),
+        "internal_api": timedelta(seconds=60),
+        "continue_as_new": timedelta(seconds=10),
     }
     return timeouts.get(step.get("type", ""), timedelta(minutes=5))
 
@@ -164,6 +167,18 @@ class DynamicWorkflowExecutor:
                     steps_completed=steps_completed,
                     error=error_msg,
                 )
+
+        # Check if last step is continue_as_new (infinite-duration workflow)
+        if steps and steps[-1].get("type") == "continue_as_new":
+            last_step = steps[-1]
+            interval = last_step.get("interval_seconds", 900)
+            await workflow.execute_activity(
+                finalize_workflow_run,
+                args=[input.run_id, "completed", steps_completed, total_tokens, total_cost],
+                start_to_close_timeout=timedelta(seconds=30),
+            )
+            await workflow.sleep(timedelta(seconds=interval))
+            workflow.continue_as_new(input)
 
         await workflow.execute_activity(
             finalize_workflow_run,
