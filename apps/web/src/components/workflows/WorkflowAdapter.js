@@ -199,21 +199,30 @@ export function flowToDefinition(nodes, edges) {
 
       const step = { ...(node.data?.step || {}), id: node.id };
 
-      // For conditions: serialize then/else from edge handles
+      // For conditions: serialize then/else from edge handles, then continue
+      // walking all reachable branch targets into the flat steps list
+      // (the executor runs steps[] sequentially; then/else are ID references)
       if (step.type === 'condition') {
         const outEdges = children[currentId] || [];
+        const branchTargets = [];
         outEdges.forEach((edge) => {
           if (edge.sourceHandle === 'then') {
             step.then = edge.target;
+            branchTargets.push(edge.target);
           } else if (edge.sourceHandle === 'else') {
             step.else = edge.target;
+            branchTargets.push(edge.target);
           }
         });
         steps.push(step);
-        // Condition branches are non-linear — don't follow chain from here
-        // The then/else targets are referenced by ID, not nested
+        // Walk each branch target's chain into the flat list
+        branchTargets.forEach((targetId) => {
+          const branchSteps = walkChain(targetId);
+          steps.push(...branchSteps);
+        });
+        // No more sequential steps from this condition — branches handle the rest
         currentId = null;
-        break;
+        continue;
       }
 
       // For for_each/parallel: children are sub-steps, not sequential successors
