@@ -521,7 +521,7 @@ async def extract_from_emails(tenant_id: str, emails: List[Dict], triaged_items:
 
 
 def _dispatch_email_action_triggers(db, tid: uuid.UUID, triggers: List[Dict], tenant_id_str: str):
-    """Dispatch action triggers from email extraction to Temporal."""
+    """Dispatch action triggers from email extraction via dynamic workflow."""
     import asyncio
 
     for trigger in triggers:
@@ -534,22 +534,17 @@ def _dispatch_email_action_triggers(db, tid: uuid.UUID, triggers: List[Dict], te
             delay_hours = trigger.get("delay_hours", 24)
             entity_name = trigger.get("entity_name", "")
 
-            async def _start():
-                from temporalio.client import Client as TemporalClient
-                from app.workflows.follow_up import FollowUpInput, FollowUpWorkflow
+            follow_up_input = {
+                "entity_id": entity_name,
+                "action": trigger_type,
+                "delay_hours": delay_hours,
+                "message": description,
+            }
 
-                client = await TemporalClient.connect(settings.TEMPORAL_ADDRESS)
-                await client.start_workflow(
-                    FollowUpWorkflow.run,
-                    FollowUpInput(
-                        entity_id=entity_name,
-                        tenant_id=tenant_id_str,
-                        action=trigger_type,
-                        delay_hours=delay_hours,
-                        message=description,
-                    ),
-                    id=f"email-trigger-{tenant_id_str[:8]}-{entity_name[:20]}-{int(time.time())}",
-                    task_queue="servicetsunami-orchestration",
+            async def _start():
+                from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
+                await start_dynamic_workflow_by_name(
+                    "Sales Follow-Up", tenant_id_str, follow_up_input
                 )
 
             try:

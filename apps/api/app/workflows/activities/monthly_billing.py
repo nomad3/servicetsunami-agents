@@ -107,28 +107,17 @@ async def send_billing_invoices(tenant_id: str, invoice_ids: list) -> dict:
 @activity.defn
 async def schedule_billing_followups(tenant_id: str, invoice_ids: list) -> dict:
     """Schedule 7-day follow-up reminders for unpaid invoices."""
-    from temporalio.client import Client
-    from app.core.config import settings
-    from app.workflows.follow_up import FollowUpInput, FollowUpWorkflow
+    from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
 
     logger.info(f"Scheduling follow-ups for {len(invoice_ids)} invoices")
 
     count = 0
     try:
-        client = await Client.connect(settings.TEMPORAL_ADDRESS)
         for invoice_id in invoice_ids:
-            follow_up_input = FollowUpInput(
-                entity_id=invoice_id,
-                tenant_id=tenant_id,
-                action="remind",
-                delay_hours=168,  # 7 days
-                message=f"Payment reminder for invoice {invoice_id}",
-            )
-            await client.start_workflow(
-                FollowUpWorkflow.run,
-                follow_up_input,
-                id=f"billing-followup-{invoice_id}",
-                task_queue="servicetsunami-orchestration",
+            await start_dynamic_workflow_by_name(
+                "Sales Follow-Up",
+                tenant_id,
+                {"entity_id": invoice_id, "action": "reminder", "delay_hours": 168},
             )
             count += 1
     except Exception as e:

@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.data_pipeline import DataPipeline
 from app.models.pipeline_run import PipelineRun
-from app.workflows.data_source_sync import ScheduledSyncWorkflow
+from app.services.dynamic_workflow_launcher import start_dynamic_workflow_by_name
 
 logger = logging.getLogger(__name__)
 
@@ -102,29 +102,19 @@ class SchedulerWorker:
 
         await session.commit()
 
-        # 4. Trigger Temporal Workflow
+        # 4. Trigger Dynamic Workflow
         try:
-            # Extract connector info from pipeline config
-            # Assuming pipeline config has connector_id and tables
-            connector_id = pipeline.config.get("connector_id")
-            connector_type = pipeline.config.get("connector_type")
-            tables = pipeline.config.get("tables", [])
-
-            if not connector_id or not connector_type:
-                raise ValueError("Pipeline config missing connector_id or connector_type")
-
-            handle = await self.temporal_client.start_workflow(
-                ScheduledSyncWorkflow.run,
-                args=[connector_id, connector_type, str(pipeline.tenant_id), tables],
-                id=f"pipeline-{pipeline.id}-{run_id}",
-                task_queue="servicetsunami-databricks",
+            temporal_wf_id = await start_dynamic_workflow_by_name(
+                "Data Source Sync",
+                str(pipeline.tenant_id),
+                {"data_source_id": str(pipeline.data_source_id)},
             )
 
             # Update run with workflow ID
-            pipeline_run.workflow_id = handle.id
+            pipeline_run.workflow_id = temporal_wf_id
             await session.commit()
 
-            logger.info(f"Started workflow {handle.id} for pipeline {pipeline.id}")
+            logger.info(f"Started workflow {temporal_wf_id} for pipeline {pipeline.id}")
 
         except Exception as e:
             logger.error(f"Failed to start workflow for pipeline {pipeline.id}: {e}")
