@@ -1,0 +1,119 @@
+.workflow-node {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(20px);
+  border: 2px solid #334155;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #e2e8f0;
+  font-size: 13px;
+  min-width: 200px;
+  max-width: 260px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.workflow-node:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+.workflow-node.selected {
+  box-shadow: 0 0 0 2px #3b82f6;
+}
+
+/* Node type colors */
+.trigger-node { border-color: #0ea5e9; border-radius: 20px; text-align: center; }
+.condition-node { border-color: #f59e0b; }
+.foreach-node { border-color: #22c55e; }
+.parallel-node { border-color: #06b6d4; }
+.approval-node { border-color: #f97316; }
+
+/* Header */
+.node-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.node-title {
+  font-weight: 600;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Body */
+.node-body {
+  font-size: 11px;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.node-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+.node-output-chip {
+  background: #1e3a5f;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  color: #60a5fa;
+}
+
+/* Loop badge */
+.loop-badge {
+  background: #166534;
+  color: #4ade80;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: auto;
+}
+
+/* Integration badge */
+.integration-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-top: 4px;
+  display: inline-block;
+}
+.integration-badge.connected { background: #14532d; color: #4ade80; }
+.integration-badge.disconnected { background: #7f1d1d; color: #fca5a5; }
+
+/* Condition */
+.condition-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  margin-top: 4px;
+  padding: 0 10px;
+}
+.then-label { color: #4ade80; }
+.else-label { color: #f87171; }
+
+/* Substep count */
+.substep-count { color: #60a5fa; margin-left: 8px; font-size: 10px; }
+
+/* Approval status */
+.approval-status {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.approval-status.pending { background: #78350f; color: #fbbf24; }
+.approval-status.approved { background: #14532d; color: #4ade80; }
+.approval-status.rejected { background: #7f1d1d; color: #fca5a5; }
+
+/* Execution status glows */
+.workflow-node[style*="border-color: rgb(59, 130, 246)"] {
+  animation: pulse-blue 1.5s infinite;
+}
+@keyframes pulse-blue {
+  0%, 100% { box-shadow: 0 0 8px rgba(59, 130, 246, 0.4); }
+  50% { box-shadow: 0 0 16px rgba(59, 130, 246, 0.7); }
+}
