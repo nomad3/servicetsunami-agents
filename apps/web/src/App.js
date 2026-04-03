@@ -26,6 +26,7 @@ import ToolsPage from './pages/ToolsPage';
 import VectorStoresPage from './pages/VectorStoresPage';
 import SkillsPage from './pages/SkillsPage';
 import WorkflowsPage from './pages/WorkflowsPage';
+import WorkflowBuilder from './components/workflows/WorkflowBuilder';
 import LearningPage from './pages/LearningPage';
 import authService from './services/auth';
 
@@ -91,6 +92,8 @@ function App() {
                 <Route path="/skills" element={<ProtectedRoute><SkillsPage /></ProtectedRoute>} />
                 <Route path="/learning" element={<ProtectedRoute><LearningPage /></ProtectedRoute>} />
                 <Route path="/workflows" element={<ProtectedRoute><WorkflowsPage /></ProtectedRoute>} />
+                <Route path="/workflows/builder" element={<ProtectedRoute><WorkflowBuilder /></ProtectedRoute>} />
+                <Route path="/workflows/builder/:id" element={<ProtectedRoute><WorkflowBuilder /></ProtectedRoute>} />
                 <Route path="/task-console" element={<Navigate to="/workflows?tab=executions" replace />} />
                 <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
                 <Route path="/settings/llm" element={<Navigate to="/integrations?tab=ai-models" replace />} />

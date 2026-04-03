@@ -26,6 +26,8 @@ async def _api_call(method: str, path: str, tenant_id: str, json_data: dict = No
         )
         if resp.status_code in (200, 201):
             return resp.json()
+        if resp.status_code == 204:
+            return {"status": "success"}
         return {"error": f"API returned {resp.status_code}: {resp.text[:200]}"}
 
 
@@ -68,7 +70,7 @@ async def create_dynamic_workflow(
     if trigger_schedule:
         trigger_config["schedule"] = trigger_schedule
 
-    result = await _api_call("post", "", tid, {
+    result = await _api_call("post", "/internal/create", tid, {
         "name": name,
         "description": description,
         "definition": definition,
@@ -100,7 +102,9 @@ async def list_dynamic_workflows(
         tenant_id: Tenant UUID
     """
     tid = resolve_tenant_id(ctx) or tenant_id
-    path = f"?status={status}" if status else ""
+    path = "/internal/list"
+    if status:
+        path += f"?status={status}"
     result = await _api_call("get", path, tid)
 
     if isinstance(result, list):
@@ -135,7 +139,7 @@ async def run_dynamic_workflow(
         tenant_id: Tenant UUID
     """
     tid = resolve_tenant_id(ctx) or tenant_id
-    result = await _api_call("post", f"/{workflow_id}/run", tid, {
+    result = await _api_call("post", f"/internal/{workflow_id}/run", tid, {
         "input_data": input_data or {},
     })
 
@@ -161,7 +165,7 @@ async def get_workflow_run_status(
         tenant_id: Tenant UUID
     """
     tid = resolve_tenant_id(ctx) or tenant_id
-    result = await _api_call("get", f"/runs/{run_id}", tid)
+    result = await _api_call("get", f"/internal/runs/{run_id}", tid)
 
     if "error" not in result and "run" in result:
         run = result["run"]
@@ -197,7 +201,95 @@ async def activate_dynamic_workflow(
         tenant_id: Tenant UUID
     """
     tid = resolve_tenant_id(ctx) or tenant_id
-    return await _api_call("post", f"/{workflow_id}/activate", tid)
+    return await _api_call("post", f"/internal/{workflow_id}/activate", tid)
+
+
+@mcp.tool()
+async def update_dynamic_workflow(
+    workflow_id: str,
+    tenant_id: str = "",
+    name: str = "",
+    description: str = "",
+    trigger_type: str = "",
+    trigger_schedule: str = "",
+    definition: dict = None,
+    ctx: Context = None,
+) -> dict:
+    """Update an existing dynamic workflow. Only provided fields are changed; omitted fields keep their current values.
+
+    Args:
+        workflow_id: UUID of the workflow to update
+        tenant_id: Tenant UUID
+        name: New workflow name (leave empty to keep current)
+        description: New description (leave empty to keep current)
+        trigger_type: New trigger type — "manual", "cron", "interval", "webhook", "event" (leave empty to keep current)
+        trigger_schedule: New cron expression for cron triggers (leave empty to keep current)
+        definition: Full workflow definition replacement (dict with "steps" list). Omit to keep current.
+    """
+    tid = resolve_tenant_id(ctx) or tenant_id
+
+    # Fetch current workflow
+    current = await _api_call("get", f"/internal/{workflow_id}", tid)
+    if "error" in current:
+        return current
+
+    # Build update payload merging only provided fields
+    update_data = {}
+    update_data["name"] = name if name else current.get("name", "")
+    update_data["description"] = description if description else current.get("description", "")
+
+    if definition is not None:
+        update_data["definition"] = definition
+    else:
+        update_data["definition"] = current.get("definition", {"steps": []})
+
+    # Merge trigger config
+    current_trigger = current.get("trigger_config") or {}
+    trigger_config = {}
+    trigger_config["type"] = trigger_type if trigger_type else current_trigger.get("type", "manual")
+    if trigger_schedule:
+        trigger_config["schedule"] = trigger_schedule
+    elif "schedule" in current_trigger:
+        trigger_config["schedule"] = current_trigger["schedule"]
+    update_data["trigger_config"] = trigger_config
+
+    update_data["tags"] = current.get("tags", [])
+
+    result = await _api_call("put", f"/internal/{workflow_id}", tid, json_data=update_data)
+
+    if "error" not in result:
+        return {
+            "status": "updated",
+            "id": result.get("id"),
+            "name": result.get("name"),
+            "steps": len(result.get("definition", {}).get("steps", [])),
+            "trigger": (result.get("trigger_config") or {}).get("type", "manual"),
+        }
+    return result
+
+
+@mcp.tool()
+async def delete_dynamic_workflow(
+    workflow_id: str,
+    tenant_id: str = "",
+    ctx: Context = None,
+) -> dict:
+    """Delete a dynamic workflow permanently.
+
+    Args:
+        workflow_id: UUID of the workflow to delete
+        tenant_id: Tenant UUID
+    """
+    tid = resolve_tenant_id(ctx) or tenant_id
+    result = await _api_call("delete", f"/internal/{workflow_id}", tid)
+
+    if "error" not in result:
+        return {
+            "status": "deleted",
+            "workflow_id": workflow_id,
+            "message": f"Workflow {workflow_id} has been permanently deleted.",
+        }
+    return result
 
 
 @mcp.tool()
@@ -213,7 +305,7 @@ async def install_workflow_template(
         tenant_id: Tenant UUID
     """
     tid = resolve_tenant_id(ctx) or tenant_id
-    result = await _api_call("post", f"/templates/{template_id}/install", tid)
+    result = await _api_call("post", f"/internal/templates/{template_id}/install", tid)
 
     if "error" not in result:
         return {

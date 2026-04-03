@@ -25,6 +25,16 @@ const dynamicWorkflowService = {
     return r.data;
   },
 
+  // Validation
+  dryRun: async (id, inputData = {}) => {
+    const r = await api.post(`/dynamic-workflows/${id}/run`, { input_data: inputData, dry_run: true });
+    return r.data;
+  },
+
+  // Integration awareness
+  getIntegrationStatus: async () => { const r = await api.get('/integrations/status'); return r.data; },
+  getToolMapping: async () => { const r = await api.get('/integrations/tool-mapping'); return r.data; },
+
   // Templates
   browseTemplates: async (tier) => {
     const params = tier ? { tier } : {};

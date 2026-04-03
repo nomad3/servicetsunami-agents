@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 
 class WorkflowStepDef(BaseModel):
     id: str
-    type: str  # mcp_tool, agent, condition, for_each, parallel, wait, transform, human_approval, webhook_trigger, workflow
+    type: str  # mcp_tool, agent, condition, for_each, parallel, wait, transform, human_approval, webhook_trigger, workflow, continue_as_new, cli_execute, internal_api
     tool: Optional[str] = None  # MCP tool name (for mcp_tool type)
     agent: Optional[str] = None  # Agent slug (for agent type)
     prompt: Optional[str] = None  # Prompt template (for agent type)
@@ -27,6 +27,14 @@ class WorkflowStepDef(BaseModel):
     duration: Optional[str] = None
     # Transform
     operation: Optional[str] = None
+    # Continue-as-new
+    interval_seconds: Optional[int] = None  # Sleep interval before continue_as_new
+    # Internal API
+    method: Optional[str] = None  # HTTP method for internal_api steps
+    path: Optional[str] = None  # API path for internal_api steps
+    body: Optional[Dict[str, Any]] = None  # Request body for internal_api steps
+    # CLI Execute
+    task: Optional[str] = None  # Task description for cli_execute steps
     # Overrides
     timeout_seconds: Optional[int] = None
     heartbeat_seconds: Optional[int] = None
@@ -124,6 +132,8 @@ class WorkflowStepLogInDB(BaseModel):
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
     duration_ms: Optional[int]
+    input_data: Optional[Dict[str, Any]] = None
+    output_data: Optional[Dict[str, Any]] = None
     error: Optional[str]
     tokens_used: Optional[int] = 0
     cost_usd: Optional[float] = 0.0
@@ -136,3 +146,4 @@ class WorkflowStepLogInDB(BaseModel):
 
 class WorkflowRunRequest(BaseModel):
     input_data: Optional[Dict[str, Any]] = None
+    dry_run: Optional[bool] = False

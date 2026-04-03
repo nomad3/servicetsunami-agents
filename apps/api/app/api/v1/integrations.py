@@ -6,10 +6,37 @@ from app.api import deps
 from app.core.config import settings
 from app.models.user import User
 from app.services.chat_import import chat_import_service
+from app.services.integration_status import get_connected_integrations, get_tool_mapping
 from app.models.chat import ChatSession, ChatMessage
 from app.workflows.knowledge_extraction import KnowledgeExtractionWorkflow
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Integration status endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/status")
+def integration_status(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """
+    Return which integrations are connected for the current tenant.
+    Each entry includes: connected (bool), name (display name), icon.
+    """
+    return get_connected_integrations(db, current_user.tenant_id)
+
+
+@router.get("/tool-mapping")
+def tool_mapping():
+    """
+    Return the static mapping of MCP tool names to their required integration.
+    Tools mapped to null require no integration.
+    """
+    return get_tool_mapping()
+
 
 @router.post("/import/chatgpt", status_code=201)
 async def import_chatgpt_history(

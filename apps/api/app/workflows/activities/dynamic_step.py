@@ -65,12 +65,49 @@ async def execute_dynamic_step(
             result = _evaluate_condition(step, context)
         elif step_type == "transform":
             result = _transform_data(step, context)
+        elif step_type == "internal_api":
+            result = await _call_internal_api(step, context, tenant_id)
+        elif step_type == "cli_execute":
+            activity.heartbeat("Delegating to CLI execution")
+            params = step.get("params", {})
+            result = {"delegated_to": "servicetsunami-code", "task": params.get("task", step.get("task", ""))}
         else:
             result = {"error": f"Unknown step type: {step_type}"}
 
         duration_ms = int((time.time() - start) * 1000)
         _log_step(run_id, step_id, step_type, "completed", duration_ms=duration_ms,
                   output=result, tokens=result.get("tokens_used", 0) if isinstance(result, dict) else 0)
+
+        # Log RL experience for individual step execution
+        try:
+            from app.db.session import SessionLocal
+            from app.services.rl_experience_service import log_experience
+            rl_db = SessionLocal()
+            try:
+                log_experience(
+                    db=rl_db,
+                    tenant_id=uuid.UUID(tenant_id),
+                    trajectory_id=uuid.UUID(run_id),
+                    step_index=hash(step_id) % 1000,
+                    decision_point="workflow_step",
+                    state={
+                        "run_id": run_id,
+                        "step_id": step_id,
+                        "step_type": step_type,
+                        "duration_ms": duration_ms,
+                    },
+                    action={
+                        "step_type": step_type,
+                        "tool": step.get("tool"),
+                        "agent": step.get("agent"),
+                        "tokens_used": result.get("tokens_used", 0) if isinstance(result, dict) else 0,
+                    },
+                    state_text=f"Workflow step {step_id} ({step_type}) completed in {duration_ms}ms",
+                )
+            finally:
+                rl_db.close()
+        except Exception as rl_err:
+            logger.debug("RL experience logging failed for step %s: %s", step_id, rl_err)
 
         return result
 
@@ -206,6 +243,31 @@ async def _call_agent(step: dict, context: dict, tenant_id: str) -> dict:
         }
     finally:
         db.close()
+
+
+async def _call_internal_api(step: dict, context: dict, tenant_id: str) -> dict:
+    """Call an internal API endpoint."""
+    params = step.get("params", {})
+    method = params.get("method", "GET").lower()
+    path = params.get("path", "")
+    body = _resolve_params(params.get("body", {}), context) if isinstance(params.get("body"), dict) else params.get("body")
+
+    activity.heartbeat(f"Calling internal API: {path}")
+
+    api_base = os.environ.get("API_BASE_URL", "http://localhost:8000")
+    api_key = os.environ.get("API_INTERNAL_KEY", "dev_internal_key")
+
+    async with httpx.AsyncClient(timeout=_http_timeout_for_step(step, default_seconds=25.0)) as client:
+        resp = await getattr(client, method)(
+            f"{api_base}/api/v1{path}",
+            headers={"X-Internal-Key": api_key, "X-Tenant-Id": tenant_id},
+            json=body if method in ("post", "put") else None,
+            params=body if method == "get" else None,
+        )
+        try:
+            return resp.json()
+        except Exception:
+            return {"status_code": resp.status_code, "text": resp.text[:2000]}
 
 
 def _evaluate_condition(step: dict, context: dict) -> dict:
@@ -377,6 +439,30 @@ async def finalize_workflow_run(
                 if error:
                     run.error = error
                 db.commit()
+
+                # Log RL experience for workflow execution
+                try:
+                    from app.services.rl_experience_service import log_experience
+                    log_experience(
+                        db=db,
+                        tenant_id=run.tenant_id,
+                        trajectory_id=uuid.UUID(run_id),
+                        step_index=0,
+                        decision_point="workflow_execution",
+                        state={
+                            "workflow_id": str(run.workflow_id),
+                            "run_id": run_id,
+                            "steps_completed": steps_completed,
+                            "total_tokens": total_tokens,
+                            "total_cost": total_cost,
+                        },
+                        action={"status": status, "error": error or None},
+                        state_text=f"Workflow run {run_id} finished with status={status}, "
+                                   f"{steps_completed} steps, {total_tokens} tokens, ${total_cost:.4f}",
+                    )
+                except Exception as rl_err:
+                    logger.debug("RL experience logging failed for run %s: %s", run_id, rl_err)
+
                 logger.info("Finalized workflow run %s: status=%s steps=%d", run_id, status, steps_completed)
                 return {"finalized": True, "status": status}
             else:

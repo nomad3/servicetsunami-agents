@@ -49,6 +49,9 @@ def _timeout_for(step: dict) -> timedelta:
         "wait": timedelta(days=7),
         "human_approval": timedelta(days=30),
         "workflow": timedelta(minutes=30),
+        "cli_execute": timedelta(minutes=30),
+        "internal_api": timedelta(seconds=60),
+        "continue_as_new": timedelta(seconds=10),
     }
     return timeouts.get(step.get("type", ""), timedelta(minutes=5))
 
@@ -121,6 +124,44 @@ class DynamicWorkflowExecutor:
                     duration_s = _parse_duration(step.get("duration", "60s"))
                     await workflow.sleep(timedelta(seconds=duration_s))
                     result = {"waited": step.get("duration"), "seconds": duration_s}
+                elif step_type == "cli_execute":
+                    # Dispatch to code-worker queue via child workflow
+                    import os as _os
+                    params = step.get("params", {})
+                    task_desc = params.get("task", step.get("task", ""))
+                    # Resolve simple {{var}} references from context
+                    import re as _re
+                    def _resolve(m):
+                        path = m.group(1).strip()
+                        val = context
+                        for k in path.split('.'):
+                            if isinstance(val, dict):
+                                val = val.get(k, m.group(0))
+                            else:
+                                return m.group(0)
+                        return str(val)
+                    task_desc = _re.sub(r'\{\{(.+?)\}\}', _resolve, task_desc)
+
+                    from temporalio.client import Client as _TClient
+                    _tc = await _TClient.connect(
+                        _os.environ.get("TEMPORAL_ADDRESS", "temporal:7233")
+                    )
+                    code_handle = await _tc.start_workflow(
+                        "CodeTaskWorkflow",
+                        {
+                            "task_description": task_desc,
+                            "tenant_id": input.tenant_id,
+                            "context": params.get("context", ""),
+                        },
+                        id=f"dyn-cli-{workflow.info().workflow_id}-{step.get('id', '')}",
+                        task_queue="servicetsunami-code",
+                        execution_timeout=timedelta(minutes=60),
+                    )
+                    code_result = await code_handle.result()
+                    result = code_result if isinstance(code_result, dict) else {"output": str(code_result)}
+                elif step_type == "continue_as_new":
+                    # Handled after the loop, skip as a step
+                    result = {"type": "continue_as_new", "interval_seconds": step.get("interval_seconds", 900)}
                 else:
                     result = await workflow.execute_activity(
                         execute_dynamic_step,
@@ -164,6 +205,18 @@ class DynamicWorkflowExecutor:
                     steps_completed=steps_completed,
                     error=error_msg,
                 )
+
+        # Check if last step is continue_as_new (infinite-duration workflow)
+        if steps and steps[-1].get("type") == "continue_as_new":
+            last_step = steps[-1]
+            interval = last_step.get("interval_seconds", 900)
+            await workflow.execute_activity(
+                finalize_workflow_run,
+                args=[input.run_id, "completed", steps_completed, total_tokens, total_cost],
+                start_to_close_timeout=timedelta(seconds=30),
+            )
+            await workflow.sleep(timedelta(seconds=interval))
+            workflow.continue_as_new(input)
 
         await workflow.execute_activity(
             finalize_workflow_run,
