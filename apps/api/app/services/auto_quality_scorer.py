@@ -121,7 +121,7 @@ async def _score_and_log(
     rubric_raw, consensus = await asyncio.gather(
         generate(
             prompt=prompt,
-            model=os.environ.get("QUALITY_MODEL", "qwen2.5-coder:1.5b"),
+            model=os.environ.get("QUALITY_MODEL", "gemma4"),
             system=rubric["system_prompt"],
             temperature=0.1,
             max_tokens=300,
@@ -207,7 +207,7 @@ async def _score_and_log(
         logger.info("Consensus FAILED for agent=%s — issues: %s", agent_slug, "; ".join(consensus.all_issues[:3]))
 
     # ── Determine scorer confidence weight based on reward source ──
-    # Single Qwen run (auto_quality) is less reliable than multi-reviewer
+    # Single Gemma 4 run (auto_quality) is less reliable than multi-reviewer
     # consensus. Human reviews and explicit ratings are ground truth.
     # Confidence weights: admin_review/explicit_rating=1.0,
     # auto_quality_consensus=0.7, auto_quality=0.5, backfill=0.1.
@@ -275,7 +275,7 @@ async def _score_and_log(
                     "breakdown": breakdown,
                     "cost_efficiency": cost_efficiency,
                     "reasoning": reasoning,
-                    "model": os.environ.get("QUALITY_MODEL", "qwen2.5-coder:1.5b"),
+                    "model": os.environ.get("QUALITY_MODEL", "gemma4"),
                     "platform": platform,
                     "tokens_used": tokens_used,
                     "cost_usd": cost_usd,

@@ -2,11 +2,11 @@
 
 **Date**: 2026-03-23
 **Status**: Design
-**Goal**: Add a provider-diverse review council where Claude, Codex, Gemini, and Qwen each independently evaluate agent responses. Runs as async Temporal workflow, not inline in chat.
+**Goal**: Add a provider-diverse review council where Claude, Codex, Gemini, and Gemma 4 each independently evaluate agent responses. Runs as async Temporal workflow, not inline in chat.
 
 ## Why
 
-The current consensus council uses 3 Qwen reviewers — same model family, different prompts. This catches formatting and factual issues but has zero model diversity. If Qwen has a systematic blind spot, all 3 reviewers share it.
+The current consensus council uses 3 Gemma 4 reviewers — same model family, different prompts. This catches formatting and factual issues but has zero model diversity. If Gemma 4 has a systematic blind spot, all 3 reviewers share it.
 
 A multi-provider council gives real disagreement signals: if Claude approves but Codex rejects, that's meaningful. If all 4 providers agree, confidence is high. These signals feed into RL for platform selection optimization.
 
@@ -15,13 +15,13 @@ A multi-provider council gives real disagreement signals: if Claude approves but
 ```
 Agent Response (already returned to user)
   → auto_quality_scorer.py (existing)
-      → Local Qwen Council (always-on, fast, free)
+      → Local Gemma 4 Council (always-on, fast, free)
       → Triggers provider council? (decision gate)
           ↓
   → Temporal: ProviderReviewWorkflow (async, never blocks user)
       → Claude CLI reviewer  (tenant's subscription)
       → Codex CLI reviewer   (tenant's subscription)
-      → Qwen local reviewer  (free)
+      → Gemma 4 local reviewer  (free)
       → [future] Gemini CLI reviewer
       → Meta-adjudicator: combines votes, stores disagreement patterns
       → RL experience update with provider-level breakdown
@@ -62,7 +62,7 @@ Each reviewer returns:
 ```python
 @dataclass
 class ProviderReview:
-    provider: str             # "claude_code", "codex", "local_qwen", "gemini_cli"
+    provider: str             # "claude_code", "codex", "local_gemma", "gemini_cli"
     approved: bool
     verdict: str              # APPROVED, REJECTED, CONDITIONAL
     score: int                # 0-100
@@ -91,7 +91,7 @@ codex exec "{review_prompt}" --json
 - Same review prompt format
 - Falls back if no Codex credential
 
-**Qwen Local Reviewer** — Already exists (consensus_reviewer.py):
+**Gemma 4 Local Reviewer** — Already exists (consensus_reviewer.py):
 - Reuses existing local reviewer infrastructure
 - Always available, zero cost
 
@@ -134,7 +134,7 @@ class ProviderReviewWorkflow:
         reviews = await asyncio.gather(
             workflow.execute_activity(review_with_claude, ...),
             workflow.execute_activity(review_with_codex, ...),
-            workflow.execute_activity(review_with_local_qwen, ...),
+            workflow.execute_activity(review_with_local_gemma, ...),
             return_exceptions=True,
         )
         # Filter out failed providers
@@ -158,10 +158,10 @@ Each provider council run produces an RL experience update:
     "provider_reviews": {
       "claude_code": {"score": 85, "approved": true},
       "codex": {"score": 72, "approved": true},
-      "local_qwen": {"score": 65, "approved": false}
+      "local_gemma": {"score": 65, "approved": false}
     },
     "provider_agreement": 0.67,
-    "disagreements": ["qwen flagged hallucination, claude/codex did not"],
+    "disagreements": ["gemma flagged hallucination, claude/codex did not"],
     "recommended_platform": "claude_code",
     "total_cost": 0.04
   }
@@ -178,7 +178,7 @@ Over time, this data enables:
 ### Phase 1: Review Activities (code-worker)
 - `review_with_claude`: CLI call with review prompt, parse JSON verdict
 - `review_with_codex`: Same pattern with Codex CLI
-- `review_with_local_qwen`: Calls existing consensus_reviewer
+- `review_with_local_gemma`: Calls existing consensus_reviewer
 - All activities in `apps/code-worker/workflows.py`
 
 ### Phase 2: ProviderReviewWorkflow
@@ -199,16 +199,16 @@ Over time, this data enables:
 
 | Scenario | Providers Used | Cost/Review | Frequency |
 |----------|---------------|-------------|-----------|
-| Code PR | Claude + Codex + Qwen | ~$0.05 | Every code task |
-| Fragile consensus | Claude + Qwen | ~$0.02 | ~10% of messages |
+| Code PR | Claude + Codex + Gemma 4 | ~$0.05 | Every code task |
+| Fragile consensus | Claude + Gemma 4 | ~$0.02 | ~10% of messages |
 | Sampled eval | All available | ~$0.05 | ~5% of messages |
-| Low score | Claude + Qwen | ~$0.02 | ~5% of messages |
+| Low score | Claude + Gemma 4 | ~$0.02 | ~5% of messages |
 
 Estimated: ~$0.50-2.00/day at current volume. Well within subscription budgets.
 
 ## What This is NOT
 
-- NOT a replacement for the local Qwen council (that stays as fast QA)
+- NOT a replacement for the local Gemma 4 council (that stays as fast QA)
 - NOT inline in the chat path (always async via Temporal)
 - NOT required for every message (decision gate controls when it runs)
 - NOT generating alternative responses (review only, not re-generation)

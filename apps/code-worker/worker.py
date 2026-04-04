@@ -15,7 +15,7 @@ from workflows import (
     CodeTaskWorkflow, execute_code_task,
     ChatCliWorkflow, execute_chat_cli,
     ProviderReviewWorkflow, review_with_claude, review_with_codex,
-    review_with_local_qwen, finalize_provider_council,
+    review_with_local_gemma, finalize_provider_council,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -37,7 +37,7 @@ async def main():
         activities=[
             execute_code_task, execute_chat_cli,
             review_with_claude, review_with_codex,
-            review_with_local_qwen, finalize_provider_council,
+            review_with_local_gemma, finalize_provider_council,
         ],
         workflow_runner=SandboxedWorkflowRunner(
             restrictions=SandboxRestrictions.default.with_passthrough_modules(

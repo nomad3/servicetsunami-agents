@@ -105,7 +105,7 @@ Message → CLI → Response             Message → Safety Gate → Trust Check
 │                  AUTO QUALITY + RL + LEARNING                       │
 │                                                                     │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐ │
-│  │ Qwen Scorer  │  │ Provider     │  │ RL Experience             │ │
+│  │ Gemma 4 Scorer  │  │ Provider     │  │ RL Experience             │ │
 │  │ 6-dim rubric │  │ Council (20%)│  │ → Trust Scores            │ │
 │  │ 100pts total │  │              │  │ → Routing Optimization    │ │
 │  └──────┬───────┘  └──────────────┘  │ → Policy Candidates      │ │
@@ -531,7 +531,7 @@ Phase 3: Learned Coalition Routing (PR #44)
   ┌─────────────────────────────────────────────────┐
   │ Coalition Template: "Code Review Team"          │
   │ Pattern: propose_critique_revise                │
-  │ Roles: planner=luna, critic=codex, verifier=qwen│
+  │ Roles: planner=luna, critic=codex, verifier=gemma│
   │ Task types: [code, refactor]                    │
   │                                                 │
   │ Performance (per task type):                    │
@@ -742,7 +742,7 @@ CLI Execution (Claude/Codex/Gemini)
     ▼
 Response
     │
-    ├──▶ Auto Quality Scorer (Qwen, 6-dim, 100pts)
+    ├──▶ Auto Quality Scorer (Gemma 4, 6-dim, 100pts)
     │       │
     │       ├──▶ RL Experience logged (state, action, reward)
     │       │
@@ -752,7 +752,7 @@ Response
     │       │       └── auto-complete on min samples
     │       │
     │       ├──▶ Provider Council (20% sample, or if low score/fragile)
-    │       │       Claude + Codex + Qwen in parallel
+    │       │       Claude + Codex + Gemma 4 in parallel
     │       │
     │       └──▶ Trust profile recompute (6h staleness refresh)
     │

@@ -566,7 +566,7 @@ def _generate_agentic_response(
                     for m in new_msgs
                 )
 
-                # Summarize using local Qwen (background priority — does NOT
+                # Summarize using local Gemma 4 (background priority — does NOT
                 # set _foreground_active, so auto-scorer is not starved)
                 import asyncio as _aio
                 from app.services.local_inference import generate
@@ -578,7 +578,7 @@ def _generate_agentic_response(
                 )
 
                 summary = _aio.run(generate(
-                    prompt, model="qwen2.5-coder:1.5b", max_tokens=200,
+                    prompt, model="gemma4", max_tokens=200,
                     timeout=45, priority="background",
                 ))
                 if not summary or len(summary) < 10:

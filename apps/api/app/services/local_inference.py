@@ -1,6 +1,6 @@
 """Local inference service — calls Ollama for zero-cost ML tasks.
 
-Uses small models (Qwen2.5-Coder-0.5B to 3B) running on the local
+Uses Gemma 4 models running on the local
 Ollama instance for:
 - Auto-quality scoring of agent responses
 - Entity extraction from messages
@@ -21,8 +21,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
-DEFAULT_MODEL = os.environ.get("LOCAL_MODEL", "qwen2.5-coder:0.5b")
-QUALITY_MODEL = os.environ.get("QUALITY_MODEL", "qwen2.5-coder:1.5b")
+DEFAULT_MODEL = os.environ.get("LOCAL_MODEL", "gemma4")
+QUALITY_MODEL = os.environ.get("QUALITY_MODEL", "gemma4")
 
 # ---------------------------------------------------------------------------
 # GPU inference bulkhead — foreground (user-blocking) has priority over
@@ -315,7 +315,7 @@ def generate_sync(
 # ---------------------------------------------------------------------------
 
 async def triage_inbox_items(items_text: str) -> Optional[list]:
-    """Triage emails and calendar events using local Qwen model.
+    """Triage emails and calendar events using local Gemma 4 model.
 
     Returns a JSON list of high/medium priority items, or None on failure.
     Replaces the Anthropic LLM call in inbox_monitor.triage_items().
@@ -360,12 +360,12 @@ If nothing is high or medium priority, respond with: []"""
         if isinstance(parsed, list):
             return parsed
     except (json.JSONDecodeError, ValueError, IndexError):
-        logger.debug("Failed to parse Qwen triage result: %s", result[:200])
+        logger.debug("Failed to parse Gemma 4 triage result: %s", result[:200])
     return None
 
 
 def extract_knowledge_sync(content: str, content_type: str = "plain_text") -> Optional[dict]:
-    """Extract entities/relations/memories from content using local Qwen model (sync).
+    """Extract entities/relations/memories from content using local Gemma 4 model (sync).
 
     Returns a dict with keys: entities, relations, memories, action_triggers.
     Returns None on failure so callers can fall back to Anthropic.
@@ -411,7 +411,7 @@ If no entities found, return: {{"entities": [], "relations": [], "memories": [],
         if "entities" in data:
             return data
     except (json.JSONDecodeError, ValueError, IndexError):
-        logger.debug("Failed to parse Qwen knowledge extraction: %s", result[:200])
+        logger.debug("Failed to parse Gemma 4 knowledge extraction: %s", result[:200])
     return None
 
 
@@ -444,12 +444,12 @@ def extract_knowledge_with_prompt_sync(prompt: str) -> Optional[dict]:
         if "entities" in data:
             return data
     except (json.JSONDecodeError, ValueError, IndexError):
-        logger.debug("Failed to parse Qwen knowledge extraction (with prompt): %s", result[:200])
+        logger.debug("Failed to parse Gemma 4 knowledge extraction (with prompt): %s", result[:200])
     return None
 
 
 def classify_task_type_sync(message: str) -> Optional[str]:
-    """Classify a user message into a task type using local Qwen model (sync).
+    """Classify a user message into a task type using local Gemma 4 model (sync).
 
     Returns one of: code, data, sales, marketing, knowledge, support, scheduling, general.
     Returns None on failure so callers can fall back to keyword matching.
@@ -483,7 +483,7 @@ async def analyze_competitors_local(
     competitors_context: str,
     previous_summary: str = "",
 ) -> Optional[dict]:
-    """Analyze competitor data using local Qwen model.
+    """Analyze competitor data using local Gemma 4 model.
 
     Returns dict with observations, notable_changes, summary — or None on failure.
     Replaces the Anthropic call in competitor_monitor.analyze_competitor_changes().
@@ -540,7 +540,7 @@ Keys in observations must match competitor IDs from the data."""
             data.setdefault("summary", "")
             return data
     except (json.JSONDecodeError, ValueError, IndexError):
-        logger.debug("Failed to parse Qwen competitor analysis: %s", result[:200])
+        logger.debug("Failed to parse Gemma 4 competitor analysis: %s", result[:200])
     return None
 
 
@@ -550,7 +550,7 @@ def generate_agent_response_sync(
     skill_body: str = "",
     agent_slug: str = "luna",
 ) -> Optional[str]:
-    """Generate an agent response using local Qwen model (sync).
+    """Generate an agent response using local Gemma 4 model (sync).
 
     Used as a fallback when no CLI subscription (Claude Code / Codex) is connected.
     Uses the agent's skill_body as the persona — not hardcoded to Luna.
@@ -594,7 +594,7 @@ generate_luna_response_sync = generate_agent_response_sync
 
 
 def summarize_conversation_sync(conversation_text: str) -> Optional[str]:
-    """Summarize a conversation using local Qwen model (sync).
+    """Summarize a conversation using local Gemma 4 model (sync).
 
     Returns summary text or None on failure.
     Replaces the Anthropic call in context_manager._generate_summary().

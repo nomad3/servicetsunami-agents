@@ -23,7 +23,7 @@ async def get_status(current_user=Depends(deps.get_current_active_user)):
 
 @router.post("/pull")
 async def pull_model(
-    model_name: str = "qwen2.5-coder:0.5b",
+    model_name: str = "gemma4",
     current_user=Depends(deps.get_current_active_user),
 ):
     """Pull a model to Ollama."""

@@ -103,7 +103,7 @@ The platform has strong foundations (chat, WhatsApp, knowledge graph, RL, Tempor
 ### P3.3 — Local Ollama performance
 - **Gap**: 47-80s per call, cold start >300s
 - **Impact**: Free-tier users get unusable response times
-- **Fix**: Switch to qwen3:0.6b for tool calling, pre-warm model on startup, add response streaming
+- **Fix**: Switch to gemma4 for tool calling, pre-warm model on startup, add response streaming
 - **Files**: `services/local_tool_agent.py`, `services/local_inference.py`
 - **Effort**: 3 days
 

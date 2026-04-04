@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-22 (revised 2026-03-23)
 **Status**: In Progress — code complete, blocked on model inference speed
-**Goal**: Give tenants without a Claude/Codex subscription access to curated MCP tools via a local model (qwen3:4b) through Ollama's native tool calling API.
+**Goal**: Give tenants without a Claude/Codex subscription access to curated MCP tools via a local model (gemma4) through Ollama's native tool calling API.
 
 ## Context
 
@@ -13,7 +13,7 @@
 
 ## Model
 
-**qwen3:4b** — 2.5GB, ~4GB RAM. Tool calling confirmed 2026-03-22. Already pulled.
+**gemma4** — 2.5GB, ~4GB RAM. Tool calling confirmed 2026-03-22. Already pulled.
 
 **Known issue**: With 10 tool schemas, each call takes 47-80s on laptop. First call after cold start exceeds 300s timeout. May need faster hardware or smaller model.
 
@@ -67,12 +67,12 @@ User message (no subscription)
 ## Status
 
 ### Done
-- qwen3:4b pulled and tool calling confirmed
+- gemma4 pulled and tool calling confirmed
 - local_tool_agent.py built with correct MCP tool names/schemas
 - Fallback chain wired: tool agent → plain text → error
 - Agent-preserving (skill_body as system prompt)
 - tenant_id auto-injected into MCP calls
 
 ### Blocked
-- qwen3:4b inference too slow on M-series laptop with 10 tool schemas (~5min per call)
-- Need either: fewer tools (2-3), smaller model (qwen3:1.7b), or beefier hardware
+- gemma4 inference too slow on M-series laptop with 10 tool schemas (~5min per call)
+- Need either: fewer tools (2-3), smaller model (gemma4), or beefier hardware

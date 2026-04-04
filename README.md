@@ -69,7 +69,7 @@ Internet -> Cloudflare Tunnel
 |  FastAPI Backend                                                  |
 |  +---------------+  +----------------+  +----------------------+  |
 |  | Agent Router  |  | Session Manager|  | Auto Quality Scorer  |  |
-|  | (Python, zero |  | (skill->config,|  | (local Qwen, 6-dim  |  |
+|  | (Python, zero |  | (skill->config,|  | (local Gemma 4,     |  |
 |  |  LLM cost)    |  |  resume/retry) |  |  RL scoring)         |  |
 |  +-------+-------+  +----------------+  +----------------------+  |
 +---------+------------------------------------------------------------+
@@ -94,7 +94,7 @@ Internet -> Cloudflare Tunnel
 |  Local ML (Ollama -- zero cloud cost)                                 |
 |  +------------------+  +---------------+  +------------------+        |
 |  | Auto Scoring     |  | Knowledge     |  | Fallback Chat    |        |
-|  | qwen2.5-coder    |  | Extraction    |  | (no sub needed)  |        |
+|  | gemma4           |  | Extraction    |  | (no sub needed)  |        |
 |  | 6-dim rubric->RL |  | + Triage      |  | Luna persona     |        |
 |  +------------------+  +---------------+  +------------------+        |
 +-----------------------------------------------------------------------+
@@ -223,7 +223,7 @@ idle ──> listening ──> thinking ──> responding ──> idle
 
 ## Auto Quality Scoring & RL
 
-Every agent response is automatically scored by a local Qwen model across 6 dimensions:
+Every agent response is automatically scored by a local Gemma 4 model across 6 dimensions:
 
 | Dimension | Max | What it measures |
 |-----------|-----|-----------------|
@@ -242,14 +242,14 @@ All lightweight ML tasks run locally via Ollama (zero cloud cost):
 
 | Task | Model | Replaces |
 |------|-------|----------|
-| Response quality scoring | qwen2.5-coder:1.5b | Manual review |
-| Conversation summarization | qwen2.5-coder:0.5b | Anthropic API calls |
-| Knowledge extraction | qwen2.5-coder:1.5b | Anthropic API calls |
-| Email/calendar triage | qwen2.5-coder:1.5b | Anthropic API calls |
-| Competitor analysis | qwen2.5-coder:1.5b | Anthropic API calls |
-| Message intent classification | qwen2.5-coder:0.5b | LLM-based routing |
-| Free-tier fallback (Luna) | qwen2.5-coder:1.5b | Error message |
-| MCP tool calling (planned) | qwen3:4b | None — new capability |
+| Response quality scoring | gemma4 | Manual review |
+| Conversation summarization | gemma4 | Anthropic API calls |
+| Knowledge extraction | gemma4 | Anthropic API calls |
+| Email/calendar triage | gemma4 | Anthropic API calls |
+| Competitor analysis | gemma4 | Anthropic API calls |
+| Message intent classification | gemma4 | LLM-based routing |
+| Free-tier fallback (Luna) | gemma4 | Error message |
+| MCP tool calling | gemma4 | None — new capability |
 
 ## 81 MCP Tools
 
@@ -325,7 +325,7 @@ See `docs/plans/2026-03-29-luna-native-operating-system-plan.md` for the full ma
 
 ## Stack
 
-FastAPI . React 18 . Tauri 2.0 (Rust) . PostgreSQL + pgvector . Temporal . FastMCP . Ollama (Qwen) . Neonize (WhatsApp) . Cloudflare Tunnel . Docker Compose . nomic-embed-text-v1.5
+FastAPI . React 18 . Tauri 2.0 (Rust) . PostgreSQL + pgvector . Temporal . FastMCP . Ollama (Gemma 4) . Neonize (WhatsApp) . Cloudflare Tunnel . Docker Compose . nomic-embed-text-v1.5
 
 ## Documentation
 

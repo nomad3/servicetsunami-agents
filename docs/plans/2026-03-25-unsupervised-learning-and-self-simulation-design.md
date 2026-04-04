@@ -68,8 +68,8 @@ Infrastructure Layer:
 Runtime Layer:
   ✓ CLI orchestration (Claude Code, Codex, Gemini, fallback chain)
   ✓ 102 MCP tools (knowledge, email, calendar, Jira, GitHub, ads, etc.)
-  ✓ Auto quality scoring (Qwen 6-dim rubric, 100pts)
-  ✓ Provider council (20% sample, Claude+Codex+Qwen)
+  ✓ Auto quality scoring (Gemma 4 6-dim rubric, 100pts)
+  ✓ Provider council (20% sample, Claude+Codex+Gemma 4)
   ✓ RL-learned routing with exploration mode
   ✓ Temporal workflows for durable execution
 ```

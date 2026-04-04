@@ -29,7 +29,7 @@
 These existing capabilities underpin the roadmap:
 
 - 2,844 RL experiences with embeddings (100% coverage after backfill)
-- Multi-provider review council (Claude + Codex + Qwen, verified E2E)
+- Multi-provider review council (Claude + Codex + Gemma 4, verified E2E)
 - Learned routing with RL feedback loop
 - Exploration mode for training data collection
 - Inference bulkhead (foreground/background isolation)

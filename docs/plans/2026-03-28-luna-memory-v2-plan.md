@@ -33,7 +33,7 @@ Luna can look up facts but can't remember *experiences*. She knows "Phoebe is a 
 ### A.1 — Conversation episode model
 - New table: `conversation_episodes`
   - `id, tenant_id, session_id, summary, key_topics (JSONB), key_entities (JSONB), mood, outcome, duration_minutes, message_count, created_at`
-- After each conversation turn (or when session goes idle for 5+ min), generate a 2-3 sentence episode summary via Qwen
+- After each conversation turn (or when session goes idle for 5+ min), generate a 2-3 sentence episode summary via Gemma 4
 - Store with embedded vector for semantic search
 
 ### A.2 — Episode extraction activity

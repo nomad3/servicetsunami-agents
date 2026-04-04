@@ -262,7 +262,7 @@ Respond ONLY with a JSON object (no markdown fences):
   "summary": "Overall summary of competitive landscape (2-3 sentences)"
 }"""
 
-    # Try local Qwen first (zero cost)
+    # Try local Gemma 4 first (zero cost)
     try:
         from app.services.local_inference import analyze_competitors_local
         analysis = await analyze_competitors_local(
@@ -270,10 +270,10 @@ Respond ONLY with a JSON object (no markdown fences):
             previous_summary=last_summary or "",
         )
         if analysis:
-            logger.info("analyze_competitor_changes: used local Qwen (saved Anthropic tokens)")
+            logger.info("analyze_competitor_changes: used local Gemma 4 (saved Anthropic tokens)")
             return analysis
     except Exception as e:
-        logger.debug("Qwen competitor analysis failed, falling back to Anthropic: %s", e)
+        logger.debug("Gemma 4 competitor analysis failed, falling back to Anthropic: %s", e)
 
     # Fall back to Anthropic
     try:

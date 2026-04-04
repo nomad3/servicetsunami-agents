@@ -41,7 +41,7 @@ _TASK_TYPE_KEYWORDS = {
 
 
 def _infer_task_type(message: str) -> str:
-    """Infer task type from message keywords. Qwen classification runs async post-routing."""
+    """Infer task type from message keywords. Gemma 4 classification runs async post-routing."""
     # Keyword matching only — never block the hot path with Ollama calls
     msg_lower = message.lower()
     for task_type, keywords in _TASK_TYPE_KEYWORDS.items():

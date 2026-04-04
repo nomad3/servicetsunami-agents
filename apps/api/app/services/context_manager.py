@@ -156,15 +156,15 @@ class ContextManager:
             for msg in messages
         ])
 
-        # ── Try local Qwen model first (zero token cost) ──
+        # ── Try local Gemma 4 model first (zero token cost) ──
         try:
-            from app.services.local_inference import summarize_conversation_sync as _qwen_summarize
-            qwen_summary = _qwen_summarize(conversation_text)
-            if qwen_summary:
-                logger.debug("_generate_summary: used local Qwen (saved Anthropic tokens)")
-                return qwen_summary
+            from app.services.local_inference import summarize_conversation_sync as _gemma_summarize
+            gemma_summary = _gemma_summarize(conversation_text)
+            if gemma_summary:
+                logger.debug("_generate_summary: used local Gemma 4 (saved Anthropic tokens)")
+                return gemma_summary
         except Exception as e:
-            logger.debug("Qwen summarization failed (%s) — falling back to Anthropic", e)
+            logger.debug("Gemma 4 summarization failed (%s) — falling back to Anthropic", e)
 
         # ── Fall back to Anthropic ──
         if not self.client:

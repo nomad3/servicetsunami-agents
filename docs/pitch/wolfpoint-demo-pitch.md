@@ -29,13 +29,13 @@ Today's AI is powerful. GPT, Claude, Gemini, open-source models — each one is 
 
 But they work **alone.**
 
-Claude doesn't know what Gemini just discovered. Codex can't build on what Claude just coded. Your local Qwen model can't ask Claude for a second opinion. Each model is a lone hunter — powerful in isolation, limited by its own walls.
+Claude doesn't know what Gemini just discovered. Codex can't build on what Claude just coded. Your local Gemma 4 model can't ask Claude for a second opinion. Each model is a lone hunter — powerful in isolation, limited by its own walls.
 
 This is where AI is today: **the prehistoric era.**
 
 ```
 ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
-│  Claude   │   │  Codex   │   │  Gemini  │   │  Qwen    │
+│  Claude   │   │  Codex   │   │  Gemini  │   │  Gemma 4    │
 │           │   │          │   │          │   │ (local)  │
 │  Alone.   │   │  Alone.  │   │  Alone.  │   │  Alone.  │
 │  No tools.│   │  No mem. │   │  No team.│   │  No trust│
@@ -52,7 +52,7 @@ Sound familiar? It's the same trap pre-agricultural humans faced — total depen
 ### Act III: What If AI Could Form Societies?
 
 What if models could:
-- **Specialize** — Claude handles reasoning, Codex handles code, Qwen handles fast local tasks
+- **Specialize** — Claude handles reasoning, Codex handles code, Gemma 4 handles fast local tasks
 - **Communicate** — through shared tools, shared memory, shared context
 - **Trust but verify** — a review council where multiple models independently evaluate each other's work
 - **Learn** — a system that remembers which specialist performs best for each type of task, and routes accordingly
@@ -76,7 +76,7 @@ This is **Wolfpoint.ai.**
           ┌────────┬───────┼───────┬────────┐
           │        │       │       │        │
      ┌────▼──┐ ┌───▼──┐ ┌──▼──┐ ┌──▼──┐ ┌───▼───┐
-     │Claude │ │Codex │ │Qwen │ │Luna │ │Gemini │
+     │Claude │ │Codex │ │Gemma 4 │ │Luna │ │Gemini │
      │Opus   │ │      │ │Local│ │     │ │(soon) │
      └───┬───┘ └──┬───┘ └──┬──┘ └──┬──┘ └───┬───┘
          │        │        │       │        │
@@ -96,7 +96,7 @@ This is **Wolfpoint.ai.**
     │      Multi-Provider Review Council          │
     │  Claude reviews Codex's work                │
     │  Codex reviews Claude's work                │
-    │  Qwen provides free local baseline          │
+    │  Gemma 4 provides free local baseline          │
     │  Disagreements → human escalation           │
     └─────────────────────┬──────────────────────┘
                           │
@@ -115,24 +115,24 @@ This is **Wolfpoint.ai.**
 
 **1. Shared Tools, Not Shared Models**
 
-Every agent — Claude, Codex, Gemini, local Qwen — connects to the same 81 MCP tools. Email, calendar, Jira, GitHub, knowledge graph, analytics. Connect once, available to all. Like roads connecting villages — they don't care who's traveling on them.
+Every agent — Claude, Codex, Gemini, local Gemma 4 — connects to the same 81 MCP tools. Email, calendar, Jira, GitHub, knowledge graph, analytics. Connect once, available to all. Like roads connecting villages — they don't care who's traveling on them.
 
 **2. Shared Memory That Survives Sessions**
 
-The Knowledge Graph persists across conversations, agents, and platforms. Claude creates a contact entity. Codex finds it next week. Qwen recalls it instantly. 337 entities, 4,823 observations, all semantically searchable.
+The Knowledge Graph persists across conversations, agents, and platforms. Claude creates a contact entity. Codex finds it next week. Gemma 4 recalls it instantly. 337 entities, 4,823 observations, all semantically searchable.
 
 This is writing for AI — memory that outlasts any single conversation.
 
 **3. Multi-Provider Review Council**
 
-No single model is trusted blindly. When a response matters, Claude, Codex, and Qwen each independently review it. Agreement = high confidence. Disagreement = human escalation.
+No single model is trusted blindly. When a response matters, Claude, Codex, and Gemma 4 each independently review it. Agreement = high confidence. Disagreement = human escalation.
 
 ```
 Response: "The contract value is $2.5M"
 
 Claude Review:  APPROVED (score: 88) — "Factually correct"
 Codex Review:   APPROVED (score: 99) — "Accurate and concise"
-Qwen Review:    APPROVED (score: 95) — "Correctly sourced"
+Gemma 4 Review:    APPROVED (score: 95) — "Correctly sourced"
 
 Agreement: 1.0 | Consensus: PASSED | Recommended: Codex
 ```
@@ -188,7 +188,7 @@ Today's AI models have everything they need to work alone. But the next leap req
 | Knowledge Observations | 4,823 |
 | RL Experiences | 2,844 |
 | Provider Council Reviews | 11 (and counting) |
-| Supported Platforms | Claude, Codex, Gemini, Local Qwen |
+| Supported Platforms | Claude, Codex, Gemini, Local Gemma 4 |
 | Channels | Web, WhatsApp, API |
 | Cloud Cost for Scoring | $0 (local Ollama) |
 | Deployment | Self-hosted laptop via Cloudflare Tunnel |
@@ -219,7 +219,7 @@ The multi-provider review council is the mechanism that makes the network trustw
 Agent Response (already returned to user — zero latency added)
   │
   ▼
-Auto Quality Scorer (local Qwen, always-on, free)
+Auto Quality Scorer (local Gemma 4, always-on, free)
   ├── 6-dimension rubric (accuracy, helpfulness, tool usage, memory, efficiency, context)
   ├── 3-reviewer consensus (Accuracy, Helpfulness, Persona reviewers)
   ├── Leave-one-out fragility detection
@@ -235,7 +235,7 @@ Auto Quality Scorer (local Qwen, always-on, free)
   Multi-Provider Review Council (async Temporal workflow)
   ├── Claude reviews (using tenant's subscription, sonnet model)
   ├── Codex reviews (using tenant's subscription)
-  ├── Qwen reviews (local, always free)
+  ├── Gemma 4 reviews (local, always free)
   │
   ▼
   Meta-Adjudicator
@@ -258,7 +258,7 @@ Provider        Verdict     Score   Time
 ────────────    ─────────   ─────   ────
 Claude Code     APPROVED    88      5s
 Codex           APPROVED    99      5s
-Local Qwen      APPROVED    95      8s
+Local Gemma 4      APPROVED    95      8s
 
 Agreement: 1.0  |  Consensus: PASSED  |  Recommended: Codex
 ```

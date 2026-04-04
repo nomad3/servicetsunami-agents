@@ -23,7 +23,7 @@ Integral Private Network
 │   ├── mcp-tools (FastMCP, port 8087) — unchanged, no new tools here
 │   ├── code-worker (Claude Code CLI via Temporal)
 │   ├── temporal (port 7233)
-│   └── ollama (Qwen scoring, port 11434)
+│   └── ollama (Gemma 4 scoring, port 11434)
 │
 ├── Integral SRE Stack (already running)
 │   ├── control-plane-api (port 8080) ← MCP connector target
@@ -233,7 +233,7 @@ No data sync to AgentProvision's pgvector is planned. The two knowledge stores s
 ## On-Premise Deployment Considerations
 
 - Replace Cloudflare Tunnel with internal DNS/reverse proxy
-- Ollama models (qwen2.5-coder:0.5b, qwen2.5-coder:1.5b, qwen3:1.7b) total ~3GB and run on CPU. GPU not required but improves scoring latency (~2s CPU vs ~200ms GPU for 1.5b model).
+- Ollama models (gemma4, gemma4, gemma4) total ~3GB and run on CPU. GPU not required but improves scoring latency (~2s CPU vs ~200ms GPU for 1.5b model).
 - Claude Code CLI needs outbound internet for Anthropic API
 - All other traffic stays inside private network
 

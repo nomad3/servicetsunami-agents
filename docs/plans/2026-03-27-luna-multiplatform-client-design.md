@@ -60,7 +60,7 @@ The MacBook M4 is the brain. Every device is a sense organ or a voice.
 │                                                                  │
 │  ┌──────────────────┐  ┌──────────────┐  ┌───────────────────┐  │
 │  │  Ollama (11434)  │  │ Temporal(7233│  │  Postgres (8003)  │  │
-│  │  Qwen vision     │  │  workflows   │  │  + pgvector       │  │
+│  │  Gemma 4 vision     │  │  workflows   │  │  + pgvector       │  │
 │  └──────────────────┘  └──────────────┘  └───────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                             │
@@ -305,7 +305,7 @@ async def start_rtsp_relay(device_id: str, rtsp_url: str):
 Luna Vision Integration:
 ```
 Camera frame capture → POST /api/v1/vision/analyze
-→ Ollama qwen2.5-vl (vision model, if available) or Claude
+→ Ollama gemma4-vision (vision model, if available) or Claude
 → { description, persons, objects, sentiment }
 → Injected into Luna chat context as visual awareness
 ```
@@ -558,7 +558,7 @@ Tasks:
 ## Open Questions
 
 - **Tauri vs PWA-only for Phase 1**: Could ship Phase 1 as pure PWA (no Tauri) and add Tauri in Phase 3 — reduces complexity upfront
-- **Ollama vision model**: `qwen2.5-vl:7b` is available but needs ~5GB VRAM. M4 Mac has 16-32GB unified memory so it fits. Need to confirm it's pulled.
+- **Ollama vision model**: `gemma4` is available but needs ~5GB VRAM. M4 Mac has 16-32GB unified memory so it fits. Need to confirm it's pulled.
 - **EZVIZ H6 RTSP credentials**: EZVIZ default RTSP path + credentials vary by firmware. Need to verify `rtsp://admin:<password>@<ip>:554/h264/ch01/main/av_stream` works with this unit.
 - **Device bridge as separate service vs integrated into API**: Could add WebSocket hub directly to FastAPI API (avoids new Docker service). Trade-off: simpler stack vs cleaner separation.
 - **Luna avatar voice**: Should the avatar lip-sync with TTS audio? Phase 3+ — requires waveform analysis.

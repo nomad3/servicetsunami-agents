@@ -172,21 +172,21 @@ class KnowledgeExtractionService:
         prompt = self._build_prompt(content, content_type, entity_schema)
 
         try:
-            # ── Try local Qwen model first (zero token cost) ──
+            # ── Try local Gemma 4 model first (zero token cost) ──
             parsed = None
             try:
-                from app.services.local_inference import extract_knowledge_with_prompt_sync as _qwen_extract
-                qwen_result = _qwen_extract(prompt)
-                if qwen_result is not None:
-                    parsed = qwen_result
+                from app.services.local_inference import extract_knowledge_with_prompt_sync as _gemma_extract
+                gemma_result = _gemma_extract(prompt)
+                if gemma_result is not None:
+                    parsed = gemma_result
                     logger.info(
-                        "extract_from_content: used local Qwen for content_type=%s (saved Anthropic tokens)",
+                        "extract_from_content: used local Gemma 4 for content_type=%s (saved Anthropic tokens)",
                         content_type,
                     )
             except Exception as e:
-                logger.debug("Qwen knowledge extraction failed (%s) — falling back to Anthropic", e)
+                logger.debug("Gemma 4 knowledge extraction failed (%s) — falling back to Anthropic", e)
 
-            # ── Fall back to Anthropic if Qwen failed ──
+            # ── Fall back to Anthropic if Gemma 4 failed ──
             if parsed is None:
                 try:
                     llm_service = get_llm_service()

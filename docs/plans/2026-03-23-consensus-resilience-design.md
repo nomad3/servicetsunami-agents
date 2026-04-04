@@ -10,7 +10,7 @@ The actual production failures are NOT about consensus voting math:
 
 1. **Foreground/background GPU contention** — Background scoring (rubric + 3 consensus reviewers) competes with foreground local_tool_agent for the single Ollama GPU. The tool agent times out waiting for the GPU semaphore while background scoring holds it.
 
-2. **Local tool agent timeouts** — qwen3:1.7b with 9 tool schemas takes 18-60s per call. With 3 rounds + background scoring queued, total time exceeds HTTP request timeouts.
+2. **Local tool agent timeouts** — gemma4 with 9 tool schemas takes 18-60s per call. With 3 rounds + background scoring queued, total time exceeds HTTP request timeouts.
 
 3. **Dynamic workflow runs never finalize** — DB row stays "running" forever. Schema nullable fields cause 500s. (Fixed in `0b0c271` but separate reliability track.)
 

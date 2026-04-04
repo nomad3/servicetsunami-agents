@@ -1663,7 +1663,7 @@ def _parse_provider_review(provider: str, raw_output: str, duration_ms: int) -> 
     Handles multiple output formats:
     - Claude: {"result": "...", "usage": {...}, "total_cost_usd": ...}
     - Codex: multi-line JSON stream or plain text with --output-last-message
-    - Qwen/Ollama: raw text possibly with <think>...</think> tags
+    - Gemma 4/Ollama: raw text (may include unexpected tags)
     """
     if not raw_output or not raw_output.strip():
         return ProviderReview(
@@ -1830,12 +1830,12 @@ async def review_with_codex(input: ProviderReviewInput) -> ProviderReview:
 
 
 @activity.defn
-async def review_with_local_qwen(input: ProviderReviewInput) -> ProviderReview:
-    """Review a response using local Qwen via Ollama (free, always available)."""
+async def review_with_local_gemma(input: ProviderReviewInput) -> ProviderReview:
+    """Review a response using local Gemma 4 via Ollama (free, always available)."""
     import httpx as _httpx
 
     OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
-    MODEL = os.environ.get("LOCAL_TOOL_MODEL", "qwen3:1.7b")
+    MODEL = os.environ.get("LOCAL_TOOL_MODEL", "gemma4")
 
     prompt = PROVIDER_REVIEW_PROMPT.format(
         user_message=input.user_message[:500],
@@ -1849,7 +1849,6 @@ async def review_with_local_qwen(input: ProviderReviewInput) -> ProviderReview:
 
     start = time.time()
     try:
-        # Use /api/chat with think:false to skip qwen3's reasoning mode
         with _httpx.Client(timeout=120) as client:
             resp = client.post(f"{OLLAMA_URL}/api/chat", json={
                 "model": MODEL,
@@ -1858,22 +1857,21 @@ async def review_with_local_qwen(input: ProviderReviewInput) -> ProviderReview:
                     {"role": "user", "content": prompt},
                 ],
                 "stream": False,
-                "think": False,
                 "options": {"temperature": 0.1, "num_predict": 400},
             })
         duration_ms = int((time.time() - start) * 1000)
         if resp.status_code != 200:
-            return ProviderReview(provider="local_qwen", approved=True, verdict="ERROR",
+            return ProviderReview(provider="local_gemma", approved=True, verdict="ERROR",
                                   score=0, issues=[], suggestions=[],
                                   summary=f"Ollama HTTP {resp.status_code}", duration_ms=duration_ms)
         resp_json = resp.json()
         raw = resp_json.get("message", {}).get("content", "")
-        logger.info("Qwen review: status=%s raw_len=%d", resp.status_code, len(raw))
-        return _parse_provider_review("local_qwen", raw, duration_ms)
+        logger.info("Gemma 4 review: status=%s raw_len=%d", resp.status_code, len(raw))
+        return _parse_provider_review("local_gemma", raw, duration_ms)
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
-        logger.warning("Qwen review exception: %s", e)
-        return ProviderReview(provider="local_qwen", approved=True, verdict="ERROR",
+        logger.warning("Gemma 4 review exception: %s", e)
+        return ProviderReview(provider="local_gemma", approved=True, verdict="ERROR",
                               score=0, issues=[], suggestions=[],
                               summary=str(e)[:200], duration_ms=duration_ms)
 
@@ -1905,7 +1903,7 @@ async def finalize_provider_council(
 
 @workflow.defn
 class ProviderReviewWorkflow:
-    """Multi-provider review council — Claude, Codex, and Qwen each review a response."""
+    """Multi-provider review council — Claude, Codex, and Gemma 4 each review a response."""
 
     @workflow.run
     async def run(self, input: ProviderReviewInput) -> ProviderCouncilResult:
@@ -1933,7 +1931,7 @@ class ProviderReviewWorkflow:
         results = list(await _asyncio.gather(
             _safe_review(review_with_claude, "claude_code"),
             _safe_review(review_with_codex, "codex"),
-            _safe_review(review_with_local_qwen, "local_qwen"),
+            _safe_review(review_with_local_gemma, "local_gemma"),
         ))
 
         # All reviews including errors

@@ -1,7 +1,7 @@
 """Local tool-capable agent runtime using Ollama + MCP JSON-RPC.
 
 Gives free-tier tenants (no Claude/Codex subscription) access to curated
-MCP tools via qwen3:4b's native tool calling through Ollama's /api/chat.
+MCP tools via Gemma 4's native tool calling through Ollama's /api/chat.
 
 Preserves the selected agent's skill_body as system prompt — not hardcoded
 to any single persona.
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
 MCP_TOOLS_URL = os.environ.get("MCP_TOOLS_URL", "http://mcp-tools:8000")
-LOCAL_TOOL_MODEL = os.environ.get("LOCAL_TOOL_MODEL", "qwen3:1.7b")
+LOCAL_TOOL_MODEL = os.environ.get("LOCAL_TOOL_MODEL", "gemma4")
 MCP_INTERNAL_KEY = os.environ.get("MCP_API_KEY", "dev_mcp_key")
 
 MAX_TOOL_ROUNDS = 3
@@ -275,7 +275,7 @@ def run(
     Preserves agent_slug and skill_body — not hardcoded to any persona.
     """
     metadata: Dict[str, Any] = {
-        "platform": "local_qwen_tools",
+        "platform": "local_gemma_tools",
         "model": LOCAL_TOOL_MODEL,
         "fallback": True,
         "agent_slug": agent_slug,

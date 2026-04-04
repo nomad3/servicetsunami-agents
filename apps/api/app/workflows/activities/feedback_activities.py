@@ -506,7 +506,7 @@ async def adjust_exploration_rates(tenant_id: str, metrics: dict) -> dict:
 
 def _extract_platform(content: str) -> str | None:
     """Extract a platform name from message content."""
-    for p in ("claude", "codex", "gemini", "openai", "qwen", "local"):
+    for p in ("claude", "codex", "gemini", "openai", "gemma", "local"):
         if p in content:
             return p
     return None

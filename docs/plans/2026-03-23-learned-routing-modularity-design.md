@@ -48,7 +48,7 @@ Every response generates an RL experience with:
 
 ### Provider Council Data
 For qualifying responses, `reward_components.provider_council` contains:
-- Per-provider scores (claude_code, codex, local_qwen)
+- Per-provider scores (claude_code, codex, local_gemma)
 - Agreement score (0.0-1.0)
 - Disagreements list
 - Recommended platform
@@ -56,7 +56,7 @@ For qualifying responses, `reward_components.provider_council` contains:
 ### Current Volume
 - ~2,625 RL experiences (and growing)
 - ~11 provider council reviews (accumulating)
-- Platform breakdown across claude_code, codex, local_qwen
+- Platform breakdown across claude_code, codex, local_gemma
 
 ## What We Need (Learned Routing)
 

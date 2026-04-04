@@ -22,8 +22,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-CONSENSUS_MODEL = "qwen3:1.7b"
-FALLBACK_MODEL = "qwen2.5-coder:1.5b"
+CONSENSUS_MODEL = "gemma4"
+FALLBACK_MODEL = "gemma4"
 
 # ── Reviewer definitions ────────────────────────────────────────────────────
 
@@ -148,7 +148,7 @@ async def _run_reviewer(
             "summary": "Reviewer unavailable — skipped",
         }
 
-    # Extract JSON from response (handle <think> tags from qwen3)
+    # Extract JSON from response (strip any unexpected wrapping tags)
     try:
         # Strip <think>...</think> blocks first
         clean = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()

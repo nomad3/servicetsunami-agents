@@ -252,7 +252,7 @@ _REAL_COMPANY_NAMES = [
 
 
 def _generate_dynamic_scenarios(persona) -> list:
-    """Use local Qwen to generate realistic simulation scenarios for a persona.
+    """Use local Gemma 4 to generate realistic simulation scenarios for a persona.
 
     Uses real company names and randomized context so each cycle produces
     unique, realistic scenarios that test different capabilities.
@@ -316,7 +316,7 @@ def _generate_dynamic_scenarios(persona) -> list:
                     valid.append({"type": s["type"], "message": msg})
 
         if len(valid) >= 2:
-            logger.info("Qwen generated %d dynamic scenarios for %s (%s)",
+            logger.info("Gemma 4 generated %d dynamic scenarios for %s (%s)",
                         len(valid), persona.name, persona.industry)
             return valid[:4]
 
@@ -441,7 +441,7 @@ async def generate_simulation_scenarios(tenant_id: str, persona_ids: list) -> di
             if existing_count > 0:
                 continue
 
-            # Try dynamic scenario generation via local Qwen first
+            # Try dynamic scenario generation via local Gemma 4 first
             dynamic_scenarios = _generate_dynamic_scenarios(persona)
 
             if dynamic_scenarios:
@@ -488,7 +488,7 @@ async def execute_simulation_scenarios(tenant_id: str) -> dict:
 
     Uses route_and_execute — the same path real users take. This means
     simulations test the actual platform (Claude Code / Codex / Gemini),
-    not the local Qwen fallback. Responses are scored by the real
+    not the local Gemma 4 fallback. Responses are scored by the real
     auto-quality scorer (6-dim rubric, 100pts).
     """
     from app.db.session import SessionLocal

@@ -27,7 +27,7 @@ The existing stack has **far more reusable infrastructure than expected**. ~40% 
   - accuracy > 0.85 → `confident`, < 0.65 → `uncertain`
   - response_time < 1s → `quick`, > 5s → `thinking`
 - `consensus_reviewer.py` has 3 reviewers including "Persona Reviewer" — sentiment already evaluated
-- `local_inference.py` has Qwen ready for cheap emotion classification
+- `local_inference.py` has Gemma 4 ready for cheap emotion classification
 
 ### Animation/CSS (ready)
 - Glassmorphic sidebar: `backdrop-filter: blur(20px)` — Luna avatar container

@@ -474,7 +474,7 @@ def run_agent_session(
             agent_slug=agent_slug,
         )
         if local_response:
-            metadata["platform"] = "local_qwen"
+            metadata["platform"] = "local_gemma"
             metadata["fallback"] = True
             return local_response, metadata
 

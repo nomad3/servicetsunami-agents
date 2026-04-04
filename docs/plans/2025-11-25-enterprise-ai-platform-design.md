@@ -289,18 +289,18 @@ LLMConfig:
 **Coding Specialists:**
 - Mistral Codestral 25.08, Devstral
 - DeepSeek Coder V2.5
-- Qwen2.5-Coder-32B
+- Gemma 4 27B
 
 **Small/Edge Models:**
 - Microsoft Phi-4: reasoning, multimodal, mini
 - HuggingFace SmolLM2: 1.7B, 360M, 135M
 - Meta Llama 3.2: 3B, 1B
-- Qwen2.5: 0.5B to 7B variants
+- Gemma 4: 4B to 27B variants
 
 **Embedding Models:**
 - text-embedding-3-large/small (OpenAI)
 - bge-m3 (multilingual)
-- gte-qwen2-1.5b
+- nomic-embed-text
 - codestral-embed
 
 ---
@@ -534,7 +534,7 @@ apps/api/app/
 │   │   │   ├── anthropic.py
 │   │   │   ├── openai.py
 │   │   │   ├── deepseek.py
-│   │   │   ├── qwen.py
+│   │   │   ├── gemma.py
 │   │   │   └── ...
 │   │   └── usage_tracker.py
 │   └── tenant/

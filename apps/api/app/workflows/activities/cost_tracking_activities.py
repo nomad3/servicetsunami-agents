@@ -17,7 +17,7 @@ _COST_PER_1K_TOKENS = {
     "claude": 0.003,    # claude-sonnet midpoint
     "codex": 0.002,     # codex estimate
     "gemini": 0.001,
-    "qwen": 0.0,        # local — free
+    "gemma": 0.0,       # local — free
     "local": 0.0,
 }
 
@@ -60,7 +60,7 @@ async def track_cycle_cost(tenant_id: str, cycle_result: dict) -> dict:
 
         # Supplement with simulation execution estimate (local model, near-zero cost)
         sim_tokens = _ACTIVITY_TOKEN_ESTIMATES["execute_simulation_scenarios"]
-        sim_cost = 0.0  # always local Qwen
+        sim_cost = 0.0  # always local Gemma 4
 
         total_tokens = int(rl_cost_row.total_tokens or 0) + sim_tokens
         total_cost_usd = float(rl_cost_row.total_cost or 0.0) + sim_cost

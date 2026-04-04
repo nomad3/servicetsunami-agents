@@ -121,7 +121,7 @@
 | Task | Description | Framework |
 |------|-------------|-----------|
 | B1.1 | Install Ollama on Mac | `brew install ollama` |
-| B1.2 | Pull a small quality-scoring model (Phi-3.5-mini 3.8B or Qwen2.5-3B) | `ollama pull phi3.5` |
+| B1.2 | Pull a small quality-scoring model (Phi-3.5-mini 3.8B or Gemma 4) | `ollama pull phi3.5` |
 | B1.3 | Create quality scoring prompt template | System prompt that rates responses on helpfulness, accuracy, completeness |
 | B1.4 | Build `auto_quality_scorer.py` service | Takes (user_message, agent_response) → score 1-5 + reasoning |
 | B1.5 | Integrate into chat pipeline: after every response, async score it | Non-blocking — runs in background after response is sent |
