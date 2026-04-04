@@ -273,6 +273,11 @@ def build_memory_context(
     tenant_id: uuid.UUID,
     user_message: str,
     session_entity_names: Optional[List[str]] = None,
+    domains: Optional[List[str]] = None,
+    max_entities: int = 10,
+    max_observations: int = 3,
+    include_relations: bool = True,
+    include_episodes: bool = True,
 ) -> Dict[str, Any]:
     """Build a memory context payload for Luna's automatic recall.
 
@@ -281,8 +286,8 @@ def build_memory_context(
     2. Semantic search: top 30 entities + top 15 memories via pgvector cosine
     3. Keyword boost: entities whose name exactly matches a query word get +0.3
     4. Combine, sort by final score
-    5. Fetch top 3 observations per recalled entity (semantic)
-    6. Return top 10 entities + top 5 memories + observations + relations
+    5. Fetch top N observations per recalled entity (semantic), where N=max_observations
+    6. Return top max_entities entities + top 5 memories + observations + relations
     7. Update recall counters on recalled entities
     8. Log RL experience for the memory_recall decision point
 
@@ -291,6 +296,14 @@ def build_memory_context(
     The user/owner entity (category="user") is always injected at the top of
     relevant_entities regardless of query — so questions like "who am I?" always
     get answered from the knowledge graph.
+
+    Args:
+        domains: Optional list of entity categories to filter by (e.g. ["client", "appointment"]).
+                 When None, all categories are included.
+        max_entities: Maximum number of entities to recall (default 10).
+        max_observations: Maximum observations to fetch per entity (default 3).
+        include_relations: When False, skip relation fetching entirely (default True).
+        include_episodes: When False, skip episode fetching entirely (default True).
     """
     # Always fetch the user/owner entity — pinned into context regardless of query
     user_entity = _fetch_user_entity(db, tenant_id)
@@ -327,6 +340,14 @@ def build_memory_context(
     # Note: time-based decay is applied in SQL (search_memories_semantic)
     # during top-K selection, so no Python-side decay needed here.
 
+    # --- Step 2b: Domain filtering ---
+    # Filter entities to only those in the requested categories when domains is specified
+    if domains:
+        semantic_entities = [
+            ent for ent in semantic_entities
+            if ent.get("category") in domains
+        ]
+
     # --- Step 3: Keyword boost ---
     # Entities whose name exactly matches a word in the query get +0.3 similarity
     query_words_lower = set(re.findall(r'[\w]+', user_message.lower()))
@@ -347,23 +368,24 @@ def build_memory_context(
     semantic_memories.sort(key=lambda x: x["similarity"], reverse=True)
 
     # --- Step 5: Take top N ---
-    top_entities = semantic_entities[:10]
+    top_entities = semantic_entities[:max_entities]
     top_memories = semantic_memories[:5]
 
     # Always pin user entity at the top (deduplicate if already recalled)
-    if user_entity:
+    # Skip pinning when domain filter excludes the "user" category
+    if user_entity and (not domains or "user" in domains):
         already_in = any(e["id"] == user_entity["id"] for e in top_entities)
         if not already_in:
-            top_entities = [user_entity] + top_entities[:9]
+            top_entities = [user_entity] + top_entities[:max_entities - 1]
 
     if not top_entities and not top_memories:
         return {}
 
-    # --- Step 6: Fetch top 3 observations per recalled entity ---
+    # --- Step 6: Fetch top N observations per recalled entity ---
     entity_observations: Dict[str, List[Dict]] = {}
     for ent in top_entities:
         obs = _fetch_top_observations_semantic(
-            db, tenant_id, ent["id"], query_embedding, limit=3
+            db, tenant_id, ent["id"], query_embedding, limit=max_observations
         )
         if obs:
             entity_observations[ent["name"]] = obs
@@ -371,7 +393,8 @@ def build_memory_context(
     # --- Fetch relations for recalled entities ---
     entity_ids = [uuid.UUID(e["id"]) for e in top_entities]
     relations = []
-    if entity_ids:
+    entity_map = {uuid.UUID(e["id"]): e["name"] for e in top_entities}
+    if include_relations and entity_ids:
         relations = (
             db.query(KnowledgeRelation)
             .filter(
@@ -385,19 +408,18 @@ def build_memory_context(
             .all()
         )
 
-    # Build entity name lookup for relations
-    entity_map = {uuid.UUID(e["id"]): e["name"] for e in top_entities}
-    rel_entity_ids = set()
-    for r in relations:
-        rel_entity_ids.add(r.from_entity_id)
-        rel_entity_ids.add(r.to_entity_id)
-    missing_ids = rel_entity_ids - set(entity_ids)
-    if missing_ids:
-        extra = db.query(KnowledgeEntity.id, KnowledgeEntity.name).filter(
-            KnowledgeEntity.id.in_(list(missing_ids))
-        ).all()
-        for eid, ename in extra:
-            entity_map[eid] = ename
+        # Build entity name lookup for relations
+        rel_entity_ids = set()
+        for r in relations:
+            rel_entity_ids.add(r.from_entity_id)
+            rel_entity_ids.add(r.to_entity_id)
+        missing_ids = rel_entity_ids - set(entity_ids)
+        if missing_ids:
+            extra = db.query(KnowledgeEntity.id, KnowledgeEntity.name).filter(
+                KnowledgeEntity.id.in_(list(missing_ids))
+            ).all()
+            for eid, ename in extra:
+                entity_map[eid] = ename
 
     # --- Step 0: Time-aware anticipatory context ---
     now = datetime.utcnow()
@@ -507,35 +529,36 @@ def build_memory_context(
             logger.debug("Failed to fetch disputed assertions", exc_info=True)
 
     # --- Step 7b: Recall recent episodes ---
-    try:
-        from sqlalchemy import text as sa_text
+    if include_episodes:
+        try:
+            from sqlalchemy import text as sa_text
 
-        vector_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
-        episode_sql = sa_text(f"""
-            SELECT id, summary, key_topics, key_entities, mood, source_channel, created_at,
-                   1 - (embedding <=> CAST('{vector_literal}' AS vector)) AS similarity
-            FROM conversation_episodes
-            WHERE tenant_id = CAST(:tid AS uuid)
-              AND embedding IS NOT NULL
-            ORDER BY embedding <=> CAST('{vector_literal}' AS vector)
-            LIMIT 5
-        """)
-        episode_rows = db.execute(episode_sql, {"tid": str(tenant_id)}).mappings().all()
-        episodes = [
-            {
-                "summary": r["summary"],
-                "mood": r["mood"],
-                "source": r["source_channel"],
-                "date": r["created_at"].strftime("%b %d") if r["created_at"] else "",
-                "similarity": round(float(r["similarity"]), 4),
-            }
-            for r in episode_rows
-            if float(r["similarity"]) > 0.3
-        ]
-        if episodes:
-            context["recent_episodes"] = episodes[:3]
-    except Exception:
-        logger.debug("Episode recall failed", exc_info=True)
+            vector_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
+            episode_sql = sa_text(f"""
+                SELECT id, summary, key_topics, key_entities, mood, source_channel, created_at,
+                       1 - (embedding <=> CAST('{vector_literal}' AS vector)) AS similarity
+                FROM conversation_episodes
+                WHERE tenant_id = CAST(:tid AS uuid)
+                  AND embedding IS NOT NULL
+                ORDER BY embedding <=> CAST('{vector_literal}' AS vector)
+                LIMIT 5
+            """)
+            episode_rows = db.execute(episode_sql, {"tid": str(tenant_id)}).mappings().all()
+            episodes = [
+                {
+                    "summary": r["summary"],
+                    "mood": r["mood"],
+                    "source": r["source_channel"],
+                    "date": r["created_at"].strftime("%b %d") if r["created_at"] else "",
+                    "similarity": round(float(r["similarity"]), 4),
+                }
+                for r in episode_rows
+                if float(r["similarity"]) > 0.3
+            ]
+            if episodes:
+                context["recent_episodes"] = episodes[:3]
+        except Exception:
+            logger.debug("Episode recall failed", exc_info=True)
 
     # --- Step 8: Update recall counters on recalled entities ---
     if entity_ids:
@@ -876,13 +899,36 @@ def build_memory_context_with_git(
     tenant_id: uuid.UUID,
     user_message: str,
     session_entity_names: Optional[List[str]] = None,
+    domains: Optional[List[str]] = None,
+    max_entities: int = 10,
+    max_observations: int = 3,
+    include_relations: bool = True,
+    include_episodes: bool = True,
 ) -> Dict[str, Any]:
     """Extended memory context that includes git history when relevant.
 
     Calls build_memory_context() first, then appends git context if the
     message appears code-related.
+
+    Args:
+        domains: Optional list of entity categories to filter by (e.g. ["client", "appointment"]).
+                 When None, all categories are included.
+        max_entities: Maximum number of entities to recall (default 10).
+        max_observations: Maximum observations to fetch per entity (default 3).
+        include_relations: When False, skip relation fetching entirely (default True).
+        include_episodes: When False, skip episode fetching entirely (default True).
     """
-    context = build_memory_context(db, tenant_id, user_message, session_entity_names=session_entity_names)
+    context = build_memory_context(
+        db,
+        tenant_id,
+        user_message,
+        session_entity_names=session_entity_names,
+        domains=domains,
+        max_entities=max_entities,
+        max_observations=max_observations,
+        include_relations=include_relations,
+        include_episodes=include_episodes,
+    )
 
     if _is_code_related(user_message):
         git_context = get_recent_git_context(db, tenant_id, user_message, limit=5)
