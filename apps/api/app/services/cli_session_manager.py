@@ -419,16 +419,24 @@ def run_agent_session(
 
     skill_body = skill.description or ""
 
-    credentials = _get_cli_platform_credentials(db, tenant_id, platform)
+    # OpenCode uses local Gemma 4 — no credentials needed
+    if platform == "opencode":
+        credentials = {}
+        subscription_missing = False
+    else:
+        credentials = _get_cli_platform_credentials(db, tenant_id, platform)
     session_token = credentials.get("session_token")
     auth_json = credentials.get("auth_json")
 
     oauth_token = credentials.get("oauth_token")
-    subscription_missing = (
-        (platform == "claude_code" and not session_token)
-        or (platform == "codex" and not (session_token or auth_json))
-        or (platform == "gemini_cli" and not (oauth_token or session_token))
-    )
+    if platform != "opencode":
+        subscription_missing = (
+            (platform == "claude_code" and not session_token)
+            or (platform == "codex" and not (session_token or auth_json))
+            or (platform == "gemini_cli" and not (oauth_token or session_token))
+        )
+    else:
+        subscription_missing = False
     if subscription_missing:
         logger.warning(
             "No %s credential for tenant %s — falling back to local agent",

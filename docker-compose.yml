@@ -149,6 +149,10 @@ services:
       - MCP_API_KEY=dev_mcp_key
       - CLAUDE_CODE_MODEL=${CLAUDE_CODE_MODEL:-sonnet}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-ghp_placeholder}
+      - OPENCODE_OLLAMA_URL=http://host.docker.internal:11434/v1
+      - OPENCODE_MODEL=${OPENCODE_MODEL:-gemma4}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./apps/code-worker:/app
       - claude_sessions:/home/codeworker/.claude

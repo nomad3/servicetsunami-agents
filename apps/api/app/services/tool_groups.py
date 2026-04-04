@@ -167,13 +167,18 @@ TIER_MODEL_MAP: dict[str, dict[str, str]] = {
         "claude_code": "haiku",
         "codex": "codex-mini",
         "gemini_cli": "gemini-2.5-flash",
+        "opencode": "gemma4",
     },
     "full": {
         "claude_code": "sonnet",
         "codex": "codex",
         "gemini_cli": "gemini-2.5-pro",
+        "opencode": "gemma4",
     },
 }
+
+# Platform to use for light tier when no tenant-specific override exists
+LIGHT_TIER_PLATFORM = "opencode"
 
 TIER_LIMITS: dict[str, dict] = {
     "light": {
