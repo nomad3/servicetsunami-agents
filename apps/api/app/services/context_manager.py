@@ -385,6 +385,22 @@ class ContextManager:
             return system_prompt
         return system_prompt + f"\n\n{stakes_context}\n"
 
+    def inject_temporal_context_into_system_prompt(
+        self,
+        system_prompt: str,
+        temporal_context: str,
+    ) -> str:
+        """
+        Inject temporal awareness context into system prompt.
+
+        Tells Luna the user's local time, typical active hours, and last
+        seen duration so she can calibrate greetings and suggestion timing.
+        Gap 5 (Temporal) feature.
+        """
+        if not temporal_context:
+            return system_prompt
+        return system_prompt + f"\n\n{temporal_context}\n"
+
 
 # Singleton instance
 _context_manager: Optional[ContextManager] = None
