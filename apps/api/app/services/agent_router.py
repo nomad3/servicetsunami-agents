@@ -249,6 +249,16 @@ def route_and_execute(
                 recalled_entities = pre_built_memory_context["relevant_entities"]
         except Exception:
             logger.debug("Early memory recall failed — routing without entity context")
+    elif recalled_entities and not pre_built_memory_context:
+        # Entities were passed in externally but memory context was not pre-built.
+        # Build it now so cli_session_manager does not rebuild (double recall).
+        try:
+            pre_built_memory_context = build_memory_context_with_git(
+                db=db, tenant_id=tenant_id, message=message,
+                session_entity_names=session_entity_names,
+            )
+        except Exception:
+            logger.debug("Memory context build for external recalled_entities failed — continuing")
 
     # Build enriched state_text for RL logging
     state_parts = [f"task_type: {inferred_type}, channel: {channel}"]

@@ -479,6 +479,10 @@ def run_agent_session(
     if pre_built_memory_context is not None:
         memory_context = pre_built_memory_context
     else:
+        logger.warning(
+            "Memory context not pre-built by router — rebuilding (should not happen in normal flow) tenant=%s",
+            str(tenant_id)[:8],
+        )
         try:
             memory_context = build_memory_context_with_git(
                 db, tenant_id, message,
