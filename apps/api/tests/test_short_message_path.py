@@ -208,12 +208,10 @@ def test_short_message_includes_memory_context(
     )
 
     assert response == "Bonjour!"
-    # generate_agent_response_sync must have received a non-empty conversation_summary containing entity name
-    call_kwargs = mock_gen.call_args
-    if call_kwargs.kwargs:
-        conversation_summary_arg = call_kwargs.kwargs.get("conversation_summary", "")
-    else:
-        conversation_summary_arg = call_kwargs.args[1] if len(call_kwargs.args) > 1 else ""
+    assert metadata.get("platform") == "local_inference"
+    assert mock_rl.called  # tier_selection RL experience was logged
+    # generate_agent_response_sync was called with conversation_summary containing entity name
+    conversation_summary_arg = mock_gen.call_args.kwargs.get("conversation_summary", "")
     assert "Alice" in conversation_summary_arg
 
 
@@ -237,3 +235,4 @@ def test_local_inference_failure_falls_through_to_cli(
 
     assert mock_run.called
     assert response == "CLI fallback"
+    assert metadata.get("platform") != "local_inference"
