@@ -35,7 +35,7 @@ services:
       - PLATFORM_CLAUDE_CODE_TOKEN=${PLATFORM_CLAUDE_CODE_TOKEN:-}
       - HF_HUB_ENABLE_HF_TRANSFER=0
       - HF_HUB_DISABLE_XET=1
-      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - PROVIDER_COUNCIL_SAMPLE_RATE=${PROVIDER_COUNCIL_SAMPLE_RATE:-0.05}
       - EXPLORATION_MODE=${EXPLORATION_MODE:-off}
       - CORS_EXTRA_ORIGINS=${CORS_EXTRA_ORIGINS:-}
@@ -81,7 +81,7 @@ services:
       - temporal
     environment:
       - MCP_SERVER_URL=http://mcp-server:8000
-      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - HF_HUB_ENABLE_HF_TRANSFER=0
       - HF_HUB_DISABLE_XET=1
     restart: unless-stopped
@@ -160,18 +160,9 @@ services:
       - temporal
     restart: unless-stopped
 
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-    volumes:
-      - ollama_models:/root/.ollama
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+  # ollama service removed — Ollama runs natively on the host Mac (GPU-accelerated)
+  # and is reachable from containers via host.docker.internal:11434.
+  # The Docker-based ollama ran CPU-only; native gives full M4 GPU at ~57 tok/s.
 
   luna-client:
     build:
@@ -209,4 +200,4 @@ volumes:
   db_data:
   claude_sessions:
   hf_cache:
-  ollama_models:
+  # ollama_models removed — native host Ollama manages its own model storage

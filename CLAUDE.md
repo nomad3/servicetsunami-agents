@@ -21,7 +21,7 @@ Docker Compose stack with Cloudflare Tunnel:
 - **`apps/web`** (port 8002): React SPA with markdown rendering (react-markdown), Ocean theme
 - **`cloudflared`**: Cloudflare Tunnel — routes servicetsunami.com + agentprovision.com to local stack
 - **`temporal`** (port 7233): Workflow engine for durable task execution
-- **`ollama`** (port 11434): Local LLM runtime — hosts Gemma 4 models for auto-scoring, RL, knowledge extraction, conversation summarization, and free-tier fallback responses
+- **`ollama`** (native host, port 11434): Local LLM runtime — runs **natively on the host Mac** (not in Docker) for full M4 GPU acceleration (~57 tok/s). Hosts Gemma 4 for auto-scoring, RL, knowledge extraction, conversation summarization, free-tier fallback, and OpenCode chat. Containers reach it via `host.docker.internal:11434`.
 - **`db`** (port 8003): PostgreSQL + pgvector
 
 Previously a Turborepo monorepo managed with `pnpm` workspaces:

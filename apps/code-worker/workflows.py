@@ -1834,7 +1834,7 @@ async def review_with_local_gemma(input: ProviderReviewInput) -> ProviderReview:
     """Review a response using local Gemma 4 via Ollama (free, always available)."""
     import httpx as _httpx
 
-    OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
+    OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://host.docker.internal:11434")
     MODEL = os.environ.get("LOCAL_TOOL_MODEL", "gemma4")
 
     prompt = PROVIDER_REVIEW_PROMPT.format(

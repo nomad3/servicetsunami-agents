@@ -20,7 +20,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 DEFAULT_MODEL = os.environ.get("LOCAL_MODEL", "gemma4")
 QUALITY_MODEL = os.environ.get("QUALITY_MODEL", "gemma4")
 
