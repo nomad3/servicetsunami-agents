@@ -2,7 +2,7 @@
 
 CREATE TABLE behavioral_signals (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
 
     -- Source context
     message_id UUID,

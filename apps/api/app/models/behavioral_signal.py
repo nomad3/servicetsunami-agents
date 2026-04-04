@@ -1,7 +1,7 @@
 """Behavioral signals — track Luna suggestions vs user actions (Gap 2: Learning)."""
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, Boolean, TIMESTAMP, Float, Integer
+from sqlalchemy import Column, String, Text, Boolean, TIMESTAMP, Float, Integer, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from app.db.base import Base
@@ -28,7 +28,7 @@ class BehavioralSignal(Base):
     __tablename__ = "behavioral_signals"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Source message context
     message_id = Column(UUID(as_uuid=True), nullable=True)   # ChatMessage that contained suggestion
@@ -54,7 +54,7 @@ class BehavioralSignal(Base):
     expires_after_hours = Column(Integer, default=24)
 
     # Extra context for future analysis
-    context = Column(JSONB, default=dict)              # e.g. {"entity": "John", "type": "lead"}
+    context = Column(JSONB, default=lambda: {})        # e.g. {"entity": "John", "type": "lead"}
 
     # Embedding for semantic matching when detecting "acted_on"
     embedding = Column(Vector(768), nullable=True) if Vector else Column(JSONB, nullable=True)

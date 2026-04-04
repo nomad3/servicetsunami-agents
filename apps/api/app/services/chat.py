@@ -204,9 +204,13 @@ def post_user_message(
     media_parts: list | None = None,
     attachment_meta: dict | None = None,
 ) -> Tuple[ChatMessage, ChatMessage]:
-    # Gap 2: Detect if user is acting on a previous suggestion (non-blocking)
+    # Gap 2: Detect if user is acting on a previous suggestion (non-blocking).
+    # Capture primitives before thread — ORM objects are not safe to access
+    # across thread boundaries after the request session may have closed.
     try:
         import threading
+        _sig_tenant_id = session.tenant_id
+        _sig_session_id = session.id
 
         def _detect_signals():
             from app.db.session import SessionLocal as _SL
@@ -215,9 +219,9 @@ def post_user_message(
             try:
                 detect_acted_on_signals(
                     db=edb,
-                    tenant_id=session.tenant_id,
+                    tenant_id=_sig_tenant_id,
                     user_message=content,
-                    session_id=session.id,
+                    session_id=_sig_session_id,
                 )
             except Exception:
                 edb.rollback()

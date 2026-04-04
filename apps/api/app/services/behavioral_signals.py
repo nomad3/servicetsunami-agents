@@ -165,20 +165,24 @@ def detect_acted_on_signals(
 
 
 def expire_stale_signals(db: Session, tenant_id: uuid.UUID) -> int:
-    """Mark old pending signals as ignored (acted_on=False)."""
-    now = datetime.utcnow()
-    expired = db.query(BehavioralSignal).filter(
-        BehavioralSignal.tenant_id == tenant_id,
-        BehavioralSignal.acted_on.is_(None),
-    ).all()
+    """Mark old pending signals as ignored (acted_on=False). Filters in SQL."""
+    from sqlalchemy import text
 
-    count = 0
-    for signal in expired:
-        expiry = signal.created_at + timedelta(hours=signal.expires_after_hours)
-        if now > expiry:
-            signal.acted_on = False
-            count += 1
-
+    # Use a SQL expression to compare created_at + expires_after_hours * interval
+    # against now(). This avoids a full table scan with Python-side filtering.
+    result = db.execute(
+        text(
+            """
+            UPDATE behavioral_signals
+            SET acted_on = FALSE, updated_at = NOW()
+            WHERE tenant_id = :tenant_id
+              AND acted_on IS NULL
+              AND created_at + (expires_after_hours || ' hours')::interval < NOW()
+            """
+        ),
+        {"tenant_id": str(tenant_id)},
+    )
+    count = result.rowcount
     if count:
         db.commit()
         logger.info(f"Expired {count} stale signals for tenant {tenant_id}")
@@ -280,15 +284,16 @@ def _make_tag(text: str) -> str:
     return " ".join(words).rstrip(".?!")
 
 
-def _cosine_similarity(a: list, b: list) -> float:
-    """Compute cosine similarity between two vectors."""
+def _cosine_similarity(a, b) -> float:
+    """Compute cosine similarity. Accepts list or numpy array; handles JSONB fallback."""
     try:
-        import math
-        dot = sum(x * y for x, y in zip(a, b))
-        mag_a = math.sqrt(sum(x * x for x in a))
-        mag_b = math.sqrt(sum(x * x for x in b))
-        if mag_a == 0 or mag_b == 0:
+        import numpy as np
+        va = np.array(a, dtype=np.float32)
+        vb = np.array(b, dtype=np.float32)
+        norm_a = np.linalg.norm(va)
+        norm_b = np.linalg.norm(vb)
+        if norm_a == 0 or norm_b == 0:
             return 0.0
-        return dot / (mag_a * mag_b)
+        return float(np.dot(va, vb) / (norm_a * norm_b))
     except Exception:
         return 0.0
