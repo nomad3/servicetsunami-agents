@@ -106,7 +106,7 @@ def _apply_agent_autonomy_restrictions(
     # bounded_autonomous: full access — override any prior BLOCK/REVIEW.
     # High/critical risk actions are logged but not blocked; the agent has
     # earned trust through accumulated evidence and admin promotion.
-    if result.autonomy_tier == AutonomyTier.BOUNDED_AUTONOMOUS:
+    if result.autonomy_tier == AutonomyTier.BOUNDED_AUTONOMOUS_EXECUTION:
         if result.risk_level.value in {"high", "critical"}:
             result.decision = PolicyDecision.ALLOW_WITH_LOGGING
         else:
