@@ -36,6 +36,8 @@ class SessionConfig:
     claude_md_content: str = ""
     mcp_config: str = ""
     oauth_token: str = ""
+    model: str = ""        # Override model slug (e.g. "claude-haiku-4-5-20251001"); empty = use env default
+    allowed_tools: str = ""  # Comma-separated tool list override; empty = derive from MCP config
 
 
 @dataclass
@@ -201,14 +203,19 @@ class SessionManager:
 
         # Build command
         session_id = str(uuid.uuid4())
+        _allowed = config.allowed_tools or self._build_allowed_tools(config)
         cmd = [
             "claude",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
             "--session-id", session_id,
-            "--allowedTools", self._build_allowed_tools(config),
+            "--allowedTools", _allowed,
             "--verbose",
         ]
+
+        # Per-request model override — falls back to CLAUDE_CODE_MODEL env var when empty
+        if config.model:
+            cmd.extend(["--model", config.model])
 
         # Add system prompt
         claude_md_path = os.path.join(session_dir, "CLAUDE.md")

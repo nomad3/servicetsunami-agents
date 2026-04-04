@@ -894,6 +894,8 @@ class ChatCliInput:
     image_b64: str = ""   # Base64-encoded image (optional)
     image_mime: str = ""   # e.g. "image/jpeg"
     session_id: str = ""  # Platform-native session continuity (e.g. Claude --resume)
+    model: str = ""        # Override model slug (e.g. "claude-haiku-4-5-20251001"); empty = use env default
+    allowed_tools: str = ""  # Comma-separated tool list override; empty = derive from MCP config
 
 
 @dataclass
@@ -1007,11 +1009,15 @@ def _execute_claude_chat(task_input: ChatCliInput, session_dir: str) -> ChatCliR
         with open(os.path.join(session_dir, "mcp.json"), "w") as f:
             f.write(task_input.mcp_config)
 
+    _model = task_input.model or CLAUDE_CODE_MODEL
+    _allowed = task_input.allowed_tools or _build_allowed_tools_from_mcp(
+        task_input.mcp_config, extra="Bash,Read,Edit,Write,WebFetch,WebSearch"
+    )
     cmd = [
         "claude", "-p", task_input.message,
         "--output-format", "json",
-        "--model", CLAUDE_CODE_MODEL,
-        "--allowedTools", _build_allowed_tools_from_mcp(task_input.mcp_config, extra="Bash,Read,Edit,Write,WebFetch,WebSearch"),
+        "--model", _model,
+        "--allowedTools", _allowed,
         "--add-dir", session_dir,
     ]
     if os.path.isdir(WORKSPACE):
