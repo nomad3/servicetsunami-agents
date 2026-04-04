@@ -325,6 +325,37 @@ class ContextManager:
 
         return system_prompt + summary_section
 
+    def inject_morning_briefing_into_system_prompt(
+        self,
+        system_prompt: str,
+        briefing: str,
+    ) -> str:
+        """
+        Inject morning briefing (continuity context) into system prompt.
+
+        This adds context about the user's recent activity, accomplishments,
+        and challenges to help Luna feel like a true continuous partner.
+        Gap 1 (Continuity) feature.
+
+        Args:
+            system_prompt: Original system prompt
+            briefing: Morning briefing text (synthesized from session journals)
+
+        Returns:
+            Enhanced system prompt with morning briefing
+        """
+        if not briefing:
+            return system_prompt
+
+        briefing_section = (
+            f"\n\n## Your Activity Context (Last 7 Days)\n\n"
+            f"{briefing}\n\n"
+            f"Remember this context and reference it naturally in conversation. "
+            f"You're a continuous partner in their journey, not a stateless chatbot."
+        )
+
+        return system_prompt + briefing_section
+
 
 # Singleton instance
 _context_manager: Optional[ContextManager] = None

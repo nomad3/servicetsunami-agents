@@ -67,6 +67,7 @@ from .conversation_episode import ConversationEpisode
 from .user_preference import UserPreference
 from .user_activity import UserActivity
 from .device_registry import DeviceRegistry
+from .session_journal import SessionJournal
 
 __all__ = [
     "Tenant", "User",
@@ -106,4 +107,5 @@ __all__ = [
     "UserPreference",
     "UserActivity",
     "DeviceRegistry",
+    "SessionJournal",
 ]
