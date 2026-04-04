@@ -195,12 +195,6 @@ def route_and_execute(
         except Exception as e:
             logger.warning("Agent selection by tool_groups failed: %s", e)
 
-    # ── Platform override for light tier: use OpenCode (local Gemma 4, $0) ──
-    from app.services.tool_groups import LIGHT_TIER_PLATFORM
-    if agent_tier == "light" and not _pin_to_claude:
-        platform = LIGHT_TIER_PLATFORM
-        logger.info("Light tier: routing to %s (Gemma 4 local)", platform)
-
     # ── RL exploration: route to underexplored platforms for training data ──
     # Per-decision-point config overrides global env vars when available
     import random
@@ -292,6 +286,14 @@ def route_and_execute(
                 routing_source = "rollout_control"
     except Exception as e:
         logger.debug("Policy rollout check failed: %s", e)
+
+    # ── Platform override for light tier: use OpenCode (local Gemma 4, $0) ──
+    # This runs AFTER RL exploration/rollout so RL can still explore other platforms
+    # when in exploration mode, but the default for light tier is always opencode.
+    from app.services.tool_groups import LIGHT_TIER_PLATFORM
+    if agent_tier == "light" and not _pin_to_claude and routing_source == "default":
+        platform = LIGHT_TIER_PLATFORM
+        logger.info("Light tier: routing to %s (Gemma 4 local)", platform)
 
     # Build memory context with agent-scoped parameters.
     # The tier limits and memory_domains from agent selection (above) drive
