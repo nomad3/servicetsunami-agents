@@ -15,7 +15,7 @@ DECISION_POINTS = [
     "response_generation", "tool_selection", "entity_validation",
     "score_weighting", "sync_strategy", "execution_decision",
     "code_strategy", "deal_stage_advance", "change_significance",
-    "code_task",
+    "code_task", "tier_selection",
 ]
 
 # Reward discount factor for backward propagation
