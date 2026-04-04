@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -58,14 +58,7 @@ def _build_today_briefing(memory_context: Dict[str, Any], include_goals: bool, i
         lines.append(summary + ".")
 
     if open_commitments:
-        due_today = sum(
-            1
-            for commitment in open_commitments
-            if (commitment.get("due_at") or "")[:10] == datetime.utcnow().date().isoformat()
-        )
         summary = f"- There {'is' if len(open_commitments) == 1 else 'are'} {len(open_commitments)} open commitment{'s' if len(open_commitments) != 1 else ''}"
-        if due_today:
-            summary += f", with {due_today} due today"
         lines.append(summary + ".")
 
     if recent_episodes and time_ctx.get("time_of_day") == "morning":

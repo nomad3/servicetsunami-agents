@@ -58,8 +58,12 @@ def _build_anticipatory_context(
     current_time = now or datetime.utcnow()
     hour = current_time.hour
     weekday = current_time.strftime("%A")
+    window_end = current_time + timedelta(hours=4)
 
-    time_context: Dict[str, str] = {"weekday": weekday}
+    time_context: Dict[str, str] = {
+        "weekday": weekday,
+        "local_date": current_time.date().isoformat(),
+    }
     if hour < 10:
         time_context["time_of_day"] = "morning"
         time_context["greeting_hint"] = f"Good morning! It's {weekday}."
@@ -81,13 +85,17 @@ def _build_anticipatory_context(
                 SELECT title, start_time, description
                 FROM channel_events
                 WHERE tenant_id = CAST(:tid AS uuid)
-                  AND start_time > NOW()
-                  AND start_time < NOW() + INTERVAL '4 hours'
+                  AND start_time > :window_start
+                  AND start_time < :window_end
                 ORDER BY start_time
                 LIMIT 3
                 """
             ),
-            {"tid": str(tenant_id)},
+            {
+                "tid": str(tenant_id),
+                "window_start": current_time,
+                "window_end": window_end,
+            },
         ).mappings().all()
 
         if upcoming:

@@ -326,8 +326,13 @@ class TestBuildMemoryContextSemantic:
         context = _build_anticipatory_context(mock_db, TENANT_ID, now=datetime(2026, 4, 4, 8, 0))
 
         assert context["time_context"]["time_of_day"] == "morning"
+        assert context["time_context"]["local_date"] == "2026-04-04"
         assert context["upcoming_events"][0]["title"] == "Standup"
         assert context["upcoming_events"][0]["time"] == "09:30 AM"
+
+        execute_args = mock_db.execute.call_args
+        assert execute_args.args[1]["window_start"] == datetime(2026, 4, 4, 8, 0)
+        assert execute_args.args[1]["window_end"] == datetime(2026, 4, 4, 12, 0)
 
 
 class TestGenerateCliInstructions:
@@ -357,7 +362,7 @@ class TestGenerateCliInstructions:
         assert "## Today's Context" in instruction_text
         assert "You have 1 upcoming event in the next 4 hours" in instruction_text
         assert "There are 2 active goals, including 1 blocked." in instruction_text
-        assert "There is 1 open commitment, with 1 due today." in instruction_text
+        assert "There is 1 open commitment." in instruction_text
         assert "Recent thread to keep in mind: Yesterday we planned the continuity work." in instruction_text
 
     @patch("app.services.memory_recall.log_experience")
