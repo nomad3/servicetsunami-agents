@@ -39,6 +39,10 @@ def score_and_log_async(
     rollout_experiment_id: Optional[str] = None,
     rollout_arm: Optional[str] = None,
     routing_trajectory_id: Optional[str] = None,
+    agent_tier: str = "full",
+    tool_groups: list = None,
+    entity_count: int = 0,
+    prompt_tokens: int = 0,
 ):
     """Fire-and-forget: score response quality and log RL reward.
 
@@ -53,6 +57,7 @@ def score_and_log_async(
             tools_called or [], entities_recalled or [],
             rollout_experiment_id, rollout_arm,
             routing_trajectory_id,
+            agent_tier, tool_groups or [], entity_count, prompt_tokens,
         )),
         daemon=True,
     ).start()
@@ -75,6 +80,10 @@ async def _score_and_log(
     rollout_experiment_id: Optional[str] = None,
     rollout_arm: Optional[str] = None,
     routing_trajectory_id: Optional[str] = None,
+    agent_tier: str = "full",
+    tool_groups: list = None,
+    entity_count: int = 0,
+    prompt_tokens: int = 0,
 ):
     """Score the response with multi-dimensional rubric + consensus council, log as RL reward."""
     from app.services.local_inference import is_available, generate
@@ -243,6 +252,10 @@ async def _score_and_log(
                     "response_preview": agent_response[:100],
                     "platform": platform,
                     "agent_slug": agent_slug,
+                    "model_tier": agent_tier,
+                    "tool_groups": tool_groups or [],
+                    "entity_count": entity_count,
+                    "prompt_tokens": prompt_tokens,
                 },
                 state_text=(
                     f"platform={platform} agent={agent_slug} task={task_type} "
