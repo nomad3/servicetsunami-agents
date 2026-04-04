@@ -393,8 +393,9 @@ def route_and_execute(
         )
         if _local_response:
             # Log tier_selection RL experience so the policy engine can learn
-            _tier_trajectory_id = uuid.uuid4()
+            _tier_trajectory_id = None
             try:
+                _tier_trajectory_id = uuid.uuid4()
                 rl_experience_service.log_experience(
                     db,
                     tenant_id=tenant_id,
@@ -418,12 +419,13 @@ def route_and_execute(
                 )
             except Exception:
                 logger.debug("Failed to log tier_selection RL experience — continuing")
+                _tier_trajectory_id = None  # ensure no orphaned reference
 
             _local_meta = {
                 "platform": "local_inference",
                 "agent_tier": "local",
                 "tool_groups": [],
-                "routing_trajectory_id": str(_tier_trajectory_id),
+                "routing_trajectory_id": str(_tier_trajectory_id) if _tier_trajectory_id else None,
             }
             if trust_profile:
                 _local_meta["agent_trust_score"] = round(float(trust_profile.trust_score), 3)
