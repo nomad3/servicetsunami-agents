@@ -204,6 +204,34 @@ def post_user_message(
     media_parts: list | None = None,
     attachment_meta: dict | None = None,
 ) -> Tuple[ChatMessage, ChatMessage]:
+    # Gap 2: Detect if user is acting on a previous suggestion (non-blocking).
+    # Capture primitives before thread — ORM objects are not safe to access
+    # across thread boundaries after the request session may have closed.
+    try:
+        import threading
+        _sig_tenant_id = session.tenant_id
+        _sig_session_id = session.id
+
+        def _detect_signals():
+            from app.db.session import SessionLocal as _SL
+            from app.services.behavioral_signals import detect_acted_on_signals
+            edb = _SL()
+            try:
+                detect_acted_on_signals(
+                    db=edb,
+                    tenant_id=_sig_tenant_id,
+                    user_message=content,
+                    session_id=_sig_session_id,
+                )
+            except Exception:
+                edb.rollback()
+            finally:
+                edb.close()
+
+        threading.Thread(target=_detect_signals, daemon=True).start()
+    except Exception:
+        pass
+
     user_context = {"attachment": attachment_meta} if attachment_meta else None
     user_message = _append_message(
         db, session=session, role="user", content=content, context=user_context,
@@ -610,6 +638,35 @@ def _generate_agentic_response(
                 edb.close()
 
         threading.Thread(target=_maybe_create_episode, daemon=True).start()
+    except Exception:
+        pass
+
+    # 4. Behavioral signal extraction — parse Luna's response for actionable
+    #    suggestions and store as pending signals for Gap 2 (Learning).
+    try:
+        _assistant_msg_id = assistant_msg.id
+
+        def _extract_behavioral_signals():
+            from app.db.session import SessionLocal as _SL
+            from app.services.behavioral_signals import extract_suggestions_from_response
+
+            edb = _SL()
+            try:
+                extract_suggestions_from_response(
+                    db=edb,
+                    tenant_id=_tenant_id,
+                    response_text=_response_text,
+                    message_id=_assistant_msg_id,
+                    session_id=_session_id,
+                )
+            except Exception:
+                import logging as _log
+                _log.getLogger(__name__).debug("Behavioral signal extraction failed", exc_info=True)
+                edb.rollback()
+            finally:
+                edb.close()
+
+        threading.Thread(target=_extract_behavioral_signals, daemon=True).start()
     except Exception:
         pass
 

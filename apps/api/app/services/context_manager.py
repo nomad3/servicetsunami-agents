@@ -356,6 +356,22 @@ class ContextManager:
 
         return system_prompt + briefing_section
 
+    def inject_learning_context_into_system_prompt(
+        self,
+        system_prompt: str,
+        learning_context: str,
+    ) -> str:
+        """
+        Inject behavioral learning context into system prompt.
+
+        Tells Luna which suggestion types resonate with the user based on
+        actual acted_on signal data. Gap 2 (Learning) feature.
+        """
+        if not learning_context:
+            return system_prompt
+
+        return system_prompt + f"\n\n{learning_context}\n"
+
 
 # Singleton instance
 _context_manager: Optional[ContextManager] = None
