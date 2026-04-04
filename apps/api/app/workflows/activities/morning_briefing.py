@@ -36,11 +36,18 @@ async def synthesize_morning_briefing(tenant_id: str) -> str:
             days_lookback=7,
         )
 
+        if not briefing:
+            logger.warning(f"No journals found for tenant {tenant_id}")
+            return ""
+
         logger.info(f"Synthesized morning briefing for tenant {tenant_id}")
         return briefing
 
+    except ValueError as e:
+        logger.error(f"Invalid tenant_id format: {e}")
+        return ""
     except Exception as e:
-        logger.error(f"Failed to synthesize morning briefing: {e}")
+        logger.error(f"Failed to synthesize morning briefing: {e}", exc_info=True)
         return ""
     finally:
         db.close()
@@ -73,17 +80,20 @@ async def create_daily_journal_entry(
             period_start=today,
             period_end=today,
             period_type="day",
-            key_accomplishments=key_accomplishments,
-            key_challenges=key_challenges,
-            mentioned_people=mentioned_people,
-            mentioned_projects=mentioned_projects,
+            key_accomplishments=key_accomplishments or [],
+            key_challenges=key_challenges or [],
+            mentioned_people=mentioned_people or [],
+            mentioned_projects=mentioned_projects or [],
         )
 
         logger.info(f"Created daily journal entry {journal.id} for tenant {tenant_id}")
         return str(journal.id)
 
+    except ValueError as e:
+        logger.error(f"Invalid tenant_id format: {e}")
+        return ""
     except Exception as e:
-        logger.error(f"Failed to create journal entry: {e}")
+        logger.error(f"Failed to create journal entry: {e}", exc_info=True)
         return ""
     finally:
         db.close()
@@ -119,18 +129,21 @@ async def create_weekly_journal_summary(
             period_start=week_start,
             period_end=week_end,
             period_type="week",
-            key_themes=key_themes,
-            key_accomplishments=key_accomplishments,
-            key_challenges=key_challenges,
-            mentioned_people=mentioned_people,
-            mentioned_projects=mentioned_projects,
+            key_themes=key_themes or [],
+            key_accomplishments=key_accomplishments or [],
+            key_challenges=key_challenges or [],
+            mentioned_people=mentioned_people or [],
+            mentioned_projects=mentioned_projects or [],
         )
 
         logger.info(f"Created weekly journal summary {journal.id} for tenant {tenant_id}")
         return str(journal.id)
 
+    except ValueError as e:
+        logger.error(f"Invalid tenant_id format: {e}")
+        return ""
     except Exception as e:
-        logger.error(f"Failed to create weekly journal: {e}")
+        logger.error(f"Failed to create weekly journal: {e}", exc_info=True)
         return ""
     finally:
         db.close()

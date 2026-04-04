@@ -3,18 +3,18 @@ import uuid
 from typing import List, Optional
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api import deps
 from app.models import SessionJournal, User
 from app.services.session_journals import session_journal_service
-from app.services.knowledge import knowledge_service
 
 router = APIRouter(prefix="/session-journals", tags=["session-journals"])
 
 
-class SessionJournalCreate:
+class SessionJournalCreate(BaseModel):
     """Request body for creating a session journal entry."""
     summary: str
     period_start: date
@@ -29,15 +29,7 @@ class SessionJournalCreate:
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_journal(
-    summary: str,
-    period_start: date,
-    period_end: date,
-    period_type: str = "week",
-    key_themes: Optional[List[str]] = None,
-    key_accomplishments: Optional[List[str]] = None,
-    key_challenges: Optional[List[str]] = None,
-    mentioned_people: Optional[List[str]] = None,
-    mentioned_projects: Optional[List[str]] = None,
+    req: SessionJournalCreate,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_user),
 ):
@@ -45,15 +37,15 @@ def create_journal(
     journal = session_journal_service.create_journal_entry(
         db=db,
         tenant_id=current_user.tenant_id,
-        summary=summary,
-        period_start=period_start,
-        period_end=period_end,
-        period_type=period_type,
-        key_themes=key_themes,
-        key_accomplishments=key_accomplishments,
-        key_challenges=key_challenges,
-        mentioned_people=mentioned_people,
-        mentioned_projects=mentioned_projects,
+        summary=req.summary,
+        period_start=req.period_start,
+        period_end=req.period_end,
+        period_type=req.period_type,
+        key_themes=req.key_themes,
+        key_accomplishments=req.key_accomplishments,
+        key_challenges=req.key_challenges,
+        mentioned_people=req.mentioned_people,
+        mentioned_projects=req.mentioned_projects,
     )
 
     return {

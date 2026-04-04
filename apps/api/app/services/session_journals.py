@@ -52,15 +52,22 @@ class SessionJournalService(BaseService[SessionJournal]):
         db.add(journal)
         db.flush()
 
-        # Embed the summary for semantic search
-        embedding = embed_and_store(
-            content=summary,
-            content_type="session_journal",
-            content_id=str(journal.id),
-            tenant_id=tenant_id,
-            db=db,
-        )
-        journal.embedding = embedding
+        # Embed the summary for semantic search (non-blocking failure)
+        try:
+            embedding = embed_and_store(
+                content=summary,
+                content_type="session_journal",
+                content_id=str(journal.id),
+                tenant_id=tenant_id,
+                db=db,
+            )
+            if embedding is not None:
+                journal.embedding = embedding
+        except Exception as e:
+            # Log but don't fail — embeddings are optional for basic journal functionality
+            import logging
+            logging.warning(f"Failed to embed journal {journal.id}: {e}")
+
         db.commit()
         return journal
 
