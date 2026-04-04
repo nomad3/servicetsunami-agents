@@ -40,6 +40,8 @@ services:
       - EXPLORATION_MODE=${EXPLORATION_MODE:-off}
       - CORS_EXTRA_ORIGINS=${CORS_EXTRA_ORIGINS:-}
       - EXPLORATION_RATE=${EXPLORATION_RATE:-0.7}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   web:
     build:
@@ -84,6 +86,8 @@ services:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - HF_HUB_ENABLE_HF_TRANSFER=0
       - HF_HUB_DISABLE_XET=1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   databricks-worker:
