@@ -185,23 +185,17 @@ export default function WorkflowBuilder() {
   const pill = integrationPill();
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 56px)', background: '#0f172a' }}>
+    <div className="workflow-builder">
       {/* Toolbar */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
-        borderBottom: '1px solid #1e293b', background: 'rgba(15, 23, 42, 0.9)',
-      }}>
-        <Button variant="link" size="sm" style={{ color: '#94a3b8' }}
+      <div className="builder-toolbar">
+        <Button variant="link" size="sm" className="btn-back"
           onClick={() => navigate('/workflows')}>
           <FiArrowLeft /> Back
         </Button>
         <input
+          className="workflow-name-input"
           value={workflowName}
           onChange={(e) => setWorkflowName(e.target.value)}
-          style={{
-            background: 'transparent', border: 'none', color: '#e2e8f0',
-            fontSize: 16, fontWeight: 600, outline: 'none', width: 250,
-          }}
         />
         <Badge bg={workflow?.status === 'active' ? 'success' : 'secondary'}>
           {workflow?.status || 'draft'}
@@ -212,7 +206,7 @@ export default function WorkflowBuilder() {
           </Badge>
         )}
 
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+        <div className="builder-toolbar-actions">
           <Button variant="outline-secondary" size="sm" onClick={() => setShowJson(!showJson)}>
             <FiCode /> JSON
           </Button>
@@ -230,7 +224,7 @@ export default function WorkflowBuilder() {
       </div>
 
       {/* Main layout */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div className="builder-layout">
         <StepPalette mcpTools={Object.keys(toolMapping).filter(k => k)} />
         <WorkflowCanvas
           nodes={nodes} edges={edges}
@@ -250,11 +244,8 @@ export default function WorkflowBuilder() {
 
       {/* JSON toggle */}
       {showJson && (
-        <div style={{
-          borderTop: '1px solid #1e293b', background: '#0f172a',
-          padding: 12, maxHeight: 200, overflowY: 'auto',
-        }}>
-          <pre style={{ color: '#94a3b8', fontSize: 11, margin: 0 }}>
+        <div className="json-editor">
+          <pre>
             {JSON.stringify(flowToDefinition(nodes, edges), null, 2)}
           </pre>
         </div>

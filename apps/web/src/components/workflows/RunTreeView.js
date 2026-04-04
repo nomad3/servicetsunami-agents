@@ -106,36 +106,33 @@ export default function RunTreeView({ run, onBack }) {
   const progress = stepsTotal > 0 ? (stepsCompleted / stepsTotal) * 100 : 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="run-tree-view">
       {/* Summary bar */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
-        borderBottom: '1px solid #1e293b', flexWrap: 'wrap',
-      }}>
-        <Button variant="link" size="sm" onClick={onBack} style={{ color: '#94a3b8', padding: 0 }}>
+      <div className="run-summary-bar">
+        <Button variant="link" size="sm" onClick={onBack} className="btn-back">
           <FiArrowLeft /> Back
         </Button>
         <Badge bg={run.status === 'completed' ? 'success' : run.status === 'failed' ? 'danger' : 'primary'}>
           {runDetail?.status || run.status}
         </Badge>
-        <span style={{ fontSize: 12, color: '#94a3b8' }}>
+        <span className="stat-label">
           Steps: {stepsCompleted}/{stepsTotal}
         </span>
         <ProgressBar now={progress} style={{ flex: 1, minWidth: 100, height: 6 }} />
         {runDetail?.duration_ms && (
-          <span style={{ fontSize: 12, color: '#94a3b8' }}>
+          <span className="stat-label">
             <FiClock size={10} /> {(runDetail.duration_ms / 1000).toFixed(1)}s
           </span>
         )}
         {runDetail?.total_cost_usd > 0 && (
-          <span style={{ fontSize: 12, color: '#94a3b8' }}>
+          <span className="stat-label">
             <FiDollarSign size={10} /> ${runDetail.total_cost_usd.toFixed(4)}
           </span>
         )}
       </div>
 
       {/* Tree + detail */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div className="run-layout">
         <WorkflowCanvas
           nodes={nodes} edges={edges}
           onNodesChange={() => {}} onEdgesChange={() => {}}

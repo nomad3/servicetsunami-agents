@@ -71,20 +71,13 @@ export default function StepPalette({ mcpTools = [] }) {
   };
 
   return (
-    <div className="step-palette" style={{
-      width: 220, minWidth: 220, overflowY: 'auto',
-      background: 'rgba(15, 23, 42, 0.6)', borderRight: '1px solid #1e293b',
-      padding: '8px',
-    }}>
-      <h6 style={{ color: '#94a3b8', fontSize: 11, textTransform: 'uppercase', marginBottom: 8 }}>
-        Steps
-      </h6>
+    <div className="step-palette">
+      <h6 className="step-palette-title">Steps</h6>
       <Accordion defaultActiveKey={['triggers', 'logic']} alwaysOpen>
         {categories.map((cat) => (
-          <Accordion.Item key={cat.key} eventKey={cat.key}
-            style={{ background: 'transparent', border: 'none' }}>
-            <Accordion.Header style={{ fontSize: 12 }}>{cat.label}</Accordion.Header>
-            <Accordion.Body style={{ padding: '4px 0' }}>
+          <Accordion.Item key={cat.key} eventKey={cat.key}>
+            <Accordion.Header>{cat.label}</Accordion.Header>
+            <Accordion.Body>
               {cat.items.map((item, i) => {
                 const Icon = item.icon;
                 return (
@@ -92,12 +85,6 @@ export default function StepPalette({ mcpTools = [] }) {
                     className="palette-item"
                     draggable
                     onDragStart={(e) => onDragStart(e, item)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 6,
-                      padding: '4px 8px', marginBottom: 2, borderRadius: 4,
-                      cursor: 'grab', fontSize: 12, color: '#cbd5e1',
-                      background: 'rgba(30, 41, 59, 0.5)',
-                    }}
                   >
                     <Icon size={12} />
                     <span>{item.label}</span>
@@ -105,7 +92,7 @@ export default function StepPalette({ mcpTools = [] }) {
                 );
               })}
               {cat.items.length === 0 && (
-                <span style={{ fontSize: 11, color: '#64748b' }}>Loading tools...</span>
+                <span className="palette-empty">Loading tools...</span>
               )}
             </Accordion.Body>
           </Accordion.Item>

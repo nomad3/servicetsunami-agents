@@ -34,7 +34,7 @@ export default function TemplatesTab() {
 
   if (templates.length === 0) {
     return (
-      <div className="text-center p-5" style={{ color: '#64748b' }}>
+      <div className="text-center p-5 template-empty">
         <h5>No templates available</h5>
         <p>Templates will appear here as native, community, and shared workflows are added.</p>
       </div>
@@ -45,13 +45,10 @@ export default function TemplatesTab() {
     <Row xs={1} md={2} lg={3} className="g-3">
       {templates.map((t) => (
         <Col key={t.id}>
-          <Card className="h-100" style={{
-            background: 'rgba(15, 23, 42, 0.6)', border: '1px solid #1e293b',
-            backdropFilter: 'blur(20px)', color: '#e2e8f0',
-          }}>
+          <Card className="h-100 template-card">
             <Card.Body>
               <Card.Title style={{ fontSize: 14 }}>{t.name}</Card.Title>
-              <Card.Text style={{ fontSize: 12, color: '#94a3b8' }}>
+              <Card.Text className="card-text">
                 {t.description}
               </Card.Text>
               <div className="d-flex gap-1 flex-wrap">
@@ -64,8 +61,7 @@ export default function TemplatesTab() {
                 <Badge bg="primary" style={{ fontSize: 10 }}>{t.tier}</Badge>
               </div>
             </Card.Body>
-            <Card.Footer style={{ background: 'transparent', borderTop: '1px solid #1e293b' }}
-              className="d-flex gap-2">
+            <Card.Footer className="card-footer d-flex gap-2">
               <Button variant="outline-primary" size="sm" onClick={() => handleInstall(t.id)}>
                 <FiDownload size={12} /> Install
               </Button>

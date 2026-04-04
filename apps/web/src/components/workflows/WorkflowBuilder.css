@@ -4,7 +4,7 @@
 
 /* Canvas background */
 .ocean-canvas {
-  background: #0f172a !important;
+  background: var(--surface-page) !important;
 }
 .ocean-canvas .react-flow__background {
   opacity: 0.3;
@@ -15,8 +15,8 @@
   display: flex;
   flex-direction: column;
   height: calc(100vh - 56px);
-  background: #0f172a;
-  color: #e2e8f0;
+  background: var(--surface-page);
+  color: var(--color-foreground);
 }
 
 .builder-toolbar {
@@ -24,9 +24,13 @@
   align-items: center;
   gap: 12px;
   padding: 8px 16px;
-  border-bottom: 1px solid #1e293b;
-  background: rgba(15, 23, 42, 0.9);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--surface-panel);
   backdrop-filter: blur(20px);
+}
+
+.builder-toolbar .btn-back {
+  color: var(--color-muted);
 }
 
 .builder-layout {
@@ -35,14 +39,21 @@
   overflow: hidden;
 }
 
+.builder-toolbar-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
 /* ---- Step Palette ---- */
 .step-palette {
   width: 220px;
   min-width: 220px;
   overflow-y: auto;
-  background: rgba(15, 23, 42, 0.6);
-  border-right: 1px solid #1e293b;
+  background: var(--surface-panel);
+  border-right: 1px solid var(--color-border);
   backdrop-filter: blur(12px);
+  padding: 8px;
 }
 
 .step-palette .accordion-item {
@@ -52,7 +63,7 @@
 
 .step-palette .accordion-button {
   background: transparent !important;
-  color: #94a3b8 !important;
+  color: var(--color-muted) !important;
   font-size: 12px;
   padding: 6px 8px;
   box-shadow: none !important;
@@ -63,11 +74,18 @@
 }
 
 .step-palette .accordion-button:not(.collapsed) {
-  color: #e2e8f0 !important;
+  color: var(--color-foreground) !important;
 }
 
 .step-palette .accordion-body {
   padding: 4px 0 !important;
+}
+
+.step-palette-title {
+  color: var(--color-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
 }
 
 .palette-item {
@@ -79,15 +97,15 @@
   border-radius: 6px;
   cursor: grab;
   font-size: 12px;
-  color: #cbd5e1;
-  background: rgba(30, 41, 59, 0.5);
+  color: var(--color-soft);
+  background: var(--surface-contrast);
   border: 1px solid transparent;
   transition: all 0.15s;
 }
 
 .palette-item:hover {
-  background: rgba(30, 41, 59, 0.8);
-  border-color: #334155;
+  background: var(--surface-elevated);
+  border-color: var(--color-border);
   transform: translateX(2px);
 }
 
@@ -96,59 +114,133 @@
   opacity: 0.7;
 }
 
+.palette-empty {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
 /* ---- Step Inspector ---- */
 .step-inspector {
   width: 280px;
   min-width: 280px;
   overflow-y: auto;
-  background: rgba(15, 23, 42, 0.6);
-  border-left: 1px solid #1e293b;
+  background: var(--surface-panel);
+  border-left: 1px solid var(--color-border);
   padding: 12px;
-  color: #e2e8f0;
+  color: var(--color-foreground);
   backdrop-filter: blur(12px);
+}
+
+.step-inspector-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .step-inspector .form-label {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--color-muted);
   margin-bottom: 2px;
 }
 
 .step-inspector .form-control,
 .step-inspector .form-select {
-  background: rgba(30, 41, 59, 0.6) !important;
-  border-color: #334155 !important;
-  color: #e2e8f0 !important;
+  background: var(--surface-contrast) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-foreground) !important;
   font-size: 12px;
 }
 
 .step-inspector .form-control:focus,
 .step-inspector .form-select:focus {
-  border-color: #3b82f6 !important;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 2px rgba(var(--color-action-rgb), 0.2) !important;
+}
+
+.step-inspector .integration-requires {
+  margin-top: 12px;
+}
+
+.step-inspector .integration-requires small {
+  color: var(--color-muted);
 }
 
 /* ---- Test Console ---- */
 .test-console {
-  border-top: 1px solid #1e293b;
-  background: rgba(15, 23, 42, 0.85);
+  border-top: 1px solid var(--color-border);
+  background: var(--surface-panel);
   backdrop-filter: blur(20px);
-  color: #e2e8f0;
+  color: var(--color-foreground);
   max-height: 250px;
   overflow-y: auto;
 }
 
+.test-console-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.test-console-body {
+  padding: 8px 12px;
+  overflow-y: auto;
+  max-height: 200px;
+}
+
+.test-console-loading {
+  padding: 12px;
+  color: var(--color-muted);
+}
+
+.test-console-plan-title {
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.test-console-step-item {
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  color: var(--color-soft);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.test-console-integrations {
+  margin-top: 8px;
+}
+
+.test-console-integrations h6 {
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.test-console-integrations .badge {
+  margin-right: 4px;
+  border: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-size: 10px;
+}
+
 /* ---- JSON Editor ---- */
 .json-editor {
-  border-top: 1px solid #1e293b;
-  background: #0f172a;
+  border-top: 1px solid var(--color-border);
+  background: var(--surface-page);
   padding: 12px;
   max-height: 250px;
   overflow-y: auto;
 }
 
 .json-editor pre {
-  color: #94a3b8;
+  color: var(--color-muted);
   font-size: 11px;
   margin: 0;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
@@ -156,26 +248,26 @@
 
 /* ---- ReactFlow Overrides ---- */
 .react-flow__minimap {
-  background: #0f172a !important;
-  border: 1px solid #1e293b !important;
+  background: var(--surface-page) !important;
+  border: 1px solid var(--color-border) !important;
   border-radius: 6px !important;
 }
 
 .react-flow__controls {
-  border: 1px solid #1e293b !important;
+  border: 1px solid var(--color-border) !important;
   border-radius: 6px !important;
   overflow: hidden;
 }
 
 .react-flow__controls-button {
-  background: rgba(15, 23, 42, 0.9) !important;
-  border-color: #334155 !important;
-  color: #94a3b8 !important;
+  background: var(--surface-panel) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-muted) !important;
 }
 
 .react-flow__controls-button:hover {
-  background: rgba(30, 41, 59, 0.9) !important;
-  color: #e2e8f0 !important;
+  background: var(--surface-elevated) !important;
+  color: var(--color-foreground) !important;
 }
 
 .react-flow__edge-path {
@@ -185,13 +277,13 @@
 .react-flow__handle {
   width: 8px !important;
   height: 8px !important;
-  background: #334155 !important;
-  border: 2px solid #64748b !important;
+  background: var(--surface-contrast) !important;
+  border: 2px solid var(--color-muted) !important;
 }
 
 .react-flow__handle:hover {
-  background: #3b82f6 !important;
-  border-color: #3b82f6 !important;
+  background: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
 }
 
 /* ---- Run Tree View ---- */
@@ -199,7 +291,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #0f172a;
+  background: var(--surface-page);
 }
 
 .run-summary-bar {
@@ -207,8 +299,18 @@
   align-items: center;
   gap: 12px;
   padding: 8px 16px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--color-border);
   flex-wrap: wrap;
+}
+
+.run-summary-bar .btn-back {
+  color: var(--color-muted);
+  padding: 0;
+}
+
+.run-summary-bar .stat-label {
+  font-size: 12px;
+  color: var(--color-muted);
 }
 
 .run-layout {
@@ -226,16 +328,36 @@
   width: 300px;
   min-width: 300px;
   overflow-y: auto;
-  background: rgba(15, 23, 42, 0.8);
-  border-left: 1px solid #1e293b;
+  background: var(--surface-panel);
+  border-left: 1px solid var(--color-border);
   padding: 12px;
-  color: #e2e8f0;
+  color: var(--color-foreground);
+}
+
+.run-step-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.run-step-detail .stat-line {
+  font-size: 12px;
+  color: var(--color-muted);
+  margin-bottom: 4px;
+}
+
+.run-step-detail .section-label {
+  font-size: 12px;
+  color: var(--color-muted);
 }
 
 .run-step-detail pre {
   font-size: 10px;
-  color: #94a3b8;
-  background: #1e293b;
+  color: var(--color-muted);
+  background: var(--surface-contrast);
   padding: 8px;
   border-radius: 4px;
   max-height: 150px;
@@ -248,11 +370,16 @@
   color: #fca5a5;
 }
 
+.run-step-detail .error-title {
+  font-size: 12px;
+  color: #ef4444;
+}
+
 /* ---- Workflow Name Input ---- */
 .workflow-name-input {
   background: transparent;
   border: none;
-  color: #e2e8f0;
+  color: var(--color-foreground);
   font-size: 16px;
   font-weight: 600;
   outline: none;
@@ -262,26 +389,40 @@
 }
 
 .workflow-name-input:focus {
-  border-bottom-color: #3b82f6;
+  border-bottom-color: var(--color-primary);
 }
 
 /* ---- Templates Tab Cards ---- */
 .template-card {
-  background: rgba(15, 23, 42, 0.6) !important;
-  border: 1px solid #1e293b !important;
+  background: var(--surface-panel) !important;
+  border: 1px solid var(--color-border) !important;
   backdrop-filter: blur(20px);
-  color: #e2e8f0 !important;
+  color: var(--color-foreground) !important;
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .template-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-md);
+}
+
+.template-card .card-text {
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.template-card .card-footer {
+  background: transparent;
+  border-top: 1px solid var(--color-border);
+}
+
+.template-empty {
+  color: var(--color-muted);
 }
 
 /* ---- Runs Tab Table ---- */
 .runs-table {
-  color: #cbd5e1;
+  color: var(--color-soft);
   font-size: 12px;
 }
 
@@ -291,5 +432,39 @@
 }
 
 .runs-table tr:hover {
-  background: rgba(30, 41, 59, 0.4) !important;
+  background: var(--surface-contrast) !important;
+}
+
+.runs-empty {
+  color: var(--color-muted);
+}
+
+.runs-back-btn {
+  color: var(--color-muted);
+  margin-bottom: 12px;
+}
+
+.runs-detail-panel {
+  background: var(--surface-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.runs-detail-panel .step-logs-title {
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.runs-detail-panel .error-title {
+  font-size: 13px;
+  color: #ef4444;
+}
+
+.runs-detail-panel pre {
+  font-size: 11px;
+  color: #fca5a5;
+  background: var(--surface-contrast);
+  padding: 8px;
+  border-radius: 4px;
 }

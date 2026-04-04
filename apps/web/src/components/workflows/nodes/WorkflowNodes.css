@@ -1,10 +1,10 @@
 .workflow-node {
-  background: rgba(15, 23, 42, 0.85);
+  background: var(--surface-panel);
   backdrop-filter: blur(20px);
-  border: 2px solid #334155;
+  border: 2px solid var(--color-border);
   border-radius: 8px;
   padding: 8px 12px;
-  color: #e2e8f0;
+  color: var(--color-foreground);
   font-size: 13px;
   min-width: 200px;
   max-width: 260px;
@@ -12,13 +12,13 @@
 }
 .workflow-node:hover {
   transform: translateY(-3px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-md);
 }
 .workflow-node.selected {
-  box-shadow: 0 0 0 2px #3b82f6;
+  box-shadow: 0 0 0 2px var(--color-primary);
 }
 
-/* Node type colors */
+/* Node type colors — semantic accent colors (stay hardcoded) */
 .trigger-node { border-color: #0ea5e9; border-radius: 20px; text-align: center; }
 .condition-node { border-color: #f59e0b; }
 .foreach-node { border-color: #22c55e; }
@@ -43,7 +43,7 @@
 /* Body */
 .node-body {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--color-muted);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -63,7 +63,7 @@
   color: #60a5fa;
 }
 
-/* Loop badge */
+/* Loop badge — semantic accent (green) */
 .loop-badge {
   background: #166534;
   color: #4ade80;
@@ -73,7 +73,7 @@
   margin-left: auto;
 }
 
-/* Integration badge */
+/* Integration badge — semantic status colors */
 .integration-badge {
   font-size: 10px;
   padding: 1px 5px;
@@ -84,7 +84,7 @@
 .integration-badge.connected { background: #14532d; color: #4ade80; }
 .integration-badge.disconnected { background: #7f1d1d; color: #fca5a5; }
 
-/* Condition */
+/* Condition — semantic colors */
 .condition-labels {
   display: flex;
   justify-content: space-between;
@@ -98,7 +98,7 @@
 /* Substep count */
 .substep-count { color: #60a5fa; margin-left: 8px; font-size: 10px; }
 
-/* Approval status */
+/* Approval status — semantic status colors */
 .approval-status {
   font-size: 10px;
   padding: 1px 5px;

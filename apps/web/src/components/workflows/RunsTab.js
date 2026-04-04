@@ -51,25 +51,22 @@ export default function RunsTab({ workflows = [] }) {
     return (
       <div>
         <Button variant="link" size="sm" onClick={() => { setSelectedRunId(null); setRunDetail(null); }}
-          style={{ color: '#94a3b8', marginBottom: 12 }}>
+          className="runs-back-btn">
           Back to Runs
         </Button>
-        <div style={{
-          background: 'rgba(15, 23, 42, 0.6)', border: '1px solid #1e293b',
-          borderRadius: 8, padding: 16,
-        }}>
+        <div className="runs-detail-panel">
           <div className="d-flex align-items-center gap-2 mb-3">
             <Badge bg={STATUS_COLORS[runDetail.status]}>{runDetail.status}</Badge>
-            <span style={{ color: '#94a3b8', fontSize: 12 }}>
+            <span className="stat-label">
               {runDetail.duration_ms ? `${(runDetail.duration_ms / 1000).toFixed(1)}s` : 'Running...'}
             </span>
             {runDetail.total_cost_usd > 0 && (
-              <span style={{ color: '#94a3b8', fontSize: 12 }}>${runDetail.total_cost_usd.toFixed(4)}</span>
+              <span className="stat-label">${runDetail.total_cost_usd.toFixed(4)}</span>
             )}
           </div>
 
-          <h6 style={{ fontSize: 13, color: '#94a3b8' }}>Step Logs</h6>
-          <Table size="sm" style={{ color: '#cbd5e1', fontSize: 12 }}>
+          <h6 className="step-logs-title">Step Logs</h6>
+          <Table size="sm" className="runs-table">
             <thead>
               <tr><th>Step</th><th>Type</th><th>Status</th><th>Duration</th><th>Tokens</th></tr>
             </thead>
@@ -88,10 +85,8 @@ export default function RunsTab({ workflows = [] }) {
 
           {runDetail.error && (
             <div style={{ marginTop: 12 }}>
-              <h6 style={{ fontSize: 13, color: '#ef4444' }}>Error</h6>
-              <pre style={{ fontSize: 11, color: '#fca5a5', background: '#1e293b', padding: 8, borderRadius: 4 }}>
-                {runDetail.error}
-              </pre>
+              <h6 className="error-title">Error</h6>
+              <pre>{runDetail.error}</pre>
             </div>
           )}
         </div>
@@ -117,11 +112,11 @@ export default function RunsTab({ workflows = [] }) {
       {loading ? (
         <div className="text-center p-4"><Spinner /></div>
       ) : runs.length === 0 ? (
-        <div className="text-center p-5" style={{ color: '#64748b' }}>
+        <div className="text-center p-5 runs-empty">
           <p>No workflow runs yet. Activate a workflow or trigger a manual run.</p>
         </div>
       ) : (
-        <Table hover size="sm" style={{ color: '#cbd5e1', fontSize: 12 }}>
+        <Table hover size="sm" className="runs-table">
           <thead>
             <tr>
               <th>Workflow</th><th>Status</th><th>Trigger</th>
@@ -130,7 +125,7 @@ export default function RunsTab({ workflows = [] }) {
           </thead>
           <tbody>
             {filtered.map((run) => (
-              <tr key={run.id} onClick={() => handleRunClick(run.id)} style={{ cursor: 'pointer' }}>
+              <tr key={run.id} onClick={() => handleRunClick(run.id)}>
                 <td>{run.workflow_name || '-'}</td>
                 <td><Badge bg={STATUS_COLORS[run.status]}>{run.status}</Badge></td>
                 <td>{run.trigger_type || '-'}</td>
@@ -138,7 +133,7 @@ export default function RunsTab({ workflows = [] }) {
                 <td>{run.total_cost_usd ? `$${run.total_cost_usd.toFixed(4)}` : '-'}</td>
                 <td>{run.started_at ? new Date(run.started_at).toLocaleString() : '-'}</td>
                 <td>
-                  <Button variant="link" size="sm" style={{ padding: 0, color: '#60a5fa' }}
+                  <Button variant="link" size="sm" style={{ padding: 0 }}
                     onClick={(e) => { e.stopPropagation(); }}>
                     <FiPlay size={10} />
                   </Button>

@@ -11,15 +11,8 @@ export default function RunStepDetail({ step, onClose }) {
   if (!step) return null;
 
   return (
-    <div style={{
-      width: 300, minWidth: 300, overflowY: 'auto',
-      background: 'rgba(15, 23, 42, 0.8)', borderLeft: '1px solid #1e293b',
-      padding: 12, color: '#e2e8f0',
-    }}>
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        marginBottom: 12, paddingBottom: 8, borderBottom: '1px solid #1e293b',
-      }}>
+    <div className="run-step-detail">
+      <div className="run-step-detail-header">
         <div>
           <h6 style={{ margin: 0, fontSize: 14 }}>{step.step_id}</h6>
           <Badge bg="secondary" style={{ fontSize: 10 }}>{step.step_type}</Badge>
@@ -32,39 +25,35 @@ export default function RunStepDetail({ step, onClose }) {
       </div>
 
       {step.duration_ms != null && (
-        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>
+        <div className="stat-line">
           <FiClock size={10} /> {step.duration_ms}ms
         </div>
       )}
       {step.tokens_used > 0 && (
-        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>
+        <div className="stat-line">
           <FiCpu size={10} /> {step.tokens_used} tokens
         </div>
       )}
       {step.cost_usd > 0 && (
-        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>
+        <div className="stat-line">
           <FiDollarSign size={10} /> ${step.cost_usd.toFixed(4)}
         </div>
       )}
       {step.retry_count > 0 && (
-        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>
+        <div className="stat-line">
           <FiRefreshCw size={10} /> Retries: {step.retry_count}
         </div>
       )}
       {step.platform && (
-        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 8 }}>
+        <div className="stat-line" style={{ marginBottom: 8 }}>
           Platform: {step.platform}
         </div>
       )}
 
       {step.input_data && (
         <div style={{ marginBottom: 12 }}>
-          <h6 style={{ fontSize: 12, color: '#64748b' }}>Input</h6>
-          <pre style={{
-            fontSize: 10, color: '#94a3b8', background: '#1e293b',
-            padding: 8, borderRadius: 4, maxHeight: 150, overflowY: 'auto',
-            whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-          }}>
+          <h6 className="section-label">Input</h6>
+          <pre>
             {JSON.stringify(step.input_data, null, 2)}
           </pre>
         </div>
@@ -72,12 +61,8 @@ export default function RunStepDetail({ step, onClose }) {
 
       {step.output_data && (
         <div style={{ marginBottom: 12 }}>
-          <h6 style={{ fontSize: 12, color: '#64748b' }}>Output</h6>
-          <pre style={{
-            fontSize: 10, color: '#94a3b8', background: '#1e293b',
-            padding: 8, borderRadius: 4, maxHeight: 150, overflowY: 'auto',
-            whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-          }}>
+          <h6 className="section-label">Output</h6>
+          <pre>
             {JSON.stringify(step.output_data, null, 2)}
           </pre>
         </div>
@@ -85,12 +70,8 @@ export default function RunStepDetail({ step, onClose }) {
 
       {step.error && (
         <div>
-          <h6 style={{ fontSize: 12, color: '#ef4444' }}>Error</h6>
-          <pre style={{
-            fontSize: 10, color: '#fca5a5', background: '#1e293b',
-            padding: 8, borderRadius: 4, maxHeight: 150, overflowY: 'auto',
-            whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-          }}>
+          <h6 className="error-title">Error</h6>
+          <pre className="error">
             {step.error}
           </pre>
         </div>
