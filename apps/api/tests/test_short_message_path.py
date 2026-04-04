@@ -25,6 +25,11 @@ def test_should_use_local_path_no_intent_short():
     assert _should_use_local_path(intent=None, message="hola", pin_to_cli=False) is True
 
 
+def test_should_use_local_path_boundary_at_100():
+    """Exactly 100-char message is included in the local path (≤ boundary)."""
+    assert _should_use_local_path(intent=None, message="x" * 100, pin_to_cli=False) is True
+
+
 def test_should_use_local_path_no_intent_long():
     """Long message (>100 chars) with no intent match → do NOT use local path."""
     assert _should_use_local_path(intent=None, message="x" * 101, pin_to_cli=False) is False
@@ -58,6 +63,22 @@ def test_format_memory_for_local_with_entities():
     result = _format_memory_for_local(ctx)
     assert "Acme Corp" in result
     assert "John Doe" in result
+
+
+def test_format_memory_for_local_caps_at_three_entities():
+    """Only the first 3 entities are included even when more are present."""
+    ctx = {
+        "relevant_entities": [
+            {"name": f"Entity{i}", "entity_type": "thing", "description": ""}
+            for i in range(5)
+        ]
+    }
+    result = _format_memory_for_local(ctx)
+    assert "Entity0" in result
+    assert "Entity1" in result
+    assert "Entity2" in result
+    assert "Entity3" not in result
+    assert "Entity4" not in result
 
 
 # ---------------------------------------------------------------------------

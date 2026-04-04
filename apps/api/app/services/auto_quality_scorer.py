@@ -326,7 +326,7 @@ async def _score_and_log(
                             rewarded_at = NOW()
                         WHERE tenant_id = CAST(:tid AS uuid)
                           AND trajectory_id = CAST(:traj AS uuid)
-                          AND decision_point = 'agent_routing'
+                          AND decision_point IN ('agent_routing', 'tier_selection')
                           AND reward IS NULL
                     """), {
                         "reward": reward,
@@ -334,9 +334,9 @@ async def _score_and_log(
                         "traj": routing_trajectory_id,
                     })
                     db.commit()
-                    logger.debug("Backfilled agent_routing reward=%.3f for trajectory %s", reward, routing_trajectory_id[:8])
+                    logger.debug("Backfilled routing reward=%.3f for trajectory %s", reward, routing_trajectory_id[:8])
                 except Exception as e:
-                    logger.debug("agent_routing reward backfill failed: %s", e)
+                    logger.debug("routing reward backfill failed: %s", e)
 
             # ── Decision gate: trigger provider council for high-value cases ──
             _maybe_trigger_provider_council(
