@@ -338,7 +338,8 @@ def initialize_intent_embeddings():
     _intent_cache = []
     for intent_def in INTENT_DEFINITIONS:
         try:
-            vec = model.encode(intent_def["name"], prompt_name="search_query")
+            prefixed = f"search_query: {intent_def['name']}"
+            vec = model.encode(prefixed, normalize_embeddings=True)
             _intent_cache.append({**intent_def, "vector": vec})
         except Exception as e:
             logger.error(f"Failed to embed intent '{intent_def['name']}': {e}")
@@ -357,7 +358,8 @@ def match_intent(message: str) -> dict:
     if not model:
         return None
     try:
-        msg_vec = model.encode(message, prompt_name="search_query")
+        prefixed = f"search_query: {message[:_MAX_INPUT_CHARS]}"
+        msg_vec = model.encode(prefixed, normalize_embeddings=True)
         best_match = None
         best_score = 0.0
         for intent in _intent_cache:
