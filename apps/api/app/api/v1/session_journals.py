@@ -11,7 +11,7 @@ from app.api import deps
 from app.models import SessionJournal, User
 from app.services.session_journals import session_journal_service
 
-router = APIRouter(prefix="/session-journals", tags=["session-journals"])
+router = APIRouter(tags=["session-journals"])
 
 
 class SessionJournalCreate(BaseModel):
