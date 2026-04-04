@@ -1,13 +1,24 @@
+import os
+import uuid
+from unittest.mock import MagicMock, patch
+
+from app.services.agent_router import _format_memory_for_local, _should_use_local_path
+from app.services.embedding_service import INTENT_DEFINITIONS, _expand_intents_with_translations
 from app.services.rl_experience_service import DECISION_POINTS
 
+
+# ---------------------------------------------------------------------------
+# Task 1: RL decision point
+# ---------------------------------------------------------------------------
 
 def test_tier_selection_in_decision_points():
     """tier_selection must appear in the known decision points."""
     assert "tier_selection" in DECISION_POINTS
 
 
-from app.services.agent_router import _should_use_local_path, _format_memory_for_local
-
+# ---------------------------------------------------------------------------
+# Task 2: Short-message local path helpers
+# ---------------------------------------------------------------------------
 
 def test_should_use_local_path_no_intent_short():
     """Short message + no intent match → local path."""
@@ -49,9 +60,9 @@ def test_format_memory_for_local_with_entities():
     assert "John Doe" in result
 
 
-import uuid
-from unittest.mock import MagicMock, patch
-
+# ---------------------------------------------------------------------------
+# Task 2: Integration tests for route_and_execute
+# ---------------------------------------------------------------------------
 
 def _make_db_mock():
     """Build a DB mock that simulates TenantFeatures with default platform."""
@@ -98,8 +109,10 @@ def test_long_message_bypasses_local_path(
     """Long message (>100 chars) with no intent must NOT use local path — goes to CLI."""
     from app.services.agent_router import route_and_execute
 
-    long_message = "Please analyze our Q1 sales data, compare it with last quarter, " \
-                   "identify the top performing products and create a detailed report with charts."
+    long_message = (
+        "Please analyze our Q1 sales data, compare it with last quarter, "
+        "identify the top performing products and create a detailed report with charts."
+    )
 
     response, metadata = route_and_execute(
         db=_make_db_mock(),
@@ -133,11 +146,12 @@ def test_pinned_cli_session_bypasses_local_path(
     assert mock_run.called
 
 
+# ---------------------------------------------------------------------------
+# Task 3: Multilingual intent expansion
+# ---------------------------------------------------------------------------
+
 def test_expand_intents_no_env_returns_empty():
     """Without INTENT_EXPANSION_LANGUAGES set, expansion returns empty list."""
-    import os
-    from app.services.embedding_service import _expand_intents_with_translations
-
     env_without_key = {k: v for k, v in os.environ.items() if k != "INTENT_EXPANSION_LANGUAGES"}
     with patch.dict(os.environ, env_without_key, clear=True):
         result = _expand_intents_with_translations()
@@ -147,9 +161,6 @@ def test_expand_intents_no_env_returns_empty():
 @patch("app.services.local_inference.generate_sync", return_value="Saludo o charla")
 def test_expand_intents_with_single_language(mock_gen):
     """With one language configured, each intent gets one translation."""
-    import os
-    from app.services.embedding_service import INTENT_DEFINITIONS, _expand_intents_with_translations
-
     with patch.dict(os.environ, {"INTENT_EXPANSION_LANGUAGES": "Spanish"}):
         result = _expand_intents_with_translations()
 
@@ -166,9 +177,6 @@ def test_expand_intents_with_single_language(mock_gen):
 @patch("app.services.local_inference.generate_sync", return_value="translation")
 def test_expand_intents_two_languages(mock_gen):
     """Two languages → 2 × len(INTENT_DEFINITIONS) expansions."""
-    import os
-    from app.services.embedding_service import INTENT_DEFINITIONS, _expand_intents_with_translations
-
     with patch.dict(os.environ, {"INTENT_EXPANSION_LANGUAGES": "Spanish,Portuguese"}):
         result = _expand_intents_with_translations()
 

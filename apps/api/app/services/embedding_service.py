@@ -5,6 +5,7 @@ API-key-free embedding generation. All functions are module-level, matching
 the service pattern used elsewhere.
 """
 import logging
+import os
 import uuid
 from typing import Dict, List, Optional
 
@@ -76,8 +77,7 @@ def _expand_intents_with_translations() -> list:
     Returns list of additional intent dicts (empty if env var not set or Ollama unavailable).
     Set at startup — no runtime overhead on the hot path.
     """
-    import os
-    from app.services.local_inference import generate_sync
+    from app.services.local_inference import generate_sync  # deferred: avoids circular import
 
     languages_str = os.environ.get("INTENT_EXPANSION_LANGUAGES", "").strip()
     if not languages_str:
