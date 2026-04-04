@@ -15,6 +15,7 @@ from app.models.mcp_server_connector import MCPServerConnector
 from app.services.memory_recall import build_memory_context_with_git
 from app.services.orchestration.credential_vault import retrieve_credentials_for_skill
 from app.services.skill_manager import skill_manager
+from app.services.tool_groups import TIER_LIMITS, TIER_MODEL_MAP, format_allowed_tools, resolve_tool_names
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +30,10 @@ def generate_cli_instructions(
     conversation_summary: str,
     memory_context: Dict[str, Any],
     agent_slug: str = "luna",
+    tier: str = "full",
 ) -> str:
     """Generate provider-neutral instruction markdown from agent skill + tenant context."""
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS["full"])
     lines: list[str] = []
 
     lines.append("# CRITICAL RULES")
@@ -220,7 +223,7 @@ def generate_cli_instructions(
         lines.append(identity_context)
         lines.append("")
 
-    if active_goals:
+    if limits["include_goals"] and active_goals:
         lines.append("## Active Goals")
         lines.append("")
         for g in active_goals:
@@ -231,7 +234,7 @@ def generate_cli_instructions(
                 lines.append(f"  Progress: {g['progress_summary']}")
         lines.append("")
 
-    if open_commitments:
+    if limits["include_commitments"] and open_commitments:
         lines.append("## Open Commitments")
         lines.append("")
         for c in open_commitments:
@@ -245,13 +248,13 @@ def generate_cli_instructions(
     unstable_assertions = world_model.get("unstable_assertions", [])
     causal_patterns = world_model.get("causal_patterns", [])
 
-    if state_context:
+    if limits["include_world_state"] and state_context:
         lines.append("## Current World State")
         lines.append("")
         lines.append(state_context)
         lines.append("")
 
-    if unstable_assertions:
+    if limits["include_world_state"] and unstable_assertions:
         lines.append("## Assumptions Needing Verification")
         lines.append("")
         lines.append("These facts have low confidence or are aging. Verify before relying on them:")
@@ -259,7 +262,7 @@ def generate_cli_instructions(
             lines.append(f"- **{ua['subject']}.{ua['attribute']}** = {ua['value']} (confidence: {ua['confidence']})")
         lines.append("")
 
-    if causal_patterns:
+    if limits["include_world_state"] and causal_patterns:
         lines.append("## Known Causal Patterns")
         lines.append("")
         lines.append("Actions and their observed outcomes (use for planning):")
@@ -382,6 +385,9 @@ def run_agent_session(
     image_mime: str = "",
     db_session_memory: Dict = None,
     pre_built_memory_context: Dict = None,
+    agent_tier: str = "full",
+    agent_tool_groups: list = None,
+    agent_memory_domains: list = None,
 ) -> Tuple[Optional[str], Dict]:
     """Run a full stateless CLI agent session through the configured platform."""
     metadata: Dict[str, Any] = {
@@ -476,13 +482,22 @@ def run_agent_session(
     # Extract session entity names from prior turns for recall boosting
     session_entity_names = (db_session_memory or {}).get("recalled_entity_names")
 
+    limits = TIER_LIMITS.get(agent_tier, TIER_LIMITS["full"])
+
     if pre_built_memory_context is not None:
         memory_context = pre_built_memory_context
     else:
         try:
             memory_context = build_memory_context_with_git(
-                db, tenant_id, message,
+                db=db,
+                tenant_id=tenant_id,
+                user_message=message,
                 session_entity_names=session_entity_names,
+                domains=agent_memory_domains,
+                max_entities=limits["entities"],
+                max_observations=limits["observations_per_entity"],
+                include_relations=limits["include_relations"],
+                include_episodes=limits["include_episodes"],
             )
         except Exception as exc:
             logger.warning("Memory recall failed for tenant %s: %s", tenant_id, exc)
@@ -585,6 +600,7 @@ def run_agent_session(
         conversation_summary=conversation_summary,
         memory_context=memory_context,
         agent_slug=agent_slug,
+        tier=agent_tier,
     )
 
     internal_key = settings.MCP_API_KEY or "dev_mcp_key"
@@ -616,12 +632,18 @@ def run_agent_session(
                 image_b64: str = ""
                 image_mime: str = ""
                 session_id: str = ""
+                model: str = ""  # model slug e.g., "claude-haiku-4-5-20251001"
+                allowed_tools: str = ""  # comma-separated MCP tool names
 
             existing_session_id = (
                 (db_session_memory or {}).get(f"{platform}_cli_session_id")
                 or (db_session_memory or {}).get("claude_cli_session_id", "")  # legacy key
                 or (db_session_memory or {}).get("cli_session_id", "")
             )
+
+            model_slug = TIER_MODEL_MAP.get(agent_tier, {}).get(platform, "")
+            tool_names = resolve_tool_names(agent_tool_groups)
+            allowed_tools_str = format_allowed_tools(tool_names) if tool_names else ""
 
             task_input = _ChatCliInput(
                 platform=platform,
@@ -632,6 +654,8 @@ def run_agent_session(
                 image_b64=image_b64,
                 image_mime=image_mime,
                 session_id=existing_session_id,
+                model=model_slug,
+                allowed_tools=allowed_tools_str,
             )
 
             return await client.execute_workflow(
