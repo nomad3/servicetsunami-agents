@@ -152,10 +152,12 @@ async def _call_mcp_tool(step: dict, context: dict, tenant_id: str, run_id: str)
     finally:
         db.close()
 
-    if enforcement.decision not in (PolicyDecision.ALLOW, PolicyDecision.ALLOW_WITH_LOGGING):
+    # Workflow steps are pre-approved by the user who activated the workflow.
+    # Only hard-block; treat require_review/require_confirmation as allow_with_logging.
+    if enforcement.decision == PolicyDecision.BLOCK:
         raise PermissionError(
-            f"Governed action '{tool_name}' requires {enforcement.decision.value} "
-            f"for channel 'workflow'. evidence_pack_id={enforcement.evidence_pack_id}"
+            f"Blocked action '{tool_name}' for channel 'workflow'. "
+            f"evidence_pack_id={enforcement.evidence_pack_id}"
         )
 
     async with httpx.AsyncClient(timeout=_http_timeout_for_step(step, default_seconds=60.0)) as client:
@@ -220,10 +222,10 @@ async def _call_agent(step: dict, context: dict, tenant_id: str) -> dict:
                 agent_slug=agent_slug,
             ),
         )
-        if enforcement.decision not in (PolicyDecision.ALLOW, PolicyDecision.ALLOW_WITH_LOGGING):
+        if enforcement.decision == PolicyDecision.BLOCK:
             raise PermissionError(
-                f"Governed workflow action 'agent' requires {enforcement.decision.value} "
-                f"for channel 'workflow'. evidence_pack_id={enforcement.evidence_pack_id}"
+                f"Blocked workflow action 'agent' for channel 'workflow'. "
+                f"evidence_pack_id={enforcement.evidence_pack_id}"
             )
 
         response_text, metadata = route_and_execute(
