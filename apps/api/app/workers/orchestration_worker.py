@@ -135,6 +135,11 @@ from app.workflows.activities.git_history import (
     extract_git_history,
     poll_pr_outcomes,
 )
+from app.workflows.activities.morning_briefing import (
+    synthesize_morning_briefing,
+    create_daily_journal_entry,
+    create_weekly_journal_summary,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -273,6 +278,10 @@ async def run_orchestration_worker():
             # Dynamic workflow step executor
             execute_dynamic_step,
             finalize_workflow_run,
+            # Morning briefing / Session Journal activities (Gap 1: Continuity)
+            synthesize_morning_briefing,
+            create_daily_journal_entry,
+            create_weekly_journal_summary,
         ],
     )
 

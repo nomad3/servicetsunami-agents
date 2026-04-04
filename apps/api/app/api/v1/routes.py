@@ -59,6 +59,7 @@ from app.api.v1 import (
     presence,
     devices,
     robot,
+    session_journals,
 )
 
 router = APIRouter()
@@ -126,3 +127,4 @@ router.include_router(presence.router, tags=["presence"])
 router.include_router(activities.router, tags=["activities"])
 router.include_router(devices.router, tags=["devices"])
 router.include_router(robot.router, tags=["robot"])
+router.include_router(session_journals.router, prefix="/session-journals", tags=["session-journals"])
