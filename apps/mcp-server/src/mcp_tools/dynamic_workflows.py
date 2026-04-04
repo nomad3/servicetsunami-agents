@@ -19,10 +19,12 @@ API_INTERNAL_KEY = os.environ.get("MCP_API_KEY", "dev_mcp_key")
 async def _api_call(method: str, path: str, tenant_id: str, json_data: dict = None) -> dict:
     """Call the internal API."""
     async with httpx.AsyncClient(timeout=15.0) as client:
+        kwargs = {"headers": {"X-Internal-Key": API_INTERNAL_KEY, "X-Tenant-Id": tenant_id}}
+        if json_data is not None and method.lower() != "get":
+            kwargs["json"] = json_data
         resp = await getattr(client, method)(
             f"{API_BASE_URL}/api/v1/dynamic-workflows{path}",
-            headers={"X-Internal-Key": API_INTERNAL_KEY, "X-Tenant-Id": tenant_id},
-            json=json_data,
+            **kwargs,
         )
         if resp.status_code in (200, 201):
             return resp.json()
