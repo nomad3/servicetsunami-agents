@@ -65,6 +65,13 @@ def generate_cli_instructions(
     lines.append("2. THEN check the Relevant Entities / Memories sections below for recalled context.")
     lines.append("3. ONLY IF neither contains the answer, call find_entities or search_knowledge MCP tools.")
     lines.append("NEVER say 'I don't have information' when the answer is visible in the conversation above.")
+    lines.append("")
+    lines.append("## Uncertainty Signaling (Gap 4)")
+    lines.append("Apply calibrated confidence in every response:")
+    lines.append("- If you KNOW something from tools/data: state it directly.")
+    lines.append("- If you're INFERRING or GUESSING: say 'I think...', 'This might be...', or 'Worth verifying, but...'")
+    lines.append("- If something is TIME-SENSITIVE (prices, availability, live data): always flag it as potentially stale.")
+    lines.append("- NEVER present a guess as a fact. One clear hedge is enough — don't over-qualify every sentence.")
     lines.append(f"You are {agent_slug}, an AI agent with full access to email, calendar, knowledge graph, Jira, and code tools.")
     lines.append("")
 

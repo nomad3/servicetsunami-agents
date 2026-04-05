@@ -738,4 +738,15 @@ def _generate_agentic_response(
     except Exception:
         pass
 
+    # 6. Confidence scoring — score the response for uncertainty level and
+    #    store in execution trace context for RL and observability (Gap 4).
+    try:
+        from app.services.confidence_scorer import score_response_confidence
+        confidence = score_response_confidence(_response_text, question=_user_message)
+        if context and isinstance(context, dict):
+            context["response_confidence"] = round(confidence, 3)
+        logger.debug(f"Response confidence: {confidence:.2f} for tenant {str(_tenant_id)[:8]}")
+    except Exception:
+        pass
+
     return assistant_msg
