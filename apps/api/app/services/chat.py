@@ -205,6 +205,7 @@ def post_user_message(
     attachment_meta: dict | None = None,
 ) -> Tuple[ChatMessage, ChatMessage]:
     # Gap 2: Detect if user is acting on a previous suggestion (non-blocking).
+    # Gap 3: Detect if user message resolves an open commitment (non-blocking).
     # Capture primitives before thread — ORM objects are not safe to access
     # across thread boundaries after the request session may have closed.
     try:
@@ -212,9 +213,10 @@ def post_user_message(
         _sig_tenant_id = session.tenant_id
         _sig_session_id = session.id
 
-        def _detect_signals():
+        def _detect_signals_and_resolve():
             from app.db.session import SessionLocal as _SL
             from app.services.behavioral_signals import detect_acted_on_signals
+            from app.services.commitment_extractor import maybe_resolve_commitments
             edb = _SL()
             try:
                 detect_acted_on_signals(
@@ -223,12 +225,17 @@ def post_user_message(
                     user_message=content,
                     session_id=_sig_session_id,
                 )
+                maybe_resolve_commitments(
+                    db=edb,
+                    tenant_id=_sig_tenant_id,
+                    user_message=content,
+                )
             except Exception:
                 edb.rollback()
             finally:
                 edb.close()
 
-        threading.Thread(target=_detect_signals, daemon=True).start()
+        threading.Thread(target=_detect_signals_and_resolve, daemon=True).start()
     except Exception:
         pass
 
