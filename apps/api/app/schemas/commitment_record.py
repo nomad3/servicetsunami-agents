@@ -13,6 +13,7 @@ class CommitmentType(str, Enum):
     FOLLOWUP = "followup"
     DELIVERY = "delivery"
     NOTIFICATION = "notification"
+    PREDICTION = "prediction"  # Gap 3: Luna makes a verifiable claim/forecast
 
 
 class CommitmentState(str, Enum):

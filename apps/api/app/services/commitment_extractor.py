@@ -128,8 +128,10 @@ def build_stakes_context(db: Session, tenant_id: uuid.UUID) -> str:
     if overdue:
         lines.append(f"\n⚠️ Overdue ({len(overdue)}):")
         for r in overdue[:3]:
-            age = (datetime.utcnow() - r.due_at).days
-            lines.append(f"  - [{r.commitment_type}] {r.title} (overdue {age}d)")
+            delta = datetime.utcnow() - r.due_at
+            age_h = int(delta.total_seconds() / 3600)
+            age_str = f"{age_h // 24}d" if age_h >= 24 else f"{age_h}h"
+            lines.append(f"  - [{r.commitment_type}] {r.title} (overdue {age_str})")
 
     if upcoming:
         lines.append(f"\n📋 Open ({len(upcoming)}):")
