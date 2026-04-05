@@ -273,16 +273,19 @@ def route_and_execute(
             platform = "codex"
             routing_source = "exploration_codex"
         elif exploration_mode == "balanced":
-            # Pick the platform with fewest scored experiences
+            # Pick the CLI platform with fewest scored experiences
+            # Only explore real CLI platforms, not fallback paths
+            _VALID_EXPLORE = {"claude_code", "codex", "gemini_cli"}
             try:
                 from app.services.rl_routing import get_best_platform
                 rec = get_best_platform(db, tenant_id, inferred_type)
                 if rec.alternatives:
-                    # Find platform with lowest total
-                    least = min(rec.alternatives, key=lambda a: a["total"])
-                    platform = least["platform"]
-                    routing_source = "exploration_balanced"
-                    logger.info("RL exploration: routing to %s (least data: %d experiences)", platform, least["total"])
+                    valid = [a for a in rec.alternatives if a["platform"] in _VALID_EXPLORE]
+                    if valid:
+                        least = min(valid, key=lambda a: a["total"])
+                        platform = least["platform"]
+                        routing_source = "exploration_balanced"
+                        logger.info("RL exploration: routing to %s (least data: %d experiences)", platform, least["total"])
             except Exception:
                 pass
     elif not _pin_to_claude:
@@ -295,7 +298,8 @@ def route_and_execute(
                 current_platform=platform,
                 current_agent=agent_slug,
             )
-            if rl_rec.platform and rl_rec.platform_confidence >= 0.4:
+            _VALID_CLI = {"claude_code", "codex", "gemini_cli"}
+            if rl_rec.platform and rl_rec.platform in _VALID_CLI and rl_rec.platform_confidence >= 0.4:
                 if rl_rec.platform != platform:
                     logger.info(
                         "RL routing override: platform %s→%s (confidence=%.2f, %s)",
