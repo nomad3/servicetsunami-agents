@@ -335,13 +335,9 @@ def route_and_execute(
     except Exception as e:
         logger.debug("Policy rollout check failed: %s", e)
 
-    # ── Platform override for light tier: use OpenCode (local Gemma 4, $0) ──
-    # Light tier ALWAYS routes to opencode regardless of RL exploration.
-    # RL explores model quality within tiers, not across tiers.
-    from app.services.tool_groups import LIGHT_TIER_PLATFORM
-    if agent_tier == "light" and not _pin_to_claude:
-        platform = LIGHT_TIER_PLATFORM
-        logger.info("Light tier: routing to %s (Gemma 4 local)", platform)
+    # ── Light tier uses Haiku via Claude CLI (fast + tools), not OpenCode ──
+    # OpenCode/Gemma4 is fallback-only (when Claude+Codex are out of credits).
+    # The --model haiku flag on Claude CLI gives us speed without losing tool quality.
 
     # Build memory context with agent-scoped parameters.
     # The tier limits and memory_domains from agent selection (above) drive
