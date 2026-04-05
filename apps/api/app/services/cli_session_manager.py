@@ -90,6 +90,12 @@ def generate_cli_instructions(
                 lines.append(f"  - {evt['time']}: {evt['title']}")
         lines.append("")
 
+    # Gap 5: Temporal awareness (local time, active hours, last seen)
+    temporal_ctx = memory_context.get("temporal_context", "")
+    if temporal_ctx:
+        lines.append(temporal_ctx)
+        lines.append("")
+
     lines.append("# Agent Instructions")
     lines.append("")
     lines.append(skill_body.strip())
@@ -651,6 +657,15 @@ def run_agent_session(
     recalled_names = memory_context.get("recalled_entity_names", [])
     if recalled_names:
         metadata["recalled_entity_names"] = recalled_names
+
+    # Gap 5: Inject temporal awareness context (user's local time, active hours, last seen)
+    try:
+        from app.services.temporal_awareness import build_temporal_system_context
+        temporal_ctx = build_temporal_system_context(db, tenant_id=tenant_id, user_id=user_id)
+        if temporal_ctx:
+            memory_context["temporal_context"] = temporal_ctx
+    except Exception as exc:
+        logger.debug("Temporal context injection failed: %s", exc)
 
     tenant_name = str(tenant_id)
     user_name = sender_phone or str(user_id)
