@@ -8,6 +8,7 @@ import os
 os.environ["TESTING"] = "True"
 
 from app.services.memory_recall import (
+    _build_anticipatory_context,
     build_memory_context,
     build_memory_context_with_git,
     extract_keywords,
@@ -15,6 +16,7 @@ from app.services.memory_recall import (
     _is_code_related,
     _build_memory_context_keyword_fallback,
 )
+from app.services.cli_session_manager import generate_cli_instructions
 
 
 TENANT_ID = uuid4()
@@ -24,7 +26,10 @@ TENANT_ID = uuid4()
 def mock_db():
     db = MagicMock()
     db.execute.return_value.fetchall.return_value = []
-    db.query.return_value.filter.return_value.limit.return_value.all.return_value = []
+    query = db.query.return_value
+    filtered = query.filter.return_value
+    filtered.limit.return_value.all.return_value = []
+    filtered.order_by.return_value.first.return_value = None
     return db
 
 
@@ -289,11 +294,10 @@ class TestBuildMemoryContextSemantic:
         def mock_query_side_effect(model):
             if model == KnowledgeEntity:
                 return entity_q
-            elif model == AgentMemory:
+            if model == AgentMemory:
                 return mem_q
-            elif model == KnowledgeRelation:
+            if model == KnowledgeRelation:
                 return rel_q
-            # For (KnowledgeEntity.id, KnowledgeEntity.name) queries
             q = MagicMock()
             q.filter.return_value = q
             q.all.return_value = []
@@ -305,6 +309,61 @@ class TestBuildMemoryContextSemantic:
 
         assert "relevant_entities" in context
         assert context["relevant_entities"][0]["name"] == "Acme"
+
+    def test_anticipatory_context_built_without_keywords(self, mock_db):
+        mock_db.execute.return_value.mappings.return_value.all.return_value = []
+
+        context = build_memory_context(mock_db, TENANT_ID, "hi")
+
+        assert context["time_context"]["time_of_day"] in {"morning", "midday", "afternoon", "evening"}
+
+    def test_anticipatory_context_includes_upcoming_events(self, mock_db):
+        start_time = datetime(2026, 4, 4, 9, 30)
+        mock_db.execute.return_value.mappings.return_value.all.return_value = [
+            {"title": "Standup", "start_time": start_time, "description": "Daily sync"},
+        ]
+
+        context = _build_anticipatory_context(mock_db, TENANT_ID, now=datetime(2026, 4, 4, 8, 0))
+
+        assert context["time_context"]["time_of_day"] == "morning"
+        assert context["time_context"]["local_date"] == "2026-04-04"
+        assert context["upcoming_events"][0]["title"] == "Standup"
+        assert context["upcoming_events"][0]["time"] == "09:30 AM"
+
+        execute_args = mock_db.execute.call_args
+        assert execute_args.args[1]["window_start"] == datetime(2026, 4, 4, 8, 0)
+        assert execute_args.args[1]["window_end"] == datetime(2026, 4, 4, 12, 0)
+
+
+class TestGenerateCliInstructions:
+    def test_today_briefing_includes_operational_summary(self):
+        instruction_text = generate_cli_instructions(
+            skill_body="You are Luna.",
+            tenant_name=str(TENANT_ID),
+            user_name="user-1",
+            channel="whatsapp",
+            conversation_summary="",
+            memory_context={
+                "time_context": {"time_of_day": "morning", "greeting_hint": "Good morning! It's Friday."},
+                "upcoming_events": [{"time": "09:30 AM", "title": "Standup"}],
+                "recent_episodes": [{"summary": "Yesterday we planned the continuity work."}],
+                "self_model": {
+                    "active_goals": [
+                        {"title": "Ship continuity layer", "state": "active", "priority": "high"},
+                        {"title": "Unblock morning brief", "state": "blocked", "priority": "high"},
+                    ],
+                    "open_commitments": [
+                        {"title": "Open PR", "due_at": datetime.utcnow().date().isoformat() + "T12:00:00"},
+                    ],
+                },
+            },
+        )
+
+        assert "## Today's Context" in instruction_text
+        assert "You have 1 upcoming event in the next 4 hours" in instruction_text
+        assert "There are 2 active goals, including 1 blocked." in instruction_text
+        assert "There is 1 open commitment." in instruction_text
+        assert "Recent thread to keep in mind: Yesterday we planned the continuity work." in instruction_text
 
     @patch("app.services.memory_recall.log_experience")
     @patch("app.services.memory_recall._fetch_top_observations_semantic")
@@ -343,9 +402,12 @@ class TestBuildMemoryContextSemantic:
     def test_empty_keywords_returns_empty(
         self, mock_embed_svc, mock_fetch_obs, mock_log_exp, mock_db
     ):
-        """When no keywords extracted, returns empty dict without calling embed."""
+        """When no keywords extracted, skip embedding but still return anticipatory context."""
+        mock_db.execute.return_value.mappings.return_value.all.return_value = []
+
         context = build_memory_context(mock_db, TENANT_ID, "hi")
-        assert context == {}
+
+        assert "time_context" in context
         mock_embed_svc.embed_text.assert_not_called()
 
 

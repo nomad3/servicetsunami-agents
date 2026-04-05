@@ -22,6 +22,53 @@ logger = logging.getLogger(__name__)
 SUPPORTED_CLI_PLATFORMS = {"claude_code", "codex", "gemini_cli", "opencode"}
 
 
+def _build_today_briefing(memory_context: Dict[str, Any], include_goals: bool, include_commitments: bool) -> list[str]:
+    """Render a compact operational briefing from anticipatory context."""
+    lines: list[str] = []
+    time_ctx = memory_context.get("time_context", {})
+    upcoming = memory_context.get("upcoming_events", [])
+    self_model = memory_context.get("self_model", {})
+    active_goals = self_model.get("active_goals", []) if include_goals else []
+    open_commitments = self_model.get("open_commitments", []) if include_commitments else []
+    recent_episodes = memory_context.get("recent_episodes", [])
+
+    if not any([time_ctx, upcoming, active_goals, open_commitments, recent_episodes]):
+        return lines
+
+    lines.append("## Today's Context")
+    lines.append("")
+
+    greeting_hint = time_ctx.get("greeting_hint")
+    if greeting_hint:
+        lines.append(f"- {greeting_hint}")
+
+    if upcoming:
+        if len(upcoming) == 1:
+            lines.append(f"- You have 1 upcoming event in the next 4 hours: {upcoming[0]['time']}: {upcoming[0]['title']}")
+        else:
+            lines.append(f"- You have {len(upcoming)} upcoming events in the next 4 hours.")
+            for evt in upcoming:
+                lines.append(f"  - {evt['time']}: {evt['title']}")
+
+    if active_goals:
+        blocked_goals = sum(1 for goal in active_goals if goal.get("state") == "blocked")
+        summary = f"- There {'is' if len(active_goals) == 1 else 'are'} {len(active_goals)} active goal{'s' if len(active_goals) != 1 else ''}"
+        if blocked_goals:
+            summary += f", including {blocked_goals} blocked"
+        lines.append(summary + ".")
+
+    if open_commitments:
+        summary = f"- There {'is' if len(open_commitments) == 1 else 'are'} {len(open_commitments)} open commitment{'s' if len(open_commitments) != 1 else ''}"
+        lines.append(summary + ".")
+
+    if recent_episodes and time_ctx.get("time_of_day") == "morning":
+        latest = recent_episodes[0]
+        lines.append(f"- Recent thread to keep in mind: {latest.get('summary', '')}")
+
+    lines.append("")
+    return lines
+
+
 def generate_cli_instructions(
     skill_body: str,
     tenant_name: str,
@@ -75,26 +122,12 @@ def generate_cli_instructions(
     lines.append(f"You are {agent_slug}, an AI agent with full access to email, calendar, knowledge graph, Jira, and code tools.")
     lines.append("")
 
-    # Time and calendar context
-    time_ctx = memory_context.get("time_context", {})
-    upcoming = memory_context.get("upcoming_events", [])
-
-    if time_ctx or upcoming:
-        lines.append("## Today's Context")
-        lines.append("")
-        if time_ctx.get("greeting_hint"):
-            lines.append(f"- {time_ctx['greeting_hint']}")
-        if upcoming:
-            lines.append("- Upcoming:")
-            for evt in upcoming:
-                lines.append(f"  - {evt['time']}: {evt['title']}")
-        lines.append("")
-
     # Gap 5: Temporal awareness (local time, active hours, last seen)
     temporal_ctx = memory_context.get("temporal_context", "")
     if temporal_ctx:
         lines.append(temporal_ctx)
         lines.append("")
+
 
     lines.append("# Agent Instructions")
     lines.append("")
@@ -231,6 +264,14 @@ def generate_cli_instructions(
     identity_context = self_model.get("identity_context")
     active_goals = self_model.get("active_goals", [])
     open_commitments = self_model.get("open_commitments", [])
+
+    lines.extend(
+        _build_today_briefing(
+            memory_context,
+            include_goals=limits["include_goals"],
+            include_commitments=limits["include_commitments"],
+        )
+    )
 
     if identity_context:
         lines.append(identity_context)

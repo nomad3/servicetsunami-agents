@@ -45,6 +45,77 @@ _STOP_WORDS = {
 }
 
 
+def _build_anticipatory_context(
+    db: Session,
+    tenant_id: uuid.UUID,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Build lightweight time and near-term calendar context.
+
+    This context should be available even when the current message has no
+    meaningful keywords, so greetings like "hey" still get continuity cues.
+    """
+    current_time = now or datetime.utcnow()
+    hour = current_time.hour
+    weekday = current_time.strftime("%A")
+    window_end = current_time + timedelta(hours=4)
+
+    time_context: Dict[str, str] = {
+        "weekday": weekday,
+        "local_date": current_time.date().isoformat(),
+    }
+    if hour < 10:
+        time_context["time_of_day"] = "morning"
+        time_context["greeting_hint"] = f"Good morning! It's {weekday}."
+    elif hour < 14:
+        time_context["time_of_day"] = "midday"
+    elif hour < 18:
+        time_context["time_of_day"] = "afternoon"
+    else:
+        time_context["time_of_day"] = "evening"
+        time_context["greeting_hint"] = f"Good evening! It's {weekday}."
+
+    upcoming_events_list: List[Dict[str, str]] = []
+    try:
+        from sqlalchemy import text as _text
+
+        upcoming = db.execute(
+            _text(
+                """
+                SELECT title, start_time, description
+                FROM channel_events
+                WHERE tenant_id = CAST(:tid AS uuid)
+                  AND start_time > :window_start
+                  AND start_time < :window_end
+                ORDER BY start_time
+                LIMIT 3
+                """
+            ),
+            {
+                "tid": str(tenant_id),
+                "window_start": current_time,
+                "window_end": window_end,
+            },
+        ).mappings().all()
+
+        if upcoming:
+            upcoming_events_list = [
+                {
+                    "title": e["title"],
+                    "time": e["start_time"].strftime("%I:%M %p") if e["start_time"] else "",
+                    "description": (e["description"] or "")[:100],
+                }
+                for e in upcoming
+            ]
+    except Exception:
+        logger.debug("Failed to fetch upcoming events for anticipatory context", exc_info=True)
+
+    anticipatory_context: Dict[str, Any] = {"time_context": time_context}
+    if upcoming_events_list:
+        anticipatory_context["upcoming_events"] = upcoming_events_list
+    return anticipatory_context
+
+
 def extract_keywords(message: str) -> List[str]:
     """Extract meaningful keywords from a user message."""
     # Split on non-alphanumeric (keep accented chars)
@@ -307,19 +378,24 @@ def build_memory_context(
     """
     # Always fetch the user/owner entity — pinned into context regardless of query
     user_entity = _fetch_user_entity(db, tenant_id)
+    anticipatory_context = _build_anticipatory_context(db, tenant_id)
 
     keywords = extract_keywords(user_message)
     if not keywords:
         # No searchable keywords — return minimal context with just the user profile
+        base_context: Dict[str, Any] = {
+            "relevant_memories": [],
+            "relevant_relations": [],
+            "entity_observations": {},
+        }
+        base_context.update(anticipatory_context)
         if user_entity:
-            return {
+            base_context.update({
                 "recalled_entity_names": [user_entity["name"]],
                 "relevant_entities": [user_entity],
-                "relevant_memories": [],
-                "relevant_relations": [],
-                "entity_observations": {},
-            }
-        return {}
+            })
+            return base_context
+        return base_context
 
     # --- Step 1: Embed user message ---
     query_embedding = embedding_service.embed_text(user_message, task_type="RETRIEVAL_QUERY")
@@ -421,49 +497,6 @@ def build_memory_context(
             for eid, ename in extra:
                 entity_map[eid] = ename
 
-    # --- Step 0: Time-aware anticipatory context ---
-    now = datetime.utcnow()
-    hour = now.hour
-    weekday = now.strftime("%A")  # Monday, Tuesday, etc.
-
-    time_context: Dict[str, str] = {}
-    if hour < 10:
-        time_context["time_of_day"] = "morning"
-        time_context["greeting_hint"] = f"Good morning! It's {weekday}."
-    elif hour < 14:
-        time_context["time_of_day"] = "midday"
-    elif hour < 18:
-        time_context["time_of_day"] = "afternoon"
-    else:
-        time_context["time_of_day"] = "evening"
-        time_context["greeting_hint"] = f"Good evening! It's {weekday}."
-
-    # --- Step 0b: Calendar context (upcoming events) ---
-    upcoming_events_list: List[Dict[str, str]] = []
-    try:
-        from sqlalchemy import text as _text
-        upcoming = db.execute(_text("""
-            SELECT title, start_time, description
-            FROM channel_events
-            WHERE tenant_id = CAST(:tid AS uuid)
-              AND start_time > NOW()
-              AND start_time < NOW() + INTERVAL '4 hours'
-            ORDER BY start_time
-            LIMIT 3
-        """), {"tid": str(tenant_id)}).mappings().all()
-
-        if upcoming:
-            upcoming_events_list = [
-                {
-                    "title": e["title"],
-                    "time": e["start_time"].strftime("%I:%M %p") if e["start_time"] else "",
-                    "description": (e["description"] or "")[:100],
-                }
-                for e in upcoming
-            ]
-    except Exception:
-        pass  # channel_events table may not exist or have no data
-
     # --- Step 7: Build context ---
     recalled_entity_names = [e["name"] for e in top_entities]
     context: Dict[str, Any] = {
@@ -500,10 +533,7 @@ def build_memory_context(
         context["entity_observations"] = entity_observations
 
     # Inject anticipatory context
-    if time_context:
-        context["time_context"] = time_context
-    if upcoming_events_list:
-        context["upcoming_events"] = upcoming_events_list
+    context.update(anticipatory_context)
 
     # --- Check for disputed assertions on recalled entities ---
     if entity_ids:
