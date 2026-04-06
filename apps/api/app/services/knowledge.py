@@ -1051,3 +1051,8 @@ def get_quality_stats(db: Session, tenant_id: uuid.UUID) -> Dict[str, Any]:
             for p, c, q in platform_stats
         ],
     }
+
+
+# Module-level alias so callers can do: from app.services.knowledge import knowledge_service
+import sys as _sys
+knowledge_service = _sys.modules[__name__]

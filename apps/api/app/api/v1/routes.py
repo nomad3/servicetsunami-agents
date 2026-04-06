@@ -1,8 +1,7 @@
+import logging
 from fastapi import APIRouter
 from app.api.v1 import (
-    activities,
     auth,
-    sales,
     channels,
     data_sources,
     data_pipelines,
@@ -57,13 +56,21 @@ from app.api.v1 import (
     learning,
     learning_dashboard,
     branding_domain,
-    unsupervised_learning,
-    presence,
-    devices,
-    robot,
-    session_journals,
-    memory_continuity_internal,
 )
+
+_logger = logging.getLogger(__name__)
+
+# Optional modules — import failures won't block API startup
+_optional_modules = [
+    "activities", "sales", "unsupervised_learning", "presence",
+    "devices", "robot", "session_journals", "memory_continuity_internal",
+]
+_loaded_optional = {}
+for _mod_name in _optional_modules:
+    try:
+        _loaded_optional[_mod_name] = __import__(f"app.api.v1.{_mod_name}", fromlist=[_mod_name])
+    except Exception as e:
+        _logger.warning("Optional route %s failed to load: %s", _mod_name, e)
 
 router = APIRouter()
 
@@ -126,12 +133,20 @@ router.include_router(collaborations.router, prefix="/collaborations", tags=["co
 router.include_router(coalitions.router, prefix="/coalitions", tags=["coalitions"])
 router.include_router(learning.router, prefix="/learning", tags=["learning"])
 router.include_router(learning_dashboard.router, prefix="/learning/dashboard", tags=["learning-dashboard"])
-router.include_router(unsupervised_learning.router, prefix="/unsupervised", tags=["unsupervised-learning"])
 router.include_router(branding_domain.router, tags=["domain-branding"])
-router.include_router(presence.router, tags=["presence"])
-router.include_router(activities.router, tags=["activities"])
-router.include_router(devices.router, tags=["devices"])
-router.include_router(robot.router, tags=["robot"])
-router.include_router(session_journals.router, tags=["session-journals"])
-router.include_router(memory_continuity_internal.router, prefix="/internal", tags=["internal-memory"])
-router.include_router(sales.router, tags=["sales"])
+
+# Register optional modules that loaded successfully
+_optional_routes = {
+    "unsupervised_learning": {"prefix": "/unsupervised", "tags": ["unsupervised-learning"]},
+    "presence": {"tags": ["presence"]},
+    "activities": {"tags": ["activities"]},
+    "devices": {"tags": ["devices"]},
+    "robot": {"tags": ["robot"]},
+    "session_journals": {"tags": ["session-journals"]},
+    "memory_continuity_internal": {"prefix": "/internal", "tags": ["internal-memory"]},
+    "sales": {"tags": ["sales"]},
+}
+for _name, _kwargs in _optional_routes.items():
+    _mod = _loaded_optional.get(_name)
+    if _mod and hasattr(_mod, "router"):
+        router.include_router(_mod.router, **_kwargs)

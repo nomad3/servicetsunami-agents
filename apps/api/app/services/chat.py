@@ -216,7 +216,6 @@ def post_user_message(
         def _detect_signals_and_resolve():
             from app.db.session import SessionLocal as _SL
             from app.services.behavioral_signals import detect_acted_on_signals
-            from app.services.commitment_extractor import maybe_resolve_commitments
             edb = _SL()
             try:
                 detect_acted_on_signals(
@@ -224,11 +223,6 @@ def post_user_message(
                     tenant_id=_sig_tenant_id,
                     user_message=content,
                     session_id=_sig_session_id,
-                )
-                maybe_resolve_commitments(
-                    db=edb,
-                    tenant_id=_sig_tenant_id,
-                    user_message=content,
                 )
             except Exception:
                 edb.rollback()
