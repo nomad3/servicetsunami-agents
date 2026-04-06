@@ -23,7 +23,9 @@ from app.models.commitment_record import CommitmentRecord
 
 logger = logging.getLogger(__name__)
 
-# Patterns for extracting commitments
+# Patterns for extracting commitments.
+# commitment_type values MUST match CommitmentType enum:
+#   action, followup, delivery, notification, prediction
 _COMMITMENT_PATTERNS = [
     # Predictions: "I think/believe", "should", "will likely"
     (
@@ -31,10 +33,10 @@ _COMMITMENT_PATTERNS = [
         "prediction",
         None,  # No fixed due date for predictions
     ),
-    # Near-term promises: "I'll", "I will", "I'm going to"
+    # Near-term action promises: "I'll", "I will", "I'm going to"
     (
         r"(?:i'?ll|i will|i'm going to|i'm gonna|let me|want me to).*?(?:send|draft|write|create|schedule|set up|follow up|reach out).*?(?:[.!?]|$)",
-        "promise",
+        "action",
         1,  # 1 day default
     ),
     # Follow-ups: "check back", "let's revisit", "in X days"
@@ -43,10 +45,16 @@ _COMMITMENT_PATTERNS = [
         "followup",
         None,
     ),
-    # Stakes/high-confidence predictions
+    # High-confidence / delivery commitments
     (
-        r"(?:i'm betting|i'm confident|stake my reputation|i guarantee|if this doesn't).*?(?:[.!?]|$)",
-        "stake",
+        r"(?:i'm betting|i'm confident|i guarantee|if this doesn't|i'll deliver|i'll have it ready).*?(?:[.!?]|$)",
+        "delivery",
+        None,
+    ),
+    # Notification: "I'll let you know", "I'll keep you posted"
+    (
+        r"(?:i'?ll|i will) (?:let you know|keep you posted|update you|notify you).*?(?:[.!?]|$)",
+        "notification",
         None,
     ),
 ]
@@ -97,25 +105,32 @@ def extract_commitments_from_response(
             state="open",
             priority="normal",
             source_type="chat",
-            source_ref={"message_id": str(message_id), "session_id": str(session_id)},
+            source_ref={
+                "message_id": str(message_id) if message_id else None,
+                "session_id": str(session_id) if session_id else None,
+            },
             due_at=due_at,
         )
         db.add(commitment)
         records.append(commitment)
 
     if records:
-        db.commit()
-        logger.info(f"Extracted {len(records)} commitments for tenant {tenant_id}")
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        logger.info("Extracted %d commitments for tenant %s", len(records), str(tenant_id)[:8])
 
     return records
 
 
 def build_stakes_context(db: Session, tenant_id: uuid.UUID) -> str:
     """Build stakes context for system prompt (Gap 3: Stakes/Accountability)."""
-    open_commitments = db.query(CommitmentRecord).filter(
-        CommitmentRecord.tenant_id == tenant_id,
-        CommitmentRecord.state == "open",
-    ).order_by(CommitmentRecord.due_at).all()
+    from app.services import commitment_service
+    open_commitments = commitment_service.list_open_commitments_for_agent(
+        db, tenant_id=tenant_id, agent_slug="luna"
+    )
 
     if not open_commitments:
         return ""
@@ -181,6 +196,54 @@ def _parse_commitments(text: str) -> List[Tuple[str, str, Optional[int]]]:
                 break
 
     return results
+
+
+def maybe_resolve_commitments(
+    db: Session,
+    tenant_id: uuid.UUID,
+    user_message: str,
+) -> int:
+    """
+    Scan open commitments — if user message implies resolution, mark fulfilled.
+    Returns count of resolved commitments.
+
+    Heuristic: looks for explicit confirmation language ("done", "sent it",
+    "followed up", "created", etc.) near the commitment keyword.
+    """
+    _RESOLVED_TOKENS = {
+        "done", "sent", "sent it", "sent that", "followed up", "created",
+        "scheduled", "set up", "finished", "complete", "completed", "fixed",
+        "resolved", "closed", "shipped", "deployed", "written", "drafted",
+        "just did", "just sent", "just created", "just scheduled",
+    }
+    lower_msg = user_message.lower()
+    if not any(tok in lower_msg for tok in _RESOLVED_TOKENS):
+        return 0
+
+    open_records = db.query(CommitmentRecord).filter(
+        CommitmentRecord.tenant_id == tenant_id,
+        CommitmentRecord.state == "open",
+        CommitmentRecord.commitment_type != "prediction",
+    ).order_by(CommitmentRecord.created_at.desc()).limit(10).all()
+
+    if not open_records:
+        return 0
+
+    count = 0
+    for record in open_records:
+        # Check if any key word from the commitment title appears in the user message
+        title_words = set(record.title.lower().split())
+        significant = {w for w in title_words if len(w) > 4}
+        if significant and significant & set(lower_msg.split()):
+            record.state = "fulfilled"
+            record.fulfilled_at = datetime.utcnow()
+            count += 1
+
+    if count:
+        db.commit()
+        logger.info("Resolved %d commitment(s) for tenant %s", count, str(tenant_id)[:8])
+
+    return count
 
 
 def _make_title(text: str) -> str:

@@ -28,6 +28,7 @@ class CommitmentSourceType(str, Enum):
     TOOL_CALL = "tool_call"
     WORKFLOW_STEP = "workflow_step"
     MANUAL = "manual"
+    CHAT = "chat"  # Auto-extracted from Luna's chat responses (Gap 3)
 
 
 class CommitmentPriority(str, Enum):
