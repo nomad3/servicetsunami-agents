@@ -34,11 +34,22 @@ class SchedulerWorker:
             logger.error(f"Failed to connect to Temporal: {e}")
             return
 
+        self._last_stale_check: datetime = datetime.min
+
         while self.running:
             try:
                 await self.check_and_trigger_pipelines()
             except Exception as e:
                 logger.error(f"Error in scheduler loop: {e}")
+
+            # Module 6.2: Check stale deals once per day around 8am UTC
+            try:
+                now = datetime.utcnow()
+                if now.hour == 8 and (now - self._last_stale_check).total_seconds() > 3600:
+                    self._last_stale_check = now
+                    await self.check_stale_deals_all_tenants()
+            except Exception as e:
+                logger.error(f"Error in stale deal check: {e}")
 
             # Sleep for 60 seconds
             await asyncio.sleep(60)
@@ -142,6 +153,40 @@ class SchedulerWorker:
 
         # Default or manual
         return now + timedelta(days=1)
+
+    async def check_stale_deals_all_tenants(self):
+        """Module 6.2 — call stale deal check for every active tenant (runs daily at 8am UTC)."""
+        import httpx as _httpx
+        from app.core.config import settings as _settings
+        from app.models.tenant import Tenant
+
+        async with async_session_factory() as session:
+            from sqlalchemy import select as _select
+            result = await session.execute(_select(Tenant).where(Tenant.is_active.is_(True)))
+            tenants = result.scalars().all()
+
+        api_base = getattr(_settings, "API_BASE_URL", "http://api:8000")
+        internal_key = getattr(_settings, "API_INTERNAL_KEY", _settings.MCP_API_KEY)
+
+        async with _httpx.AsyncClient(timeout=15.0) as client:
+            for tenant in tenants:
+                try:
+                    resp = await client.post(
+                        f"{api_base}/api/v1/sales/internal/check-stale-deals",
+                        headers={
+                            "X-Internal-Key": internal_key,
+                            "X-Tenant-Id": str(tenant.id),
+                        },
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("stale_count", 0) > 0:
+                            logger.info(
+                                f"Stale deals: tenant={str(tenant.id)[:8]} count={data['stale_count']}"
+                            )
+                except Exception as e:
+                    logger.warning(f"Stale deal check failed for tenant {tenant.id}: {e}")
+
 
 if __name__ == "__main__":
     import uuid # Needed for the trigger_pipeline method

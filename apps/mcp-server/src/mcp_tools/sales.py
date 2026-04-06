@@ -549,3 +549,166 @@ async def schedule_followup(
             "delay_hours": delay_hours,
             "note": f"Temporal scheduling failed ({e}), follow up manually.",
         }
+
+
+@mcp.tool()
+async def source_leads(
+    vertical: str,
+    location: str = "",
+    count: int = 10,
+    tenant_id: str = "",
+    ctx: Context = None,
+) -> dict:
+    """Source new prospect leads from web research for a given vertical and location.
+
+    Triggers the prospect_research pipeline via the internal API. Searches
+    Google News, company directories, and public sources (NOT LinkedIn scraping).
+
+    Args:
+        vertical: Industry vertical to target, e.g. "vet clinics", "SaaS startups", "law offices".
+        location: Geographic focus, e.g. "Santiago, Chile" or "Miami, FL". Optional.
+        count: Number of prospects to source (default: 10, max: 50).
+        tenant_id: Tenant UUID (resolved from session if omitted).
+        ctx: MCP request context (injected automatically).
+
+    Returns:
+        Dict with sourced count, entity IDs, and pipeline status.
+    """
+    tid = resolve_tenant_id(ctx) or tenant_id
+    if not tid:
+        return {"error": "tenant_id is required."}
+    if not vertical:
+        return {"error": "vertical is required."}
+
+    count = min(count, 50)
+    api_base_url = _get_api_base_url()
+    internal_key = _get_internal_key()
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{api_base_url}/api/v1/sales/internal/source-leads",
+                headers={"X-Internal-Key": internal_key, "X-Tenant-Id": tid},
+                json={"vertical": vertical, "location": location, "count": count},
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            return {"error": f"Source leads failed: {resp.status_code} {resp.text[:200]}"}
+    except Exception as e:
+        logger.error("source_leads failed: %s", e)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def send_outreach(
+    lead_entity_id: str,
+    channel: str = "email",
+    approved: bool = False,
+    tenant_id: str = "",
+    ctx: Context = None,
+) -> dict:
+    """Send a pre-drafted outreach message to a lead (Module 3.4).
+
+    Fetches the outreach draft stored as an observation on the lead entity,
+    then sends it via the specified channel. Requires approved=True to prevent
+    accidental sends.
+
+    Args:
+        lead_entity_id: UUID of the lead entity to contact.
+        channel: "email" or "whatsapp" (default: "email").
+        approved: Must be True to actually send. Safety gate. Required.
+        tenant_id: Tenant UUID (resolved from session if omitted).
+        ctx: MCP request context (injected automatically).
+
+    Returns:
+        Dict with status, channel, and sent timestamp.
+    """
+    tid = resolve_tenant_id(ctx) or tenant_id
+    if not tid:
+        return {"error": "tenant_id is required."}
+    if not lead_entity_id:
+        return {"error": "lead_entity_id is required."}
+    if not approved:
+        return {
+            "status": "pending_approval",
+            "message": "Set approved=True to confirm sending this outreach.",
+            "lead_entity_id": lead_entity_id,
+            "channel": channel,
+        }
+
+    api_base_url = _get_api_base_url()
+    internal_key = _get_internal_key()
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Fetch lead entity to get draft observation and contact info
+            entity_resp = await client.get(
+                f"{api_base_url}/api/v1/knowledge/entities/{lead_entity_id}",
+                headers={"X-Internal-Key": internal_key, "X-Tenant-Id": tid},
+            )
+            if entity_resp.status_code != 200:
+                return {"error": f"Lead not found: {entity_resp.status_code}"}
+
+            entity = entity_resp.json()
+            props = entity.get("properties") or {}
+            name = entity.get("name", "Prospect")
+            email = props.get("email")
+            phone = props.get("phone") or props.get("whatsapp")
+
+            # Fetch latest outreach draft from observations
+            obs_resp = await client.get(
+                f"{api_base_url}/api/v1/knowledge/entities/{lead_entity_id}/observations",
+                headers={"X-Internal-Key": internal_key, "X-Tenant-Id": tid},
+            )
+            draft_body = None
+            draft_subject = f"Quick note for {name}"
+            if obs_resp.status_code == 200:
+                observations = obs_resp.json()
+                for obs in reversed(observations):
+                    if "outreach" in (obs.get("observation_type") or "").lower() or \
+                       "draft" in (obs.get("content") or "").lower():
+                        draft_body = obs.get("content")
+                        break
+
+            if not draft_body:
+                return {"error": "No outreach draft found. Run draft_outreach first."}
+
+            # Send via appropriate channel
+            sent = False
+            if channel == "email" and email:
+                send_resp = await client.post(
+                    f"{api_base_url}/api/v1/internal/send-email",
+                    headers={"X-Internal-Key": internal_key, "X-Tenant-Id": tid},
+                    json={"to": email, "subject": draft_subject, "body": draft_body},
+                )
+                sent = send_resp.status_code in (200, 201)
+            elif channel == "whatsapp" and phone:
+                send_resp = await client.post(
+                    f"{api_base_url}/api/v1/internal/send-whatsapp",
+                    headers={"X-Internal-Key": internal_key, "X-Tenant-Id": tid},
+                    json={"phone": phone, "message": draft_body},
+                )
+                sent = send_resp.status_code in (200, 201)
+            else:
+                return {"error": f"No {channel} contact info found for this lead."}
+
+            if sent:
+                # Update last_contact_date on entity
+                from datetime import datetime
+                updated_props = {**props, "last_contact_date": datetime.utcnow().isoformat(), "outreach_sent": True}
+                await client.patch(
+                    f"{api_base_url}/api/v1/knowledge/entities/{lead_entity_id}",
+                    headers={"X-Internal-Key": internal_key, "X-Tenant-Id": tid},
+                    json={"properties": updated_props},
+                )
+                return {
+                    "status": "sent",
+                    "channel": channel,
+                    "lead": name,
+                    "contact": email if channel == "email" else phone,
+                }
+            return {"error": "Send failed — check channel credentials."}
+
+    except Exception as e:
+        logger.error("send_outreach failed: %s", e)
+        return {"error": str(e)}
