@@ -141,6 +141,11 @@ def build_stakes_context(db: Session, tenant_id: uuid.UUID) -> str:
     return ""
 
 
+def resolve_commitment_from_message(db: Session, tenant_id: uuid.UUID, user_message: str) -> int:
+    """Alias for maybe_resolve_commitments — preferred name for chat.py wiring."""
+    return maybe_resolve_commitments(db, tenant_id, user_message)
+
+
 def maybe_resolve_commitments(db: Session, tenant_id: uuid.UUID, user_message: str) -> int:
     """
     Check if user message resolves any open commitments.
