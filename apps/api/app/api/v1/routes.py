@@ -62,6 +62,7 @@ from app.api.v1 import (
     devices,
     robot,
     session_journals,
+    memory_continuity_internal,
 )
 
 router = APIRouter()
@@ -132,4 +133,5 @@ router.include_router(activities.router, tags=["activities"])
 router.include_router(devices.router, tags=["devices"])
 router.include_router(robot.router, tags=["robot"])
 router.include_router(session_journals.router, tags=["session-journals"])
+router.include_router(memory_continuity_internal.router, prefix="/internal", tags=["internal-memory"])
 router.include_router(sales.router, tags=["sales"])

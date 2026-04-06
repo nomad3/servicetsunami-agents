@@ -1458,6 +1458,57 @@ NATIVE_TEMPLATES = [
             ],
         },
     },
+    # -----------------------------------------------------------------------
+    # Gap 1: Daily Journal Synthesis — nightly at 23:55
+    # -----------------------------------------------------------------------
+    {
+        "name": "Daily Journal Synthesis",
+        "description": "Nightly: synthesize today's conversation episodes into a session journal entry for morning continuity context (Gap 1).",
+        "tier": "native",
+        "public": True,
+        "tags": ["memory", "journal", "continuity", "nightly", "gap-1"],
+        "trigger_config": {"type": "cron", "schedule": "55 23 * * *", "timezone": "UTC"},
+        "definition": {
+            "steps": [
+                {
+                    "id": "synthesize_daily",
+                    "type": "mcp_tool",
+                    "tool": "synthesize_daily_journal",
+                    "params": {},
+                    "output": "daily_result",
+                },
+                {
+                    "id": "expire_signals",
+                    "type": "mcp_tool",
+                    "tool": "expire_behavioral_signals",
+                    "params": {},
+                    "output": "signal_result",
+                },
+            ],
+        },
+    },
+    # -----------------------------------------------------------------------
+    # Gap 1: Weekly Journal Summary — Sundays at 23:00
+    # -----------------------------------------------------------------------
+    {
+        "name": "Weekly Journal Summary",
+        "description": "Every Sunday: aggregate this week's daily journals into a weekly narrative for longer-range continuity context (Gap 1).",
+        "tier": "native",
+        "public": True,
+        "tags": ["memory", "journal", "continuity", "weekly", "gap-1"],
+        "trigger_config": {"type": "cron", "schedule": "0 23 * * 0", "timezone": "UTC"},
+        "definition": {
+            "steps": [
+                {
+                    "id": "synthesize_weekly",
+                    "type": "mcp_tool",
+                    "tool": "synthesize_weekly_journal",
+                    "params": {},
+                    "output": "weekly_result",
+                },
+            ],
+        },
+    },
 ]
 
 
