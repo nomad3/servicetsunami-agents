@@ -5,15 +5,20 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from app.models import SessionJournal
-from app.services.base import BaseService
-from app.services.embedding_service import embed_and_store
-from app.services.local_inference import summarize_conversation_sync
+
+try:
+    from app.services.embedding_service import embed_and_store
+except ImportError:
+    embed_and_store = None  # type: ignore
+
+try:
+    from app.services.local_inference import summarize_conversation_sync
+except ImportError:
+    summarize_conversation_sync = None  # type: ignore
 
 
-class SessionJournalService(BaseService[SessionJournal]):
+class SessionJournalService:
     """Service for managing session journals (episodic memory synthesis)."""
-
-    model_class = SessionJournal
 
     def create_journal_entry(
         self,
