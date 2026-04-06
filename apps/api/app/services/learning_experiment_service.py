@@ -308,15 +308,7 @@ def run_offline_evaluation(
     db.commit()
     db.refresh(experiment)
 
-    return {
-        "experiment_id": str(experiment.id),
-        "status": experiment.status,
-        "control": {"n": experiment.control_sample_size, "avg_reward": experiment.control_avg_reward},
-        "treatment": {"n": experiment.treatment_sample_size, "avg_reward": experiment.treatment_avg_reward},
-        "improvement_pct": experiment.improvement_pct,
-        "is_significant": experiment.is_significant,
-        "conclusion": experiment.conclusion,
-    }
+    return experiment
 
 
 def generate_routing_candidates(

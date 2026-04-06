@@ -74,7 +74,7 @@ class LearningExperiment(Base):
     control_avg_reward = Column(Float, nullable=True)
     treatment_avg_reward = Column(Float, nullable=True)
     improvement_pct = Column(Float, nullable=True)
-    is_significant = Column(String(10), nullable=True)
+    is_significant = Column(String(20), nullable=True)
     conclusion = Column(Text, nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

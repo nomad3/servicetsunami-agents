@@ -128,7 +128,7 @@ def create_experiment(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/experiments/{experiment_id}/run-offline", response_model=dict)
+@router.post("/experiments/{experiment_id}/run-offline", response_model=LearningExperimentInDB)
 def run_offline_evaluation(
     experiment_id: uuid.UUID,
     db: Session = Depends(get_db),

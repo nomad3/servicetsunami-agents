@@ -203,6 +203,10 @@ def advance_phase(
         "phase_completed": current_phase,
         "entry_id": str(entry.id),
         "board_version": entry.board_version,
+        "current_phase": None,
+        "rounds_completed": session.rounds_completed,
+        "status": session.status,
+        "consensus_reached": session.consensus_reached,
     }
 
     # Handle disagreement in debate phase
@@ -214,7 +218,7 @@ def advance_phase(
     if next_index < len(phases):
         session.current_phase = phases[next_index]
         session.phase_index = next_index
-        result["next_phase"] = session.current_phase
+        result["current_phase"] = session.current_phase
         result["next_required_roles"] = PHASE_REQUIRED_ROLES.get(session.current_phase, [])
     else:
         # All phases complete — agrees_with_previous already validated above
@@ -226,7 +230,7 @@ def advance_phase(
             session.phase_index = critique_index
             session.current_phase = phases[critique_index]
             result["new_round"] = session.rounds_completed + 1
-            result["next_phase"] = session.current_phase
+            result["current_phase"] = session.current_phase
         else:
             session.status = "completed"
             session.consensus_reached = "yes" if agrees_with_previous else "partial"
@@ -234,7 +238,10 @@ def advance_phase(
             accepted = _find_last_proposal(db, session.blackboard_id)
             session.outcome = accepted if accepted else contribution
             result["completed"] = True
-            result["consensus"] = session.consensus_reached
+
+    result["rounds_completed"] = session.rounds_completed
+    result["status"] = session.status
+    result["consensus_reached"] = session.consensus_reached
 
     session.updated_at = datetime.utcnow()
     db.commit()

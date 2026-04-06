@@ -395,7 +395,20 @@ def _action_key(action_type: ActionType, action_name: str) -> str:
 def _get_profile(action_type: ActionType, action_name: str) -> ActionRiskProfile:
     profile = _all_profiles().get(_action_key(action_type, action_name))
     if not profile:
-        raise ValueError(f"Unknown governed action: {action_type.value}:{action_name}")
+        # Dynamic fallback: classify unknown actions by prefix instead of rejecting
+        if action_type == ActionType.MCP_TOOL:
+            profile = _classify_mcp_tool(action_name, "dynamic")
+        elif action_type == ActionType.WORKFLOW_ACTION:
+            # Treat unknown workflow actions as orchestration control (medium risk)
+            profile = ActionRiskProfile(
+                action_type=ActionType.WORKFLOW_ACTION,
+                action_name=action_name,
+                category="dynamic",
+                risk_class=RiskClass.ORCHESTRATION_CONTROL,
+                risk_level=RiskLevel.MEDIUM,
+                side_effect_level=SideEffectLevel.INTERNAL_STATE,
+                reversibility=Reversibility.UNKNOWN,
+            )
     return profile
 
 
