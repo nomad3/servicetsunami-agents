@@ -21,9 +21,11 @@ from app.models.commitment_record import CommitmentRecord
 
 logger = logging.getLogger(__name__)
 
-# Patterns that indicate Luna is making a prediction or commitment
+# Patterns that indicate Luna is making a prediction or commitment.
+# Must be first-person ("I'll", "I will", "let me") to avoid extracting
+# explanatory text, user quotes, or third-person descriptions.
 _COMMITMENT_PATTERNS = [
-    # Explicit commitments
+    # Explicit commitments (Luna as subject)
     (r"i(?:'ll| will) (?:send|draft|write|schedule|set up|create|follow up|reach out|check on|monitor)", "action_promised"),
     (r"(?:i'll|i will|let me|i'm going to) (?:help|assist|work on|focus on|tackle)", "action_promised"),
 
@@ -31,11 +33,10 @@ _COMMITMENT_PATTERNS = [
     (r"(?:this|that|it) should (?:solve|fix|help|work|improve|resolve)", "prediction"),
     (r"(?:this|that|it) will (?:likely|probably|definitely) (?:work|help|improve|solve|fix)", "prediction"),
     (r"i (?:think|believe|expect|predict|anticipate) (?:this|that|it) (?:will|would|should)", "prediction"),
-    (r"(?:my|the) prediction is|(?:i|we) should see", "prediction"),
 
-    # Time-bound claims
-    (r"(?:within|in|by) (?:a few|the next|this) (?:days?|weeks?|hours?|minutes?)", "time_bound"),
-    (r"(?:today|tomorrow|this week|next week|within \d+ days?)", "time_bound"),
+    # Time-bound claims — ONLY when Luna is the subject making the time commitment
+    (r"i(?:'ll| will) .{5,60}(?:by|within|before) (?:today|tomorrow|this week|next week)", "time_bound"),
+    (r"i(?:'ll| will) .{5,60}(?:within|in) (?:a few|the next|\d+) (?:days?|weeks?|hours?)", "time_bound"),
 ]
 
 # Default due date if Luna doesn't specify
