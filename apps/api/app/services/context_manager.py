@@ -378,6 +378,22 @@ class ContextManager:
         stakes_context: str,
     ) -> str:
         """
+        Inject commitment stakes context into system prompt.
+
+        Shows Luna her open commitments and overdue items to increase
+        accountability. Gap 3 (Stakes) feature.
+        """
+        if not stakes_context:
+            return system_prompt
+
+        return system_prompt + f"\n\n{stakes_context}\n"
+
+    def inject_stakes_context_into_system_prompt(
+        self,
+        system_prompt: str,
+        stakes_context: str,
+    ) -> str:
+        """
         Inject open commitments into system prompt so Luna always knows what she owes.
         Gap 3 (Stakes) feature.
         """
