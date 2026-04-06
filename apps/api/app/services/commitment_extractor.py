@@ -231,6 +231,12 @@ def _parse_commitments(text: str) -> List[Tuple[str, str, int]]:
         if not matched_type:
             continue
 
+        # Skip meta-explanations about the commitment system itself (prevents self-referential loop)
+        meta_terms = ("commitment", "auto-extract", "track record", "fulfillment rate", "gap 3",
+                      "stakes", "accountability", "predictions", "pattern match", "auto-detect")
+        if any(t in lower for t in meta_terms):
+            continue
+
         # Extract time from sentence if present
         time_match = re.search(
             r'(?:in|within|by|this|next|within the next|in the next)\s+(\d+)\s+(hours?|days?|weeks?)',
