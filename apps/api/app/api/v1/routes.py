@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     activities,
     auth,
+    sales,
     channels,
     data_sources,
     data_pipelines,
@@ -131,3 +132,4 @@ router.include_router(activities.router, tags=["activities"])
 router.include_router(devices.router, tags=["devices"])
 router.include_router(robot.router, tags=["robot"])
 router.include_router(session_journals.router, tags=["session-journals"])
+router.include_router(sales.router, tags=["sales"])
