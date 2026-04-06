@@ -22,8 +22,9 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-CONSENSUS_MODEL = "gemma4"
-FALLBACK_MODEL = "gemma4"
+import os
+CONSENSUS_MODEL = os.environ.get("QUALITY_MODEL", "claude-haiku-4-5-20251001")
+_USE_HAIKU = CONSENSUS_MODEL.startswith("claude-")
 
 # ── Reviewer definitions ────────────────────────────────────────────────────
 
@@ -115,30 +116,31 @@ async def _run_reviewer(
     prompt: str,
 ) -> dict:
     """Run one review agent. Returns parsed result or fallback dict on failure."""
-    from app.services.local_inference import generate
-
-    raw = await generate(
-        prompt=prompt,
-        model=CONSENSUS_MODEL,
-        system=agent.system_prompt,
-        temperature=0.1,
-        max_tokens=250,
-        timeout=20.0,
-    )
-
-    # Fallback to smaller model if primary not available
-    if not raw:
+    if _USE_HAIKU:
+        import anthropic
+        from app.core.config import settings
+        try:
+            client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY.strip())
+            response = await client.messages.create(
+                model=CONSENSUS_MODEL,
+                max_tokens=250,
+                temperature=0.1,
+                system=agent.system_prompt,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = response.content[0].text if response.content else ""
+        except Exception as exc:
+            logger.debug("Consensus reviewer %s: Haiku call failed: %s", agent.role, exc)
+            raw = ""
+    else:
+        from app.services.local_inference import generate
         raw = await generate(
-            prompt=prompt,
-            model=FALLBACK_MODEL,
-            system=agent.system_prompt,
-            temperature=0.1,
-            max_tokens=250,
-            timeout=20.0,
+            prompt=prompt, model=CONSENSUS_MODEL, system=agent.system_prompt,
+            temperature=0.1, max_tokens=250, timeout=20.0,
         )
 
     if not raw:
-        logger.debug("Consensus reviewer %s: no response from Ollama", agent.role)
+        logger.debug("Consensus reviewer %s: no response from model", agent.role)
         return {
             "role": agent.role,
             "approved": True,  # Fail open — don't penalize when model unavailable
