@@ -708,6 +708,12 @@ def run_agent_session(
     except Exception as exc:
         logger.debug("Temporal context injection failed: %s", exc)
 
+    # Clear any poisoned DB state before we start querying
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
     tenant_name = str(tenant_id)
     # Resolve actual user name from DB instead of passing a UUID
     user_name = sender_phone
@@ -717,6 +723,7 @@ def run_agent_session(
             user_obj = db.query(User).filter(User.id == user_id).first()
             user_name = (user_obj.full_name if user_obj and user_obj.full_name else None) or str(user_id)
         except Exception:
+            db.rollback()
             user_name = str(user_id)
     instruction_md_content = generate_cli_instructions(
         skill_body=skill_body,

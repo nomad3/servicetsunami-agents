@@ -7,7 +7,7 @@ from app.db.init_db import init_db
 
 init_db(db=SessionLocal())
 
-app = FastAPI()
+app = FastAPI(redirect_slashes=False)
 
 
 class TrailingSlashMiddleware(BaseHTTPMiddleware):

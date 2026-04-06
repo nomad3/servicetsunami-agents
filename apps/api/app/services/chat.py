@@ -239,28 +239,7 @@ def post_user_message(
     except Exception:
         pass
 
-    # Gap 3: Detect if user is resolving an open commitment ("done", "sent it", etc.)
-    try:
-        _comm_tenant_id = session.tenant_id
-
-        def _resolve_commitments():
-            from app.db.session import SessionLocal as _SL
-            from app.services.commitment_extractor import resolve_commitment_from_message
-            edb = _SL()
-            try:
-                resolve_commitment_from_message(
-                    db=edb,
-                    tenant_id=_comm_tenant_id,
-                    user_message=content,
-                )
-            except Exception:
-                edb.rollback()
-            finally:
-                edb.close()
-
-        threading.Thread(target=_resolve_commitments, daemon=True).start()
-    except Exception:
-        pass
+    # Gap 3: Commitment resolution already runs inside _detect_signals_and_resolve above
 
     user_context = {"attachment": attachment_meta} if attachment_meta else None
     user_message = _append_message(

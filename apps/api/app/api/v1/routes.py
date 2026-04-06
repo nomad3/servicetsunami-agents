@@ -66,6 +66,7 @@ from app.api.v1 import (
 router = APIRouter()
 
 @router.get("/")
+@router.get("")
 def read_root():
     return {"message": "agentprovision.com API"}
 
