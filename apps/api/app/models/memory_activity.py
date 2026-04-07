@@ -34,6 +34,7 @@ class MemoryActivity(Base):
     entity_id = Column(UUID(as_uuid=True), ForeignKey("knowledge_entities.id", ondelete="SET NULL"), nullable=True)
     memory_id = Column(UUID(as_uuid=True), ForeignKey("agent_memories.id", ondelete="SET NULL"), nullable=True)
     workflow_run_id = Column(String(100), nullable=True)  # Temporal workflow run ID
+    workflow_id = Column(String(200), nullable=True)  # Temporal workflow type ID
     change_delta = Column(JSON, nullable=True)  # Before/after diff for updates
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
