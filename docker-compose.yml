@@ -118,6 +118,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/servicetsunami
       - MCP_API_KEY=${MCP_API_KEY:-dev_mcp_key}
+      - API_INTERNAL_KEY=${MCP_API_KEY:-dev_mcp_key}
       - API_BASE_URL=http://api:8000
       - UVICORN_HOST=0.0.0.0
       - UVICORN_PORT=8000
