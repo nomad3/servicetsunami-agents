@@ -145,3 +145,4 @@ class MemoryEvent:
     proposed_commitments: list[dict[str, Any]] = field(default_factory=list)
     confidence: float = 1.0
     visibility: str = "tenant_wide"
+    visible_to: list[str] = field(default_factory=list)  # agent slugs when visibility=agent_group

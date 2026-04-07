@@ -39,6 +39,8 @@ def test_memory_event_construction():
     )
     assert ev.source_type == "chat"
     assert ev.confidence == 1.0  # default
+    assert ev.visibility == "tenant_wide"  # default
+    assert ev.visible_to == []  # default — populated when visibility=agent_group
 
 def test_recall_response_summarises_token_estimate():
     from app.memory.types import RecallResponse
