@@ -1,0 +1,465 @@
+// Memory-First gRPC IDL — Phase 2 forward-compatibility contract.
+//
+// Phase 1 implements these services in Python (apps/api/app/memory/).
+// Phase 2 reimplements them in Rust (memory-core, embedding-service)
+// behind the SAME gRPC contract. Consumers (FastAPI, Temporal workers,
+// Luna agents) call the Python wrappers in Phase 1; the wrappers become
+// gRPC clients in Phase 2 with no caller changes.
+//
+// This file is the source of truth for both Python and Rust signatures.
+// If you change a field here, update both implementations.
+//
+// Conventions:
+// - All UUIDs encoded as `string` (gRPC convention; lowercase hex with dashes).
+// - All timestamps use `google.protobuf.Timestamp`.
+// - All optional fields use `optional` (proto3 syntax).
+// - source_type is a free-form `string` validated at runtime against an
+//   adapter registry — NOT a Literal/enum. Adding a source means
+//   registering an adapter, not regenerating the IDL.
+
+syntax = "proto3";
+
+package servicetsunami.memory.v1;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// embedding-service — minimal Rust service shipping in Phase 2
+// =============================================================================
+
+service EmbeddingService {
+  // Single-text embedding for the hot path (chat recall query).
+  rpc Embed(EmbedRequest) returns (EmbedResponse);
+
+  // Batched embedding for ingestion + backfill workflows.
+  rpc EmbedBatch(EmbedBatchRequest) returns (EmbedBatchResponse);
+
+  // Health probe — used by K8s liveness/readiness.
+  rpc Health(google.protobuf.Empty) returns (HealthResponse);
+}
+
+message EmbedRequest {
+  string text = 1;
+
+  // task_type controls task-specific embedding heads in nomic-embed-text-v1.5.
+  // Values: "search_query" | "search_document" | "classification" | "clustering"
+  // Defaults to "search_document" if empty.
+  string task_type = 2;
+}
+
+message EmbedResponse {
+  // 768-dim float vector for nomic-embed-text-v1.5.
+  repeated float vector = 1;
+  string model = 2;        // e.g., "nomic-embed-text-v1.5"
+  int32 dimensions = 3;    // 768
+}
+
+message EmbedBatchRequest {
+  repeated string texts = 1;
+  string task_type = 2;
+}
+
+message EmbedBatchResponse {
+  repeated EmbedResponse results = 1;
+}
+
+message HealthResponse {
+  enum Status {
+    UNKNOWN = 0;
+    OK = 1;
+    DEGRADED = 2;
+    LOADING = 3;
+  }
+  Status status = 1;
+  string model = 2;
+  int64 uptime_seconds = 3;
+}
+
+// =============================================================================
+// memory-core — primary memory service (Python in Phase 1, Rust in Phase 2)
+// =============================================================================
+
+service MemoryCore {
+  // ── Read API ──
+
+  // The hot path: pre-load memory context for a chat turn.
+  // Pre-loaded into the prompt; no in-prompt "recall tool" call required.
+  rpc Recall(RecallRequest) returns (RecallResponse);
+
+  // Search past conversations directly (used by Luna's "what did we discuss"
+  // intent gating; the regular Recall already includes past_conversations,
+  // but this is the explicit search-only entry point).
+  rpc SearchConversations(SearchConversationsRequest) returns (SearchConversationsResponse);
+
+  // List a tenant's open commitments (for system-prompt injection of stakes).
+  rpc GetCommitments(GetCommitmentsRequest) returns (GetCommitmentsResponse);
+
+  // List a tenant's active goals.
+  rpc GetGoals(GetGoalsRequest) returns (GetGoalsResponse);
+
+  // Get a single entity by ID (with full description, observations, relations).
+  rpc GetEntity(GetEntityRequest) returns (EntityResponse);
+
+  // ── Write API (sync, request-thread small writes) ──
+
+  rpc RecordObservation(RecordObservationRequest) returns (ObservationResponse);
+  rpc RecordCommitment(RecordCommitmentRequest) returns (CommitmentResponse);
+  rpc RecordGoal(RecordGoalRequest) returns (GoalResponse);
+  rpc UpdateConfidence(UpdateConfidenceRequest) returns (google.protobuf.Empty);
+  rpc RecordBehavioralSignal(RecordBehavioralSignalRequest) returns (BehavioralSignalResponse);
+
+  // ── Write API (bulk, async via Temporal workflows) ──
+
+  // Ingest events from source adapters. Used by ChatIngestionWorkflow,
+  // EmailIngestionWorkflow (Phase 3b), etc.
+  rpc IngestEvents(IngestEventsRequest) returns (IngestEventsResponse);
+
+  // ── Admin ──
+
+  rpc Health(google.protobuf.Empty) returns (HealthResponse);
+}
+
+// -----------------------------------------------------------------------------
+// Recall — the hot path
+// -----------------------------------------------------------------------------
+
+message RecallRequest {
+  string tenant_id = 1;          // hard tenant boundary; no cross-tenant reads
+  string agent_slug = 2;         // applies multi-agent visibility filter
+  string query = 3;              // natural-language query (the user message)
+  optional string chat_session_id = 4;  // for session-aware boosts
+  int32 top_k_per_type = 5;      // default 5 (per result list)
+  int32 total_token_budget = 6;  // default 8000 — drops lowest-priority items
+                                 // until total estimated tokens <= budget
+  repeated string source_filter = 7;  // optional: restrict to these source types
+}
+
+message RecallResponse {
+  repeated EntitySummary entities = 1;
+  repeated ObservationSummary observations = 2;
+  repeated RelationSummary relations = 3;
+  repeated CommitmentSummary commitments = 4;
+  repeated GoalSummary goals = 5;
+  repeated ConversationSummary past_conversations = 6;
+  repeated EpisodeSummary episodes = 7;
+  repeated ContradictionSummary contradictions = 8;
+  int32 total_tokens_estimate = 9;  // sum of all returned content / 4
+  RecallMetadata metadata = 10;
+}
+
+message RecallMetadata {
+  double elapsed_ms = 1;
+  bool used_keyword_fallback = 2;  // true if pgvector failed and we used ILIKE
+  bool degraded = 3;               // true if hard timeout fired or service partial
+  bool truncated_for_budget = 4;   // true if results were dropped to fit budget
+}
+
+message EntitySummary {
+  string id = 1;
+  string name = 2;
+  optional string category = 3;
+  optional string description = 4;
+  double confidence = 5;
+  double similarity = 6;       // 0..1 cosine
+  optional string source_type = 7;
+}
+
+message ObservationSummary {
+  string id = 1;
+  string entity_id = 2;
+  string content = 3;
+  double confidence = 4;
+  double similarity = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message RelationSummary {
+  string id = 1;
+  string from_entity = 2;       // entity name
+  string to_entity = 3;         // entity name
+  string relation_type = 4;
+  double confidence = 5;
+}
+
+message CommitmentSummary {
+  string id = 1;
+  string title = 2;
+  string state = 3;             // open | in_progress | fulfilled | broken
+  optional google.protobuf.Timestamp due_at = 4;
+  string priority = 5;
+  double similarity = 6;
+}
+
+message GoalSummary {
+  string id = 1;
+  string title = 2;
+  string state = 3;             // proposed | active | achieved | abandoned
+  int32 progress_pct = 4;       // 0..100
+  string priority = 5;
+  double similarity = 6;
+}
+
+message ConversationSummary {
+  string id = 1;                // chat_messages.id
+  string role = 2;              // user | assistant
+  string content = 3;
+  google.protobuf.Timestamp created_at = 4;
+  double similarity = 5;
+}
+
+message EpisodeSummary {
+  // Backed by `conversation_episodes` table — extended in migration 086
+  // with window_start, window_end, trigger_reason, agent_slug, generated_by.
+  string id = 1;
+  optional string session_id = 2;
+  string summary = 3;
+  repeated string key_topics = 4;
+  repeated string key_entities = 5;
+  google.protobuf.Timestamp created_at = 6;
+  double similarity = 7;
+}
+
+message ContradictionSummary {
+  string assertion_id = 1;
+  string subject = 2;            // entity name or world state subject
+  string predicate = 3;          // e.g., "next_meeting_at"
+  string winning_value = 4;
+  string losing_value = 5;
+  string losing_source = 6;      // e.g., "email" or "calendar"
+}
+
+// -----------------------------------------------------------------------------
+// SearchConversations
+// -----------------------------------------------------------------------------
+
+message SearchConversationsRequest {
+  string tenant_id = 1;
+  string agent_slug = 2;
+  string query = 3;
+  int32 top_k = 4;               // default 10
+  optional google.protobuf.Timestamp since = 5;
+  optional google.protobuf.Timestamp until = 6;
+}
+
+message SearchConversationsResponse {
+  repeated ConversationSummary conversations = 1;
+}
+
+// -----------------------------------------------------------------------------
+// GetCommitments / GetGoals / GetEntity
+// -----------------------------------------------------------------------------
+
+message GetCommitmentsRequest {
+  string tenant_id = 1;
+  string agent_slug = 2;
+  repeated string states = 3;    // optional state filter ["open", "in_progress"]
+  int32 limit = 4;               // default 50
+}
+
+message GetCommitmentsResponse {
+  repeated CommitmentSummary commitments = 1;
+}
+
+message GetGoalsRequest {
+  string tenant_id = 1;
+  string agent_slug = 2;
+  repeated string states = 3;
+  int32 limit = 4;
+}
+
+message GetGoalsResponse {
+  repeated GoalSummary goals = 1;
+}
+
+message GetEntityRequest {
+  string tenant_id = 1;
+  string entity_id = 2;
+  string agent_slug = 3;          // visibility filter
+}
+
+message EntityResponse {
+  EntitySummary entity = 1;
+  repeated ObservationSummary observations = 2;
+  repeated RelationSummary relations = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Sync write API
+// -----------------------------------------------------------------------------
+
+message RecordObservationRequest {
+  string tenant_id = 1;
+  string entity_id = 2;
+  string content = 3;
+  double confidence = 4;          // default 0.7
+  optional string source_type = 5;
+  optional string source_id = 6;   // for dedup — same source_type+source_id is idempotent
+  optional string actor_slug = 7;
+  optional string workflow_id = 8;
+  optional string workflow_run_id = 9;
+  string visibility = 10;          // tenant_wide | agent_scoped | agent_group
+  repeated string visible_to = 11; // when visibility=agent_group
+}
+
+message ObservationResponse {
+  ObservationSummary observation = 1;
+  bool deduplicated = 2;           // true if returned existing row instead of creating
+}
+
+message RecordCommitmentRequest {
+  string tenant_id = 1;
+  string owner_agent_slug = 2;
+  string title = 3;
+  optional string description = 4;
+  string commitment_type = 5;      // action | delivery | response | meeting
+  optional google.protobuf.Timestamp due_at = 6;
+  string priority = 7;             // default "normal"
+  optional string source_type = 8;
+  optional string source_id = 9;
+  optional string workflow_id = 10;
+  string visibility = 11;
+  repeated string visible_to = 12;
+}
+
+message CommitmentResponse {
+  CommitmentSummary commitment = 1;
+  bool deduplicated = 2;
+}
+
+message RecordGoalRequest {
+  string tenant_id = 1;
+  string owner_agent_slug = 2;
+  string title = 3;
+  optional string description = 4;
+  string objective_type = 5;       // operational | strategic | aspirational
+  string priority = 6;
+  optional google.protobuf.Timestamp deadline = 7;
+  optional string source_type = 8;
+  optional string source_id = 9;
+  string visibility = 10;
+  repeated string visible_to = 11;
+}
+
+message GoalResponse {
+  GoalSummary goal = 1;
+}
+
+message UpdateConfidenceRequest {
+  string tenant_id = 1;
+  string target_table = 2;        // e.g., "knowledge_observations"
+  string target_id = 3;
+  double new_confidence = 4;
+  string reason = 5;              // free-text explanation
+  optional string workflow_id = 6;
+}
+
+message RecordBehavioralSignalRequest {
+  string tenant_id = 1;
+  string suggestion_type = 2;     // e.g., "follow_up", "send_email"
+  string suggestion_text = 3;
+  optional string message_id = 4;
+  optional string session_id = 5;
+  double confidence = 6;
+}
+
+message BehavioralSignalResponse {
+  string id = 1;
+  string state = 2;               // pending | acted | ignored
+}
+
+// -----------------------------------------------------------------------------
+// Bulk ingestion (async via Temporal)
+// -----------------------------------------------------------------------------
+
+message IngestEventsRequest {
+  string tenant_id = 1;
+  repeated MemoryEvent events = 2;
+  // workflow_id is OPTIONAL because not every ingest is workflow-backed
+  // (synthetic test fixtures call ingest_events directly).
+  optional string workflow_id = 3;
+  optional string workflow_run_id = 4;
+}
+
+message IngestEventsResponse {
+  int32 events_processed = 1;
+  int32 entities_created = 2;
+  int32 entities_reused = 3;
+  int32 observations_created = 4;
+  int32 relations_created = 5;
+  int32 commitments_created = 6;
+  int32 skipped = 7;               // events that referenced unknown source_type or had bad data
+  repeated string errors = 8;      // human-readable error strings, capped at 10
+}
+
+// -----------------------------------------------------------------------------
+// MemoryEvent — the canonical ingestion shape
+// -----------------------------------------------------------------------------
+
+message MemoryEvent {
+  // tenant scope
+  string tenant_id = 1;
+
+  // source attribution
+  string source_type = 2;          // free-form string validated against runtime adapter registry
+  string source_id = 3;            // raw source's native ID (used for dedup)
+  optional string actor_slug = 4;  // agent or user that produced the source data
+  map<string, string> source_metadata = 5;  // arbitrary string→string metadata
+
+  // timing
+  google.protobuf.Timestamp occurred_at = 6;  // when the event happened in the source
+  google.protobuf.Timestamp ingested_at = 7;  // when we processed it
+
+  // content discriminator
+  Kind kind = 8;
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_TEXT = 1;
+    KIND_STRUCTURED = 2;
+    KIND_MEDIA = 3;
+  }
+
+  optional string text = 9;          // for KIND_TEXT
+  optional string structured_json = 10;  // for KIND_STRUCTURED — JSON encoded as string
+  optional string media_ref = 11;    // for KIND_MEDIA — URI/path to the asset
+
+  // pre-extracted hints from the adapter (downstream may override or augment)
+  repeated ProposedEntity proposed_entities = 12;
+  repeated ProposedObservation proposed_observations = 13;
+  repeated ProposedRelation proposed_relations = 14;
+  repeated ProposedCommitment proposed_commitments = 15;
+
+  // adapter's initial confidence in this event
+  double confidence = 16;
+
+  // visibility scoping (defaults to tenant_wide)
+  string visibility = 17;
+  repeated string visible_to = 18;
+}
+
+message ProposedEntity {
+  string name = 1;
+  optional string category = 2;
+  optional string description = 3;
+  map<string, string> properties = 4;
+}
+
+message ProposedObservation {
+  string entity_name = 1;          // resolved to entity_id by ingest_events
+  string content = 2;
+  double confidence = 3;
+}
+
+message ProposedRelation {
+  string from_entity = 1;
+  string to_entity = 2;
+  string relation_type = 3;
+  double confidence = 4;
+}
+
+message ProposedCommitment {
+  string title = 1;
+  optional google.protobuf.Timestamp due_at = 2;
+  string commitment_type = 3;       // action | delivery | response | meeting
+  string priority = 4;
+}
