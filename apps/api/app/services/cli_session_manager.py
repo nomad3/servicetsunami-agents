@@ -135,9 +135,15 @@ def generate_cli_instructions(
     lines.append("")
 
     if conversation_summary:
-        lines.append("# Last Few Messages (for immediate context)")
+        # Pass the full chat history through. The upstream builder in
+        # chat.py:_generate_agentic_response (~line 285) caps to 50,000 chars
+        # / ~12K tokens of newest-first messages BEFORE this point. Slicing
+        # again here was a long-standing bug — the previous `[-1500:]` cut
+        # the budget to ~3% (3-5 short messages) and caused turn-to-turn
+        # context loss in long WhatsApp conversations.
+        lines.append("# Conversation History")
         lines.append("")
-        lines.append(conversation_summary.strip()[-1500:])
+        lines.append(conversation_summary.strip())
         lines.append("")
 
     relevant_entities = memory_context.get("relevant_entities", [])
