@@ -1,23 +1,45 @@
-"""Visibility filter for multi-agent scoping. Used by recall queries.
+"""SQL visibility filter for multi-agent scoping (design doc §7).
 
-Phase 1.3 stub: pass-through. Plan Task 11 replaces this with a real
-filter that scopes rows by `visibility` (`tenant_wide` | `agent_group` |
-`agent_only`) and `visible_to` (list of agent slugs) on the model.
+Applied at the query layer in `memory/_query.py`. Business logic does
+not need to think about visibility — the memory API enforces it.
 
-The signature is locked: `apply_visibility(query, model, agent_slug)`.
-Task 11 must NOT change the signature — only the body.
+A record is visible to `agent_slug` iff one of:
+  1. visibility = 'tenant_wide' (default — visible to all agents)
+  2. visibility = 'agent_scoped' AND owner_agent_slug = agent_slug
+  3. visibility = 'agent_group'  AND agent_slug IN visible_to[]
+
+The signature `apply_visibility(query, model, agent_slug)` is locked
+and matches the Task 10 stub call sites.
 """
 from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import and_, or_
+from sqlalchemy.orm.query import Query
 
-def apply_visibility(query: Any, model: Any, agent_slug: str) -> Any:
-    """Pass-through stub. Returns the query unchanged.
 
-    TODO(Task 11): apply visibility filter:
-        - tenant_wide rows: visible to all agents
-        - agent_only rows: visible only to owner_agent_slug == agent_slug
-        - agent_group rows: visible if agent_slug in visible_to
+def apply_visibility(query: Query, model: Any, agent_slug: str) -> Query:
+    """Filter `query` to records visible to `agent_slug`.
+
+    Requires `model` to expose three columns added by migration 087:
+      - visibility       (VARCHAR(20), NOT NULL, default 'tenant_wide')
+      - owner_agent_slug (VARCHAR(100), NULL)
+      - visible_to       (TEXT[], NULL)
+
+    Returns the same query with an additional WHERE clause.
     """
-    return query
+    return query.filter(
+        or_(
+            model.visibility == "tenant_wide",
+            and_(
+                model.visibility == "agent_scoped",
+                model.owner_agent_slug == agent_slug,
+            ),
+            and_(
+                model.visibility == "agent_group",
+                # PostgreSQL ANY operator on TEXT[] column
+                model.visible_to.any(agent_slug),
+            ),
+        )
+    )

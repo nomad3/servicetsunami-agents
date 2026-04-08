@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Column, DateTime, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
@@ -36,6 +36,11 @@ class CommitmentRecord(Base):
 
     goal_id = Column(UUID(as_uuid=True), ForeignKey("goal_records.id"), nullable=True)
     related_entity_ids = Column(JSONB, nullable=False, default=list)
+
+    # Multi-agent visibility scoping (migration 087, design doc §7).
+    # owner_agent_slug already exists above; visibility/visible_to added here.
+    visibility = Column(String(20), nullable=False, default="tenant_wide")
+    visible_to = Column(ARRAY(String), nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -55,7 +55,15 @@ def search_entities(
     agent_slug: str,
     deadline: Optional[float] = None,
 ) -> list[EntitySummary]:
-    """Top-K entities by pgvector cosine similarity. TODO Task 11: visibility."""
+    """Top-K entities by pgvector cosine similarity, scoped by visibility.
+
+    Visibility filter (design doc §7) is inlined into the WHERE clause
+    because this query uses raw SQL, not the ORM. The same three rules
+    that `apply_visibility()` enforces on ORM queries apply here:
+      - tenant_wide rows: visible to all agents
+      - agent_scoped rows: visible only to owner_agent_slug == :agent
+      - agent_group rows:  visible when :agent = ANY(visible_to)
+    """
     if _check_deadline(deadline):
         return []
     vec = "[" + ",".join(str(v) for v in query_embedding) + "]"
@@ -70,10 +78,18 @@ def search_entities(
         WHERE e.tenant_id = CAST(:tid AS uuid)
           AND e.content_type = 'entity'
           AND ke.deleted_at IS NULL
+          AND (
+              ke.visibility = 'tenant_wide'
+              OR (ke.visibility = 'agent_scoped' AND ke.owner_agent_slug = :agent)
+              OR (ke.visibility = 'agent_group'  AND :agent = ANY(ke.visible_to))
+          )
         ORDER BY e.embedding <=> CAST('{vec}' AS vector)
         LIMIT :lim
     """)
-    rows = db.execute(sql, {"tid": str(tenant_id), "lim": top_k}).mappings().all()
+    rows = db.execute(
+        sql,
+        {"tid": str(tenant_id), "lim": top_k, "agent": agent_slug},
+    ).mappings().all()
     return [
         EntitySummary(
             id=r["id"],

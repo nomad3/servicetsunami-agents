@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Text, Float, Integer, DateTime, ForeignKey, JSON
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 
@@ -47,6 +47,11 @@ class AgentMemory(Base):
     # Categorization and linking
     tags = Column(JSON, default=list)  # e.g. ["project:luna", "priority:high"]
     related_entity_ids = Column(JSON, default=list)  # Links to knowledge_entities
+
+    # Multi-agent visibility scoping (migration 087, design doc §7)
+    visibility = Column(String(20), nullable=False, default="tenant_wide")
+    visible_to = Column(ARRAY(String), nullable=True)
+    owner_agent_slug = Column(String(100), nullable=True)
 
     # Lifecycle
     expires_at = Column(DateTime, nullable=True)
