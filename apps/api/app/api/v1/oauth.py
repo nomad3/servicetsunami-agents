@@ -54,7 +54,6 @@ OAUTH_PROVIDERS = {
             "https://www.googleapis.com/auth/drive.readonly",
             "https://www.googleapis.com/auth/drive.file",
             "https://www.googleapis.com/auth/cloud-platform",
-            "https://www.googleapis.com/auth/generative-ai",
             "https://www.googleapis.com/auth/userinfo.email",
             "https://www.googleapis.com/auth/userinfo.profile",
             "openid",
