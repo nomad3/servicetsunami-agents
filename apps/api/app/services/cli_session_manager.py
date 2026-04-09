@@ -425,13 +425,15 @@ def _get_cli_platform_credentials(
 ) -> Dict[str, Any]:
     """Retrieve active credentials for a tenant CLI platform.
     
-    Falls back to other compatible Google integrations for gemini_cli.
+    Falls back to other compatible Google integrations for gemini_cli
+    if the primary one is missing or has inactive credentials.
     """
+    from app.models.integration_credential import IntegrationCredential
+
     search_names = [integration_name]
     if integration_name == "gemini_cli":
         search_names.extend(["gmail", "google_drive", "google_calendar"])
 
-    config = None
     for name in search_names:
         config = (
             db.query(IntegrationConfig)
@@ -442,17 +444,25 @@ def _get_cli_platform_credentials(
             )
             .first()
         )
-        if config:
-            break
+        if not config:
+            continue
 
-    if not config:
-        logger.warning("No active %s (or compatible) integration config for tenant %s", integration_name, tenant_id)
-        return {}
+        # Check if this config has at least one active credential
+        active_cred = db.query(IntegrationCredential).filter(
+            IntegrationCredential.integration_config_id == config.id,
+            IntegrationCredential.status == "active"
+        ).first()
+        
+        if not active_cred:
+            logger.debug("Integration %s found for tenant %s but has no active credentials", name, tenant_id)
+            continue
 
-    creds = retrieve_credentials_for_skill(db, config.id, tenant_id)
-    if not creds:
-        logger.warning("No credentials found for %s integration, tenant %s", config.integration_name, tenant_id)
-    return creds
+        creds = retrieve_credentials_for_skill(db, config.id, tenant_id)
+        if creds:
+            return creds
+
+    logger.warning("No active %s (or compatible) integration with credentials for tenant %s", integration_name, tenant_id)
+    return {}
 
 
 def run_agent_session(
