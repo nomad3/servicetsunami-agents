@@ -83,8 +83,6 @@ def seed_shared_cli_credentials_for_tenant(
     )
 
     seed_specs = [
-        ("claude_code", {"session_token": (settings.PLATFORM_CLAUDE_CODE_TOKEN or os.environ.get("PLATFORM_CLAUDE_CODE_TOKEN", "")).strip()}),
-        ("codex", {"auth_json": (settings.PLATFORM_CODEX_AUTH_JSON or "").strip()}),
         ("gemini_cli", {"oauth_token": (settings.PLATFORM_GEMINI_CLI_TOKEN or "").strip()}),
     ]
 
@@ -153,7 +151,7 @@ def create_user_with_tenant(db: Session, *, user_in: UserCreate, tenant_in: Tena
     features = TenantFeatures(
         tenant_id=tenant.id,
         cli_orchestrator_enabled=True,
-        default_cli_platform="claude_code",
+        default_cli_platform="gemini_cli",
         rl_enabled=True,
     )
     db.add(features)

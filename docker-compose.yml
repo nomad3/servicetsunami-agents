@@ -41,7 +41,7 @@ services:
       - CORS_EXTRA_ORIGINS=${CORS_EXTRA_ORIGINS:-}
       - EXPLORATION_RATE=${EXPLORATION_RATE:-0.0}
       - USE_MEMORY_V2=${USE_MEMORY_V2:-false}
-      - USE_MEMORY_V2_TENANT_ALLOWLIST=${USE_MEMORY_V2_TENANT_ALLOWLIST:-}
+      - USE_MEMORY_V2_TENANT_ALLOWLIST=${USE_MEMORY_V2_TENANT_ALLOWLIST:-[]}
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -88,6 +88,8 @@ services:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - HF_HUB_ENABLE_HF_TRANSFER=0
       - HF_HUB_DISABLE_XET=1
+      - USE_MEMORY_V2=${USE_MEMORY_V2:-false}
+      - USE_MEMORY_V2_TENANT_ALLOWLIST=${USE_MEMORY_V2_TENANT_ALLOWLIST:-[]}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -108,6 +110,8 @@ services:
       - temporal
     environment:
       - MCP_SERVER_URL=http://mcp-server:8000
+      - USE_MEMORY_V2=${USE_MEMORY_V2:-false}
+      - USE_MEMORY_V2_TENANT_ALLOWLIST=${USE_MEMORY_V2_TENANT_ALLOWLIST:-[]}
     restart: unless-stopped
     healthcheck:
       disable: true
@@ -149,6 +153,8 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-ghp_placeholder}
       - OPENCODE_OLLAMA_URL=http://host.docker.internal:11434/v1
       - OPENCODE_MODEL=${OPENCODE_MODEL:-gemma4}
+      - USE_MEMORY_V2=${USE_MEMORY_V2:-false}
+      - USE_MEMORY_V2_TENANT_ALLOWLIST=${USE_MEMORY_V2_TENANT_ALLOWLIST:-[]}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
