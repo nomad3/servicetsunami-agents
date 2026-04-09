@@ -1443,8 +1443,9 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
     env["HOME"] = session_dir  # Tell Gemini CLI where to find .gemini/
     env["GEMINI_AUTH_TOKEN"] = oauth_token
     env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.join(gemini_home, "application_default_credentials.json")
-    env["GOOGLE_GENAI_USE_VERTEXAI"] = "0"  # Ensure we use personal/consumer OAuth if applicable
+    env["GOOGLE_GENAI_USE_VERTEXAI"] = "0"
     env["GOOGLE_GENAI_USE_GCA"] = "0"
+    env["GEMINI_PROJECT_ID"] = "personal-project" # Placeholder to avoid registry lookup
 
     result = subprocess.run(
         cmd,
@@ -1494,12 +1495,20 @@ def _prepare_gemini_home(session_dir: str, auth_payload: dict, mcp_config_json: 
 
     # Pre-create projects.json to avoid rename errors and initialize the workspace project
     projects_path = os.path.join(gemini_home, "projects.json")
-    workspace_abs = os.path.abspath(WORKSPACE)
     if not os.path.exists(projects_path):
         with open(projects_path, "w") as f:
-            # Registry format: { "projects": { "path": { "id": "...", "name": "..." } } }
-            # But let's try a simpler approach first: just an empty registry that doesn't crash
-            json.dump({"projects": {}}, f)
+            # Proper registry format to avoid ProjectRegistry.getShortId TypeError
+            registry = {
+                "projects": {
+                    "/workspace": {
+                        "id": "workspace-project",
+                        "name": "workspace",
+                        "is_active": True
+                    }
+                },
+                "active_project_path": "/workspace"
+            }
+            json.dump(registry, f, indent=2)
 
     # Gemini CLI credentials.json format for oauth-personal
     import time
@@ -1509,7 +1518,7 @@ def _prepare_gemini_home(session_dir: str, auth_payload: dict, mcp_config_json: 
     creds_payload = {
         "access_token": auth_payload.get("access_token"),
         "refresh_token": auth_payload.get("refresh_token"),
-        "scope": "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email openid",
+        "scope": "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/accounts.reauth https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile openid",
         "token_type": "Bearer",
         "expiry_date": expiry_ms
     }
@@ -1529,13 +1538,16 @@ def _prepare_gemini_home(session_dir: str, auth_payload: dict, mcp_config_json: 
     with open(adc_path, "w") as f:
         json.dump(adc_payload, f, indent=2)
     
-    # settings.json for auth enforcement
+    # settings.json for auth enforcement and feature disabling
     settings = {
         "security": {
             "auth": {
                 "enforcedType": "oauth-personal",
                 "selectedType": "oauth-personal"
             }
+        },
+        "cloudCodeAssist": {
+            "enabled": False
         }
     }
     if mcp_config_json:
