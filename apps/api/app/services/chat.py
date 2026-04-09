@@ -297,7 +297,7 @@ def _generate_agentic_response(
         .limit(30)  # Pull up to 30; budget decides how many fit
         .all()
     )
-    max_total = 50000  # ~12K tokens budget for history
+    max_total = 65000  # ~16K tokens budget for history
     kept = []  # (idx, line) newest→oldest
     total_chars = 0
     for m in recent_msgs:  # newest first

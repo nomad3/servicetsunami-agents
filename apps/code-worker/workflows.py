@@ -57,6 +57,7 @@ CLAUDE_CREDIT_ERROR_PATTERNS = (
     "out of extra usage",
     "insufficient credits",
     "subscription required",
+    "hit your limit",
 )
 
 CODEX_CREDIT_ERROR_PATTERNS = (
@@ -1073,8 +1074,15 @@ def _execute_claude_chat(task_input: ChatCliInput, session_dir: str) -> ChatCliR
     _allowed = task_input.allowed_tools or _build_allowed_tools_from_mcp(
         task_input.mcp_config, extra="Bash,Read,Edit,Write,WebFetch,WebSearch"
     )
+    
+    prompt = task_input.message
+    if task_input.instruction_md_content.strip():
+        # Bypass the 20KB limit of --append-system-prompt by injecting
+        # instructions and conversation history directly into the prompt.
+        prompt = f"{task_input.instruction_md_content.strip()}\n\n# User Request\n\n{task_input.message}"
+
     cmd = [
-        "claude", "-p", task_input.message,
+        "claude", "-p", prompt,
         "--output-format", "json",
         "--model", _model,
         "--allowedTools", _allowed,
@@ -1097,13 +1105,6 @@ def _execute_claude_chat(task_input: ChatCliInput, session_dir: str) -> ChatCliR
     # Use --no-session-persistence to avoid leaking JSONL files on every
     # call (842+ files were accumulated in the previous model).
     cmd.append("--no-session-persistence")
-
-    claude_md_path = os.path.join(session_dir, "CLAUDE.md")
-    if os.path.exists(claude_md_path):
-        with open(claude_md_path) as f:
-            system_prompt = f.read()
-        if system_prompt.strip():
-            cmd.extend(["--append-system-prompt", system_prompt[:20000]])
 
     mcp_path = os.path.join(session_dir, "mcp.json")
     if os.path.exists(mcp_path):
