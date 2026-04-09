@@ -440,16 +440,16 @@ def route_and_execute(
                         "reason": "short_no_intent",
                     },
                     state_text=f"task_type: {inferred_type}, channel: {channel}, "
-                                        f"message_len: {len(message)}, intent_matched: false",
-                        )
-                    except Exception:
-                        try:
-                            db.rollback()
-                        except Exception:
-                            pass
-                        logger.debug("Failed to log short_no_intent RL experience — continuing")
+                               f"message_len: {len(message)}, intent_matched: false",
+                )
+            except Exception:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                logger.debug("Failed to log short_no_intent RL experience — continuing")
 
-                _tier_trajectory_id = None  # ensure no orphaned reference
+            _tier_trajectory_id = None  # ensure no orphaned reference
 
             _local_meta = {
                 "platform": "local_inference",
