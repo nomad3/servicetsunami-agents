@@ -1435,12 +1435,15 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
         "gemini",
         "-p",
         prompt,
-        "--json",
+        "-y",
     ]
 
     env = os.environ.copy()
     env["HOME"] = session_dir  # Tell Gemini CLI where to find .gemini/
     env["GEMINI_AUTH_TOKEN"] = oauth_token
+    env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.join(gemini_home, "application_default_credentials.json")
+    env["GOOGLE_GENAI_USE_VERTEXAI"] = "0"  # Ensure we use personal/consumer OAuth if applicable
+    env["GOOGLE_GENAI_USE_GCA"] = "0"
 
     result = subprocess.run(
         cmd,
@@ -1450,6 +1453,12 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
         env=env,
         cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
     )
+    logger.info("Gemini CLI exit code: %s", result.returncode)
+    if result.stdout:
+        logger.info("Gemini CLI stdout: %s", result.stdout[:500])
+    if result.stderr:
+        logger.warning("Gemini CLI stderr: %s", result.stderr[:500])
+
     if result.returncode != 0:
         err = (result.stderr or result.stdout or "")[:2000]
         return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
@@ -1478,13 +1487,53 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
 
 def _prepare_gemini_home(session_dir: str, auth_payload: dict, mcp_config_json: str) -> str:
     """Materialize tenant-scoped GEMINI_HOME with credentials.json and MCP settings.json."""
+    # Create .gemini directory for settings and credentials
     gemini_home = os.path.join(session_dir, ".gemini")
     os.makedirs(gemini_home, exist_ok=True)
 
-    with open(os.path.join(gemini_home, "credentials.json"), "w") as f:
-        json.dump(auth_payload, f)
+    # Pre-create projects.json to avoid rename errors in containerized environment
+    projects_path = os.path.join(gemini_home, "projects.json")
+    if not os.path.exists(projects_path):
+        with open(projects_path, "w") as f:
+            json.dump({}, f)
+
+    # Gemini CLI credentials.json format for oauth-personal
+    import time
+    expiry_ms = int((time.time() + 3600) * 1000)  # Assume 1h expiry if unknown
     
-    settings = {}
+    # Use any existing refresh token or access token from auth_payload
+    creds_payload = {
+        "access_token": auth_payload.get("access_token"),
+        "refresh_token": auth_payload.get("refresh_token"),
+        "scope": "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email openid",
+        "token_type": "Bearer",
+        "expiry_date": expiry_ms
+    }
+    
+    with open(os.path.join(gemini_home, "credentials.json"), "w") as f:
+        json.dump(creds_payload, f, indent=2)
+
+    # Also maintain ADC for tools that might use it (Vertex AI nodes)
+    adc_path = os.path.join(gemini_home, "application_default_credentials.json")
+    adc_payload = {
+        "access_token": auth_payload.get("access_token"),
+        "refresh_token": auth_payload.get("refresh_token"),
+        "client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
+        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
+        "type": "authorized_user",
+    }
+    with open(adc_path, "w") as f:
+        json.dump(adc_payload, f, indent=2)
+    
+    # settings.json for auth enforcement
+    settings = {
+        "security": {
+            "auth": {
+                "enforcedType": "oauth-personal",
+                "selectedType": "oauth-personal"
+            }
+        }
+    }
     if mcp_config_json:
         try:
             mcp_data = json.loads(mcp_config_json)
