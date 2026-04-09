@@ -456,6 +456,39 @@ def delete_relation(db: Session, relation_id: uuid.UUID, tenant_id: uuid.UUID) -
 # Git History Context
 # ---------------------------------------------------------------------------
 
+def upsert_entity_by_name(
+    db: Session,
+    tenant_id: uuid.UUID,
+    name: str,
+    *,
+    entity_type: str = "general",
+    category: Optional[str] = None,
+    description: Optional[str] = None,
+) -> tuple[KnowledgeEntity, bool]:
+    """Public wrapper around _find_or_create_entity. Returns (entity, created)."""
+    existing = db.query(KnowledgeEntity).filter(
+        KnowledgeEntity.tenant_id == tenant_id,
+        KnowledgeEntity.name == name,
+    ).first()
+    if existing:
+        return existing, False
+    entity = _find_or_create_entity(
+        db, tenant_id=tenant_id, name=name,
+        entity_type=entity_type, category=category or "general",
+        description=description,
+    )
+    return entity, True
+
+
+def get_entity_by_name(
+    db: Session, tenant_id: uuid.UUID, name: str,
+) -> Optional[KnowledgeEntity]:
+    return db.query(KnowledgeEntity).filter(
+        KnowledgeEntity.tenant_id == tenant_id,
+        KnowledgeEntity.name == name,
+    ).first()
+
+
 def _find_or_create_entity(
     db: Session,
     tenant_id: uuid.UUID,

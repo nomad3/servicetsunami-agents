@@ -45,6 +45,7 @@ async def generate(
     max_tokens: int = 500,
     timeout: float = 30.0,
     priority: str = "background",
+    response_format: str = None,
 ) -> Optional[str]:
     """Call Ollama generate endpoint. Returns None on failure.
 
@@ -54,16 +55,16 @@ async def generate(
     model = model or DEFAULT_MODEL
 
     if priority == "foreground":
-        return await _generate_foreground(prompt, model, system, temperature, max_tokens, timeout)
+        return await _generate_foreground(prompt, model, system, temperature, max_tokens, timeout, response_format)
     else:
-        return await _generate_background(prompt, model, system, temperature, max_tokens, timeout)
+        return await _generate_background(prompt, model, system, temperature, max_tokens, timeout, response_format)
 
 
-async def _generate_foreground(prompt, model, system, temperature, max_tokens, timeout):
+async def _generate_foreground(prompt, model, system, temperature, max_tokens, timeout, response_format=None):
     """Foreground async inference — sets shared flag so background skips."""
     try:
         _foreground_active.set()
-        return await _do_generate(prompt, model, system, temperature, max_tokens, timeout)
+        return await _do_generate(prompt, model, system, temperature, max_tokens, timeout, response_format)
     except Exception as e:
         logger.warning("Foreground inference failed: %s", e)
         return None
@@ -71,7 +72,7 @@ async def _generate_foreground(prompt, model, system, temperature, max_tokens, t
         _foreground_active.clear()
 
 
-async def _generate_background(prompt, model, system, temperature, max_tokens, timeout):
+async def _generate_background(prompt, model, system, temperature, max_tokens, timeout, response_format=None):
     """Background inference — skips if any foreground caller (async or sync) is active."""
     if _foreground_active.is_set():
         logger.debug("GPU busy with foreground — skipping background inference")
@@ -84,7 +85,7 @@ async def _generate_background(prompt, model, system, temperature, max_tokens, t
         if _foreground_active.is_set():
             logger.debug("GPU became busy — skipping background inference")
             return None
-        return await _do_generate(prompt, model, system, temperature, max_tokens, timeout)
+        return await _do_generate(prompt, model, system, temperature, max_tokens, timeout, response_format)
     except Exception as e:
         logger.warning("Background inference failed: %s", e)
         return None
@@ -92,22 +93,26 @@ async def _generate_background(prompt, model, system, temperature, max_tokens, t
         _background_lock.release()
 
 
-async def _do_generate(prompt, model, system, temperature, max_tokens, timeout):
+async def _do_generate(prompt, model, system, temperature, max_tokens, timeout, response_format=None):
     """Raw Ollama generate call — no locking, called by foreground/background wrappers."""
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "system": system,
+                "stream": False,
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": max_tokens,
+                },
+            }
+            if response_format:
+                payload["format"] = response_format
+
             resp = await client.post(
                 f"{OLLAMA_BASE_URL}/api/generate",
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "system": system,
-                    "stream": False,
-                    "options": {
-                        "temperature": temperature,
-                        "num_predict": max_tokens,
-                    },
-                },
+                json=payload,
             )
             if resp.status_code == 200:
                 return resp.json().get("response", "").strip()
@@ -278,6 +283,7 @@ def generate_sync(
     temperature: float = 0.1,
     max_tokens: int = 500,
     timeout: float = 45.0,
+    response_format: str = None,
 ) -> Optional[str]:
     """Synchronous Ollama call. Returns None on failure. Sets foreground flag so background skips."""
     model = model or DEFAULT_MODEL
@@ -285,18 +291,22 @@ def generate_sync(
         _foreground_active.set()
         try:
             with httpx.Client(timeout=timeout) as client:
+                payload = {
+                    "model": model,
+                    "prompt": prompt,
+                    "system": system,
+                    "stream": False,
+                    "options": {
+                        "temperature": temperature,
+                        "num_predict": max_tokens,
+                    },
+                }
+                if response_format:
+                    payload["format"] = response_format
+
                 resp = client.post(
                     f"{OLLAMA_BASE_URL}/api/generate",
-                    json={
-                        "model": model,
-                        "prompt": prompt,
-                        "system": system,
-                        "stream": False,
-                        "options": {
-                            "temperature": temperature,
-                            "num_predict": max_tokens,
-                        },
-                    },
+                    json=payload,
                 )
                 if resp.status_code == 200:
                     return resp.json().get("response", "").strip()
@@ -435,6 +445,7 @@ def extract_knowledge_with_prompt_sync(prompt: str) -> Optional[dict]:
     )
 
     if not result:
+        logger.warning("extract_knowledge_with_prompt_sync: generate_sync returned empty result")
         return None
 
     try:
@@ -443,8 +454,10 @@ def extract_knowledge_with_prompt_sync(prompt: str) -> Optional[dict]:
         data = json.loads(result[start:end])
         if "entities" in data:
             return data
-    except (json.JSONDecodeError, ValueError, IndexError):
-        logger.debug("Failed to parse Gemma 4 knowledge extraction (with prompt): %s", result[:200])
+        else:
+            logger.warning("extract_knowledge_with_prompt_sync: 'entities' key missing in parsed JSON")
+    except (json.JSONDecodeError, ValueError, IndexError) as e:
+        logger.warning("Failed to parse Gemma 4 knowledge extraction: %s. Raw result: %s", e, result[:500])
     return None
 
 
@@ -622,3 +635,53 @@ CONVERSATION:
         max_tokens=800,
         timeout=45.0,
     )
+
+
+import json
+
+def summarize_chat_window(messages: list[dict]) -> dict:
+    """Summarize a chat window with structured output via Gemma4 JSON mode.
+
+    Args:
+        messages: list of {"role", "content", "created_at"} dicts.
+
+    Returns:
+        {"summary": str, "key_topics": list[str], "key_entities": list[str],
+         "mood": str, "messages": list (echoed for downstream count)}
+    """
+    if not messages:
+        return {"summary": "", "key_topics": [], "key_entities": [], "mood": "neutral", "messages": []}
+
+    convo_text = "\n".join(
+        f"[{m.get('role', 'user')}] {str(m.get('content', ''))[:500]}" for m in messages[:60]
+    )
+    prompt = f"""Summarize this conversation window. Return JSON ONLY in this exact shape:
+{{"summary": "<2-3 sentence narrative summary>",
+  "key_topics": ["topic1", "topic2"],
+  "key_entities": ["Person A", "Project B"],
+  "mood": "positive|neutral|concerned|escalated"}}
+
+CONVERSATION:
+{convo_text[:6000]}"""
+
+    raw = generate_sync(
+        prompt=prompt,
+        model=QUALITY_MODEL,
+        system="You are a conversation summarizer. Output valid JSON only, no prose, no markdown.",
+        temperature=0.2,
+        max_tokens=500,
+        timeout=60.0,
+        response_format="json",
+    )
+    try:
+        parsed = json.loads(raw or "{}")
+    except (json.JSONDecodeError, TypeError):
+        parsed = {"summary": (raw or "")[:500], "key_topics": [], "key_entities": [], "mood": "neutral"}
+
+    return {
+        "summary": parsed.get("summary", "")[:2000],
+        "key_topics": parsed.get("key_topics", [])[:10],
+        "key_entities": parsed.get("key_entities", [])[:10],
+        "mood": parsed.get("mood", "neutral"),
+        "messages": messages,  # passed through for message_count downstream
+    }

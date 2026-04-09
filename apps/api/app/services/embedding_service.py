@@ -140,7 +140,19 @@ def _get_model():
 
         def _load():
             try:
-                loaded[0] = SentenceTransformer(_MODEL_NAME, trust_remote_code=True)
+                from sentence_transformers import SentenceTransformer, models
+                # Attempt standard load
+                try:
+                    loaded[0] = SentenceTransformer(_MODEL_NAME, trust_remote_code=True)
+                except TypeError as te:
+                    if "word_embedding_dimension" in str(te):
+                        logger.info("Nomic pooling bug detected — applying manual layer fix")
+                        # Manual assembly to bypass the broken __init__ in some ST versions
+                        word_embedding_model = models.Transformer(_MODEL_NAME, max_seq_length=2048)
+                        pooling_model = models.Pooling(word_embedding_model.get_word_embedding_dimension())
+                        loaded[0] = SentenceTransformer(modules=[word_embedding_model, pooling_model])
+                    else:
+                        raise
             except Exception as e:
                 error[0] = e
 

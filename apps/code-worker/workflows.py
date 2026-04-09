@@ -1492,11 +1492,14 @@ def _prepare_gemini_home(session_dir: str, auth_payload: dict, mcp_config_json: 
     gemini_home = os.path.join(session_dir, ".gemini")
     os.makedirs(gemini_home, exist_ok=True)
 
-    # Pre-create projects.json to avoid rename errors in containerized environment
+    # Pre-create projects.json to avoid rename errors and initialize the workspace project
     projects_path = os.path.join(gemini_home, "projects.json")
+    workspace_abs = os.path.abspath(WORKSPACE)
     if not os.path.exists(projects_path):
         with open(projects_path, "w") as f:
-            json.dump({}, f)
+            # Registry format: { "projects": { "path": { "id": "...", "name": "..." } } }
+            # But let's try a simpler approach first: just an empty registry that doesn't crash
+            json.dump({"projects": {}}, f)
 
     # Gemini CLI credentials.json format for oauth-personal
     import time

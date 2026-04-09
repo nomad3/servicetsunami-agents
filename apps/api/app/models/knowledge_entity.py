@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Text, ForeignKey, JSON, DateTime, Float, Integer
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
@@ -55,6 +55,14 @@ class KnowledgeEntity(Base):
 
     # Soft delete
     deleted_at = Column(DateTime, nullable=True)
+
+    # Multi-agent visibility scoping (migration 087, design doc §7)
+    # tenant_wide  → visible to all agents in the tenant (default)
+    # agent_scoped → visible only when owner_agent_slug == agent_slug
+    # agent_group  → visible when agent_slug IN visible_to[]
+    visibility = Column(String(20), nullable=False, default="tenant_wide")
+    visible_to = Column(ARRAY(String), nullable=True)
+    owner_agent_slug = Column(String(100), nullable=True)
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)

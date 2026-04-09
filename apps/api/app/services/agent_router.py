@@ -21,8 +21,67 @@ from app.services import luna_presence_service
 from app.services.embedding_service import match_intent
 from app.services.local_inference import generate_agent_response_sync
 from app.services.tool_groups import TIER_LIMITS
+from app.memory.feature_flag import is_v2_enabled
 
 logger = logging.getLogger(__name__)
+
+
+def _build_memory_context(
+    db, tenant_id, message, *,
+    session_entity_names, domains, max_entities, max_observations,
+    include_relations, include_episodes, agent_slug,
+):
+    """V2 → memory.recall(); V1 → legacy build_memory_context_with_git."""
+    if is_v2_enabled(tenant_id):
+        from app.memory import recall
+        from app.memory.types import RecallRequest
+        req = RecallRequest(
+            tenant_id=tenant_id,
+            agent_slug=agent_slug or "luna",
+            query=message,
+            total_token_budget=8000,
+        )
+        resp = recall.recall(db, req)
+        return _recall_response_to_legacy_dict(resp)
+
+    return build_memory_context_with_git(
+        db, tenant_id, message,
+        session_entity_names=session_entity_names,
+        domains=domains,
+        max_entities=max_entities,
+        max_observations=max_observations,
+        include_relations=include_relations,
+        include_episodes=include_episodes,
+    )
+
+
+def _recall_response_to_legacy_dict(resp) -> dict:
+    """Convert typed RecallResponse to the dict shape the CLI prompt builder expects."""
+    return {
+        "recalled_entity_names": [e.name for e in resp.entities],
+        "relevant_entities": [
+            {"name": e.name, "type": e.entity_type, "description": e.description, "similarity": e.similarity} 
+            for e in resp.entities
+        ],
+        "relevant_memories": [],  # memories are absorbed into entities in V2
+        "relevant_relations": [
+            {"from": r.from_entity_id, "to": r.to_entity_id, "type": r.relation_type} 
+            for r in resp.relations
+        ],
+        "entity_observations": {
+            e.name: [{"text": o.content, "sentiment": "neutral"} for o in e.observations]
+            for e in resp.entities
+        },
+        "recent_episodes": [
+            {"summary": ep.summary, "date": ep.created_at.isoformat() if ep.created_at else "", "mood": ep.mood} 
+            for ep in resp.episodes
+        ],
+        "anticipatory_context": "",
+        "contradictions": [
+            {"entity": c.entity_name, "attribute": c.attribute, "current": c.current_value, "conflicting": c.new_value} 
+            for c in resp.contradictions
+        ],
+    }
 
 # Default agent for each channel
 CHANNEL_AGENT_MAP = {
@@ -170,38 +229,12 @@ def route_and_execute(
         TenantFeatures.tenant_id == tenant_id
     ).first()
 
-    # Default platform is claude_code; allow per-tenant override via features
-    platform = "claude_code"
+    # Default platform is gemini_cli; allow per-tenant override via features
+    platform = "gemini_cli"
     if features and hasattr(features, 'default_cli_platform') and features.default_cli_platform:
         platform = features.default_cli_platform
 
-    # Pin to Claude Code when the session has substantial conversation history.
-    #
-    # ORIGINAL intent: detect an active --resume session ID and avoid switching
-    # to a one-shot platform mid-conversation. But --resume was removed in
-    # commit 4b6dae99 ("stop --resume on Claude CLI to prevent runaway session
-    # bloat"). After that change, claude_code_cli_session_id is never set, so
-    # the check became dead and EVERY short reply in an ongoing session was
-    # falling through to the short-message local path (line 389), which uses
-    # local_inference.py:561's 800-char history truncation.
-    #
-    # Concrete production impact: Aremko's WhatsApp booking flow receives short
-    # replies like "Hornopiren", "Si 16:45", "1", "ok" — all <= 100 chars with
-    # no semantic intent match — and was routing each one to local Gemma4 with
-    # only ~3 turns of context. Multi-step bookings would fall apart.
-    #
-    # REPLACEMENT: pin to Claude when conversation_summary has substantial
-    # content. The 500-char threshold is ~125 tokens / ~3 short messages —
-    # any real conversation crosses it within 2-3 turns. Fresh single-turn
-    # sessions (just "hola") still take the local fast path.
-    _mem = db_session_memory or {}
-    _legacy_resume_session = _mem.get("claude_code_cli_session_id") or _mem.get("claude_cli_session_id")
-    _has_substantial_history = len((conversation_summary or "").strip()) >= 500
-    if _legacy_resume_session or _has_substantial_history:
-        platform = "claude_code"
-        _pin_to_claude = True
-    else:
-        _pin_to_claude = False
+    _pin_to_claude = False # Deprecated: Phase 1 solved context loss for all platforms
 
     trust_profile = safety_trust.get_agent_trust_profile(
         db,
@@ -372,7 +405,7 @@ def route_and_execute(
     limits = TIER_LIMITS.get(agent_tier, TIER_LIMITS["full"])
     if not recalled_entities:
         try:
-            pre_built_memory_context = build_memory_context_with_git(
+            pre_built_memory_context = _build_memory_context(
                 db, tenant_id, message,
                 session_entity_names=session_entity_names,
                 domains=agent_memory_domains,
@@ -380,6 +413,7 @@ def route_and_execute(
                 max_observations=limits["observations_per_entity"],
                 include_relations=limits["include_relations"],
                 include_episodes=limits["include_episodes"],
+                agent_slug=agent_slug,
             )
             if pre_built_memory_context and pre_built_memory_context.get("relevant_entities"):
                 recalled_entities = pre_built_memory_context["relevant_entities"]
@@ -387,7 +421,7 @@ def route_and_execute(
             logger.debug("Early memory recall failed — routing without entity context")
     elif recalled_entities and not pre_built_memory_context:
         try:
-            pre_built_memory_context = build_memory_context_with_git(
+            pre_built_memory_context = _build_memory_context(
                 db=db, tenant_id=tenant_id, message=message,
                 session_entity_names=session_entity_names,
                 domains=agent_memory_domains,
@@ -395,6 +429,7 @@ def route_and_execute(
                 max_observations=limits["observations_per_entity"],
                 include_relations=limits["include_relations"],
                 include_episodes=limits["include_episodes"],
+                agent_slug=agent_slug,
             )
         except Exception:
             logger.debug("Memory context build for external recalled_entities failed — continuing")

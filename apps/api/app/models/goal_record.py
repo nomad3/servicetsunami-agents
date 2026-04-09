@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
@@ -37,6 +37,11 @@ class GoalRecord(Base):
     completed_at = Column(DateTime, nullable=True)
     abandoned_at = Column(DateTime, nullable=True)
     abandoned_reason = Column(Text)
+
+    # Multi-agent visibility scoping (migration 087, design doc §7).
+    # owner_agent_slug already exists above; visibility/visible_to added here.
+    visibility = Column(String(20), nullable=False, default="tenant_wide")
+    visible_to = Column(ARRAY(String), nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

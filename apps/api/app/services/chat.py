@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Tuple
 import uuid
 
@@ -244,6 +245,7 @@ def post_user_message(
         session=session,
         user_id=user_id,
         user_message=content,
+        user_message_id=user_message.id,
         sender_phone=sender_phone,
         media_parts=media_parts,
     )
@@ -256,6 +258,7 @@ def _generate_agentic_response(
     session: ChatSessionModel,
     user_id: uuid.UUID,
     user_message: str,
+    user_message_id: uuid.UUID,
     sender_phone: str | None = None,
     media_parts: list | None = None,
 ) -> ChatMessage:
@@ -329,8 +332,6 @@ def _generate_agentic_response(
                     cli_message += f"\n\n{part['text']}"
 
     # Use a fresh DB session for routing to prevent poisoned transaction cascades.
-    # If any query inside route_and_execute fails, only the routing session is affected,
-    # not the main request session used for saving the response.
     from app.db.session import SessionLocal
     routing_db = SessionLocal()
     try:
@@ -343,13 +344,13 @@ def _generate_agentic_response(
             sender_phone=sender_phone,
             agent_slug=agent_slug,
             conversation_summary=summary,
-        image_b64=image_b64,
-        image_mime=image_mime,
-        db_session_memory={
-            **(session.memory_context or {}),
-            "chat_session_id": str(session.id),
-        },
-    )
+            image_b64=image_b64,
+            image_mime=image_mime,
+            db_session_memory={
+                **(session.memory_context or {}),
+                "chat_session_id": str(session.id),
+            },
+        )
     finally:
         try:
             routing_db.close()
@@ -357,7 +358,6 @@ def _generate_agentic_response(
             pass
 
     # Gap 4: Score confidence and apply hedging when uncertain.
-    # Gate on full-tier only — light/local tiers are already constrained by design.
     _agent_tier_early = context.get("agent_tier", "full") if context else "full"
     if _agent_tier_early == "full":
         try:
@@ -372,30 +372,21 @@ def _generate_agentic_response(
                 context = {}
             context["confidence_score"] = _confidence
         except Exception:
-            pass  # Never block response delivery for confidence scoring
+            pass
 
     # Extract tier metadata from router trace for downstream RL logging
     agent_tier = context.get("agent_tier", "full") if context else "full"
     tool_groups = context.get("tool_groups", []) if context else []
 
-    # Save recalled entity names for cross-turn continuity.
-    # NOTE: CLI session_id is NOT persisted — we intentionally run each
-    # Claude invocation as a fresh one-shot session (see workflows.py).
-    # Resuming accumulates unbounded JSONL state that grows to 16+ MB and
-    # causes slow startup + lossy context compaction.
     if context and isinstance(context, dict):
         _mem_dirty = False
         _mem = dict(session.memory_context or {})
-
-        # Persist recalled entity names so the next turn can boost them
         recalled_entity_names = context.get("recalled_entity_names")
         if recalled_entity_names:
-            # Merge with existing session entities, keeping last 50 unique names
             existing = _mem.get("recalled_entity_names", [])
             merged = list(dict.fromkeys(existing + recalled_entity_names))[:50]
             _mem["recalled_entity_names"] = merged
             _mem_dirty = True
-
         if _mem_dirty:
             session.memory_context = _mem
             flag_modified(session, "memory_context")
@@ -450,7 +441,21 @@ def _generate_agentic_response(
         db.add(trace)
         db.commit()
     except Exception:
-        pass  # Never block response for tracing
+        db.rollback()
+
+    # Phase 1.6: Dispatch post-chat memory activities (Temporal)
+    from app.memory.feature_flag import is_v2_enabled
+    if is_v2_enabled(session.tenant_id):
+        try:
+            from app.memory.dispatch import dispatch_post_chat_memory
+            dispatch_post_chat_memory(
+                tenant_id=session.tenant_id,
+                session_id=session.id,
+                user_message_id=user_message_id,
+                assistant_message_id=assistant_msg.id,
+            )
+        except Exception as e:
+            logger.warning("Failed to dispatch PostChatMemoryWorkflow: %s", e)
 
     # Update presence: idle (response delivered), scoped to this session
     try:
@@ -473,260 +478,21 @@ def _generate_agentic_response(
             platform=meta.get("platform", "claude_code"),
             agent_slug=agent_slug or "luna",
             channel="whatsapp" if sender_phone else "web",
-            tokens_used=meta.get("input_tokens", 0) + meta.get("output_tokens", 0),
-            cost_usd=meta.get("cost_usd", 0.0),
-            rollout_experiment_id=meta.get("rollout_experiment_id"),
-            rollout_arm=meta.get("rollout_arm"),
-            routing_trajectory_id=meta.get("routing_trajectory_id"),
-            agent_tier=agent_tier,
+            tokens_used=int(meta.get("input_tokens", 0) or 0) + int(meta.get("output_tokens", 0) or 0),
+            cost_usd=meta.get("cost_usd"),
+            trajectory_id=meta.get("routing_trajectory_id"),
             tool_groups=tool_groups,
         )
     except Exception:
-        pass  # Never block response delivery for scoring
-
-    # ── Post-response memory writes ──
-    # Capture ALL primitives before spawning threads — ORM objects are
-    # not safe to dereference after the request session commits.
-    _tenant_id = session.tenant_id  # uuid, not ORM lazy
-    _session_id = session.id
-    _channel = "whatsapp" if sender_phone else "web"
-    _user_message = user_message
-    _response_text = response_text
-    _recalled_names = (context or {}).get("recalled_entity_names", [])
-
-    # 1. Knowledge extraction — runs in a daemon thread with its own
-    #    SessionLocal. Uses only captured primitives, never the request
-    #    session. extract_from_content manages its own commits internally.
-    try:
-        import threading
-
-        def _extract_knowledge():
-            import logging as _log
-            from app.db.session import SessionLocal as _SL
-            from app.services.knowledge_extraction import KnowledgeExtractionService
-
-            edb = _SL()
-            try:
-                extraction_service = KnowledgeExtractionService()
-                conversation_text = f"User: {_user_message}\n\nAssistant: {_response_text}"
-                extraction_service.extract_from_content(
-                    edb,
-                    tenant_id=_tenant_id,
-                    content=conversation_text,
-                    content_type="chat_transcript",
-                )
-            except Exception:
-                _log.getLogger(__name__).warning(
-                    "Post-response knowledge extraction failed for tenant %s",
-                    str(_tenant_id)[:8], exc_info=True,
-                )
-                edb.rollback()
-            finally:
-                edb.close()
-
-        threading.Thread(target=_extract_knowledge, daemon=True).start()
-    except Exception:
         pass
 
-    # 2. Recall feedback — lightweight, safe in a thread since we only
-    #    use captured primitives.
-    try:
-        import threading
-
-        def _recall_feedback():
-            from app.db.session import SessionLocal as _SL
-            from app.models.memory_activity import MemoryActivity
-
-            if not _recalled_names or not _response_text:
-                return
-
-            response_lower = _response_text.lower()
-            edb = _SL()
-            try:
-                for name in _recalled_names:
-                    used = name.lower() in response_lower
-                    activity = MemoryActivity(
-                        tenant_id=_tenant_id,
-                        event_type="recall_feedback",
-                        description=f"Entity '{name}' recalled and {'used' if used else 'unused'} in response",
-                        source="chat",
-                        event_metadata={"entity_name": name, "used": used},
-                    )
-                    edb.add(activity)
-                edb.commit()
-            except Exception:
-                edb.rollback()
-            finally:
-                edb.close()
-
-        threading.Thread(target=_recall_feedback, daemon=True).start()
-    except Exception:
-        pass
-
-    # 3. Episode generation — create a conversation episode summary
-    #    when enough new messages have accumulated.
-    try:
-        import threading
-
-        def _maybe_create_episode():
-            from datetime import datetime as _dt
-            from app.db.session import SessionLocal as _SL
-            from app.models.conversation_episode import ConversationEpisode
-            from app.models.chat import ChatMessage as _CM
-            from sqlalchemy import func
-
-            edb = _SL()
-            try:
-                # Check messages since last episode for this session
-                # Dedup: skip if an episode was created in the last 5 minutes
-                last_episode = edb.query(ConversationEpisode).filter(
-                    ConversationEpisode.session_id == _session_id,
-                ).order_by(ConversationEpisode.created_at.desc()).first()
-
-                since = last_episode.created_at if last_episode else _dt(2020, 1, 1)
-
-                # Time gap guard — avoid duplicate episodes from rapid messages
-                if last_episode:
-                    age_seconds = (_dt.utcnow() - last_episode.created_at).total_seconds()
-                    if age_seconds < 300:  # 5 minute cooldown
-                        return
-
-                new_msg_count = edb.query(func.count(_CM.id)).filter(
-                    _CM.session_id == _session_id,
-                    _CM.created_at > since,
-                ).scalar()
-
-                if new_msg_count < 4:
-                    return  # Not enough new messages
-
-                # Fetch the new messages for summarization
-                new_msgs = edb.query(_CM).filter(
-                    _CM.session_id == _session_id,
-                    _CM.created_at > since,
-                ).order_by(_CM.created_at).limit(20).all()
-
-                conversation_text = "\n".join(
-                    f"{'User' if m.role == 'user' else 'Luna'}: {m.content[:300]}"
-                    for m in new_msgs
-                )
-
-                # Summarize using local Gemma 4 (background priority — does NOT
-                # set _foreground_active, so auto-scorer is not starved)
-                import asyncio as _aio
-                from app.services.local_inference import generate
-                prompt = (
-                    "Summarize this conversation in 2-3 sentences. Include key topics "
-                    "discussed, any decisions made, and the user's emotional tone "
-                    "(excited, frustrated, neutral, curious, etc).\n\n"
-                    f"Conversation:\n{conversation_text[:3000]}\n\nSummary:"
-                )
-
-                summary = _aio.run(generate(
-                    prompt, model="gemma4", max_tokens=200,
-                    timeout=45, priority="background",
-                ))
-                if not summary or len(summary) < 10:
-                    return
-
-                # Extract key entities from summary (capitalized multi-char words)
-                import re
-                _skip = {
-                    'the', 'and', 'but', 'for', 'was', 'are', 'has', 'had',
-                    'not', 'this', 'that', 'they', 'user', 'luna', 'with',
-                }
-                entities = []
-                for word in summary.split():
-                    cleaned = re.sub(r'[^\w]', '', word)
-                    if cleaned and cleaned[0].isupper() and len(cleaned) > 2 and cleaned.lower() not in _skip:
-                        entities.append(cleaned)
-                entities = list(set(entities))[:10]
-
-                # Detect mood from summary keywords
-                mood = "neutral"
-                summary_lower = summary.lower()
-                if any(w in summary_lower for w in ["excited", "enthusiastic", "happy", "great"]):
-                    mood = "positive"
-                elif any(w in summary_lower for w in ["frustrated", "annoyed", "confused", "problem"]):
-                    mood = "frustrated"
-                elif any(w in summary_lower for w in ["curious", "interested", "exploring"]):
-                    mood = "curious"
-
-                # Generate embedding for semantic search
-                from app.services.embedding_service import embed_text
-                embedding = embed_text(summary, task_type="RETRIEVAL_DOCUMENT")
-
-                episode = ConversationEpisode(
-                    tenant_id=_tenant_id,
-                    session_id=_session_id,
-                    summary=summary.strip(),
-                    key_topics=[],
-                    key_entities=entities,
-                    mood=mood,
-                    message_count=new_msg_count,
-                    source_channel=_channel,
-                    embedding=embedding,
-                )
-                edb.add(episode)
-                edb.commit()
-
-                import logging as _log
-                _log.getLogger(__name__).info(
-                    "Created episode for session %s: %d msgs, mood=%s",
-                    str(_session_id)[:8], new_msg_count, mood,
-                )
-            except Exception:
-                import logging as _log
-                _log.getLogger(__name__).debug("Episode generation failed", exc_info=True)
-                edb.rollback()
-            finally:
-                edb.close()
-
-        threading.Thread(target=_maybe_create_episode, daemon=True).start()
-    except Exception:
-        pass
-
-    # 4. Behavioral signal extraction — parse Luna's response for actionable
-    #    suggestions and store as pending signals for Gap 2 (Learning).
-    try:
-        _assistant_msg_id = assistant_msg.id
-
-        def _extract_behavioral_signals():
-            from app.db.session import SessionLocal as _SL
-            from app.services.behavioral_signals import extract_suggestions_from_response
-
-            edb = _SL()
-            try:
-                extract_suggestions_from_response(
-                    db=edb,
-                    tenant_id=_tenant_id,
-                    response_text=_response_text,
-                    message_id=_assistant_msg_id,
-                    session_id=_session_id,
-                )
-            except Exception:
-                import logging as _log
-                _log.getLogger(__name__).debug("Behavioral signal extraction failed", exc_info=True)
-                edb.rollback()
-            finally:
-                edb.close()
-
-        threading.Thread(target=_extract_behavioral_signals, daemon=True).start()
-    except Exception:
-        pass
-
-    # 5. Commitment extraction — DISABLED.
-    # Regex-matching Luna's output to auto-create commitments was creating junk
-    # data from explanations and third-person text. Proper path: Luna creates
-    # commitments via explicit tool call (commitments API) when she decides to.
-
-    # 6. Confidence scoring — score the response for uncertainty level and
-    #    store in execution trace context for RL and observability (Gap 4).
+    # ── Post-response confidence scoring ──
     try:
         from app.services.confidence_scorer import score_response_confidence
-        confidence = score_response_confidence(_response_text, question=_user_message)
+        confidence = score_response_confidence(response_text, question=user_message)
         if context and isinstance(context, dict):
             context["response_confidence"] = round(confidence, 3)
-        logger.debug(f"Response confidence: {confidence:.2f} for tenant {str(_tenant_id)[:8]}")
+        logger.debug(f"Response confidence: {confidence:.2f} for tenant {str(session.tenant_id)[:8]}")
     except Exception:
         pass
 

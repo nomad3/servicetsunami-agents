@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Text, Boolean, TIMESTAMP, Float, Integer, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, UUID, JSONB
 
 from app.db.base import Base
 
@@ -58,6 +58,11 @@ class BehavioralSignal(Base):
 
     # Embedding for semantic matching when detecting "acted_on"
     embedding = Column(Vector(768), nullable=True) if Vector else Column(JSONB, nullable=True)
+
+    # Multi-agent visibility scoping (migration 087, design doc §7).
+    # No owner_agent_slug here — behavioral signals are tenant-wide by default.
+    visibility = Column(String(20), nullable=False, default="tenant_wide")
+    visible_to = Column(ARRAY(String), nullable=True)
 
     created_at = Column(TIMESTAMP, nullable=False, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

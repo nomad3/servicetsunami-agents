@@ -259,12 +259,18 @@ async def _call_internal_api(step: dict, context: dict, tenant_id: str) -> dict:
     api_base = os.environ.get("API_BASE_URL", "http://localhost:8000")
     api_key = os.environ.get("API_INTERNAL_KEY", "dev_internal_key")
 
+    kwargs = {
+        "headers": {"X-Internal-Key": api_key, "X-Tenant-Id": tenant_id},
+    }
+    if method in ("post", "put", "patch"):
+        kwargs["json"] = body
+    elif method == "get" and body:
+        kwargs["params"] = body
+
     async with httpx.AsyncClient(timeout=_http_timeout_for_step(step, default_seconds=25.0)) as client:
         resp = await getattr(client, method)(
             f"{api_base}/api/v1{path}",
-            headers={"X-Internal-Key": api_key, "X-Tenant-Id": tenant_id},
-            json=body if method in ("post", "put") else None,
-            params=body if method == "get" else None,
+            **kwargs
         )
         try:
             return resp.json()

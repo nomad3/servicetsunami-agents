@@ -7,19 +7,19 @@ GITHUB_TOKEN="$(echo -n "${GITHUB_TOKEN}" | tr -d '[:space:]')"
 # Mark /workspace as safe (ownership may differ across pod restarts)
 git config --global --add safe.directory /workspace
 
-echo "[code-worker] Setting up repository..."
+echo "[code-worker] Setting up repository (branch: ${GIT_BRANCH:-main})..."
 if [ -d /workspace/.git ]; then
     # Verify repo is valid; if not, remove and re-clone
     if cd /workspace && git rev-parse --git-dir >/dev/null 2>&1; then
         echo "[code-worker] Updating existing repo..."
-        git fetch origin && git checkout main && git reset --hard origin/main
+        git fetch origin && git checkout "${GIT_BRANCH:-main}" && git reset --hard "origin/${GIT_BRANCH:-main}"
     else
         echo "[code-worker] Removing corrupted repo..."
         rm -rf /workspace/.git /workspace/*
-        git clone "https://${GITHUB_TOKEN}@github.com/nomad3/servicetsunami-agents.git" /workspace
+        git clone --branch "${GIT_BRANCH:-main}" "https://${GITHUB_TOKEN}@github.com/nomad3/servicetsunami-agents.git" /workspace
     fi
 else
-    git clone "https://${GITHUB_TOKEN}@github.com/nomad3/servicetsunami-agents.git" /workspace
+    git clone --branch "${GIT_BRANCH:-main}" "https://${GITHUB_TOKEN}@github.com/nomad3/servicetsunami-agents.git" /workspace
 fi
 
 # Configure git identity for commits
