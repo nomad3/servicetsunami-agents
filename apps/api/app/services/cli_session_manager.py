@@ -409,6 +409,10 @@ def generate_mcp_config(tenant_id: str, internal_key: str, db: Session = None) -
                 config["mcpServers"][server_key] = server_entry
                 logger.info("Injected external MCP server '%s' (%s) for tenant %s", conn.name, conn.server_url, str(tenant_id)[:8])
         except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
             logger.warning("Failed to load tenant MCP connectors: %s", e, exc_info=True)
 
     return config
@@ -694,7 +698,10 @@ def run_agent_session(
             user_obj = db.query(User).filter(User.id == user_id).first()
             user_name = (user_obj.full_name if user_obj and user_obj.full_name else None) or str(user_id)
         except Exception:
-            db.rollback()
+            try:
+                db.rollback()
+            except Exception:
+                pass
             user_name = str(user_id)
     instruction_md_content = generate_cli_instructions(
         skill_body=skill_body,
