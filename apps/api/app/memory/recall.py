@@ -98,80 +98,145 @@ def _get_grpc_stub():
         return None
 
 
+def _recall_rust(request: RecallRequest) -> Optional[RecallResponse]:
+    """Run recall via Rust gRPC. Returns None on any failure."""
+    stub = _get_grpc_stub()
+    if not stub:
+        return None
+    try:
+        from app.generated import memory_pb2
+
+        req = memory_pb2.RecallRequest(
+            tenant_id=str(request.tenant_id),
+            agent_slug=request.agent_slug,
+            query=request.query,
+            user_id=str(request.user_id) if request.user_id else "",
+            chat_session_id=str(request.chat_session_id) if request.chat_session_id else "",
+            top_k_per_type=request.top_k_per_type,
+            total_token_budget=request.total_token_budget,
+        )
+
+        t0 = time.perf_counter()
+        resp = stub.Recall(req, timeout=5.0)
+        elapsed = (time.perf_counter() - t0) * 1000
+
+        entities = [
+            EntitySummary(
+                id=uuid.UUID(e.id),
+                name=e.name,
+                category=e.category,
+                description=e.description,
+                similarity=e.similarity,
+                confidence=1.0,
+                source_type=e.entity_type,
+            )
+            for e in resp.entities
+        ]
+
+        observations = [
+            ObservationSummary(
+                id=uuid.UUID(o.id),
+                entity_id=uuid.UUID(o.entity_id),
+                content=o.content,
+                similarity=o.similarity,
+                confidence=1.0,
+                created_at=datetime.utcnow(),  # TODO: use proto timestamp
+            )
+            for o in resp.observations
+        ]
+
+        relations = [
+            RelationSummary(
+                from_entity=r.from_entity,
+                to_entity=r.to_entity,
+                relation_type=r.relation_type,
+            )
+            for r in resp.relations
+        ]
+
+        episodes = [
+            EpisodeSummary(
+                id=uuid.UUID(e.id),
+                summary=e.summary,
+                similarity=e.similarity,
+                created_at=datetime.fromtimestamp(e.created_at.seconds),
+            )
+            for e in resp.episodes
+        ]
+
+        return RecallResponse(
+            entities=entities,
+            observations=observations,
+            relations=relations,
+            episodes=episodes,
+            metadata=RecallMetadata(elapsed_ms=elapsed),
+        )
+    except Exception as e:
+        logger.warning("Rust recall failed: %s", e)
+        return None
+
+
+def _compare_and_log(
+    request: RecallRequest,
+    python_result: RecallResponse,
+    rust_result: RecallResponse,
+) -> None:
+    """Compare Python and Rust recall results and log divergences.
+
+    This is observational only — it never affects the returned result.
+    """
+    from app.memory.validation_metrics import metrics
+
+    py_entity_ids = [e.id for e in python_result.entities]
+    rust_entity_ids = [e.id for e in rust_result.entities]
+
+    # Top-3 exact match
+    py_top3 = py_entity_ids[:3]
+    rust_top3 = rust_entity_ids[:3]
+    top3_match = py_top3 == rust_top3
+
+    # Top-10 Jaccard similarity
+    py_top10 = set(py_entity_ids[:10])
+    rust_top10 = set(rust_entity_ids[:10])
+    if py_top10 or rust_top10:
+        intersection = py_top10 & rust_top10
+        union = py_top10 | rust_top10
+        jaccard = len(intersection) / len(union) if union else 1.0
+    else:
+        jaccard = 1.0  # both empty = perfect agreement
+
+    matched = top3_match and jaccard >= 0.9
+    metrics.record_read(matched)
+
+    if not top3_match or jaccard < 0.9:
+        logger.warning(
+            "dual-read DIVERGENCE (tenant=%s, agent=%s): "
+            "top3_match=%s, jaccard=%.3f, py_top3=%s, rust_top3=%s, "
+            "py_top10_size=%d, rust_top10_size=%d",
+            request.tenant_id, request.agent_slug,
+            top3_match, jaccard,
+            [str(i) for i in py_top3], [str(i) for i in rust_top3],
+            len(py_top10), len(rust_top10),
+        )
+    else:
+        logger.debug(
+            "dual-read OK (tenant=%s, agent=%s): "
+            "top3_match=%s, jaccard=%.3f",
+            request.tenant_id, request.agent_slug,
+            top3_match, jaccard,
+        )
+
+
 def recall(db: Session, request: RecallRequest) -> RecallResponse:
     """Pre-load memory context for a chat turn."""
     use_rust = os.environ.get("USE_RUST_MEMORY", "false").lower() == "true"
-    if use_rust:
-        stub = _get_grpc_stub()
-        if stub:
-            try:
-                from app.generated import memory_pb2
-                from app.memory.types import EntitySummary, ObservationSummary, RelationSummary, EpisodeSummary, RecallResponse, RecallMetadata
-                
-                req = memory_pb2.RecallRequest(
-                    tenant_id=str(request.tenant_id),
-                    agent_slug=request.agent_slug,
-                    query=request.query,
-                    user_id=str(request.user_id) if request.user_id else "",
-                    chat_session_id=str(request.chat_session_id) if request.chat_session_id else "",
-                    top_k_per_type=request.top_k_per_type,
-                    total_token_budget=request.total_token_budget
-                )
-                
-                t0 = time.perf_counter()
-                resp = stub.Recall(req, timeout=5.0)
-                elapsed = (time.perf_counter() - t0) * 1000
-                
-                # Map back to Python dataclasses
-                entities = [
-                    EntitySummary(
-                        id=uuid.UUID(e.id),
-                        name=e.name,
-                        category=e.category,
-                        description=e.description,
-                        similarity=e.similarity,
-                        confidence=1.0,
-                        source_type=e.entity_type
-                    ) for e in resp.entities
-                ]
-                
-                observations = [
-                    ObservationSummary(
-                        id=uuid.UUID(o.id),
-                        entity_id=uuid.UUID(o.entity_id),
-                        content=o.content,
-                        similarity=o.similarity,
-                        confidence=1.0,
-                        created_at=datetime.utcnow() # TODO: use proto timestamp
-                    ) for o in resp.observations
-                ]
-                
-                relations = [
-                    RelationSummary(
-                        from_entity=r.from_entity,
-                        to_entity=r.to_entity,
-                        relation_type=r.relation_type
-                    ) for r in resp.relations
-                ]
-                
-                episodes = [
-                    EpisodeSummary(
-                        id=uuid.UUID(e.id),
-                        summary=e.summary,
-                        similarity=e.similarity,
-                        created_at=datetime.fromtimestamp(e.created_at.seconds)
-                    ) for e in resp.episodes
-                ]
-                
-                return RecallResponse(
-                    entities=entities,
-                    observations=observations,
-                    relations=relations,
-                    episodes=episodes,
-                    metadata=RecallMetadata(elapsed_ms=elapsed)
-                )
-            except Exception as e:
-                logger.warning("Rust recall failed, falling back to Python: %s", e)
+    dual_read = os.environ.get("MEMORY_DUAL_READ", "false").lower() == "true"
+
+    if use_rust and not dual_read:
+        rust_result = _recall_rust(request)
+        if rust_result is not None:
+            return rust_result
+        logger.warning("Rust recall failed, falling back to Python")
 
     metadata = RecallMetadata(elapsed_ms=0.0)
     
@@ -373,6 +438,18 @@ def recall(db: Session, request: RecallRequest) -> RecallResponse:
         metadata.elapsed_ms, metadata.degraded, metadata.used_keyword_fallback,
         metadata.truncated_for_budget,
     )
+
+    # --- Step 7: Dual-read shadow comparison (observational only) ---
+    if dual_read:
+        try:
+            rust_result = _recall_rust(request)
+            if rust_result is not None:
+                _compare_and_log(request, response, rust_result)
+            else:
+                logger.warning("dual-read: Rust recall returned None (tenant=%s)", request.tenant_id)
+        except Exception:
+            logger.warning("dual-read: comparison failed", exc_info=True)
+
     return response
 
 
