@@ -1,0 +1,94 @@
+# AgentProvision API Service - Local Development
+nameOverride: "api"
+fullnameOverride: "api"
+
+image:
+  repository: agentprovision-api
+  tag: latest
+  pullPolicy: Never
+
+replicaCount: 1
+
+container:
+  port: 8000
+
+# Pod security
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false # Needs write for local storage/logs
+  capabilities:
+    drop:
+      - ALL
+
+# Resource allocation
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+# Health checks
+livenessProbe:
+  enabled: true
+  httpGet:
+    path: /api/v1/
+    port: 8000
+  initialDelaySeconds: 30
+readinessProbe:
+  enabled: true
+  httpGet:
+    path: /api/v1/
+    port: 8000
+  initialDelaySeconds: 15
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+# ConfigMap
+configMap:
+  enabled: true
+  data:
+    ALGORITHM: "HS256"
+    TEMPORAL_NAMESPACE: "default"
+    MCP_ENABLED: "true"
+    USE_MEMORY_V2: "true"
+    USE_RUST_EMBEDDING: "true"
+    USE_RUST_MEMORY: "true"
+    MEMORY_DUAL_READ: "true"
+    EMBEDDING_SERVICE_URL: "embedding-service:50051"
+    MEMORY_CORE_URL: "memory-core:50052"
+    DATABASE_URL: "postgresql://postgres:postgres@postgresql:5432/agentprovision"
+    TEMPORAL_ADDRESS: "temporal:7233"
+
+# Disable GKE specifics
+externalSecret:
+  enabled: false
+backendConfig:
+  enabled: false
+healthCheckPolicy:
+  enabled: false
+ingress:
+  enabled: false
+managedCertificate:
+  enabled: false
+cloudSqlProxy:
+  enabled: false
+extraContainers: []
+
+# Local persistence for storage
+persistence:
+  enabled: true
+  storageClass: hostpath
+  size: 5Gi
+  mountPath: /app/storage

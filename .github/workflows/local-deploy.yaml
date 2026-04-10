@@ -9,12 +9,14 @@ on:
       - 'apps/code-worker/**'
       - 'apps/mcp-server/**'
       - 'apps/luna-client/**'
+      - 'apps/embedding-service/**'
+      - 'apps/memory-core/**'
       - 'docker-compose.yml'
       - '.github/workflows/local-deploy.yaml'
   workflow_dispatch:
     inputs:
       services:
-        description: 'Services to rebuild (comma-separated: api,web,luna-client,code-worker,mcp-tools,orchestration-worker,databricks-worker)'
+        description: 'Services to rebuild (comma-separated: api,web,luna-client,code-worker,mcp-tools,orchestration-worker,databricks-worker,embedding-service,memory-core)'
         required: false
         default: 'all'
 
@@ -39,6 +41,8 @@ jobs:
           echo "$CHANGED" | grep -q "apps/code-worker/" && SERVICES="$SERVICES code-worker"
           echo "$CHANGED" | grep -q "apps/mcp-server/" && SERVICES="$SERVICES mcp-tools"
           echo "$CHANGED" | grep -q "apps/luna-client/" && SERVICES="$SERVICES luna-client"
+          echo "$CHANGED" | grep -q "apps/embedding-service/" && SERVICES="$SERVICES embedding-service"
+          echo "$CHANGED" | grep -q "apps/memory-core/" && SERVICES="$SERVICES memory-core"
           echo "$CHANGED" | grep -q "docker-compose.yml" && SERVICES="api web luna-client code-worker orchestration-worker databricks-worker"
 
           # Default: skip mcp-tools (12GB image, 10+ min build) unless explicitly changed
@@ -52,7 +56,7 @@ jobs:
         run: |
           INPUT="${{ github.event.inputs.services }}"
           if [ "$INPUT" = "all" ]; then
-            echo "services=api web luna-client code-worker mcp-tools orchestration-worker databricks-worker" >> $GITHUB_OUTPUT
+            echo "services=api web luna-client code-worker mcp-tools orchestration-worker databricks-worker embedding-service memory-core" >> $GITHUB_OUTPUT
           else
             echo "services=$(echo $INPUT | tr ',' ' ')" >> $GITHUB_OUTPUT
           fi
@@ -102,7 +106,7 @@ jobs:
           SERVICES="${{ steps.changes.outputs.services || steps.dispatch.outputs.services }}"
           echo "Building: $SERVICES"
 
-          cd /Users/nomade/Documents/GitHub/servicetsunami-agents
+          cd /Users/nomade/Documents/GitHub/agentprovision-agents
 
           # Build and restart only changed services
           for svc in $SERVICES; do
@@ -134,16 +138,51 @@ jobs:
             echo "WARNING: API not responding yet, may still be starting up"
           fi
 
+      - name: Build Rust services (Docker)
+        run: |
+          SERVICES="${{ steps.changes.outputs.services || steps.dispatch.outputs.services }}"
+
+          if echo "$SERVICES" | grep -q "embedding-service"; then
+            echo "--- Building embedding-service ---"
+            docker build -t agentprovision-embedding-service:latest apps/embedding-service/
+          fi
+
+          if echo "$SERVICES" | grep -q "memory-core"; then
+            echo "--- Building memory-core ---"
+            docker build -t agentprovision-memory-core:latest apps/memory-core/
+          fi
+
+      - name: Deploy Rust services (Helm)
+        run: |
+          SERVICES="${{ steps.changes.outputs.services || steps.dispatch.outputs.services }}"
+          NAMESPACE=agentprovision
+
+          if echo "$SERVICES" | grep -q "embedding-service"; then
+            echo "--- Deploying embedding-service ---"
+            helm upgrade --install embedding-service helm/charts/microservice \
+              -f helm/values/embedding-service.yaml \
+              -f helm/values/embedding-service-local.yaml \
+              -n "$NAMESPACE" --create-namespace
+          fi
+
+          if echo "$SERVICES" | grep -q "memory-core"; then
+            echo "--- Deploying memory-core ---"
+            helm upgrade --install memory-core helm/charts/microservice \
+              -f helm/values/memory-core.yaml \
+              -f helm/values/memory-core-local.yaml \
+              -n "$NAMESPACE" --create-namespace
+          fi
+
       - name: Run pending migrations
         if: contains(steps.changes.outputs.services || steps.dispatch.outputs.services, 'api') || github.event_name == 'workflow_dispatch'
         shell: bash --noprofile --norc {0}
         run: |
           set +e
-          PROJECT_DIR="/Users/nomade/Documents/GitHub/servicetsunami-agents"
+          PROJECT_DIR="/Users/nomade/Documents/GitHub/agentprovision-agents"
           MIGRATION_DIR="$PROJECT_DIR/apps/api/migrations"
 
           # Create tracking table if it doesn't exist
-          docker exec servicetsunami-agents-db-1 psql -U postgres servicetsunami -c \
+          docker exec agentprovision-agents-db-1 psql -U postgres agentprovision -c \
             "CREATE TABLE IF NOT EXISTS _migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT now());" 2>/dev/null
 
           # Run any migrations not yet applied
@@ -152,16 +191,16 @@ jobs:
           FAILED=0
           for f in $(ls "$MIGRATION_DIR"/*.sql 2>/dev/null | sort); do
             BASENAME=$(basename "$f")
-            ALREADY=$(docker exec servicetsunami-agents-db-1 psql -U postgres servicetsunami -tAc \
+            ALREADY=$(docker exec agentprovision-agents-db-1 psql -U postgres agentprovision -tAc \
               "SELECT COUNT(*) FROM _migrations WHERE filename = '$BASENAME';" 2>/dev/null)
             if [ "$ALREADY" = "1" ]; then
               SKIPPED=$((SKIPPED + 1))
               continue
             fi
             echo "Applying: $BASENAME"
-            docker cp "$f" servicetsunami-agents-db-1:/tmp/migration.sql
-            if docker exec servicetsunami-agents-db-1 psql -U postgres servicetsunami -f /tmp/migration.sql; then
-              docker exec servicetsunami-agents-db-1 psql -U postgres servicetsunami -c \
+            docker cp "$f" agentprovision-agents-db-1:/tmp/migration.sql
+            if docker exec agentprovision-agents-db-1 psql -U postgres agentprovision -f /tmp/migration.sql; then
+              docker exec agentprovision-agents-db-1 psql -U postgres agentprovision -c \
                 "INSERT INTO _migrations (filename) VALUES ('$BASENAME') ON CONFLICT DO NOTHING;"
               APPLIED=$((APPLIED + 1))
             else
@@ -188,6 +227,10 @@ jobs:
           echo "| Service | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
           for svc in api web luna-client code-worker mcp-tools orchestration-worker databricks-worker; do
-            STATUS=$(docker inspect --format='{{.State.Status}}' servicetsunami-agents-${svc}-1 2>/dev/null || echo "not found")
+            STATUS=$(docker inspect --format='{{.State.Status}}' agentprovision-agents-${svc}-1 2>/dev/null || echo "not found")
             echo "| $svc | $STATUS |" >> $GITHUB_STEP_SUMMARY
+          done
+          for svc in embedding-service memory-core; do
+            STATUS=$(kubectl get pod -n agentprovision -l "app=$svc" --no-headers 2>/dev/null | awk '{print $3}' | head -1 || echo "not found")
+            echo "| $svc (k8s) | ${STATUS:-not found} |" >> $GITHUB_STEP_SUMMARY
           done
