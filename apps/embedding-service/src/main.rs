@@ -116,16 +116,20 @@ impl EmbeddingService for MyEmbeddingService {
     async fn embed_batch(&self, request: Request<EmbedBatchRequest>) -> Result<Response<EmbedBatchResponse>, Status> {
         let req = request.into_inner();
         let model = self.model.clone();
-        
-        let mut results = Vec::with_capacity(req.texts.len());
-        for text in req.texts {
+
+        // Spawn all blocking tasks in parallel
+        let handles: Vec<_> = req.texts.into_iter().map(|text| {
             let m = model.clone();
             let tt = req.task_type.clone();
-            let vector = tokio::task::spawn_blocking(move || {
-                m.embed(&text, &tt)
-            }).await.map_err(|e| Status::internal(e.to_string()))?
-              .map_err(|e| Status::internal(e.to_string()))?;
-              
+            tokio::task::spawn_blocking(move || m.embed(&text, &tt))
+        }).collect();
+
+        // Await all results in order
+        let mut results = Vec::with_capacity(handles.len());
+        for handle in handles {
+            let vector = handle.await
+                .map_err(|e| Status::internal(e.to_string()))?
+                .map_err(|e| Status::internal(e.to_string()))?;
             results.push(EmbedResponse {
                 vector,
                 model: "nomic-embed-text-v1.5".to_string(),
