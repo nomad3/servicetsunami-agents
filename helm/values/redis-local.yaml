@@ -1,0 +1,52 @@
+# Redis - Local Development
+nameOverride: "redis"
+fullnameOverride: "redis"
+
+image:
+  repository: redis
+  tag: "7-alpine"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+container:
+  port: 6379
+
+# Pod security
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  runAsGroup: 999
+  fsGroup: 999
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+
+# Resource allocation
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 512Mi
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 6379
+  targetPort: 6379
+
+# Persistent storage
+persistence:
+  enabled: true
+  storageClass: local-path
+  size: 1Gi
+  mountPath: /data
+
+# Disable default health probes (redis doesn't serve HTTP)
+livenessProbe:
+  enabled: false
+readinessProbe:
+  enabled: false

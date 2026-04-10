@@ -159,7 +159,7 @@ spec:
             {{- end }}
             {{- if .Values.persistence.enabled }}
             - name: data
-              mountPath: /app/storage
+              mountPath: {{ .Values.persistence.mountPath | default "/app/storage" }}
             {{- end }}
             {{- if .Values.nginxConfig.enabled }}
             - name: nginx-config

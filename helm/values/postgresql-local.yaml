@@ -1,0 +1,64 @@
+# PostgreSQL Database - Local Development with pgvector
+nameOverride: "postgresql"
+fullnameOverride: "postgresql"
+
+image:
+  repository: pgvector/pgvector
+  tag: "pg13"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+container:
+  port: 5432
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  runAsUser: 0 # Local dev convenience for hostpath permissions
+
+# Resource allocation
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 5432
+  targetPort: 5432
+
+# ConfigMap
+configMap:
+  enabled: true
+  data:
+    POSTGRES_DB: "agentprovision"
+    POSTGRES_USER: "postgres"
+
+# Manual Password for local
+env:
+  - name: POSTGRES_PASSWORD
+    value: "postgres"
+
+# Disable GKE specifics
+externalSecret:
+  enabled: false
+
+# Persistent storage — protected against deletion
+persistence:
+  enabled: true
+  storageClass: local-path
+  size: 5Gi
+  mountPath: /var/lib/postgresql/data
+  annotations:
+    "helm.sh/resource-policy": keep
+
+# Disable default health probes (postgres doesn't serve HTTP)
+livenessProbe:
+  enabled: false
+readinessProbe:
+  enabled: false

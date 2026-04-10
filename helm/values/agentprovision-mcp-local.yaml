@@ -1,0 +1,64 @@
+# AgentProvision MCP Server - Local Development
+nameOverride: "mcp-server"
+fullnameOverride: "mcp-server"
+
+image:
+  repository: agentprovision-mcp-tools
+  tag: latest
+  pullPolicy: Never
+
+replicaCount: 1
+
+container:
+  port: 8086
+  command: ["python", "-m", "src.server"]
+
+podSecurityContext:
+  runAsNonRoot: false
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+livenessProbe:
+  enabled: false
+readinessProbe:
+  enabled: false
+
+service:
+  type: ClusterIP
+  port: 8086
+  targetPort: 8086
+
+configMap:
+  enabled: true
+  data:
+    API_BASE_URL: "http://api"
+    MCP_API_KEY: "dev_mcp_key"
+    API_INTERNAL_KEY: "internal-service-key"
+    DATABASE_URL: "postgresql://postgres:postgres@postgresql:5432/agentprovision"
+
+# Disable GKE specifics
+externalSecret:
+  enabled: false
+extraContainers: []
+ingress:
+  enabled: false
+managedCertificate:
+  enabled: false
+healthCheckPolicy:
+  enabled: false
+persistence:
+  enabled: false
+
+tmpDirs:
+  - /tmp

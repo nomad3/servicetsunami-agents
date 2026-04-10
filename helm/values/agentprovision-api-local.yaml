@@ -89,6 +89,19 @@ extraContainers: []
 # Local persistence for storage
 persistence:
   enabled: true
-  storageClass: hostpath
+  storageClass: local-path
   size: 5Gi
   mountPath: /app/storage
+
+# API secrets — defaults from config.py work for local dev
+env:
+  - name: SECRET_KEY
+    value: "local-dev-secret-key-change-in-production"
+  - name: MCP_API_KEY
+    value: "dev_mcp_key"
+  - name: API_INTERNAL_KEY
+    value: "internal-service-key"
+  - name: MCP_SERVER_URL
+    value: "http://mcp-server:8086"
+  - name: OLLAMA_BASE_URL
+    value: "http://host.docker.internal:11434"

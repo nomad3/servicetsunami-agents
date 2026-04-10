@@ -1,0 +1,73 @@
+# Temporal Server - Local Development
+nameOverride: "temporal"
+fullnameOverride: "temporal"
+
+image:
+  repository: temporalio/auto-setup
+  tag: "1.22.2"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+container:
+  port: 7233
+
+# Pod security
+podSecurityContext:
+  runAsNonRoot: false
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+
+# Resource allocation
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 7233
+  targetPort: 7233
+
+# ConfigMap
+configMap:
+  enabled: true
+  data:
+    DB: "postgresql"
+    DB_PORT: "5432"
+    POSTGRES_USER: "postgres"
+    POSTGRES_DB: "temporal"
+    POSTGRES_SEEDS: "postgresql"
+
+# Manual Password for local
+env:
+  - name: POSTGRES_PWD
+    value: "postgres"
+  - name: SKIP_SCHEMA_SETUP
+    value: "false"
+  - name: SKIP_DEFAULT_NAMESPACE_CREATION
+    value: "false"
+
+# Disable default health probes (temporal uses gRPC, not HTTP)
+livenessProbe:
+  enabled: false
+readinessProbe:
+  enabled: false
+
+# Disable GKE specifics
+externalSecret:
+  enabled: false
+extraContainers: []
+managedCertificate:
+  enabled: false
+ingress:
+  enabled: false
+persistence:
+  enabled: false
