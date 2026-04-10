@@ -1,0 +1,3 @@
+# Local overrides for Rancher Desktop / kind
+persistence:
+  storageClass: local-path

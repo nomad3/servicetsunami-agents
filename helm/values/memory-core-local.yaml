@@ -1,0 +1,6 @@
+# Local overrides for Rancher Desktop / kind
+env:
+  - name: DATABASE_URL
+    value: "postgresql://postgres:postgres@postgresql:5432/agentprovision"
+  - name: RUST_LOG
+    value: "debug"
