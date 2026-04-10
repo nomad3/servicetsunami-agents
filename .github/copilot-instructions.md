@@ -264,7 +264,7 @@ Manual SQL scripts in `apps/api/migrations/` (not Alembic). See `migrations/READ
 **Task Queues**:
 - `agentprovision-orchestration`: TaskExecution, ChannelHealthMonitor, FollowUp, InboxMonitor, CompetitorMonitor
 - `agentprovision-code`: Code-worker (Claude Code CLI execution)
-- `agentprovision-databricks`: DatasetSync, KnowledgeExtraction, AgentKitExecution
+- `agentprovision-postgres`: DatasetSync, KnowledgeExtraction, AgentKitExecution
 
 Workflow structure:
 ```python

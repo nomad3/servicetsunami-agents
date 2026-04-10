@@ -125,7 +125,7 @@ The server will be available at `http://localhost:8087`.
 - `list_drive_folder`: List folder contents
 
 ### Data Connectors (1 tool)
-- `query_data_source`: Query connected Databricks/Snowflake/data warehouse
+- `query_data_source`: Query connected PostgreSQL/data warehouse
 
 ## Configuration for Claude Code & Codex
 

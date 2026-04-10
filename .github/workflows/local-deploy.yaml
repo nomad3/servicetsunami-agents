@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: 'Services to rebuild (comma-separated: api,web,luna-client,code-worker,mcp-tools,orchestration-worker,databricks-worker,embedding-service,memory-core)'
+        description: 'Services to rebuild (comma-separated: api,web,luna-client,code-worker,orchestration-worker,embedding-service,memory-core)'
         required: false
         default: 'all'
 
@@ -36,17 +36,15 @@ jobs:
           echo "files=$CHANGED" >> $GITHUB_OUTPUT
 
           SERVICES=""
-          echo "$CHANGED" | grep -q "apps/api/" && SERVICES="$SERVICES api orchestration-worker databricks-worker"
+          echo "$CHANGED" | grep -q "apps/api/" && SERVICES="$SERVICES api orchestration-worker"
           echo "$CHANGED" | grep -q "apps/web/" && SERVICES="$SERVICES web"
           echo "$CHANGED" | grep -q "apps/code-worker/" && SERVICES="$SERVICES code-worker"
           echo "$CHANGED" | grep -q "apps/mcp-server/" && SERVICES="$SERVICES mcp-tools"
           echo "$CHANGED" | grep -q "apps/luna-client/" && SERVICES="$SERVICES luna-client"
           echo "$CHANGED" | grep -q "apps/embedding-service/" && SERVICES="$SERVICES embedding-service"
           echo "$CHANGED" | grep -q "apps/memory-core/" && SERVICES="$SERVICES memory-core"
-          echo "$CHANGED" | grep -q "docker-compose.yml" && SERVICES="api web luna-client code-worker orchestration-worker databricks-worker"
-
-          # Default: skip mcp-tools (12GB image, 10+ min build) unless explicitly changed
-          [ -z "$SERVICES" ] && SERVICES="api web luna-client code-worker orchestration-worker databricks-worker"
+          # Default set if nothing specific changed
+          [ -z "$SERVICES" ] && SERVICES="api web luna-client code-worker orchestration-worker"
           echo "services=$SERVICES" >> $GITHUB_OUTPUT
           echo "Deploying: $SERVICES"
 
@@ -56,7 +54,7 @@ jobs:
         run: |
           INPUT="${{ github.event.inputs.services }}"
           if [ "$INPUT" = "all" ]; then
-            echo "services=api web luna-client code-worker mcp-tools orchestration-worker databricks-worker embedding-service memory-core" >> $GITHUB_OUTPUT
+            echo "services=api web luna-client code-worker orchestration-worker embedding-service memory-core" >> $GITHUB_OUTPUT
           else
             echo "services=$(echo $INPUT | tr ',' ' ')" >> $GITHUB_OUTPUT
           fi
@@ -114,15 +112,12 @@ jobs:
             docker-compose up -d --build "$svc" 2>&1 | tail -3
           done
 
-          # Workers share the API image and mount code via volumes, but
-          # the Python process caches modules on start. On workflow_dispatch
-          # the user may select only "api" without workers — bounce them
-          # to pick up the new code. Skip if they were already rebuilt above.
+          # Workers share the API image — restart them when API changes
           if echo "$SERVICES" | grep -q "api"; then
-            for worker in orchestration-worker databricks-worker; do
+            for worker in orchestration-worker; do
               if ! echo "$SERVICES" | grep -q "$worker"; then
-                echo "--- Restarting $worker (not in build list but depends on API code) ---"
-                docker-compose restart "$worker" 2>&1 | tail -3
+                echo "--- Restarting $worker (depends on API code) ---"
+                kubectl rollout restart deploy/$worker -n agentprovision 2>/dev/null || true
               fi
             done
           fi
@@ -226,11 +221,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Service | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
-          for svc in api web luna-client code-worker mcp-tools orchestration-worker databricks-worker; do
-            STATUS=$(docker inspect --format='{{.State.Status}}' agentprovision-agents-${svc}-1 2>/dev/null || echo "not found")
-            echo "| $svc | $STATUS |" >> $GITHUB_STEP_SUMMARY
-          done
-          for svc in embedding-service memory-core; do
-            STATUS=$(kubectl get pod -n agentprovision -l "app=$svc" --no-headers 2>/dev/null | awk '{print $3}' | head -1 || echo "not found")
-            echo "| $svc (k8s) | ${STATUS:-not found} |" >> $GITHUB_STEP_SUMMARY
+          for svc in api web orchestration-worker code-worker embedding-service memory-core; do
+            STATUS=$(kubectl get pod -n agentprovision -l "app.kubernetes.io/name=$svc" --no-headers 2>/dev/null | awk '{print $3}' | head -1 || echo "not found")
+            echo "| $svc | ${STATUS:-not found} |" >> $GITHUB_STEP_SUMMARY
           done
