@@ -27,26 +27,41 @@ _MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
 _DIMENSIONS = 768
 _MAX_INPUT_CHARS = 8000
 
+try:
+    import grpc as _grpc
+except ImportError:
+    _grpc = None  # type: ignore[assignment]
+
+
 def _get_grpc_stub():
     """Lazy-init the gRPC client stub for Rust embedding-service."""
     global _grpc_channel, _grpc_stub
     if _grpc_stub is not None:
         return _grpc_stub
-    
+
     url = os.environ.get("EMBEDDING_SERVICE_URL")
     if not url:
         return None
-        
+
+    if _grpc is None:
+        return None
+
     try:
-        import grpc
         try:
             from app.generated import embedding_pb2_grpc
         except ImportError:
             logger.warning("gRPC generated code not found. Rust embedding disabled.")
             return None
-            
-        _grpc_channel = grpc.insecure_channel(url)
+
+        options = [
+            ('grpc.keepalive_time_ms', 30000),
+            ('grpc.keepalive_timeout_ms', 5000),
+            ('grpc.keepalive_permit_without_calls', 1),
+            ('grpc.max_receive_message_length', 16 * 1024 * 1024),
+        ]
+        _grpc_channel = _grpc.insecure_channel(url, options=options)
         _grpc_stub = embedding_pb2_grpc.EmbeddingServiceStub(_grpc_channel)
+        logger.info("Connected to Rust embedding-service at %s", url)
         return _grpc_stub
     except Exception as e:
         logger.warning("Failed to connect to Rust embedding-service at %s: %s", url, e)

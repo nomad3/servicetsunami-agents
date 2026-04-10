@@ -24,6 +24,7 @@ Behavioral additions over the legacy function:
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from datetime import datetime
@@ -56,26 +57,41 @@ _HARD_TIMEOUT_SECONDS = 1.5
 _grpc_channel = None
 _grpc_stub = None
 
+try:
+    import grpc as _grpc
+except ImportError:
+    _grpc = None  # type: ignore[assignment]
+
+
 def _get_grpc_stub():
     """Lazy-init the gRPC client stub for Rust memory-core."""
     global _grpc_channel, _grpc_stub
     if _grpc_stub is not None:
         return _grpc_stub
-    
+
     url = os.environ.get("MEMORY_CORE_URL")
     if not url:
         return None
-        
+
+    if _grpc is None:
+        return None
+
     try:
-        import grpc
         try:
             from app.generated import memory_pb2_grpc
         except ImportError:
             logger.warning("gRPC generated code not found for memory-core. Rust memory disabled.")
             return None
-            
-        _grpc_channel = grpc.insecure_channel(url)
+
+        options = [
+            ('grpc.keepalive_time_ms', 30000),
+            ('grpc.keepalive_timeout_ms', 5000),
+            ('grpc.keepalive_permit_without_calls', 1),
+            ('grpc.max_receive_message_length', 16 * 1024 * 1024),
+        ]
+        _grpc_channel = _grpc.insecure_channel(url, options=options)
         _grpc_stub = memory_pb2_grpc.MemoryCoreStub(_grpc_channel)
+        logger.info("Connected to Rust memory-core at %s", url)
         return _grpc_stub
     except Exception as e:
         logger.warning("Failed to connect to Rust memory-core at %s: %s", url, e)
