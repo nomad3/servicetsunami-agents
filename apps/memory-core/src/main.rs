@@ -1,4 +1,5 @@
 use tonic::{transport::Server, Request, Response, Status};
+use tonic_health::server::health_reporter;
 use memory::v1::memory_core_server::{MemoryCore, MemoryCoreServer};
 use memory::v1::{
     RecallRequest, RecallResponse, Entity, Observation, Relation, EpisodeSummary,
@@ -501,10 +502,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     let service = MyMemoryCore::new(pool, embedding_url);
+
+    let (mut health_reporter, health_service) = health_reporter();
+    health_reporter
+        .set_serving::<MemoryCoreServer<MyMemoryCore>>()
+        .await;
+
     let addr = "0.0.0.0:50052".parse()?;
     println!("MemoryCore listening on {}", addr);
 
     Server::builder()
+        .timeout(Duration::from_secs(30))
+        .add_service(health_service)
         .add_service(MemoryCoreServer::new(service))
         .serve(addr)
         .await?;
