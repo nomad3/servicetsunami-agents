@@ -38,6 +38,7 @@ resources:
 # Health checks - gRPC health probes via tonic-health
 livenessProbe:
   enabled: true
+  httpGet: null
   grpc:
     port: 50051
   initialDelaySeconds: 30
@@ -47,6 +48,7 @@ livenessProbe:
 
 readinessProbe:
   enabled: true
+  httpGet: null
   grpc:
     port: 50051
   initialDelaySeconds: 10
