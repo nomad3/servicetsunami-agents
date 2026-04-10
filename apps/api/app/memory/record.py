@@ -4,6 +4,8 @@ Phase 1: thin wrappers over existing services (knowledge, commitment_service,
 goal_service) that ALSO write to memory_activities for audit traceability.
 Phase 2: Rust memory-core gRPC service replaces the wrappers.
 """
+import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
@@ -18,6 +20,89 @@ from app.models.knowledge_observation import KnowledgeObservation
 from app.models.commitment_record import CommitmentRecord
 from app.models.goal_record import GoalRecord
 from app.models.memory_activity import MemoryActivity
+
+logger = logging.getLogger(__name__)
+
+
+def _get_grpc_stub():
+    """Re-use the shared gRPC stub from recall module."""
+    from app.memory.recall import _get_grpc_stub as _recall_get_stub
+    return _recall_get_stub()
+
+
+def _dual_write_observation(
+    tenant_id: UUID,
+    entity_id: UUID,
+    content: str,
+    confidence: float,
+    source_type: Optional[str],
+    source_id: Optional[str],
+    actor_slug: Optional[str],
+) -> None:
+    """Shadow-write observation to Rust gRPC (fire-and-forget)."""
+    from app.memory.validation_metrics import metrics
+
+    stub = _get_grpc_stub()
+    if not stub:
+        metrics.record_write(False)
+        return
+    try:
+        from app.generated import memory_pb2
+
+        req = memory_pb2.RecordObservationRequest(
+            tenant_id=str(tenant_id),
+            entity_id=str(entity_id),
+            content=content,
+            confidence=confidence,
+            source_type=source_type or "",
+            source_id=source_id or "",
+            actor_slug=actor_slug or "",
+        )
+        stub.RecordObservation(req, timeout=5.0)
+        metrics.record_write(True)
+        logger.debug("dual-write: observation written to Rust (tenant=%s)", tenant_id)
+    except Exception as e:
+        metrics.record_write(False)
+        logger.warning("dual-write: Rust RecordObservation failed (tenant=%s): %s", tenant_id, e)
+
+
+def _dual_write_commitment(
+    tenant_id: UUID,
+    owner_agent_slug: str,
+    title: str,
+    description: Optional[str],
+    commitment_type: str,
+    due_at: Optional[datetime],
+) -> None:
+    """Shadow-write commitment to Rust gRPC (fire-and-forget)."""
+    from app.memory.validation_metrics import metrics
+
+    stub = _get_grpc_stub()
+    if not stub:
+        metrics.record_write(False)
+        return
+    try:
+        from app.generated import memory_pb2
+        from google.protobuf.timestamp_pb2 import Timestamp
+
+        req = memory_pb2.RecordCommitmentRequest(
+            tenant_id=str(tenant_id),
+            owner_agent_slug=owner_agent_slug,
+            title=title,
+            description=description or "",
+            commitment_type=commitment_type,
+        )
+        if due_at:
+            ts = Timestamp()
+            ts.FromDatetime(due_at)
+            req.due_at.CopyFrom(ts)
+
+        stub.RecordCommitment(req, timeout=5.0)
+        metrics.record_write(True)
+        logger.debug("dual-write: commitment written to Rust (tenant=%s)", tenant_id)
+    except Exception as e:
+        metrics.record_write(False)
+        logger.warning("dual-write: Rust RecordCommitment failed (tenant=%s): %s", tenant_id, e)
 
 
 def _audit(
@@ -105,6 +190,22 @@ def record_observation(
            actor_slug=actor_slug, workflow_id=workflow_id,
            entity_id=entity_id)
     db.commit()
+
+    # Dual-write: shadow-write to Rust gRPC (observational only)
+    if os.environ.get("MEMORY_DUAL_WRITE", "false").lower() == "true":
+        try:
+            _dual_write_observation(
+                tenant_id=tenant_id,
+                entity_id=entity_id,
+                content=content,
+                confidence=confidence,
+                source_type=source_type,
+                source_id=source_id,
+                actor_slug=actor_slug,
+            )
+        except Exception:
+            logger.warning("dual-write: observation shadow-write failed", exc_info=True)
+
     return obs
 
 
@@ -143,6 +244,21 @@ def record_commitment(
            source_type=source_type, source_id=source_id,
            actor_slug=owner_agent_slug, workflow_id=workflow_id)
     db.commit()
+
+    # Dual-write: shadow-write to Rust gRPC (observational only)
+    if os.environ.get("MEMORY_DUAL_WRITE", "false").lower() == "true":
+        try:
+            _dual_write_commitment(
+                tenant_id=tenant_id,
+                owner_agent_slug=owner_agent_slug,
+                title=title,
+                description=description,
+                commitment_type=commitment_type,
+                due_at=due_at,
+            )
+        except Exception:
+            logger.warning("dual-write: commitment shadow-write failed", exc_info=True)
+
     return c
 
 
