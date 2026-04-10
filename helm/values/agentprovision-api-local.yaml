@@ -101,7 +101,6 @@ env:
     value: "dev_mcp_key"
   - name: API_INTERNAL_KEY
     value: "internal-service-key"
-  - name: MCP_SERVER_URL
-    value: "http://mcp-server:8086"
+  # MCP server decommissioned — tools are FastMCP-based inside the API
   - name: OLLAMA_BASE_URL
     value: "http://host.docker.internal:11434"

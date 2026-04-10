@@ -58,8 +58,7 @@ if [ "$SKIP_BUILD" = false ]; then
   docker tag agentprovision-api:latest agentprovision-orchestration-worker:latest
   echo "  ✓ agentprovision-orchestration-worker (tagged from api)"
 
-  # MCP + Code worker
-  build_image "agentprovision-mcp-tools" "./apps/mcp-server"
+  # Code worker
   build_image "agentprovision-code-worker" "./apps/code-worker"
 
   # Rust services
@@ -133,10 +132,6 @@ echo "  ✓ orchestration-worker"
 helm upgrade --install web "$CHART_PATH" \
   -n "$NAMESPACE" -f "$VALUES_DIR/agentprovision-web-local.yaml" || true
 echo "  ✓ web"
-
-helm upgrade --install mcp-server "$CHART_PATH" \
-  -n "$NAMESPACE" -f "$VALUES_DIR/agentprovision-mcp-local.yaml" || true
-echo "  ✓ mcp-server"
 
 helm upgrade --install code-worker "$CHART_PATH" \
   -n "$NAMESPACE" -f "$VALUES_DIR/agentprovision-code-worker-local.yaml" || true
