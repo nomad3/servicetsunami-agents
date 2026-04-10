@@ -3,7 +3,7 @@ from fastapi import APIRouter, Header, HTTPException
 from temporalio.client import Client
 from app.core.config import settings
 
-router = APIRouter(prefix="/internal/memory", tags=["internal"])
+router = APIRouter(tags=["internal"])
 
 
 @router.post("/backfill/{tenant_id}")

@@ -285,34 +285,24 @@ def _generate_agentic_response(
                     agent_slug = skill.slug
                     break
 
-    # Build recent conversation history for CLI context.
-    # Strategy: fit as many recent messages as possible into a 50KB budget,
-    # keeping messages full-length. We walk newest→oldest, adding full
-    # messages until we hit the cap. Older messages beyond the cap are
-    # dropped entirely (rather than showing a truncated stub that confuses
-    # the model). This preserves rich responses like lead gen lists intact.
+    # Strategy: fit as many recent messages as possible into a 65KB budget
     recent_msgs = (
         db.query(ChatMessage)
         .filter(ChatMessage.session_id == session.id)
         .order_by(ChatMessage.created_at.desc())
-        .limit(30)  # Pull up to 30; budget decides how many fit
+        .limit(30)
         .all()
     )
-    max_total = 65000  # ~16K tokens budget for history
-    kept = []  # (idx, line) newest→oldest
+    max_total = 65000
+    kept = []
     total_chars = 0
-    for m in recent_msgs:  # newest first
+    for m in recent_msgs:
         role = "User" if m.role == "user" else "Assistant"
         line = f"[{role}]: {m.content}"
-        if m.context and isinstance(m.context, dict):
-            attachment = m.context.get("attachment")
-            if attachment:
-                line += f"\n  (attached: {attachment.get('type', 'file')} — {attachment.get('name', 'unnamed')})"
         if total_chars + len(line) > max_total and kept:
-            break  # stop before exceeding budget, but keep at least one
+            break
         kept.append(line)
         total_chars += len(line)
-    # Reverse to chronological order for the prompt
     summary = "\n\n".join(reversed(kept))
 
     # If media_parts present, extract image data for CLI
@@ -331,12 +321,10 @@ def _generate_agentic_response(
                 elif part.get("text"):
                     cli_message += f"\n\n{part['text']}"
 
-    # Use a fresh DB session for routing to prevent poisoned transaction cascades.
-    from app.db.session import SessionLocal
-    routing_db = SessionLocal()
+    # Routing and execution
     try:
         response_text, context = route_and_execute(
-            routing_db,
+            db,
             tenant_id=session.tenant_id,
             user_id=user_id,
             message=cli_message,
@@ -351,11 +339,10 @@ def _generate_agentic_response(
                 "chat_session_id": str(session.id),
             },
         )
-    finally:
-        try:
-            routing_db.close()
-        except Exception:
-            pass
+    except Exception as e:
+        logger.error("Routing failed: %s", e, exc_info=True)
+        response_text = None
+        context = {"error": str(e)}
 
     # Gap 4: Score confidence and apply hedging when uncertain.
     _agent_tier_early = context.get("agent_tier", "full") if context else "full"

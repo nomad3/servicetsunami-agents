@@ -6,6 +6,7 @@ Phase 3: RL-driven routing added on top.
 import logging
 import os
 import uuid
+import random
 from typing import Optional, Tuple, Dict, Any, List
 
 from sqlalchemy.orm import Session
@@ -29,58 +30,83 @@ logger = logging.getLogger(__name__)
 def _build_memory_context(
     db, tenant_id, message, *,
     session_entity_names, domains, max_entities, max_observations,
-    include_relations, include_episodes, agent_slug,
+    include_relations, include_episodes, agent_slug, chat_session_id=None,
+    user_id=None,
 ):
     """V2 → memory.recall(); V1 → legacy build_memory_context_with_git."""
-    if is_v2_enabled(tenant_id):
-        from app.memory import recall
-        from app.memory.types import RecallRequest
-        req = RecallRequest(
-            tenant_id=tenant_id,
-            agent_slug=agent_slug or "luna",
-            query=message,
-            total_token_budget=8000,
-        )
-        resp = recall.recall(db, req)
-        return _recall_response_to_legacy_dict(resp)
+    try:
+        if is_v2_enabled(tenant_id):
+            from app.memory import recall
+            from app.memory.types import RecallRequest
+            req = RecallRequest(
+                tenant_id=tenant_id,
+                agent_slug=agent_slug or "luna",
+                query=message,
+                user_id=user_id,
+                chat_session_id=uuid.UUID(chat_session_id) if chat_session_id else None,
+                total_token_budget=8000,
+            )
+            resp = recall(db, req)
+            return _recall_response_to_legacy_dict(resp)
 
-    return build_memory_context_with_git(
-        db, tenant_id, message,
-        session_entity_names=session_entity_names,
-        domains=domains,
-        max_entities=max_entities,
-        max_observations=max_observations,
-        include_relations=include_relations,
-        include_episodes=include_episodes,
-    )
+        return build_memory_context_with_git(
+            db, tenant_id, message,
+            session_entity_names=session_entity_names,
+            domains=domains,
+            max_entities=max_entities,
+            max_observations=max_observations,
+            include_relations=include_relations,
+            include_episodes=include_episodes,
+        )
+    except Exception as e:
+        logger.warning("Memory context build failed: %s", e)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None
 
 
 def _recall_response_to_legacy_dict(resp) -> dict:
     """Convert typed RecallResponse to the dict shape the CLI prompt builder expects."""
+    # Group observations by entity name
+    obs_by_name = {}
+    entity_map = {e.id: e.name for e in resp.entities}
+    
+    for o in resp.observations:
+        name = entity_map.get(o.entity_id)
+        if name:
+            if name not in obs_by_name:
+                obs_by_name[name] = []
+            obs_by_name[name].append({"text": o.content, "sentiment": "neutral"})
+
     return {
         "recalled_entity_names": [e.name for e in resp.entities],
         "relevant_entities": [
-            {"name": e.name, "type": e.entity_type, "description": e.description, "similarity": e.similarity} 
+            {
+                "name": e.name,
+                "type": e.category or "general",
+                "description": e.description,
+                "similarity": e.similarity
+            } 
             for e in resp.entities
         ],
         "relevant_memories": [],  # memories are absorbed into entities in V2
         "relevant_relations": [
-            {"from": r.from_entity_id, "to": r.to_entity_id, "type": r.relation_type} 
+            {"from": r.from_entity, "to": r.to_entity, "type": r.relation_type} 
             for r in resp.relations
         ],
-        "entity_observations": {
-            e.name: [{"text": o.content, "sentiment": "neutral"} for o in e.observations]
-            for e in resp.entities
-        },
+        "entity_observations": obs_by_name,
         "recent_episodes": [
-            {"summary": ep.summary, "date": ep.created_at.isoformat() if ep.created_at else "", "mood": ep.mood} 
+            {
+                "summary": ep.summary,
+                "date": ep.created_at.isoformat() if ep.created_at else "",
+                "mood": "neutral"
+            } 
             for ep in resp.episodes
         ],
         "anticipatory_context": "",
-        "contradictions": [
-            {"entity": c.entity_name, "attribute": c.attribute, "current": c.current_value, "conflicting": c.new_value} 
-            for c in resp.contradictions
-        ],
+        "contradictions": [],
     }
 
 # Default agent for each channel
@@ -102,7 +128,6 @@ _TASK_TYPE_KEYWORDS = {
 
 def _infer_task_type(message: str) -> str:
     """Infer task type from message keywords. Gemma 4 classification runs async post-routing."""
-    # Keyword matching only — never block the hot path with Ollama calls
     msg_lower = message.lower()
     for task_type, keywords in _TASK_TYPE_KEYWORDS.items():
         if any(kw in msg_lower for kw in keywords):
@@ -115,16 +140,6 @@ _LOCAL_PATH_MAX_CHARS = 100
 
 
 def _should_use_local_path(intent: dict | None, message: str, pin_to_cli: bool) -> bool:
-    """Return True when a message should be handled by local Ollama (no CLI spin-up).
-
-    Conditions:
-    - No intent match (intent is None) — semantic routing found nothing above threshold
-    - Short message (≤ _LOCAL_PATH_MAX_CHARS chars) — heuristic for conversational/simple
-    - Session is NOT pinned to an active CLI session (context continuity takes priority)
-
-    The message-length heuristic is language-agnostic: a short message in any language
-    gets the fast path. RL learns the optimal threshold from quality scores over time.
-    """
     if pin_to_cli:
         return False
     if intent is not None:
@@ -133,32 +148,35 @@ def _should_use_local_path(intent: dict | None, message: str, pin_to_cli: bool) 
 
 
 def _format_memory_for_local(memory_context: dict | None) -> str:
-    """Format memory context dict as a brief string for local inference context injection.
-
-    Extracts up to 3 relevant entities from the pre-built memory context and returns
-    a compact text block suitable for the conversation_summary parameter of
-    generate_agent_response_sync().
-    """
+    """Format memory context dict as a brief string for local inference context injection."""
     if not memory_context:
         return ""
     entities = memory_context.get("relevant_entities") or []
     if not entities:
         return ""
+    
     lines = ["Relevant context:"]
-    for ent in entities[:3]:
-        name = ent.get("name", "") if isinstance(ent, dict) else getattr(ent, "name", "")
-        etype = ent.get("entity_type", "") if isinstance(ent, dict) else getattr(ent, "entity_type", "")
-        desc = ent.get("description", "") if isinstance(ent, dict) else getattr(ent, "description", "")
+    # Take top 5 entities for local context
+    for ent in entities[:5]:
+        name = ent.get("name", "")
+        etype = ent.get("type", "")
+        desc = ent.get("description", "")
         if name:
             line = f"- {name} ({etype})"
             if desc:
-                line += f": {desc[:80]}"
+                # Include more description for local context
+                line += f": {desc[:200]}"
             lines.append(line)
+            
+            # Add observations for this entity if present
+            observations = memory_context.get("entity_observations", {}).get(name, [])
+            for obs in observations[:2]:  # Top 2 observations per entity
+                lines.append(f"  * {obs['text'][:200]}")
+                
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def get_platform_performance(db: Session, tenant_id: uuid.UUID) -> List[Dict[str, Any]]:
-    """Query rl_experiences for agent_routing, grouped by platform action, compute positive_pct."""
     sql = text("""
         SELECT
             action->>'platform' AS platform,
@@ -174,16 +192,23 @@ def get_platform_performance(db: Session, tenant_id: uuid.UUID) -> List[Dict[str
         HAVING COUNT(*) >= 3
         ORDER BY AVG(reward) DESC
     """)
-    rows = db.execute(sql, {"tid": str(tenant_id)}).fetchall()
-    return [
-        {
-            "platform": r.platform or "unknown",
-            "total": r.total,
-            "avg_reward": round(float(r.avg_reward or 0), 3),
-            "positive_pct": round(r.positive_count * 100.0 / r.total, 1) if r.total > 0 else 0.0,
-        }
-        for r in rows
-    ]
+    try:
+        rows = db.execute(sql, {"tid": str(tenant_id)}).fetchall()
+        return [
+            {
+                "platform": r.platform or "unknown",
+                "total": r.total,
+                "avg_reward": round(float(r.avg_reward or 0), 3),
+                "positive_pct": round(r.positive_count * 100.0 / r.total, 1) if r.total > 0 else 0.0,
+            }
+            for r in rows
+        ]
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return []
 
 
 def route_and_execute(
@@ -201,52 +226,51 @@ def route_and_execute(
     db_session_memory: dict = None,
     recalled_entities: list = None,
 ) -> Tuple[Optional[str], Dict[str, Any]]:
-    """Route message to the appropriate CLI platform and execute.
-
-    Args:
-        db: SQLAlchemy database session.
-        tenant_id: UUID of the tenant.
-        user_id: UUID of the authenticated user.
-        message: The user's message to process.
-        channel: Communication channel (default "web").
-        sender_phone: Sender's phone number (relevant for WhatsApp channel).
-        agent_slug: Explicit agent slug.
-        conversation_summary: Brief summary of prior conversation context.
-        image_b64: Base64-encoded image data.
-        image_mime: MIME type of the image.
-        db_session_memory: Session memory dict.
-        recalled_entities: Optional list of recalled KG entities for context enrichment.
-
-    Returns:
-        Tuple of (response_text, metadata).
-    """
     # Apply channel-based agent default if not explicitly specified
     if not agent_slug:
         agent_slug = CHANNEL_AGENT_MAP.get(channel, "luna")
 
-    # Load tenant features to determine the CLI platform preference
-    features = db.query(TenantFeatures).filter(
-        TenantFeatures.tenant_id == tenant_id
-    ).first()
+    # 1. Load tenant features
+    try:
+        features = db.query(TenantFeatures).filter(
+            TenantFeatures.tenant_id == tenant_id
+        ).first()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        features = None
 
-    # Default platform is gemini_cli; allow per-tenant override via features
+    # Default platform is gemini_cli
     platform = "gemini_cli"
     if features and hasattr(features, 'default_cli_platform') and features.default_cli_platform:
         platform = features.default_cli_platform
 
-    _pin_to_claude = False # Deprecated: Phase 1 solved context loss for all platforms
+    _pin_to_claude = False 
 
-    trust_profile = safety_trust.get_agent_trust_profile(
-        db,
-        tenant_id,
-        agent_slug,
-        auto_create=True,
-    )
+    # 2. Get trust profile
+    try:
+        trust_profile = safety_trust.get_agent_trust_profile(
+            db,
+            tenant_id,
+            agent_slug,
+            auto_create=True,
+        )
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        trust_profile = None
 
-    # Infer task type for RL context
     inferred_type = _infer_task_type(message)
 
-    # ── Intent-based tier selection (embedding match) ──
+    # 0. Presence session scoping: use chat session ID so concurrent
+    # requests don't clobber each other's state.
+    _presence_sid = str((db_session_memory or {}).get("chat_session_id", ""))
+
+    # 3. Intent matching
     try:
         intent = match_intent(message)
     except Exception as e:
@@ -257,16 +281,14 @@ def route_and_execute(
         agent_tier = intent["tier"]
         intent_tool_groups = intent["tools"]
         is_mutation = intent["mutation"]
-        # Mutations always go to full tier for safety
         if is_mutation:
             agent_tier = "full"
     else:
-        # No match or embedding unavailable — safe default
         agent_tier = "full"
         intent_tool_groups = None
         is_mutation = False
 
-    # ── Select responding agent by tool_groups overlap ──
+    # 4. Agent selection
     responding_agent = None
     agent_tool_groups = None
     agent_memory_domains = None
@@ -293,15 +315,16 @@ def route_and_execute(
                 agent_memory_domains = responding_agent.memory_domains
         except Exception as e:
             logger.warning("Agent selection by tool_groups failed: %s", e)
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
-    # ── RL exploration: route to underexplored platforms for training data ──
-    # Per-decision-point config overrides global env vars when available
-    import random
+    # 5. RL exploration & routing
     exploration_mode = os.environ.get("EXPLORATION_MODE", "off")
     exploration_rate = float(os.environ.get("EXPLORATION_RATE", "0.0"))
     routing_source = "default"
 
-    # Check per-decision-point exploration config (set by autonomous learning)
     try:
         dp_config = db.execute(
             text("""
@@ -314,20 +337,19 @@ def route_and_execute(
         ).first()
         if dp_config:
             exploration_mode = dp_config.exploration_mode or exploration_mode
-            # Use `is not None` so a DB value of 0.0 is respected (don't fall back).
             if dp_config.exploration_rate is not None:
                 exploration_rate = float(dp_config.exploration_rate)
     except Exception:
-        pass  # Table may not exist yet
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
-    if exploration_mode != "off" and random.random() < exploration_rate and not _pin_to_claude:
+    if exploration_mode != "off" and random.random() < exploration_rate:
         if exploration_mode == "codex":
-            logger.info("RL exploration: routing to codex (training mode, rate=%.0f%%)", exploration_rate * 100)
             platform = "codex"
             routing_source = "exploration_codex"
         elif exploration_mode == "balanced":
-            # Pick the CLI platform with fewest scored experiences
-            # Only explore real CLI platforms, not fallback paths
             _VALID_EXPLORE = {"claude_code", "codex", "gemini_cli"}
             try:
                 from app.services.rl_routing import get_best_platform
@@ -338,11 +360,12 @@ def route_and_execute(
                         least = min(valid, key=lambda a: a["total"])
                         platform = least["platform"]
                         routing_source = "exploration_balanced"
-                        logger.info("RL exploration: routing to %s (least data: %d experiences)", platform, least["total"])
             except Exception:
-                pass
-    elif not _pin_to_claude:
-        # ── RL-learned routing: override platform if strong signal ──
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+    else:
         try:
             from app.services.rl_routing import get_routing_recommendation
             rl_rec = get_routing_recommendation(
@@ -353,22 +376,16 @@ def route_and_execute(
             )
             _VALID_CLI = {"claude_code", "codex", "gemini_cli"}
             if rl_rec.platform and rl_rec.platform in _VALID_CLI and rl_rec.platform_confidence >= 0.4:
-                if rl_rec.platform != platform:
-                    logger.info(
-                        "RL routing override: platform %s→%s (confidence=%.2f, %s)",
-                        platform, rl_rec.platform, rl_rec.platform_confidence, rl_rec.platform_reasoning,
-                    )
-                    platform = rl_rec.platform
-                else:
-                    logger.info(
-                        "RL routing confirmed: %s (confidence=%.2f, %s)",
-                        platform, rl_rec.platform_confidence, rl_rec.platform_reasoning,
-                    )
+                platform = rl_rec.platform
                 routing_source = "rl_platform"
         except Exception as e:
-            logger.debug("RL routing lookup failed: %s — using defaults", e)
+            logger.debug("RL routing lookup failed: %s", e)
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
-    # ── Policy rollout: check if a live A/B experiment overrides routing ──
+    # 6. Policy rollout
     rollout_experiment_id = None
     try:
         from app.services import policy_rollout_service
@@ -376,294 +393,143 @@ def route_and_execute(
         if rollout:
             apply_policy, is_treatment = policy_rollout_service.should_apply_rollout(rollout)
             rollout_experiment_id = rollout["experiment_id"]
-            if is_treatment and apply_policy and not _pin_to_claude:
+            if is_treatment and apply_policy:
                 routing_source = "rollout_treatment"
                 proposed = rollout.get("proposed_policy", {})
-                if "platform" in proposed:
-                    platform = proposed["platform"]
-                if "agent_slug" in proposed:
-                    agent_slug = proposed["agent_slug"]
-                logger.info(
-                    "Policy rollout: applying treatment (experiment=%s, pct=%.0f%%)",
-                    rollout["experiment_id"], rollout["rollout_pct"] * 100,
-                )
-            else:
-                routing_source = "rollout_control"
+                if "platform" in proposed: platform = proposed["platform"]
+                if "agent_slug" in proposed: agent_slug = proposed["agent_slug"]
     except Exception as e:
         logger.debug("Policy rollout check failed: %s", e)
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
-    # ── Light tier uses Haiku via Claude CLI (fast + tools), not OpenCode ──
-    # OpenCode/Gemma4 is fallback-only (when Claude+Codex are out of credits).
-    # The --model haiku flag on Claude CLI gives us speed without losing tool quality.
-
-    # Build memory context with agent-scoped parameters.
-    # The tier limits and memory_domains from agent selection (above) drive
-    # how much context we load — a Light-tier booking agent gets 3 entities
-    # from its domains instead of 10 from everywhere.
+    # 7. Build memory context
     pre_built_memory_context = None
     session_entity_names = (db_session_memory or {}).get("recalled_entity_names")
     limits = TIER_LIMITS.get(agent_tier, TIER_LIMITS["full"])
-    if not recalled_entities:
+    
+    try:
+        pre_built_memory_context = _build_memory_context(
+            db, tenant_id, message,
+            session_entity_names=session_entity_names,
+            domains=agent_memory_domains,
+            max_entities=limits["entities"],
+            max_observations=limits["observations_per_entity"],
+            include_relations=limits["include_relations"],
+            include_episodes=limits["include_episodes"],
+            agent_slug=agent_slug,
+            chat_session_id=_presence_sid,
+            user_id=user_id,
+        )
+        if pre_built_memory_context and pre_built_memory_context.get("relevant_entities"):
+            recalled_entities = pre_built_memory_context["relevant_entities"]
+    except Exception:
+        logger.debug("Memory context build failed — routing without entity context")
         try:
-            pre_built_memory_context = _build_memory_context(
-                db, tenant_id, message,
-                session_entity_names=session_entity_names,
-                domains=agent_memory_domains,
-                max_entities=limits["entities"],
-                max_observations=limits["observations_per_entity"],
-                include_relations=limits["include_relations"],
-                include_episodes=limits["include_episodes"],
-                agent_slug=agent_slug,
-            )
-            if pre_built_memory_context and pre_built_memory_context.get("relevant_entities"):
-                recalled_entities = pre_built_memory_context["relevant_entities"]
+            db.rollback()
         except Exception:
-            logger.debug("Early memory recall failed — routing without entity context")
-    elif recalled_entities and not pre_built_memory_context:
-        try:
-            pre_built_memory_context = _build_memory_context(
-                db=db, tenant_id=tenant_id, message=message,
-                session_entity_names=session_entity_names,
-                domains=agent_memory_domains,
-                max_entities=limits["entities"],
-                max_observations=limits["observations_per_entity"],
-                include_relations=limits["include_relations"],
-                include_episodes=limits["include_episodes"],
-                agent_slug=agent_slug,
-            )
-        except Exception:
-            logger.debug("Memory context build for external recalled_entities failed — continuing")
+            pass
 
-    # ── Short-message local path ──
-    # When semantic intent matching fails for short messages (e.g. non-English
-    # greetings like "hola", "bonjour"), avoid spinning up a full CLI session.
-    # Use local Ollama inference directly — 2-5s instead of 65-75s.
-    # RL learns the quality of this tier decision via tier_selection experiences.
+    # 8. Short-message local path
     if _should_use_local_path(intent, message, _pin_to_claude):
+        user_name = None
+        try:
+            from app.models.user import User
+            user = db.query(User).filter(User.id == user_id).first()
+            if user:
+                user_name = user.full_name
+        except Exception:
+            try: db.rollback()
+            except Exception: pass
+
         _memory_summary = _format_memory_for_local(pre_built_memory_context)
         _local_response = generate_agent_response_sync(
             message=message,
-            conversation_summary=(_memory_summary + "\n\n" + conversation_summary).strip(),
+            conversation_summary=conversation_summary,
+            memory_context=_memory_summary,
             agent_slug=agent_slug,
+            skill_body=f"The user you are speaking with is {user_name}." if user_name else ""
         )
         if _local_response:
-            # Log tier_selection RL experience so the policy engine can learn
-            _tier_trajectory_id = None
+            _tier_trajectory_id = uuid.uuid4()
             try:
-                # Clear any poisoned DB session state before RL logging
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
-                _tier_trajectory_id = uuid.uuid4()
+                try: db.rollback() 
+                except Exception: pass
                 rl_experience_service.log_experience(
-                    db,
-                    tenant_id=tenant_id,
-                    trajectory_id=_tier_trajectory_id,
-                    step_index=0,
-                    decision_point="tier_selection",
-                    state={
-                        "user_message": message[:200],
-                        "channel": channel,
-                        "message_len": len(message),
-                        "intent_matched": False,
-                        "task_type": inferred_type,
-                    },
-                    action={
-                        "tier": "local",
-                        "platform": "local_inference",
-                        "reason": "short_no_intent",
-                    },
-                    state_text=f"task_type: {inferred_type}, channel: {channel}, "
-                               f"message_len: {len(message)}, intent_matched: false",
+                    db, tenant_id=tenant_id, trajectory_id=_tier_trajectory_id,
+                    step_index=0, decision_point="tier_selection",
+                    state={"user_message": message[:200], "task_type": inferred_type},
+                    action={"tier": "local", "platform": "local_inference"},
+                    state_text=f"task_type: {inferred_type}, message_len: {len(message)}",
                 )
             except Exception:
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
-                logger.debug("Failed to log short_no_intent RL experience — continuing")
-
-            _tier_trajectory_id = None  # ensure no orphaned reference
-
+                try: db.rollback() 
+                except Exception: pass
+            
             _local_meta = {
-                "platform": "local_inference",
+                "platform": "local_inference", 
                 "agent_tier": "local",
-                "tool_groups": [],
-                "routing_trajectory_id": str(_tier_trajectory_id) if _tier_trajectory_id else None,
+                "recalled_entity_names": pre_built_memory_context.get("recalled_entity_names", []) if pre_built_memory_context else []
             }
-            if trust_profile:
-                _local_meta["agent_trust_score"] = round(float(trust_profile.trust_score), 3)
-                _local_meta["agent_autonomy_tier"] = trust_profile.autonomy_tier
-
-            logger.info(
-                "Local path: tenant=%s message_len=%d response_len=%d",
-                str(tenant_id)[:8], len(message), len(_local_response),
-            )
             return _local_response, _local_meta
-        # If local inference fails (Ollama down), fall through to full CLI
-        logger.warning("Local inference failed for short message — falling through to CLI")
 
-    # Build enriched state_text for RL logging
-    state_parts = [f"task_type: {inferred_type}, channel: {channel}"]
-
-    if recalled_entities:
-        # Cap to 5 entities
-        capped = recalled_entities[:5]
-        entity_strs = []
-        categories = set()
-        for ent in capped:
-            name = ent.get("name", "unknown") if isinstance(ent, dict) else getattr(ent, "name", "unknown")
-            etype = ent.get("entity_type", "") if isinstance(ent, dict) else getattr(ent, "entity_type", "")
-            cat = ent.get("category", "") if isinstance(ent, dict) else getattr(ent, "category", "")
-            entity_strs.append(f"{name}({etype}/{cat})")
-            if cat:
-                categories.add(cat)
-        state_parts.append(f"known_entities: [{', '.join(entity_strs)}]")
-        state_parts.append(f"entity_categories: [{', '.join(sorted(categories))}]")
-
-    # Add platform performance history
-    try:
-        perf = get_platform_performance(db, tenant_id)
-        if perf:
-            perf_strs = [f"{p['platform']}:{p['positive_pct']}%" for p in perf]
-            state_parts.append(f"platform_history: [{', '.join(perf_strs)}]")
-    except Exception:
-        logger.debug("Failed to fetch platform performance — skipping")
-
-    state_text = ", ".join(state_parts)
-
-    # Log RL experience for agent_routing decision
+    # 9. Log RL experience for agent_routing decision
     trajectory_id = uuid.uuid4()
     try:
-        # Clear any poisoned DB session state
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        try: db.rollback() 
+        except Exception: pass
         rl_experience_service.log_experience(
-            db,
-            tenant_id=tenant_id,
-            trajectory_id=trajectory_id,
-            step_index=0,
-            decision_point="agent_routing",
-            state={
-                "user_message": message[:200],
-                "channel": channel,
-                "agent_slug": agent_slug,
-                "task_type": inferred_type,
-                "entity_count": len(recalled_entities) if recalled_entities else 0,
-            },
-            action={
-                "platform": platform,
-                "agent_slug": agent_slug,
-                "routing_source": routing_source,
-                "agent_trust_score": round(float(trust_profile.trust_score), 3) if trust_profile else None,
-                "agent_autonomy_tier": trust_profile.autonomy_tier if trust_profile else None,
-                "model_tier": agent_tier,
-                "tool_groups": intent_tool_groups or [],
-            },
-            state_text=state_text,
+            db, tenant_id=tenant_id, trajectory_id=trajectory_id,
+            step_index=0, decision_point="agent_routing",
+            state={"user_message": message[:200], "task_type": inferred_type},
+            action={"platform": platform, "agent_slug": agent_slug, "routing_source": routing_source},
+            state_text=f"task_type: {inferred_type}, channel: {channel}",
+        )
+    except Exception:
+        try: db.rollback() 
+        except Exception: pass
+
+    # 10. Presence update
+    try:
+        luna_presence_service.update_state(
+            tenant_id, state="thinking", tool_status="running",
+            session_id=_presence_sid,
+        )
+    except Exception:
+        pass
+
+    # 11. Execute
+    try:
+        response_text, metadata = run_agent_session(
+            db, tenant_id=tenant_id, user_id=user_id,
+            platform=platform, agent_slug=agent_slug,
+            message=message, channel=channel,
+            sender_phone=sender_phone, conversation_summary=conversation_summary,
+            image_b64=image_b64, image_mime=image_mime,
+            db_session_memory=db_session_memory,
+            pre_built_memory_context=pre_built_memory_context,
+            agent_tier=agent_tier,
+            agent_tool_groups=agent_tool_groups,
+            agent_memory_domains=agent_memory_domains,
         )
     except Exception:
         try:
-            db.rollback()
+            luna_presence_service.update_state(tenant_id, state="error", session_id=_presence_sid)
         except Exception:
             pass
-        logger.debug("Failed to log agent_routing RL experience — continuing")
+        raise
 
-    # Playful mood for short casual messages
-    if inferred_type == "general" and len(message) < 50:
-        try:
-            luna_presence_service.update_state(tenant_id, mood="playful")
-        except Exception:
-            pass
+    # 12. Final updates
+    metadata = metadata or {}
+    if pre_built_memory_context:
+        metadata["recalled_entity_names"] = pre_built_memory_context.get("recalled_entity_names", [])
 
-    logger.info(
-        "Routing: tenant=%s agent=%s platform=%s channel=%s task_type=%s entities=%d trust=%s tier=%s",
-        str(tenant_id)[:8], agent_slug, platform, channel, inferred_type,
-        len(recalled_entities) if recalled_entities else 0,
-        round(float(trust_profile.trust_score), 3) if trust_profile else "n/a",
-        trust_profile.autonomy_tier if trust_profile else "n/a",
-    )
+    try:
+        state = "responding" if response_text else "idle"
+        luna_presence_service.update_state(tenant_id, state=state, session_id=_presence_sid)
+    except Exception:
+        pass
 
-    # Execute on the selected platform
-    if platform in ("claude_code", "gemini_cli", "codex", "opencode"):
-        # Presence session scoping: use chat session ID so concurrent
-        # requests don't clobber each other's state.
-        _presence_sid = str((db_session_memory or {}).get("chat_session_id", ""))
-        try:
-            _presence_state = "focused" if inferred_type == "code" else "thinking"
-            luna_presence_service.update_state(
-                tenant_id, state=_presence_state, tool_status="running",
-                session_id=_presence_sid,
-            )
-        except Exception:
-            pass
-        try:
-            response_text, metadata = run_agent_session(
-                db,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                platform=platform,
-                agent_slug=agent_slug,
-                message=message,
-                channel=channel,
-                sender_phone=sender_phone,
-                conversation_summary=conversation_summary,
-                image_b64=image_b64,
-                image_mime=image_mime,
-                db_session_memory=db_session_memory,
-                pre_built_memory_context=pre_built_memory_context,
-                agent_tier=agent_tier,
-                agent_tool_groups=agent_tool_groups,
-                agent_memory_domains=agent_memory_domains,
-            )
-        except Exception:
-            # CLI failure — set error state briefly, then idle
-            try:
-                luna_presence_service.update_state(
-                    tenant_id, state="error", tool_status="error",
-                    session_id=_presence_sid,
-                )
-            except Exception:
-                pass
-            raise
-        # Update presence: responding or idle
-        try:
-            if response_text:
-                luna_presence_service.update_state(
-                    tenant_id, state="responding", tool_status="idle",
-                    session_id=_presence_sid,
-                )
-            else:
-                luna_presence_service.update_state(
-                    tenant_id, state="idle", tool_status="idle",
-                    mood="empathetic", session_id=_presence_sid,
-                )
-        except Exception:
-            pass
-
-        metadata = metadata or {}
-        if trust_profile:
-            metadata.setdefault("agent_trust_score", round(float(trust_profile.trust_score), 3))
-            metadata.setdefault("agent_autonomy_tier", trust_profile.autonomy_tier)
-            metadata.setdefault("agent_trust_confidence", round(float(trust_profile.confidence), 3))
-
-        # Tag rollout metadata so the async scorer can record the observation
-        # with the scored reward (single recording point, no double-counting)
-        if rollout_experiment_id:
-            metadata["rollout_experiment_id"] = rollout_experiment_id
-            metadata["rollout_arm"] = "treatment" if routing_source == "rollout_treatment" else "control"
-
-        # Thread routing trajectory so scorer can backfill the reward
-        metadata["routing_trajectory_id"] = str(trajectory_id)
-
-        # Expose tier routing info for downstream logging (chat service, scorer)
-        metadata["agent_tier"] = agent_tier
-        metadata["tool_groups"] = intent_tool_groups or []
-
-        return response_text, metadata
-
-    # Future: gemini_cli and additional providers.
-    return None, {"error": f"Platform '{platform}' not yet supported"}
+    return response_text, metadata

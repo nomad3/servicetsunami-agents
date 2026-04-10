@@ -1445,7 +1445,10 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
     env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.join(gemini_home, "application_default_credentials.json")
     env["GOOGLE_GENAI_USE_VERTEXAI"] = "0"
     env["GOOGLE_GENAI_USE_GCA"] = "0"
-    env["GEMINI_PROJECT_ID"] = "personal-project" # Placeholder to avoid registry lookup
+    # Unset project vars so CLI doesn't try to validate Code Assist entitlements
+    env.pop("GOOGLE_CLOUD_PROJECT", None)
+    env.pop("GOOGLE_CLOUD_PROJECT_ID", None)
+    env.pop("GEMINI_PROJECT_ID", None)
 
     result = subprocess.run(
         cmd,
@@ -1493,22 +1496,12 @@ def _prepare_gemini_home(session_dir: str, auth_payload: dict, mcp_config_json: 
     gemini_home = os.path.join(session_dir, ".gemini")
     os.makedirs(gemini_home, exist_ok=True)
 
-    # Pre-create projects.json to avoid rename errors and initialize the workspace project
+    # Pre-create projects.json to avoid rename errors
     projects_path = os.path.join(gemini_home, "projects.json")
     if not os.path.exists(projects_path):
         with open(projects_path, "w") as f:
-            # Proper registry format to avoid ProjectRegistry.getShortId TypeError
-            registry = {
-                "projects": {
-                    "/workspace": {
-                        "id": "workspace-project",
-                        "name": "workspace",
-                        "is_active": True
-                    }
-                },
-                "active_project_path": "/workspace"
-            }
-            json.dump(registry, f, indent=2)
+            # Simplest valid registry to avoid TypeError and rename issues
+            json.dump({"projects": {}}, f, indent=2)
 
     # Gemini CLI credentials.json format for oauth-personal
     import time

@@ -560,6 +560,7 @@ Keys in observations must match competitor IDs from the data."""
 def generate_agent_response_sync(
     message: str,
     conversation_summary: str = "",
+    memory_context: str = "",
     skill_body: str = "",
     agent_slug: str = "luna",
 ) -> Optional[str]:
@@ -569,9 +570,17 @@ def generate_agent_response_sync(
     Uses the agent's skill_body as the persona — not hardcoded to Luna.
     Returns response text or None on failure.
     """
-    context_block = ""
+    context_parts = []
+    if memory_context:
+        context_parts.append(f"Long-term memory context:\n{memory_context.strip()}")
+    
     if conversation_summary:
-        context_block = f"\n\nRecent conversation context:\n{conversation_summary.strip()[-800:]}"
+        # Truncate history but keep it reasonable
+        context_parts.append(f"Recent conversation context:\n{conversation_summary.strip()[-2000:]}")
+
+    context_block = "\n\n".join(context_parts)
+    if context_block:
+        context_block = "\n\n" + context_block
 
     prompt = f"""A user sent this message to you:{context_block}
 

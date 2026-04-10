@@ -17,6 +17,7 @@ class RecallRequest:
     tenant_id: UUID
     agent_slug: str
     query: str
+    user_id: Optional[UUID] = None
     chat_session_id: Optional[UUID] = None
     top_k_per_type: int = 5
     total_token_budget: int = 8000

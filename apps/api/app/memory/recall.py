@@ -55,32 +55,39 @@ _HARD_TIMEOUT_SECONDS = 1.5
 
 
 def recall(db: Session, request: RecallRequest) -> RecallResponse:
-    """Pre-load memory context for a chat turn.
-
-    Args:
-        db: SQLAlchemy session bound to the canonical Postgres.
-        request: RecallRequest dataclass with tenant_id, agent_slug, query,
-                 and optional knobs (top_k_per_type, total_token_budget,
-                 chat_session_id, source_filter).
-
-    Returns:
-        RecallResponse with entities, observations, relations, commitments,
-        goals, past_conversations, episodes, contradictions, plus metadata
-        (elapsed_ms, used_keyword_fallback, degraded, truncated_for_budget).
-    """
+    """Pre-load memory context for a chat turn."""
     metadata = RecallMetadata(elapsed_ms=0.0)
+    
+    # --- Step 0: Context Enrichment (Who is the user?) ---
+    user_name = None
+    if request.user_id:
+        try:
+            from app.models.user import User
+            user = db.query(User).filter(User.id == request.user_id).first()
+            if user:
+                user_name = user.full_name
+        except Exception:
+            try: db.rollback()
+            except Exception: pass
+    elif request.chat_session_id:
+        # Fallback for sessions where user_id wasn't passed but we might find it 
+        # (Though chat_sessions doesn't have user_id, some implementations might have it in metadata)
+        pass
 
-    # --- Step 1: Embed the query (NOT counted toward elapsed_ms / deadline) ---
-    # Rationale: the embedding model is a process-wide singleton in production
-    # (loaded at API startup). The cold-start cost on first call is a model-
-    # loading cost, not a recall cost. Measuring it here would distort
-    # latency observability. Start the clock AFTER embedding is ready.
+    query_with_context = request.query
+    query_lower = request.query.lower()
+    if user_name and any(kw in query_lower for kw in ["who", "me", "my", " i "]) and any(kw in query_lower for kw in ["am", "is", "memory", "know", "recall", "about"]):
+        # Inject identity hints for semantic search if asking about themselves
+        query_with_context = f"{request.query} (User identity: {user_name})"
+        logger.info("recall: enriched query with identity hint: %s", user_name)
+
+    # --- Step 1: Embed the query ---
     try:
         query_embedding = embedding_service.embed_text(
-            request.query, task_type="RETRIEVAL_QUERY"
+            query_with_context, task_type="RETRIEVAL_QUERY"
         )
     except Exception:
-        logger.exception("embedding_service.embed_text raised — using keyword fallback")
+        logger.exception("embedding_service.embed_text failed")
         query_embedding = None
 
     t0 = time.perf_counter()
@@ -105,6 +112,7 @@ def recall(db: Session, request: RecallRequest) -> RecallResponse:
             agent_slug=request.agent_slug,
             deadline=deadline,
         )
+        logger.info("recall: found %d raw entities", len(entities))
     except Exception:
         logger.exception("search_entities failed")
 
