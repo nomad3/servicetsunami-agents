@@ -73,18 +73,38 @@ The platform uses a **Reward-Weighted Experience Store (RWES)** to optimize rout
 
 ## 3. Agent-to-Agent (A2A) Protocol Guarantees
 
-Regarding the concern about A2A protocol guarantees, ServiceTsunami uses a **Shared Memory Substrate** for handoffs rather than simple message passing.
+ServiceTsunami solves the "context loss" and "handoff reliability" problems common in multi-agent systems through a formal orchestration protocol.
 
-### A2A Handoff Flow:
-1.  **Supervisor (Luna)** identifies a task needing a specialist (e.g., DevOps Agent).
-2.  **Context Injection:** The Specialist is invoked with the **same Chat Session ID**.
-3.  **State Recovery:** The Specialist calls `recall()` using its own `agent_slug`. It receives:
-    *   `tenant_wide` memory (Shared facts).
-    *   `agent_scoped` memory (Specialist's private technical notes).
-4.  **Action Execution:** The Specialist executes tools via MCP.
-5.  **Reconciliation:** Results are written back to the shared Knowledge Graph, making them immediately visible to the Supervisor.
+### 3.1. Shared Blackboard Architecture
+Handoffs are not just "message passing." We use a **Shared Blackboard** model where multiple agents read from and write to a common state-space.
 
-**Guarantee:** There is no "context loss" during handoff because the handoff isn't just a text summary—it's a pointer to a shared, persistent state in the memory layer.
+```ascii
+   AGENT A (Planner)        AGENT B (Critic)        AGENT C (Coder)
+         |                      |                       |
+         +----------+-----------+-----------+-----------+
+                    |                       |
+                    v                       v
+        +-------------------------------------------------------+
+        |                SHARED BLACKBOARD (Postgres)           |
+        +-------------------------------------------------------+
+        | - Proposed Plan                                       |
+        | - Critiques & Evidence                                |
+        | - Current Status (In-Progress / Verified)             |
+        | - Reference Entities (Knowledge Graph Pointers)       |
+        +-------------------------------------------------------+
+```
+
+### 3.2. Collaboration Patterns (State Machines)
+The platform enforces strict collaboration patterns. A handoff is a state transition in a formal machine:
+
+*   **Propose-Critique-Revise:** Agent A proposes, Agent B critiques, Agent A revises until a Consensus threshold is met.
+*   **Plan-Verify:** One agent plans, another verifies against policy/security rules before execution.
+*   **Research-Synthesize:** Distributed agents gather raw data; a supervisor synthesizes the final result.
+
+### 3.3. Protocol Guarantees:
+1.  **Atomicity:** A handoff only "completes" when the successor agent heartbeats into the session.
+2.  **Shared Context:** The successor agent automatically inherits the full `Recall` state of the predecessor.
+3.  **Traceability:** Every transition is recorded in the `execution_traces` table, including the specific reasoning provided by each agent during the handoff.
 
 ---
 
@@ -124,4 +144,4 @@ Agents have access to 100+ tools through the **Model Context Protocol (MCP)**:
 ---
 
 **Next Steps:**
-We invite the Security and Architecture teams to a technical deep-dive where we can demonstrate the Temporal event traces and the pgvector search isolation in real-time.
+We invite the Security and Architecture teams to a technical deep-dive where we can demonstrate the Temporal event traces, the Shared Blackboard transitions, and the pgvector search isolation in real-time.
