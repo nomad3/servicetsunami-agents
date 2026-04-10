@@ -8,7 +8,9 @@ use memory::v1::{
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Row;
 use uuid::Uuid;
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 
 pub mod memory {
     pub mod v1 {
@@ -28,17 +30,27 @@ use embedding::v1::EmbedRequest;
 pub struct MyMemoryCore {
     pool: sqlx::PgPool,
     embedding_url: String,
+    embedding_client: Arc<Mutex<Option<EmbeddingServiceClient<tonic::transport::Channel>>>>,
 }
 
 impl MyMemoryCore {
     pub fn new(pool: sqlx::PgPool, embedding_url: String) -> Self {
-        Self { pool, embedding_url }
+        Self {
+            pool,
+            embedding_url,
+            embedding_client: Arc::new(Mutex::new(None)),
+        }
     }
 
     async fn get_embedding(&self, text: &str, task_type: &str) -> Result<Vec<f32>, Status> {
-        let mut client = EmbeddingServiceClient::connect(self.embedding_url.clone())
-            .await
-            .map_err(|e| Status::internal(format!("Failed to connect to embedding service: {}", e)))?;
+        let mut guard = self.embedding_client.lock().await;
+        if guard.is_none() {
+            let client = EmbeddingServiceClient::connect(self.embedding_url.clone())
+                .await
+                .map_err(|e| Status::internal(format!("Failed to connect to embedding service: {}", e)))?;
+            *guard = Some(client);
+        }
+        let client = guard.as_mut().unwrap();
 
         let request = Request::new(EmbedRequest {
             text: text.to_string(),
@@ -482,7 +494,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Connecting to database...");
     let pool = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(20)
+        .acquire_timeout(Duration::from_secs(5))
+        .idle_timeout(Duration::from_secs(300))
         .connect(&database_url)
         .await?;
 
