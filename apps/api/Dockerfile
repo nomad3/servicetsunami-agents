@@ -1,4 +1,4 @@
-# ServiceTsunami API - Production Dockerfile
+# AgentProvision API - Production Dockerfile
 # Multi-stage build for optimal image size
 
 # ===== Build Stage =====
@@ -26,9 +26,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 FROM python:3.11-slim
 
 # Labels
-LABEL maintainer="ServiceTsunami Team" \
+LABEL maintainer="AgentProvision Team" \
       version="1.0.0" \
-      description="ServiceTsunami API - FastAPI Backend"
+      description="AgentProvision API - FastAPI Backend"
 
 # Create non-root user for security
 RUN groupadd --gid 1000 appgroup && \
@@ -56,12 +56,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy application code
 COPY --chown=appuser:appgroup ./app /app/app
 
-# Copy proto files and generate gRPC client code
+# Copy proto files and generation script, then compile gRPC stubs
 COPY --chown=appuser:appgroup ./proto /app/proto
-RUN mkdir -p /app/app/generated && \
-    python -m grpc_tools.protoc -I /app/proto --python_out=/app/app/generated --grpc_python_out=/app/app/generated /app/proto/embedding.proto && \
-    python -m grpc_tools.protoc -I /app/proto --python_out=/app/app/generated --grpc_python_out=/app/app/generated /app/proto/memory.proto && \
-    touch /app/app/generated/__init__.py
+COPY --chown=appuser:appgroup ./scripts/gen_proto.sh /app/scripts/gen_proto.sh
+RUN bash /app/scripts/gen_proto.sh
 
 # Create storage directory with correct permissions
 RUN mkdir -p /app/storage && chown -R appuser:appgroup /app/storage
