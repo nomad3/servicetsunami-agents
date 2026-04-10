@@ -172,7 +172,11 @@ def _recall_rust(request: RecallRequest) -> Optional[RecallResponse]:
             metadata=RecallMetadata(elapsed_ms=elapsed),
         )
     except Exception as e:
-        logger.warning("Rust recall failed: %s", e)
+        # Force reconnect on next call (service may have restarted)
+        global _grpc_stub, _grpc_channel
+        _grpc_stub = None
+        _grpc_channel = None
+        logger.warning("Rust recall failed (will reconnect next call): %s", e)
         return None
 
 

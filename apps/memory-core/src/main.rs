@@ -9,9 +9,7 @@ use memory::v1::{
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Row;
 use uuid::Uuid;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
 
 pub mod memory {
     pub mod v1 {
@@ -30,28 +28,18 @@ use embedding::v1::EmbedRequest;
 
 pub struct MyMemoryCore {
     pool: sqlx::PgPool,
-    embedding_url: String,
-    embedding_client: Arc<Mutex<Option<EmbeddingServiceClient<tonic::transport::Channel>>>>,
+    embedding_client: EmbeddingServiceClient<tonic::transport::Channel>,
 }
 
 impl MyMemoryCore {
-    pub fn new(pool: sqlx::PgPool, embedding_url: String) -> Self {
-        Self {
-            pool,
-            embedding_url,
-            embedding_client: Arc::new(Mutex::new(None)),
-        }
+    pub async fn new(pool: sqlx::PgPool, embedding_url: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let embedding_client = EmbeddingServiceClient::connect(embedding_url.to_string()).await?;
+        Ok(Self { pool, embedding_client })
     }
 
     async fn get_embedding(&self, text: &str, task_type: &str) -> Result<Vec<f32>, Status> {
-        let mut guard = self.embedding_client.lock().await;
-        if guard.is_none() {
-            let client = EmbeddingServiceClient::connect(self.embedding_url.clone())
-                .await
-                .map_err(|e| Status::internal(format!("Failed to connect to embedding service: {}", e)))?;
-            *guard = Some(client);
-        }
-        let client = guard.as_mut().unwrap();
+        // tonic channels are cloneable and safe for concurrent use
+        let mut client = self.embedding_client.clone();
 
         let request = Request::new(EmbedRequest {
             text: text.to_string(),
@@ -501,7 +489,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .connect(&database_url)
         .await?;
 
-    let service = MyMemoryCore::new(pool, embedding_url);
+    println!("Connecting to embedding service at {}...", embedding_url);
+    let service = MyMemoryCore::new(pool, &embedding_url).await?;
 
     let (mut health_reporter, health_service) = health_reporter();
     health_reporter

@@ -129,6 +129,7 @@ def _audit(
         event_metadata={
             "target_table": target_table,
             "target_id": str(target_id),
+            "source_type": source_type,
             "source_id": source_id,
             "actor_slug": actor_slug,
         },
@@ -136,7 +137,7 @@ def _audit(
         workflow_run_id=workflow_run_id,
         entity_id=entity_id,
         memory_id=memory_id,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     ))
 
 

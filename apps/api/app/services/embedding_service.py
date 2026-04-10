@@ -248,7 +248,10 @@ def embed_text(
                 resp = stub.Embed(req, timeout=5.0)
                 return list(resp.vector)
             except Exception as e:
-                logger.warning("Rust embedding failed, falling back to Python: %s", e)
+                global _grpc_stub, _grpc_channel
+                _grpc_stub = None
+                _grpc_channel = None
+                logger.warning("Rust embedding failed (will reconnect), falling back to Python: %s", e)
 
     model = _get_model()
     if model is None:
