@@ -20,10 +20,38 @@ logger = logging.getLogger(__name__)
 
 # Lazy-initialized sentence-transformers model
 _model = None
+_grpc_channel = None
+_grpc_stub = None
 
 _MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
 _DIMENSIONS = 768
 _MAX_INPUT_CHARS = 8000
+
+def _get_grpc_stub():
+    """Lazy-init the gRPC client stub for Rust embedding-service."""
+    global _grpc_channel, _grpc_stub
+    if _grpc_stub is not None:
+        return _grpc_stub
+    
+    url = os.environ.get("EMBEDDING_SERVICE_URL")
+    if not url:
+        return None
+        
+    try:
+        import grpc
+        try:
+            from app.generated import embedding_pb2_grpc
+        except ImportError:
+            logger.warning("gRPC generated code not found. Rust embedding disabled.")
+            return None
+            
+        _grpc_channel = grpc.insecure_channel(url)
+        _grpc_stub = embedding_pb2_grpc.EmbeddingServiceStub(_grpc_channel)
+        return _grpc_stub
+    except Exception as e:
+        logger.warning("Failed to connect to Rust embedding-service at %s: %s", url, e)
+        return None
+
 
 # Canonical intent definitions for tier routing
 # Language-agnostic via nomic multilingual embeddings
@@ -67,16 +95,7 @@ _MAX_LOAD_RETRIES = 3
 
 
 def _expand_intents_with_translations() -> list:
-    """Use local Ollama to translate intent definitions for multilingual matching.
-
-    Reads INTENT_EXPANSION_LANGUAGES env var (comma-separated language names,
-    e.g. "Spanish,Portuguese,French,German"). For each language, generates a
-    translation of each intent definition name via local Qwen inference.
-    All translations share the same tier/tools/mutation as their source intent.
-
-    Returns list of additional intent dicts (empty if env var not set or Ollama unavailable).
-    Set at startup — no runtime overhead on the hot path.
-    """
+    """Use local Ollama to translate intent definitions for multilingual matching."""
     from app.services.local_inference import generate_sync  # deferred: avoids circular import
 
     languages_str = os.environ.get("INTENT_EXPANSION_LANGUAGES", "").strip()
@@ -193,11 +212,29 @@ def embed_text(
 ) -> Optional[List[float]]:
     """Generate a 768-dim embedding for *text_content*.
 
-    Returns None when the model fails to load or on error.
-    The task_type prefix follows nomic-embed conventions:
-    - "search_document: " for documents
-    - "search_query: " for queries
+    Tries Rust gRPC service first if USE_RUST_EMBEDDING=true.
+    Falls back to local sentence-transformers on error or if disabled.
     """
+    use_rust = os.environ.get("USE_RUST_EMBEDDING", "false").lower() == "true"
+    if use_rust:
+        stub = _get_grpc_stub()
+        if stub:
+            try:
+                from app.generated import embedding_pb2
+                # Map Python task types to Proto task types
+                rust_task = "search_document"
+                if task_type == "RETRIEVAL_QUERY":
+                    rust_task = "search_query"
+                
+                req = embedding_pb2.EmbedRequest(
+                    text=text_content[:_MAX_INPUT_CHARS],
+                    task_type=rust_task
+                )
+                resp = stub.Embed(req, timeout=5.0)
+                return list(resp.vector)
+            except Exception as e:
+                logger.warning("Rust embedding failed, falling back to Python: %s", e)
+
     model = _get_model()
     if model is None:
         logger.debug("embed_text skipped — model not loaded")
@@ -217,6 +254,48 @@ def embed_text(
     except Exception:
         logger.exception("embed_text failed")
         return None
+
+
+def embed_batch(
+    texts: List[str],
+    task_type: str = "RETRIEVAL_DOCUMENT",
+) -> List[Optional[List[float]]]:
+    """Generate embeddings for a list of strings in bulk."""
+    use_rust = os.environ.get("USE_RUST_EMBEDDING", "false").lower() == "true"
+    if use_rust:
+        stub = _get_grpc_stub()
+        if stub:
+            try:
+                from app.generated import embedding_pb2
+                rust_task = "search_document"
+                if task_type == "RETRIEVAL_QUERY":
+                    rust_task = "search_query"
+                
+                req = embedding_pb2.EmbedBatchRequest(
+                    texts=[t[:_MAX_INPUT_CHARS] for t in texts],
+                    task_type=rust_task
+                )
+                resp = stub.EmbedBatch(req, timeout=30.0)
+                return [list(r.vector) for r in resp.results]
+            except Exception as e:
+                logger.warning("Rust batch embedding failed, falling back to Python: %s", e)
+
+    model = _get_model()
+    if model is None:
+        return [None] * len(texts)
+
+    try:
+        # Nomic-embed uses task-specific prefixes
+        prefix = "search_document: "
+        if task_type == "RETRIEVAL_QUERY":
+            prefix = "search_query: "
+            
+        prefixed = [f"{prefix}{t[:_MAX_INPUT_CHARS]}" for t in texts]
+        embeddings = model.encode(prefixed, normalize_embeddings=True)
+        return [emb.tolist() for emb in embeddings]
+    except Exception:
+        logger.exception("embed_batch failed")
+        return [None] * len(texts)
 
 
 # ------------------------------------------------------------------
@@ -276,12 +355,7 @@ def search_similar(
     query_text: str,
     limit: int = 10,
 ) -> List[Dict]:
-    """Return the *limit* most similar embeddings to *query_text*.
-
-    Uses pgvector cosine distance operator (<=>).
-    Filters by tenant_id (includes NULL for global content) and optional
-    content_types.
-    """
+    """Return the *limit* most similar embeddings to *query_text*."""
     vector = embed_text(query_text, task_type="RETRIEVAL_QUERY")
     if vector is None:
         return []
@@ -298,8 +372,6 @@ def search_similar(
         type_clause = "AND content_type = ANY(:ctypes)"
         params["ctypes"] = content_types
 
-    # Inline the vector literal to avoid SQLAlchemy confusing ':vector::vector'
-    # (colon-based named param vs PostgreSQL type cast).
     sql = text(f"""
         SELECT
             id,
@@ -349,11 +421,7 @@ def search_entities_semantic(
     query_embedding: List[float],
     limit: int = 30,
 ) -> List[Dict]:
-    """Search entities via cosine similarity on embeddings table (content_type='entity').
-
-    Joins with knowledge_entities to return entity metadata.
-    Returns list of dicts with id, name, entity_type, category, description, similarity.
-    """
+    """Search entities via cosine similarity on embeddings table (content_type='entity')."""
     vector_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
     sql = text(f"""
@@ -394,22 +462,42 @@ def search_entities_semantic(
 # ------------------------------------------------------------------
 
 def initialize_intent_embeddings():
-    """Embed canonical intents at API startup. Call once from main.py.
-
-    Builds the in-memory _intent_cache with embedded vectors for each intent.
-    If INTENT_EXPANSION_LANGUAGES is set, also embeds Ollama-translated variants
-    for multilingual matching — same quality, no hardcoded phrases.
-    """
+    """Embed canonical intents at API startup. Call once from main.py."""
     global _intent_cache
+    
+    # Try Rust first for initialization speed
+    use_rust = os.environ.get("USE_RUST_EMBEDDING", "false").lower() == "true"
+    if use_rust:
+        stub = _get_grpc_stub()
+        if stub:
+            try:
+                from app.generated import embedding_pb2
+                all_intents = list(INTENT_DEFINITIONS)
+                try:
+                    additional = _expand_intents_with_translations()
+                    if additional:
+                        all_intents.extend(additional)
+                except Exception: pass
+                
+                req = embedding_pb2.EmbedBatchRequest(
+                    texts=[f"search_query: {i['name']}" for i in all_intents],
+                    task_type="search_query"
+                )
+                resp = stub.EmbedBatch(req, timeout=60.0)
+                _intent_cache = []
+                for i, r in enumerate(resp.results):
+                    _intent_cache.append({**all_intents[i], "vector": np.array(r.vector)})
+                logger.info("Intent embedding cache initialized via Rust (%d intents)", len(_intent_cache))
+                return
+            except Exception as e:
+                logger.warning("Rust intent initialization failed: %s", e)
+
     model = _get_model()
     if not model:
         logger.warning("Embedding model not available, intent matching disabled")
         return
 
-    # Start with canonical English intents
     all_intents = list(INTENT_DEFINITIONS)
-
-    # Optionally expand with translated variants
     try:
         additional = _expand_intents_with_translations()
         if additional:
@@ -433,19 +521,16 @@ def initialize_intent_embeddings():
 
 
 def match_intent(message: str) -> dict:
-    """Embed message and cosine-match against cached intent vectors.
-
-    Returns best matching intent dict with 'similarity' score, or None if
-    no match above threshold (0.4) or cache not initialized.
-    """
+    """Embed message and cosine-match against cached intent vectors."""
     if not _intent_cache:
         return None
-    model = _get_model()
-    if not model:
+    
+    msg_vec = embed_text(message, task_type="RETRIEVAL_QUERY")
+    if msg_vec is None:
         return None
+        
     try:
-        prefixed = f"search_query: {message[:_MAX_INPUT_CHARS]}"
-        msg_vec = model.encode(prefixed, normalize_embeddings=True)
+        msg_vec = np.array(msg_vec)
         best_match = None
         best_score = 0.0
         for intent in _intent_cache:
@@ -474,15 +559,9 @@ def search_memories_semantic(
     query_embedding: List[float],
     limit: int = 15,
 ) -> List[Dict]:
-    """Search agent_memories by content_embedding (pgvector cosine) directly.
-
-    Returns list of dicts with id, agent_id, memory_type, content, importance, similarity.
-    """
+    """Search agent_memories by content_embedding (pgvector cosine) directly."""
     vector_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
-    # Fetch 3× candidates by raw cosine, then apply time-decay in SQL so
-    # stale memories don't push out fresher ones during top-K selection.
-    # decay_adjusted = similarity * GREATEST(0.1, 1 - decay_rate * days_since_access)
     sql = text(f"""
         WITH candidates AS (
             SELECT

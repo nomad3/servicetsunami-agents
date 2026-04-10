@@ -1,0 +1,93 @@
+syntax = "proto3";
+package memory.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+service MemoryCore {
+  rpc Recall(RecallRequest) returns (RecallResponse);
+  rpc RecordObservation(RecordObservationRequest) returns (google.protobuf.Empty);
+  rpc RecordCommitment(RecordCommitmentRequest) returns (google.protobuf.Empty);
+  rpc IngestEvents(IngestRequest) returns (IngestResponse);
+}
+
+message RecallRequest {
+  string tenant_id = 1;
+  string agent_slug = 2;
+  string query = 3;
+  string user_id = 4;
+  string chat_session_id = 5;
+  int32 top_k_per_type = 6;
+  int32 total_token_budget = 7;
+}
+
+message Entity {
+  string id = 1;
+  string name = 2;
+  string entity_type = 3;
+  string category = 4;
+  string description = 5;
+  float similarity = 6;
+}
+
+message Observation {
+  string id = 1;
+  string entity_id = 2;
+  string content = 3;
+  float similarity = 4;
+}
+
+message Relation {
+  string from_entity = 1;
+  string to_entity = 2;
+  string relation_type = 3;
+}
+
+message EpisodeSummary {
+  string id = 1;
+  string summary = 2;
+  google.protobuf.Timestamp created_at = 3;
+  float similarity = 4;
+}
+
+message RecallResponse {
+  repeated Entity entities = 1;
+  repeated Observation observations = 2;
+  repeated Relation relations = 3;
+  repeated EpisodeSummary episodes = 4;
+}
+
+message RecordObservationRequest {
+  string tenant_id = 1;
+  string entity_id = 2;
+  string content = 3;
+  float confidence = 4;
+  string source_type = 5;
+  string source_id = 6;
+  string actor_slug = 7;
+}
+
+message RecordCommitmentRequest {
+  string tenant_id = 1;
+  string owner_agent_slug = 2;
+  string title = 3;
+  string description = 4;
+  string commitment_type = 5;
+  google.protobuf.Timestamp due_at = 6;
+}
+
+message MemoryEvent {
+  string source_type = 1;
+  string source_id = 2;
+  repeated string proposed_entities = 3; // simplified for proto
+  string actor_slug = 4;
+}
+
+message IngestRequest {
+  string tenant_id = 1;
+  repeated MemoryEvent events = 2;
+}
+
+message IngestResponse {
+  int32 processed = 1;
+}

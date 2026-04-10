@@ -53,9 +53,110 @@ logger = logging.getLogger(__name__)
 # Hard timeout: 1500ms total (soft target is 500ms — see plan Phase 1.3).
 _HARD_TIMEOUT_SECONDS = 1.5
 
+_grpc_channel = None
+_grpc_stub = None
+
+def _get_grpc_stub():
+    """Lazy-init the gRPC client stub for Rust memory-core."""
+    global _grpc_channel, _grpc_stub
+    if _grpc_stub is not None:
+        return _grpc_stub
+    
+    url = os.environ.get("MEMORY_CORE_URL")
+    if not url:
+        return None
+        
+    try:
+        import grpc
+        try:
+            from app.generated import memory_pb2_grpc
+        except ImportError:
+            logger.warning("gRPC generated code not found for memory-core. Rust memory disabled.")
+            return None
+            
+        _grpc_channel = grpc.insecure_channel(url)
+        _grpc_stub = memory_pb2_grpc.MemoryCoreStub(_grpc_channel)
+        return _grpc_stub
+    except Exception as e:
+        logger.warning("Failed to connect to Rust memory-core at %s: %s", url, e)
+        return None
+
 
 def recall(db: Session, request: RecallRequest) -> RecallResponse:
     """Pre-load memory context for a chat turn."""
+    use_rust = os.environ.get("USE_RUST_MEMORY", "false").lower() == "true"
+    if use_rust:
+        stub = _get_grpc_stub()
+        if stub:
+            try:
+                from app.generated import memory_pb2
+                from app.memory.types import EntitySummary, ObservationSummary, RelationSummary, EpisodeSummary, RecallResponse, RecallMetadata
+                
+                req = memory_pb2.RecallRequest(
+                    tenant_id=str(request.tenant_id),
+                    agent_slug=request.agent_slug,
+                    query=request.query,
+                    user_id=str(request.user_id) if request.user_id else "",
+                    chat_session_id=str(request.chat_session_id) if request.chat_session_id else "",
+                    top_k_per_type=request.top_k_per_type,
+                    total_token_budget=request.total_token_budget
+                )
+                
+                t0 = time.perf_counter()
+                resp = stub.Recall(req, timeout=5.0)
+                elapsed = (time.perf_counter() - t0) * 1000
+                
+                # Map back to Python dataclasses
+                entities = [
+                    EntitySummary(
+                        id=uuid.UUID(e.id),
+                        name=e.name,
+                        category=e.category,
+                        description=e.description,
+                        similarity=e.similarity,
+                        confidence=1.0,
+                        source_type=e.entity_type
+                    ) for e in resp.entities
+                ]
+                
+                observations = [
+                    ObservationSummary(
+                        id=uuid.UUID(o.id),
+                        entity_id=uuid.UUID(o.entity_id),
+                        content=o.content,
+                        similarity=o.similarity,
+                        confidence=1.0,
+                        created_at=datetime.utcnow() # TODO: use proto timestamp
+                    ) for o in resp.observations
+                ]
+                
+                relations = [
+                    RelationSummary(
+                        from_entity=r.from_entity,
+                        to_entity=r.to_entity,
+                        relation_type=r.relation_type
+                    ) for r in resp.relations
+                ]
+                
+                episodes = [
+                    EpisodeSummary(
+                        id=uuid.UUID(e.id),
+                        summary=e.summary,
+                        similarity=e.similarity,
+                        created_at=datetime.fromtimestamp(e.created_at.seconds)
+                    ) for e in resp.episodes
+                ]
+                
+                return RecallResponse(
+                    entities=entities,
+                    observations=observations,
+                    relations=relations,
+                    episodes=episodes,
+                    metadata=RecallMetadata(elapsed_ms=elapsed)
+                )
+            except Exception as e:
+                logger.warning("Rust recall failed, falling back to Python: %s", e)
+
     metadata = RecallMetadata(elapsed_ms=0.0)
     
     # --- Step 0: Context Enrichment (Who is the user?) ---

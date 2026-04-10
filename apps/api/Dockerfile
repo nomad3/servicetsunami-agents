@@ -56,6 +56,13 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy application code
 COPY --chown=appuser:appgroup ./app /app/app
 
+# Copy proto files and generate gRPC client code
+COPY --chown=appuser:appgroup ./proto /app/proto
+RUN mkdir -p /app/app/generated && \
+    python -m grpc_tools.protoc -I /app/proto --python_out=/app/app/generated --grpc_python_out=/app/app/generated /app/proto/embedding.proto && \
+    python -m grpc_tools.protoc -I /app/proto --python_out=/app/app/generated --grpc_python_out=/app/app/generated /app/proto/memory.proto && \
+    touch /app/app/generated/__init__.py
+
 # Create storage directory with correct permissions
 RUN mkdir -p /app/storage && chown -R appuser:appgroup /app/storage
 

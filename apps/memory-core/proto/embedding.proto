@@ -1,0 +1,36 @@
+syntax = "proto3";
+package embedding.v1;
+
+import "google/protobuf/empty.proto";
+
+service EmbeddingService {
+  rpc Embed(EmbedRequest) returns (EmbedResponse);
+  rpc EmbedBatch(EmbedBatchRequest) returns (EmbedBatchResponse);
+  rpc Health(google.protobuf.Empty) returns (HealthResponse);
+}
+
+message EmbedRequest {
+  string text = 1;
+  string task_type = 2;          // "search_query" | "search_document" | "classification"
+}
+
+message EmbedResponse {
+  repeated float vector = 1;     // 768 floats for nomic-embed-text-v1.5
+  string model = 2;
+  int32 dimensions = 3;
+}
+
+message EmbedBatchRequest {
+  repeated string texts = 1;
+  string task_type = 2;
+}
+
+message EmbedBatchResponse {
+  repeated EmbedResponse results = 1;
+}
+
+message HealthResponse {
+  string status = 1;             // "ok" | "degraded" | "loading"
+  string model = 2;
+  int64 uptime_seconds = 3;
+}

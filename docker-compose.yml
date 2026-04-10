@@ -30,7 +30,10 @@ services:
     depends_on:
       - db
       - temporal
+      - embedding-service
+      - memory-core
     environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/servicetsunami
       - MCP_SERVER_URL=http://mcp-server:8000
       - PLATFORM_CLAUDE_CODE_TOKEN=${PLATFORM_CLAUDE_CODE_TOKEN:-}
       - HF_HUB_ENABLE_HF_TRANSFER=0
@@ -42,8 +45,41 @@ services:
       - EXPLORATION_RATE=${EXPLORATION_RATE:-0.0}
       - USE_MEMORY_V2=true
       - USE_MEMORY_V2_TENANT_ALLOWLIST=[]
+      - EMBEDDING_SERVICE_URL=embedding-service:50051
+      - MEMORY_CORE_URL=memory-core:50052
+      - USE_RUST_EMBEDDING=true
+      - USE_RUST_MEMORY=true
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  embedding-service:
+    build:
+      context: ./apps/embedding-service
+      dockerfile: Dockerfile
+    image: servicetsunami-embedding-service
+    ports:
+      - "50051:50051"
+    environment:
+      - RUST_LOG=info
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  memory-core:
+    build:
+      context: ./apps/memory-core
+      dockerfile: Dockerfile
+    image: servicetsunami-memory-core
+    ports:
+      - "50052:50052"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/servicetsunami
+      - EMBEDDING_SERVICE_URL=http://embedding-service:50051
+      - RUST_LOG=info
+    depends_on:
+      - db
+      - embedding-service
+    restart: unless-stopped
 
   web:
     build:
@@ -83,6 +119,8 @@ services:
     depends_on:
       - db
       - temporal
+      - embedding-service
+      - memory-core
     environment:
       - MCP_SERVER_URL=http://mcp-server:8000
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
@@ -90,6 +128,10 @@ services:
       - HF_HUB_DISABLE_XET=1
       - USE_MEMORY_V2=true
       - USE_MEMORY_V2_TENANT_ALLOWLIST=[]
+      - EMBEDDING_SERVICE_URL=embedding-service:50051
+      - MEMORY_CORE_URL=memory-core:50052
+      - USE_RUST_EMBEDDING=true
+      - USE_RUST_MEMORY=true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -115,8 +157,6 @@ services:
     restart: unless-stopped
     healthcheck:
       disable: true
-
-  # mcp-server removed — Databricks/scraping not used, saves 12GB disk
 
   mcp-tools:
     build:
@@ -165,10 +205,6 @@ services:
       - temporal
     restart: unless-stopped
 
-  # ollama service removed — Ollama runs natively on the host Mac (GPU-accelerated)
-  # and is reachable from containers via host.docker.internal:11434.
-  # The Docker-based ollama ran CPU-only; native gives full M4 GPU at ~57 tok/s.
-
   luna-client:
     build:
       context: ./apps/luna-client
@@ -205,4 +241,3 @@ volumes:
   db_data:
   claude_sessions:
   hf_cache:
-  # ollama_models removed — native host Ollama manages its own model storage
