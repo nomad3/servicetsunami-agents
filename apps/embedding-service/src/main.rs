@@ -2,7 +2,7 @@ use tonic::{transport::Server, Request, Response, Status};
 use tonic_health::server::health_reporter;
 use embedding::v1::embedding_service_server::{EmbeddingService, EmbeddingServiceServer};
 use embedding::v1::{EmbedRequest, EmbedResponse, EmbedBatchRequest, EmbedBatchResponse, HealthResponse};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::sync::Arc;
 
 use candle_core::{Device, Tensor, DType};
@@ -166,6 +166,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("EmbeddingService listening on {}", addr);
 
     Server::builder()
+        .timeout(Duration::from_secs(30))
         .add_service(health_service)
         .add_service(EmbeddingServiceServer::new(service))
         .serve(addr)
