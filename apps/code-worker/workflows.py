@@ -1503,33 +1503,28 @@ def _prepare_gemini_home(session_dir: str, auth_payload: dict, mcp_config_json: 
             # Simplest valid registry to avoid TypeError and rename issues
             json.dump({"projects": {}}, f, indent=2)
 
-    # Gemini CLI credentials.json format for oauth-personal
+    # Gemini CLI credentials.json — use only the user's OAuth tokens.
+    # Do NOT include our platform's GOOGLE_CLIENT_ID/SECRET here.
+    # Gemini CLI has its own built-in client ID for Cloud Code API access
+    # via the user's Gemini subscription. Injecting our platform's client_id
+    # causes "Cloud Code Private API not enabled" errors because our GCP
+    # project doesn't have that API enabled (nor should it).
     import time
-    expiry_ms = int((time.time() + 3600) * 1000)  # Assume 1h expiry if unknown
-    
-    # Use any existing refresh token or access token from auth_payload
+    expiry_ms = int((time.time() + 3600) * 1000)
+
     creds_payload = {
         "access_token": auth_payload.get("access_token"),
         "refresh_token": auth_payload.get("refresh_token"),
-        "scope": "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/accounts.reauth https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile openid",
+        "scope": "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile openid",
         "token_type": "Bearer",
         "expiry_date": expiry_ms
     }
-    
+
     with open(os.path.join(gemini_home, "credentials.json"), "w") as f:
         json.dump(creds_payload, f, indent=2)
 
-    # Also maintain ADC for tools that might use it (Vertex AI nodes)
-    adc_path = os.path.join(gemini_home, "application_default_credentials.json")
-    adc_payload = {
-        "access_token": auth_payload.get("access_token"),
-        "refresh_token": auth_payload.get("refresh_token"),
-        "client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
-        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
-        "type": "authorized_user",
-    }
-    with open(adc_path, "w") as f:
-        json.dump(adc_payload, f, indent=2)
+    # Do NOT write application_default_credentials.json — it would override
+    # Gemini CLI's built-in auth with our platform's GCP project.
     
     # settings.json for auth enforcement and feature disabling
     settings = {
