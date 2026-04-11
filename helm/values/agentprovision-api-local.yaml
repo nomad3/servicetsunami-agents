@@ -63,14 +63,19 @@ configMap:
     TEMPORAL_NAMESPACE: "default"
     MCP_ENABLED: "true"
     USE_MEMORY_V2: "true"
-    USE_RUST_EMBEDDING: "false"
+    USE_RUST_EMBEDDING: "true"
     USE_RUST_MEMORY: "false"
-    MEMORY_DUAL_READ: "false"
-    # Rust services disabled until candle/nomic model compat is resolved
-    # EMBEDDING_SERVICE_URL: "embedding-service:50051"
-    # MEMORY_CORE_URL: "memory-core:50052"
+    MEMORY_DUAL_READ: "true"
+    EMBEDDING_SERVICE_URL: "embedding-service:50051"
+    MEMORY_CORE_URL: "memory-core:50052"
     DATABASE_URL: "postgresql://postgres:postgres@postgresql:5432/agentprovision"
     TEMPORAL_ADDRESS: "temporal:7233"
+
+# Load secrets from k8s secret (created from apps/api/.env)
+envFrom:
+  configMapRef: []
+  secretRef:
+    - api-secrets
 
 # Disable GKE specifics
 externalSecret:

@@ -1,0 +1,54 @@
+# Cloudflare Tunnel - runs inside K8s, routes to services by DNS name
+nameOverride: "cloudflared"
+fullnameOverride: "cloudflared"
+
+image:
+  repository: cloudflare/cloudflared
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+container:
+  port: 8080
+  command:
+    - cloudflared
+    - tunnel
+    - --no-autoupdate
+    - --config
+    - /etc/cloudflared/config.yml
+    - run
+    - agentprovision
+
+podSecurityContext:
+  runAsNonRoot: false
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+livenessProbe:
+  enabled: false
+readinessProbe:
+  enabled: false
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+# Disable everything else
+externalSecret:
+  enabled: false
+persistence:
+  enabled: false
+configMap:
+  enabled: false
