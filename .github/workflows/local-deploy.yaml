@@ -1,4 +1,4 @@
-name: Local Deploy
+name: Local Deploy (Rancher Desktop K8s)
 
 on:
   push:
@@ -7,23 +7,25 @@ on:
       - 'apps/api/**'
       - 'apps/web/**'
       - 'apps/code-worker/**'
-      - 'apps/mcp-server/**'
-      - 'apps/luna-client/**'
       - 'apps/embedding-service/**'
       - 'apps/memory-core/**'
-      - 'docker-compose.yml'
+      - 'helm/**'
       - '.github/workflows/local-deploy.yaml'
   workflow_dispatch:
     inputs:
       services:
-        description: 'Services to rebuild (comma-separated: api,web,luna-client,code-worker,orchestration-worker,embedding-service,memory-core)'
+        description: 'Services to rebuild (comma-separated: api,web,code-worker,orchestration-worker,embedding-service,memory-core or "all")'
         required: false
         default: 'all'
+
+env:
+  NAMESPACE: agentprovision
+  CHART_PATH: ./helm/charts/microservice
 
 jobs:
   deploy:
     runs-on: self-hosted
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,18 +35,14 @@ jobs:
         if: github.event_name == 'push'
         run: |
           CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
-          echo "files=$CHANGED" >> $GITHUB_OUTPUT
-
           SERVICES=""
           echo "$CHANGED" | grep -q "apps/api/" && SERVICES="$SERVICES api orchestration-worker"
           echo "$CHANGED" | grep -q "apps/web/" && SERVICES="$SERVICES web"
           echo "$CHANGED" | grep -q "apps/code-worker/" && SERVICES="$SERVICES code-worker"
-          echo "$CHANGED" | grep -q "apps/mcp-server/" && SERVICES="$SERVICES mcp-tools"
-          echo "$CHANGED" | grep -q "apps/luna-client/" && SERVICES="$SERVICES luna-client"
           echo "$CHANGED" | grep -q "apps/embedding-service/" && SERVICES="$SERVICES embedding-service"
           echo "$CHANGED" | grep -q "apps/memory-core/" && SERVICES="$SERVICES memory-core"
-          # Default set if nothing specific changed
-          [ -z "$SERVICES" ] && SERVICES="api web luna-client code-worker orchestration-worker"
+          echo "$CHANGED" | grep -q "helm/" && SERVICES="$SERVICES helm-only"
+          [ -z "$SERVICES" ] && SERVICES="api web orchestration-worker"
           echo "services=$SERVICES" >> $GITHUB_OUTPUT
           echo "Deploying: $SERVICES"
 
@@ -54,7 +52,7 @@ jobs:
         run: |
           INPUT="${{ github.event.inputs.services }}"
           if [ "$INPUT" = "all" ]; then
-            echo "services=api web luna-client code-worker orchestration-worker embedding-service memory-core" >> $GITHUB_OUTPUT
+            echo "services=api web code-worker orchestration-worker embedding-service memory-core" >> $GITHUB_OUTPUT
           else
             echo "services=$(echo $INPUT | tr ',' ' ')" >> $GITHUB_OUTPUT
           fi
@@ -62,166 +60,200 @@ jobs:
       - name: Unlock keychain
         run: security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" ~/Library/Keychains/login.keychain-db
 
-      - name: Clean up Docker disk (threshold-based)
+      - name: Verify K8s context
         run: |
-          echo "--- Docker disk before cleanup ---"
-          docker system df 2>/dev/null || true
+          kubectl config use-context rancher-desktop
+          kubectl get ns $NAMESPACE 2>/dev/null || kubectl create ns $NAMESPACE
 
-          # Check available space in Docker VM
+      - name: Clean Docker disk (threshold-based)
+        run: |
           AVAIL_GB=$(docker run --rm --privileged alpine df / 2>/dev/null | tail -1 | awk '{print int($4/1024/1024)}')
-          echo "Available disk: ${AVAIL_GB}GB"
-
-          # Only aggressive cleanup if below 15GB free
+          echo "Available disk: ${AVAIL_GB:-unknown}GB"
           if [ "${AVAIL_GB:-0}" -lt 15 ]; then
-            echo "Low disk (${AVAIL_GB}GB < 15GB) — running aggressive cleanup"
-
-            # Remove dangling images
-            docker image prune -f 2>/dev/null || true
-
-            # Remove unused images not referenced by running containers
+            echo "Low disk — aggressive cleanup"
             docker image prune -af 2>/dev/null || true
-
-            # Clear build cache
             docker builder prune -af 2>/dev/null || true
-
-            # Remove orphaned buildx volumes
-            for vol in $(docker volume ls -q 2>/dev/null | grep buildkit); do
-              if ! docker ps -q --filter "volume=$vol" 2>/dev/null | grep -q .; then
-                echo "Removing orphaned buildx volume: $vol"
-                docker volume rm "$vol" 2>/dev/null || true
-              fi
-            done
           else
-            echo "Disk OK (${AVAIL_GB}GB) — only pruning dangling images"
             docker image prune -f 2>/dev/null || true
           fi
 
-          echo "--- Docker disk after cleanup ---"
-          docker system df 2>/dev/null || true
-
-      - name: Build and deploy
+      # ── Build Docker Images ──────────────────────────────────
+      - name: Build Docker images
         run: |
           SERVICES="${{ steps.changes.outputs.services || steps.dispatch.outputs.services }}"
           echo "Building: $SERVICES"
 
-          cd /Users/nomade/Documents/GitHub/agentprovision-agents
+          build_img() {
+            local name=$1 path=$2
+            echo "--- Building $name ---"
+            docker build -t "$name:latest" "$path" --quiet && echo "  OK: $name" || echo "  FAILED: $name"
+          }
 
-          # Build and restart only changed services
-          for svc in $SERVICES; do
-            echo "--- Rebuilding $svc ---"
-            docker-compose up -d --build "$svc" 2>&1 | tail -3
-          done
+          echo "$SERVICES" | grep -q "api" && {
+            build_img agentprovision-api ./apps/api
+            docker tag agentprovision-api:latest agentprovision-orchestration-worker:latest
+            echo "  Tagged orchestration-worker from api"
+          }
 
-          # Workers share the API image — restart them when API changes
+          echo "$SERVICES" | grep -q "web" && build_img agentprovision-web ./apps/web
+
+          echo "$SERVICES" | grep -q "code-worker" && build_img agentprovision-code-worker ./apps/code-worker
+
+          echo "$SERVICES" | grep -q "embedding-service" && build_img agentprovision-embedding-service ./apps/embedding-service
+
+          echo "$SERVICES" | grep -q "memory-core" && build_img agentprovision-memory-core ./apps/memory-core
+
+      # ── Deploy via Helm ──────────────────────────────────────
+      - name: Deploy services (Helm)
+        run: |
+          SERVICES="${{ steps.changes.outputs.services || steps.dispatch.outputs.services }}"
+          NS=$NAMESPACE
+          CHART=$CHART_PATH
+          V=./helm/values
+
+          deploy() {
+            local name=$1 values=$2
+            echo "--- Deploying $name ---"
+            helm upgrade --install "$name" "$CHART" -n "$NS" $values || echo "WARN: $name deploy failed"
+          }
+
+          # Infrastructure (idempotent — always ensure running)
+          deploy postgresql "-f $V/postgresql-local.yaml"
+          deploy redis "-f $V/redis-local.yaml"
+          deploy temporal "-f $V/temporal-local.yaml"
+
+          # Application services (only if changed)
+          echo "$SERVICES" | grep -q "api" && \
+            deploy api "-f $V/agentprovision-api-local.yaml"
+
+          echo "$SERVICES" | grep -q "orchestration-worker" && \
+            deploy orchestration-worker "-f $V/agentprovision-orchestration-worker-local.yaml"
+
+          echo "$SERVICES" | grep -q "web" && \
+            deploy web "-f $V/agentprovision-web-local.yaml"
+
+          echo "$SERVICES" | grep -q "code-worker" && \
+            deploy code-worker "-f $V/agentprovision-code-worker-local.yaml"
+
+          echo "$SERVICES" | grep -q "embedding-service" && \
+            deploy embedding-service "-f $V/embedding-service.yaml -f $V/embedding-service-local.yaml"
+
+          echo "$SERVICES" | grep -q "memory-core" && \
+            deploy memory-core "-f $V/memory-core.yaml -f $V/memory-core-local.yaml"
+
+          # Restart workers if API image changed (they share the image)
           if echo "$SERVICES" | grep -q "api"; then
             for worker in orchestration-worker; do
               if ! echo "$SERVICES" | grep -q "$worker"; then
-                echo "--- Restarting $worker (depends on API code) ---"
-                kubectl rollout restart deploy/$worker -n agentprovision 2>/dev/null || true
+                echo "--- Restarting $worker (depends on API image) ---"
+                kubectl rollout restart deploy/$worker -n $NS 2>/dev/null || true
               fi
             done
           fi
 
-          # Wait for health
-          echo "--- Waiting for services to be healthy ---"
-          sleep 20
-
-          # Health check
-          API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/auth/login 2>/dev/null || echo "000")
-          echo "API status: $API_STATUS"
-          if [ "$API_STATUS" = "000" ]; then
-            echo "WARNING: API not responding yet, may still be starting up"
-          fi
-
-      - name: Build Rust services (Docker)
-        run: |
-          SERVICES="${{ steps.changes.outputs.services || steps.dispatch.outputs.services }}"
-
-          if echo "$SERVICES" | grep -q "embedding-service"; then
-            echo "--- Building embedding-service ---"
-            docker build -t agentprovision-embedding-service:latest apps/embedding-service/
-          fi
-
-          if echo "$SERVICES" | grep -q "memory-core"; then
-            echo "--- Building memory-core ---"
-            docker build -t agentprovision-memory-core:latest apps/memory-core/
-          fi
-
-      - name: Deploy Rust services (Helm)
-        run: |
-          SERVICES="${{ steps.changes.outputs.services || steps.dispatch.outputs.services }}"
-          NAMESPACE=agentprovision
-
-          if echo "$SERVICES" | grep -q "embedding-service"; then
-            echo "--- Deploying embedding-service ---"
-            helm upgrade --install embedding-service helm/charts/microservice \
-              -f helm/values/embedding-service.yaml \
-              -f helm/values/embedding-service-local.yaml \
-              -n "$NAMESPACE" --create-namespace
-          fi
-
-          if echo "$SERVICES" | grep -q "memory-core"; then
-            echo "--- Deploying memory-core ---"
-            helm upgrade --install memory-core helm/charts/microservice \
-              -f helm/values/memory-core.yaml \
-              -f helm/values/memory-core-local.yaml \
-              -n "$NAMESPACE" --create-namespace
-          fi
-
+      # ── Migrations ───────────────────────────────────────────
       - name: Run pending migrations
         if: contains(steps.changes.outputs.services || steps.dispatch.outputs.services, 'api') || github.event_name == 'workflow_dispatch'
         shell: bash --noprofile --norc {0}
         run: |
           set +e
-          PROJECT_DIR="/Users/nomade/Documents/GitHub/agentprovision-agents"
-          MIGRATION_DIR="$PROJECT_DIR/apps/api/migrations"
+          NS=$NAMESPACE
+          MIGRATION_DIR="./apps/api/migrations"
 
-          # Create tracking table if it doesn't exist
-          docker exec agentprovision-agents-db-1 psql -U postgres agentprovision -c \
+          # Wait for PostgreSQL pod
+          echo "Waiting for PostgreSQL..."
+          for i in $(seq 1 30); do
+            PG_POD=$(kubectl get pod -n $NS -l app.kubernetes.io/name=postgresql -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+            [ -n "$PG_POD" ] && kubectl exec -n $NS "$PG_POD" -- pg_isready -U postgres 2>/dev/null | grep -q "accepting" && break
+            sleep 2
+          done
+
+          PG_POD=$(kubectl get pod -n $NS -l app.kubernetes.io/name=postgresql -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+          if [ -z "$PG_POD" ]; then
+            echo "ERROR: PostgreSQL pod not found"
+            exit 0
+          fi
+
+          # Create tracking table
+          kubectl exec -n $NS "$PG_POD" -- psql -U postgres agentprovision -c \
             "CREATE TABLE IF NOT EXISTS _migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT now());" 2>/dev/null
 
-          # Run any migrations not yet applied
+          # Apply migrations
           APPLIED=0
           SKIPPED=0
-          FAILED=0
           for f in $(ls "$MIGRATION_DIR"/*.sql 2>/dev/null | sort); do
             BASENAME=$(basename "$f")
-            ALREADY=$(docker exec agentprovision-agents-db-1 psql -U postgres agentprovision -tAc \
+            ALREADY=$(kubectl exec -n $NS "$PG_POD" -- psql -U postgres agentprovision -tAc \
               "SELECT COUNT(*) FROM _migrations WHERE filename = '$BASENAME';" 2>/dev/null)
             if [ "$ALREADY" = "1" ]; then
               SKIPPED=$((SKIPPED + 1))
               continue
             fi
             echo "Applying: $BASENAME"
-            docker cp "$f" agentprovision-agents-db-1:/tmp/migration.sql
-            if docker exec agentprovision-agents-db-1 psql -U postgres agentprovision -f /tmp/migration.sql; then
-              docker exec agentprovision-agents-db-1 psql -U postgres agentprovision -c \
-                "INSERT INTO _migrations (filename) VALUES ('$BASENAME') ON CONFLICT DO NOTHING;"
+            kubectl cp "$f" "$NS/$PG_POD:/tmp/migration.sql"
+            if kubectl exec -n $NS "$PG_POD" -- psql -U postgres agentprovision -f /tmp/migration.sql 2>/dev/null; then
+              kubectl exec -n $NS "$PG_POD" -- psql -U postgres agentprovision -c \
+                "INSERT INTO _migrations (filename) VALUES ('$BASENAME') ON CONFLICT DO NOTHING;" 2>/dev/null
               APPLIED=$((APPLIED + 1))
-            else
-              echo "WARNING: Failed to apply $BASENAME (may already exist)"
-              FAILED=$((FAILED + 1))
             fi
           done
-          echo "Migrations: $APPLIED applied, $SKIPPED already applied, $FAILED failed"
+          echo "Migrations: $APPLIED applied, $SKIPPED already applied"
           exit 0
 
+      # ── Ensure port-forwards and tunnel ──────────────────────
+      - name: Setup access (port-forward + cloudflare tunnel)
+        run: |
+          NS=$NAMESPACE
+
+          # Kill old port-forwards
+          pkill -f "kubectl port-forward" 2>/dev/null || true
+          sleep 1
+
+          # Start fresh port-forwards
+          kubectl port-forward -n $NS svc/api 8000:80 &>/dev/null &
+          kubectl port-forward -n $NS svc/web 8002:80 &>/dev/null &
+          sleep 3
+
+          # Restart cloudflare tunnel (picks up new port-forwards)
+          pkill -f "cloudflared tunnel" 2>/dev/null || true
+          sleep 2
+          cloudflared tunnel run agentprovision &>/tmp/cloudflared.log &
+          sleep 5
+
+          # Verify
+          API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/ 2>/dev/null || echo "000")
+          echo "API local: $API_STATUS"
+
+          TUNNEL_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://agentprovision.com/api/v1/ 2>/dev/null || echo "000")
+          echo "API tunnel: $TUNNEL_STATUS"
+
+      # ── Cleanup & Summary ────────────────────────────────────
       - name: Post-deploy cleanup
-        run: |
-          # Always prune dangling images after build (cheap, removes old layers)
-          docker image prune -f 2>/dev/null || true
+        run: docker image prune -f 2>/dev/null || true
 
-          # Report disk usage
-          AVAIL_GB=$(docker run --rm --privileged alpine df / 2>/dev/null | tail -1 | awk '{print int($4/1024/1024)}')
-          echo "Available disk after deploy: ${AVAIL_GB}GB"
-
-      - name: Post-deploy summary
+      - name: Deploy summary
         run: |
+          NS=$NAMESPACE
           echo "## Deploy Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|--------|" >> $GITHUB_STEP_SUMMARY
-          for svc in api web orchestration-worker code-worker embedding-service memory-core; do
-            STATUS=$(kubectl get pod -n agentprovision -l "app.kubernetes.io/name=$svc" --no-headers 2>/dev/null | awk '{print $3}' | head -1 || echo "not found")
-            echo "| $svc | ${STATUS:-not found} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Status | Ready |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          for svc in postgresql redis temporal api web orchestration-worker code-worker embedding-service memory-core; do
+            POD_INFO=$(kubectl get pod -n $NS -l "app.kubernetes.io/name=$svc" --no-headers 2>/dev/null | head -1)
+            STATUS=$(echo "$POD_INFO" | awk '{print $3}')
+            READY=$(echo "$POD_INFO" | awk '{print $2}')
+            echo "| $svc | ${STATUS:-not deployed} | ${READY:--} |" >> $GITHUB_STEP_SUMMARY
           done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Endpoint | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          API_LOCAL=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/v1/ 2>/dev/null || echo "000")
+          API_TUNNEL=$(curl -s -o /dev/null -w "%{http_code}" https://agentprovision.com/api/v1/ 2>/dev/null || echo "000")
+          echo "| localhost:8000 | $API_LOCAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| agentprovision.com | $API_TUNNEL |" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Helm Releases" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          helm list -n $NS >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

@@ -186,11 +186,32 @@ echo ""
 echo "=== Helm Releases ==="
 helm list -n "$NAMESPACE"
 echo ""
-echo "=== Access ==="
-echo "  API:  kubectl port-forward -n $NAMESPACE svc/api 8000:80"
-echo "  Web:  kubectl port-forward -n $NAMESPACE svc/web 8002:80"
-echo "  DB:   kubectl port-forward -n $NAMESPACE svc/postgresql 5432:5432"
+# ── Port Forwards + Cloudflare Tunnel ─────────────────────
+echo "=== Setting up access ==="
+
+# Kill old port-forwards and tunnel
+pkill -f "kubectl port-forward" 2>/dev/null || true
+pkill -f "cloudflared tunnel" 2>/dev/null || true
+sleep 1
+
+# Start port-forwards
+kubectl port-forward -n "$NAMESPACE" svc/api 8000:80 &>/dev/null &
+kubectl port-forward -n "$NAMESPACE" svc/web 8002:80 &>/dev/null &
+sleep 3
+
+# Start Cloudflare tunnel
+if command -v cloudflared &>/dev/null && [ -f ~/.cloudflared/config.yml ]; then
+  cloudflared tunnel run agentprovision &>/tmp/cloudflared.log &
+  sleep 5
+  echo "  Cloudflare tunnel: $(curl -s -o /dev/null -w '%{http_code}' https://agentprovision.com/api/v1/ 2>/dev/null || echo 'unknown')"
+else
+  echo "  Cloudflare tunnel: skipped (cloudflared not installed or config missing)"
+fi
+
 echo ""
-echo "  Or all at once:"
-echo "  kubectl port-forward -n $NAMESPACE svc/api 8000:80 &"
-echo "  kubectl port-forward -n $NAMESPACE svc/web 8002:80 &"
+echo "=== Access ==="
+echo "  Local API:   http://localhost:8000/api/v1/"
+echo "  Local Web:   http://localhost:8002/"
+echo "  Public API:  https://agentprovision.com/api/v1/"
+echo "  Public Web:  https://agentprovision.com/"
+echo "  DB:          kubectl port-forward -n $NAMESPACE svc/postgresql 5432:5432"
