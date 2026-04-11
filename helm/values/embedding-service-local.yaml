@@ -1,6 +1,6 @@
 # Local overrides for Rancher Desktop / kind
 persistence:
-  storageClass: local-path
+  storageClass: hostpath
   mountPath: /app/hf-cache
 
 # Set HF cache env vars (pod runs as user 1000, not root)

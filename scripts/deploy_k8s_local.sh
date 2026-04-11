@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # AgentProvision Local Kubernetes Deployment Script
-# Target: Rancher Desktop (rancher-desktop context)
+# Target: Docker Desktop Kubernetes (docker-desktop context)
 #
 # Usage:
 #   ./scripts/deploy_k8s_local.sh              # Deploy everything
@@ -25,8 +25,8 @@ done
 echo "=== AgentProvision K8s Local Deploy (Rancher Desktop) ==="
 
 # ── Pre-flight checks ────────────────────────────────────────
-kubectl config use-context rancher-desktop 2>/dev/null || {
-  echo "ERROR: rancher-desktop context not found. Is Rancher Desktop running?"
+kubectl config use-context docker-desktop 2>/dev/null || {
+  echo "ERROR: docker-desktop context not found. Is Docker Desktop running with Kubernetes enabled?"
   exit 1
 }
 
@@ -48,8 +48,6 @@ if [ "$SKIP_BUILD" = false ]; then
     fi
   }
 
-  # Infrastructure images are pulled from registries, no build needed
-
   # Core services
   build_image "agentprovision-api" "./apps/api"
   build_image "agentprovision-web" "./apps/web"
@@ -60,6 +58,9 @@ if [ "$SKIP_BUILD" = false ]; then
 
   # Code worker
   build_image "agentprovision-code-worker" "./apps/code-worker"
+
+  # MCP Tools
+  build_image "agentprovision-mcp-tools" "./apps/mcp-server"
 
   # Rust services
   build_image "agentprovision-embedding-service" "./apps/embedding-service"
@@ -125,6 +126,10 @@ helm upgrade --install api "$CHART_PATH" \
   -n "$NAMESPACE" -f "$VALUES_DIR/agentprovision-api-local.yaml" || true
 echo "  ✓ api"
 
+helm upgrade --install mcp-tools "$CHART_PATH" \
+  -n "$NAMESPACE" -f "$VALUES_DIR/agentprovision-mcp-local.yaml" || true
+echo "  ✓ mcp-tools"
+
 helm upgrade --install orchestration-worker "$CHART_PATH" \
   -n "$NAMESPACE" -f "$VALUES_DIR/agentprovision-orchestration-worker-local.yaml" || true
 echo "  ✓ orchestration-worker"
@@ -186,18 +191,15 @@ echo ""
 echo "=== Helm Releases ==="
 helm list -n "$NAMESPACE"
 echo ""
+
 # ── Cloudflare Tunnel (in-cluster) ────────────────────────
 echo "=== Deploying Cloudflare tunnel ==="
 kubectl apply -f kubernetes/cloudflared-deployment.yaml 2>/dev/null || true
-sleep 10
+sleep 5
 
 # Verify tunnel
 TUNNEL_STATUS=$(curl -s -o /dev/null -w '%{http_code}' https://agentprovision.com/api/v1/ 2>/dev/null || echo '000')
 echo "  Tunnel: $TUNNEL_STATUS"
-
-# Optional: local port-forwards for debugging
-# kubectl port-forward -n $NAMESPACE svc/api 8000:80 &
-# kubectl port-forward -n $NAMESPACE svc/web 8002:80 &
 
 echo ""
 echo "=== Access ==="

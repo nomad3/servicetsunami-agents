@@ -95,7 +95,7 @@ extraContainers: []
 # Local persistence for storage
 persistence:
   enabled: true
-  storageClass: local-path
+  storageClass: hostpath
   size: 5Gi
   mountPath: /app/storage
 
