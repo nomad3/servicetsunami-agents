@@ -51,11 +51,12 @@ configMap:
     GIT_BRANCH: "main"
     USE_MEMORY_V2: "true"
 
-# Secrets loaded from k8s secret
+# Secrets: code-worker-secrets (GITHUB_TOKEN) + api-secrets (GOOGLE_CLIENT_ID/SECRET, ENCRYPTION_KEY)
 envFrom:
   configMapRef: []
   secretRef:
     - code-worker-secrets
+    - api-secrets
 
 # Disable GKE specifics
 externalSecret:
