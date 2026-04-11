@@ -97,6 +97,9 @@ def _get_provider_credentials(provider: str):
     """Return (client_id, client_secret, redirect_uri) for a provider."""
     if provider == "google":
         return settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET, settings.GOOGLE_REDIRECT_URI
+    # Note: gemini_cli uses the "google" provider (same OAuth flow) but
+    # the code-worker writes ADC with Gemini CLI's own client_id for
+    # Cloud Code API compatibility.
     elif provider == "microsoft":
         return (
             settings.MICROSOFT_CLIENT_ID,

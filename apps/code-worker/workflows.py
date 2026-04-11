@@ -1411,21 +1411,30 @@ def _extract_codex_metadata(raw_output: str) -> dict:
 
 
 def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path: str) -> ChatCliResult:
-    try:
-        creds = _fetch_integration_credentials("gemini_cli", task_input.tenant_id)
-    except Exception as exc:
-        return ChatCliResult(response_text="", success=False, error=f"Failed to load Gemini credentials: {exc}")
+    # Check for API key first (simplest auth — no OAuth needed)
+    api_key = os.environ.get("GEMINI_API_KEY", "")
 
-    # Gemini uses OAuth token, so credentials should contain oauth_token
-    oauth_token = creds.get("oauth_token") or creds.get("session_token")
-    if not oauth_token:
-        return ChatCliResult(response_text="", success=False, error="Gemini CLI not connected")
+    if not api_key:
+        try:
+            creds = _fetch_integration_credentials("gemini_cli", task_input.tenant_id)
+            # Also check if the tenant stored an api_key credential
+            api_key = creds.get("api_key", "")
+        except Exception as exc:
+            return ChatCliResult(response_text="", success=False, error=f"Failed to load Gemini credentials: {exc}")
 
-    auth_payload = {"access_token": oauth_token}
-    if "refresh_token" in creds:
-        auth_payload["refresh_token"] = creds["refresh_token"]
-        
-    gemini_home = _prepare_gemini_home(session_dir, auth_payload, task_input.mcp_config)
+    if api_key:
+        # API key auth — no OAuth, no ADC, just set GEMINI_API_KEY env var
+        gemini_home = _prepare_gemini_home_apikey(session_dir, task_input.mcp_config)
+    else:
+        # OAuth auth — use platform tokens with platform client_id
+        oauth_token = creds.get("oauth_token") or creds.get("session_token")
+        if not oauth_token:
+            return ChatCliResult(response_text="", success=False, error="Gemini CLI not connected. Set GEMINI_API_KEY or connect via OAuth.")
+
+        auth_payload = {"access_token": oauth_token}
+        if "refresh_token" in creds:
+            auth_payload["refresh_token"] = creds["refresh_token"]
+        gemini_home = _prepare_gemini_home(session_dir, auth_payload, task_input.mcp_config)
     
     prompt = task_input.message
     if task_input.instruction_md_content.strip():
@@ -1441,14 +1450,19 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
 
     env = os.environ.copy()
     env["HOME"] = session_dir  # Tell Gemini CLI where to find .gemini/
-    env["GEMINI_AUTH_TOKEN"] = oauth_token
-    env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.join(gemini_home, "application_default_credentials.json")
     env["GOOGLE_GENAI_USE_VERTEXAI"] = "0"
     env["GOOGLE_GENAI_USE_GCA"] = "0"
     # Unset project vars so CLI doesn't try to validate Code Assist entitlements
     env.pop("GOOGLE_CLOUD_PROJECT", None)
     env.pop("GOOGLE_CLOUD_PROJECT_ID", None)
     env.pop("GEMINI_PROJECT_ID", None)
+
+    if api_key:
+        env["GEMINI_API_KEY"] = api_key
+        # Don't set GOOGLE_APPLICATION_CREDENTIALS when using API key
+    else:
+        env["GEMINI_AUTH_TOKEN"] = oauth_token
+        env["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.join(gemini_home, "application_default_credentials.json")
 
     result = subprocess.run(
         cmd,
@@ -1490,6 +1504,29 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
         )
 
 
+def _prepare_gemini_home_apikey(session_dir: str, mcp_config_json: str) -> str:
+    """Minimal GEMINI_HOME for API key auth — no credentials.json needed."""
+    gemini_home = os.path.join(session_dir, ".gemini")
+    os.makedirs(gemini_home, exist_ok=True)
+
+    projects_path = os.path.join(gemini_home, "projects.json")
+    if not os.path.exists(projects_path):
+        with open(projects_path, "w") as f:
+            json.dump({"projects": {}}, f, indent=2)
+
+    settings = {"security": {"auth": {"enforcedType": "api-key", "selectedType": "api-key"}}}
+    if mcp_config_json:
+        try:
+            mcp_data = json.loads(mcp_config_json)
+            settings["mcpServers"] = mcp_data.get("mcpServers", {})
+        except json.JSONDecodeError:
+            pass
+    with open(os.path.join(gemini_home, "settings.json"), "w") as f:
+        json.dump(settings, f, indent=2)
+
+    return gemini_home
+
+
 def _prepare_gemini_home(session_dir: str, auth_payload: dict, mcp_config_json: str) -> str:
     """Materialize tenant-scoped GEMINI_HOME with credentials.json and MCP settings.json."""
     # Create .gemini directory for settings and credentials
@@ -1523,8 +1560,18 @@ def _prepare_gemini_home(session_dir: str, auth_payload: dict, mcp_config_json: 
     with open(os.path.join(gemini_home, "credentials.json"), "w") as f:
         json.dump(creds_payload, f, indent=2)
 
-    # Do NOT write application_default_credentials.json — it would override
-    # Gemini CLI's built-in auth with our platform's GCP project.
+    # ADC with platform's client_id/secret so refresh_token works
+    # (token was issued by our platform's OAuth client, must use same client to refresh)
+    adc_path = os.path.join(gemini_home, "application_default_credentials.json")
+    adc_payload = {
+        "access_token": auth_payload.get("access_token"),
+        "refresh_token": auth_payload.get("refresh_token"),
+        "client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
+        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
+        "type": "authorized_user",
+    }
+    with open(adc_path, "w") as f:
+        json.dump(adc_payload, f, indent=2)
     
     # settings.json for auth enforcement and feature disabling
     settings = {
