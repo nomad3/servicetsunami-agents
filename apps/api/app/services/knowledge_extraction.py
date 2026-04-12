@@ -14,9 +14,16 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+# Reject system-identifier-shaped entity names that the LLM may surface from
+# its own framing context (tenant_id, internal IDs, etc.). These are never
+# legitimate entities.
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_LONG_HEX_RE = re.compile(r"^[0-9a-fA-F]{16,}$")
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -520,6 +527,14 @@ class KnowledgeExtractionService:
             # Skip blocklisted entities
             if name.lower() in ENTITY_BLOCKLIST:
                 blocked_count += 1
+                continue
+
+            # Skip system identifiers that leaked into LLM output (UUIDs, IDs).
+            # These are never legitimate entity names — they're framing metadata
+            # the LLM accidentally surfaced from the prompt or its own response.
+            if _UUID_RE.match(name) or _LONG_HEX_RE.match(name):
+                blocked_count += 1
+                logger.debug("Skipping UUID-shaped entity name: %s", name)
                 continue
 
             # Determine entity_type: schema override > LLM output > default

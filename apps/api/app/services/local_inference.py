@@ -13,12 +13,28 @@ All inference is async and non-blocking — never delays user responses.
 import asyncio
 import logging
 import os
+import re
 import threading
 from typing import Optional
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_json_fences(text: str) -> str:
+    """Strip optional ```json ... ``` markdown fences and surrounding whitespace.
+
+    Some Gemma outputs wrap JSON in code fences even when asked not to.
+    Returns the inner JSON text. Safe to call on already-clean JSON.
+    """
+    if not text:
+        return text
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned.strip()
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 DEFAULT_MODEL = os.environ.get("LOCAL_MODEL", "gemma4")
@@ -409,18 +425,17 @@ If no entities found, return: {{"entities": [], "relations": [], "memories": [],
         temperature=0.0,
         max_tokens=1200,
         timeout=60.0,
+        response_format="json",
     )
 
     if not result:
         return None
 
     try:
-        start = result.index("{")
-        end = result.rindex("}") + 1
-        data = json.loads(result[start:end])
+        data = json.loads(_strip_json_fences(result))
         if "entities" in data:
             return data
-    except (json.JSONDecodeError, ValueError, IndexError):
+    except (json.JSONDecodeError, ValueError):
         logger.debug("Failed to parse Gemma 4 knowledge extraction: %s", result[:200])
     return None
 
@@ -442,6 +457,7 @@ def extract_knowledge_with_prompt_sync(prompt: str) -> Optional[dict]:
         temperature=0.0,
         max_tokens=1200,
         timeout=60.0,
+        response_format="json",
     )
 
     if not result:
@@ -449,14 +465,11 @@ def extract_knowledge_with_prompt_sync(prompt: str) -> Optional[dict]:
         return None
 
     try:
-        start = result.index("{")
-        end = result.rindex("}") + 1
-        data = json.loads(result[start:end])
+        data = json.loads(_strip_json_fences(result))
         if "entities" in data:
             return data
-        else:
-            logger.warning("extract_knowledge_with_prompt_sync: 'entities' key missing in parsed JSON")
-    except (json.JSONDecodeError, ValueError, IndexError) as e:
+        logger.warning("extract_knowledge_with_prompt_sync: 'entities' key missing in parsed JSON")
+    except (json.JSONDecodeError, ValueError) as e:
         logger.warning("Failed to parse Gemma 4 knowledge extraction: %s. Raw result: %s", e, result[:500])
     return None
 

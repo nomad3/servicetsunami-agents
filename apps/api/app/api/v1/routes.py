@@ -37,6 +37,7 @@ from app.api.v1 import (
     oauth,
     claude_auth,
     codex_auth,
+    gemini_cli_auth,
     notifications,
     reports,
     rl,
@@ -115,6 +116,7 @@ router.include_router(mcp_server_connectors.router, prefix="/mcp-servers", tags=
 router.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
 router.include_router(claude_auth.router, prefix="/claude-auth", tags=["claude-auth"])
 router.include_router(codex_auth.router, prefix="/codex-auth", tags=["codex-auth"])
+router.include_router(gemini_cli_auth.router, prefix="/gemini-cli-auth", tags=["gemini-cli-auth"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 router.include_router(reports.router, prefix="/reports", tags=["reports"])
 router.include_router(rl.router, prefix="/rl", tags=["reinforcement-learning"])

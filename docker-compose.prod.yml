@@ -1,0 +1,70 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/api.Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      APP_ENV: production
+      PROJECT_NAME: ServiceTsunami API
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://servicetsunami.com,https://www.servicetsunami.com}
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "18000:8000"
+
+  web:
+    image: servicetsunami_web:ci
+    command: npm run start
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://api:8000}
+    depends_on:
+      - api
+    ports:
+      - "13000:3000"
+
+  n8n:
+    image: n8nio/n8n:1.73.0
+    environment:
+      N8N_PORT: ${N8N_PORT:-5678}
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_HOST: ${N8N_HOST:-n8n}
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-true}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-changeme}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-https://n8n.servicetsunami.com/}
+      GENERIC_TIMEZONE: ${N8N_GENERIC_TIMEZONE:-Etc/UTC}
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    volumes:
+      - n8n-data:/home/node/.n8n
+    ports:
+      - "15678:5678"
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-servicetsunami}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_HOST_PORT:-15432}:5432"
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+volumes:
+  postgres-data:
+  n8n-data:

@@ -1,5 +1,6 @@
 """Activities for PostChatMemoryWorkflow."""
 import logging
+from datetime import datetime
 from uuid import UUID
 from temporalio import activity
 
@@ -109,14 +110,20 @@ async def update_world_state(
         )
         
         # Convert raw extraction to MemoryEvents for ingest
+        now = datetime.utcnow()
         event = MemoryEvent(
+            tenant_id=UUID(tenant_id),
             source_type="chat",
             source_id=user_message_id,
+            occurred_at=now,
+            ingested_at=now,
+            kind="text",
+            text=content,
             proposed_entities=raw_result.get("entities", []),
             proposed_observations=raw_result.get("observations", []),
-            proposed_relations=[],
+            proposed_relations=raw_result.get("relations", []),
             proposed_commitments=[],
-            confidence=0.9
+            confidence=0.9,
         )
         
         ingest_result = ingest_events(db, UUID(tenant_id), [event], workflow_id=activity.info().workflow_id)

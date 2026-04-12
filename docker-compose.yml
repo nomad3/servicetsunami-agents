@@ -1,0 +1,223 @@
+services:
+  temporal:
+    image: temporalio/auto-setup:1.22.2
+    restart: unless-stopped
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PWD=postgres
+      - POSTGRES_SEEDS=db
+      - SKIP_SCHEMA_SETUP=false
+      - SKIP_DEFAULT_NAMESPACE_CREATION=false
+    ports:
+      - "${TEMPORAL_GRPC_PORT:-7233}:7233"
+      - "${TEMPORAL_WEB_PORT:-8233}:8233"
+    depends_on:
+      - db
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    ports:
+      - "${API_PORT:-8001}:8000"
+    volumes:
+      - ./apps/api:/app
+      - hf_cache:/root/.cache/huggingface
+    env_file:
+      - ./apps/api/.env
+    depends_on:
+      - db
+      - temporal
+      - embedding-service
+      - memory-core
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/agentprovision
+      - MCP_SERVER_URL=http://mcp-server:8000
+      - PLATFORM_CLAUDE_CODE_TOKEN=${PLATFORM_CLAUDE_CODE_TOKEN:-}
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+      - HF_HUB_DISABLE_XET=1
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - PROVIDER_COUNCIL_SAMPLE_RATE=${PROVIDER_COUNCIL_SAMPLE_RATE:-0.05}
+      - EXPLORATION_MODE=${EXPLORATION_MODE:-off}
+      - CORS_EXTRA_ORIGINS=${CORS_EXTRA_ORIGINS:-}
+      - EXPLORATION_RATE=${EXPLORATION_RATE:-0.0}
+      - USE_MEMORY_V2=true
+      - USE_MEMORY_V2_TENANT_ALLOWLIST=[]
+      - EMBEDDING_SERVICE_URL=embedding-service:50051
+      - MEMORY_CORE_URL=memory-core:50052
+      - USE_RUST_EMBEDDING=true
+      - USE_RUST_MEMORY=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  embedding-service:
+    build:
+      context: ./apps/embedding-service
+      dockerfile: Dockerfile
+    image: agentprovision-embedding-service
+    ports:
+      - "50051:50051"
+    environment:
+      - RUST_LOG=info
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  memory-core:
+    build:
+      context: ./apps/memory-core
+      dockerfile: Dockerfile
+    image: agentprovision-memory-core
+    ports:
+      - "50052:50052"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/agentprovision
+      - EMBEDDING_SERVICE_URL=http://embedding-service:50051
+      - RUST_LOG=info
+    depends_on:
+      - db
+      - embedding-service
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    ports:
+      - "${WEB_PORT:-8002}:80"
+    environment:
+      - NODE_ENV=development
+      - WDS_SOCKET_HOST=0.0.0.0
+      - WDS_SOCKET_PORT=3000
+    depends_on:
+      - api
+
+  db:
+    image: pgvector/pgvector:pg13
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=agentprovision
+    ports:
+      - "${DB_PORT:-8003}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  orchestration-worker:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    image: agentprovision-agents-api
+    command: python -m app.workers.orchestration_worker
+    volumes:
+      - ./apps/api:/app
+      - hf_cache:/root/.cache/huggingface
+    env_file:
+      - ./apps/api/.env
+    depends_on:
+      - db
+      - temporal
+      - embedding-service
+      - memory-core
+    environment:
+      - MCP_SERVER_URL=http://mcp-server:8000
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+      - HF_HUB_DISABLE_XET=1
+      - USE_MEMORY_V2=true
+      - USE_MEMORY_V2_TENANT_ALLOWLIST=[]
+      - EMBEDDING_SERVICE_URL=embedding-service:50051
+      - MEMORY_CORE_URL=memory-core:50052
+      - USE_RUST_EMBEDDING=true
+      - USE_RUST_MEMORY=true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+
+  mcp-tools:
+    build:
+      context: ./apps/mcp-server
+      dockerfile: Dockerfile
+    command: ["python", "-m", "src.mcp_serve"]
+    ports:
+      - "8087:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/agentprovision
+      - MCP_API_KEY=${MCP_API_KEY:-dev_mcp_key}
+      - API_INTERNAL_KEY=${MCP_API_KEY:-dev_mcp_key}
+      - API_BASE_URL=http://api:8000
+      - UVICORN_HOST=0.0.0.0
+      - UVICORN_PORT=8000
+    depends_on:
+      - db
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  code-worker:
+    build:
+      context: ./apps/code-worker
+      dockerfile: Dockerfile
+    env_file:
+      - ./apps/api/.env
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - API_BASE_URL=http://api:8000
+      - API_INTERNAL_KEY=dev_mcp_key
+      - MCP_API_KEY=dev_mcp_key
+      - CLAUDE_CODE_MODEL=${CLAUDE_CODE_MODEL:-sonnet}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-ghp_placeholder}
+      - OPENCODE_OLLAMA_URL=http://host.docker.internal:11434/v1
+      - OPENCODE_MODEL=${OPENCODE_MODEL:-gemma4}
+      - GIT_BRANCH=${GIT_BRANCH:-feat/memory-first-phase-1}
+      - USE_MEMORY_V2=true
+      - USE_MEMORY_V2_TENANT_ALLOWLIST=[]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./apps/code-worker:/app
+      - claude_sessions:/home/codeworker/.claude
+    depends_on:
+      - temporal
+    restart: unless-stopped
+
+  luna-client:
+    build:
+      context: ./apps/luna-client
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    ports:
+      - "${LUNA_PORT:-8009}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    depends_on:
+      - api
+      - web
+      - luna-client
+    restart: unless-stopped
+
+  test-db:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=testuser
+      - POSTGRES_PASSWORD=testpass
+      - POSTGRES_DB=testdb
+    ports:
+      - "8004:5432"
+
+volumes:
+  db_data:
+  claude_sessions:
+  hf_cache:

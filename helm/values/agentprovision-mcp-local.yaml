@@ -1,6 +1,6 @@
 # AgentProvision MCP Server - Local Development
-nameOverride: "mcp-server"
-fullnameOverride: "mcp-server"
+nameOverride: "mcp-tools"
+fullnameOverride: "mcp-tools"
 
 image:
   repository: agentprovision-mcp-tools

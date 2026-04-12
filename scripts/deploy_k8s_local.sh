@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # AgentProvision Local Kubernetes Deployment Script
-# Target: Docker Desktop Kubernetes (docker-desktop context)
+# Target: k3d (k3s in Docker) — same K8s flavor as on-prem deployment
+# Cluster name: agentprovision (context: k3d-agentprovision)
+# Setup: k3d cluster create --config kubernetes/k3d-config.yaml
 #
 # Usage:
 #   ./scripts/deploy_k8s_local.sh              # Deploy everything
@@ -25,8 +27,9 @@ done
 echo "=== AgentProvision K8s Local Deploy (Rancher Desktop) ==="
 
 # ── Pre-flight checks ────────────────────────────────────────
-kubectl config use-context docker-desktop 2>/dev/null || {
-  echo "ERROR: docker-desktop context not found. Is Docker Desktop running with Kubernetes enabled?"
+kubectl config use-context k3d-agentprovision 2>/dev/null || {
+  echo "ERROR: k3d-agentprovision context not found."
+  echo "  Create the cluster: k3d cluster create --config kubernetes/k3d-config.yaml"
   exit 1
 }
 
@@ -66,7 +69,18 @@ if [ "$SKIP_BUILD" = false ]; then
   build_image "agentprovision-embedding-service" "./apps/embedding-service"
   build_image "agentprovision-memory-core" "./apps/memory-core"
 
+  # Import images into k3d cluster (k3d nodes don't see host docker images)
   echo ""
+  echo "=== Importing images into k3d cluster ==="
+  k3d image import \
+    agentprovision-api:latest \
+    agentprovision-orchestration-worker:latest \
+    agentprovision-web:latest \
+    agentprovision-code-worker:latest \
+    agentprovision-mcp-tools:latest \
+    agentprovision-embedding-service:latest \
+    agentprovision-memory-core:latest \
+    --cluster agentprovision 2>&1 | tail -5
 fi
 
 # ── Deploy Infrastructure ────────────────────────────────────

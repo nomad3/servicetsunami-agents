@@ -45,7 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean
 
 # Install CLI tools for device-auth / OAuth flows
-RUN npm install -g @openai/codex @anthropic-ai/claude-code
+RUN npm install -g @openai/codex @anthropic-ai/claude-code @google/gemini-cli
 
 WORKDIR /app
 

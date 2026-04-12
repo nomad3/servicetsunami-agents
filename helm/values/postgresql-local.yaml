@@ -62,7 +62,7 @@ externalSecret:
 # Persistent storage — protected against deletion
 persistence:
   enabled: true
-  storageClass: hostpath
+  storageClass: local-path
   size: 5Gi
   mountPath: /var/lib/postgresql/data
   annotations:

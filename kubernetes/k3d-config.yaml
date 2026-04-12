@@ -1,0 +1,44 @@
+# k3d cluster config for AgentProvision local development
+# Replicates the Levi's-style on-prem k3s deployment
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: agentprovision
+
+servers: 1
+agents: 0
+
+ports:
+  # Expose K8s services on host
+  - port: 8000:80
+    nodeFilters:
+      - loadbalancer
+  - port: 8443:443
+    nodeFilters:
+      - loadbalancer
+
+volumes:
+  # Host mount for persistent data — survives k3d cluster delete
+  - volume: /Users/nomade/.k3d-data/agentprovision:/var/lib/rancher/k3s/storage
+    nodeFilters:
+      - server:*
+
+options:
+  k3d:
+    wait: true
+    timeout: 120s
+  k3s:
+    extraArgs:
+      # Disable traefik (we use cloudflared instead)
+      - arg: --disable=traefik
+        nodeFilters:
+          - server:*
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true
+
+registries:
+  create:
+    name: agentprovision-registry
+    host: "0.0.0.0"
+    hostPort: "5500"

@@ -129,11 +129,11 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
     },
     "gemini_cli": {
         "display_name": "Gemini CLI",
-        "description": "Connect your Google account and AI Pro subscription for agent chat",
+        "description": "Connect your Google account and Gemini Pro subscription for agent chat",
         "icon": "FaGoogle",
         "credentials": [],
-        "auth_type": "oauth",
-        "oauth_provider": "google",
+        "auth_type": "device_auth",
+        "device_auth_endpoint": "/gemini-cli-auth",
     },
     "meta_ads": {
         "display_name": "Meta Ads",

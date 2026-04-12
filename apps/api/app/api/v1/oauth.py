@@ -20,6 +20,7 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from jose import jwt, JWTError
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -54,12 +55,16 @@ OAUTH_PROVIDERS = {
             "https://www.googleapis.com/auth/drive.readonly",
             "https://www.googleapis.com/auth/drive.file",
             "https://www.googleapis.com/auth/cloud-platform",
-            "https://www.googleapis.com/auth/accounts.reauth",
             "https://www.googleapis.com/auth/userinfo.email",
             "https://www.googleapis.com/auth/userinfo.profile",
             "openid",
         ],
-        "integration_names": ["gmail", "google_calendar", "google_drive", "gemini_cli"],
+        # NOTE: gemini_cli is intentionally NOT in this list. Gemini CLI's
+        # Cloud Code API requires tokens issued by Gemini's own OAuth client
+        # (681255809395-...), and refresh tokens are bound to the issuing
+        # client. The dedicated /gemini-cli-auth flow stores Gemini-native
+        # credentials separately.
+        "integration_names": ["gmail", "google_calendar", "google_drive"],
     },
     "microsoft": {
         "authorize_url": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
@@ -169,10 +174,15 @@ def _fetch_account_email(provider: str, access_token: str) -> Optional[str]:
     return None
 
 
-def _refresh_access_token(provider: str, refresh_token: str) -> Optional[Dict[str, str]]:
+def _refresh_access_token(provider: str, refresh_token: str, integration_name: Optional[str] = None) -> Optional[Dict[str, str]]:
     """Use a refresh token to get fresh OAuth tokens."""
     config = OAUTH_PROVIDERS[provider]
     client_id, client_secret, _ = _get_provider_credentials(provider)
+    
+    # Override client_id for gemini_cli
+    if integration_name == "gemini_cli":
+        client_id = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
+        client_secret = ""
 
     try:
         token_data = {
@@ -599,6 +609,85 @@ def oauth_callback(
     ))
 
 
+class ManualLogin(BaseModel):
+    code: Optional[str] = None
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+
+
+@router.post("/gemini-cli/login")
+async def gemini_cli_manual_login(
+    body: ManualLogin,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Manual login for Gemini CLI.
+    
+    Accepts an authorization code (to be exchanged for tokens) or direct tokens.
+    Uses Gemini CLI's official client_id for compatibility.
+    """
+    client_id = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
+    # No secret for first-party native apps
+    
+    access_token = body.access_token
+    refresh_token = body.refresh_token
+    
+    if body.code:
+        # Exchange code for tokens
+        token_url = "https://oauth2.googleapis.com/token"
+        data = {
+            "client_id": client_id,
+            "code": body.code,
+            "grant_type": "authorization_code",
+            "redirect_uri": "http://127.0.0.1:62347/oauth2callback",
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(token_url, data=data)
+            if resp.status_code != 200:
+                logger.error(f"Failed to exchange Gemini CLI code: {resp.text}")
+                raise HTTPException(status_code=400, detail=f"Token exchange failed: {resp.text}")
+            
+            token_data = resp.json()
+            access_token = token_data.get("access_token")
+            refresh_token = token_data.get("refresh_token")
+
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Missing access_token")
+
+    # Discover email
+    email = _fetch_account_email("google", access_token)
+    
+    # Create or update IntegrationConfig
+    config = (
+        db.query(IntegrationConfig)
+        .filter(
+            IntegrationConfig.tenant_id == current_user.tenant_id,
+            IntegrationConfig.integration_name == "gemini_cli",
+        )
+        .first()
+    )
+    
+    if not config:
+        config = IntegrationConfig(
+            tenant_id=current_user.tenant_id,
+            integration_name="gemini_cli",
+            account_email=email,
+            enabled=True
+        )
+        db.add(config)
+        db.commit()
+        db.refresh(config)
+    else:
+        config.account_email = email
+        config.enabled = True
+        db.commit()
+    
+    # Update tokens
+    _update_stored_tokens(db, config.id, current_user.tenant_id, access_token, refresh_token)
+    
+    return {"status": "success", "email": email}
+
+
 # ---------------------------------------------------------------------------
 # POST /oauth/{provider}/disconnect
 # ---------------------------------------------------------------------------
@@ -801,9 +890,12 @@ def get_integration_token(
         raise HTTPException(status_code=404, detail=f"No active config for '{integration_name}'")
 
     creds = retrieve_credentials_for_skill(db, config.id, tid)
+    logger.info("Retrieved credentials for %s (tenant %s): keys=%s", integration_name, tid, list(creds.keys()))
 
     # For OAuth integrations, require oauth_token; for manual, require any credential
     provider = _integration_to_provider(integration_name)
+    logger.info("Mapped integration %s to provider %s", integration_name, provider)
+    
     if provider and not creds.get("oauth_token"):
         raise HTTPException(status_code=404, detail="No active OAuth token found")
     elif not provider and not creds:
@@ -833,7 +925,7 @@ def get_integration_token(
                 break
 
     if provider in {"google", "microsoft"} and refresh_token:
-        refreshed_tokens = _refresh_access_token(provider, refresh_token)
+        refreshed_tokens = _refresh_access_token(provider, refresh_token, integration_name=integration_name)
         if refreshed_tokens:
             # Update stored credential with fresh token(s)
             _update_stored_tokens(

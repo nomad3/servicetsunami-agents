@@ -71,6 +71,35 @@ const SKILL_COLORS = {
   linkedin: '#0A66C2',
   claude_code: '#D97706',
   codex: '#111827',
+  gemini_cli: '#1A73E8',
+};
+
+// Pinned order for the integration card grid. Anything not listed gets pushed
+// to the end and sorted alphabetically.
+const INTEGRATION_ORDER = [
+  'gemini_cli',
+  'codex',
+  'claude_code',
+  'gmail',
+  'google_calendar',
+  'google_drive',
+  'outlook',
+  'github',
+  'linkedin',
+  'whatsapp',
+  'slack',
+  'notion',
+  'jira',
+  'linear',
+];
+
+const sortIntegrations = (a, b) => {
+  const ai = INTEGRATION_ORDER.indexOf(a.integration_name);
+  const bi = INTEGRATION_ORDER.indexOf(b.integration_name);
+  if (ai === -1 && bi === -1) return a.display_name.localeCompare(b.display_name);
+  if (ai === -1) return 1;
+  if (bi === -1) return -1;
+  return ai - bi;
 };
 
 // Provider brand colors and icons for OAuth buttons
@@ -96,6 +125,8 @@ const IntegrationsPanel = () => {
   const [connectingProvider, setConnectingProvider] = useState(null);
   const [codexAuthState, setCodexAuthState] = useState({ status: 'idle', connected: false });
   const [claudeAuthState, setClaudeAuthState] = useState({ status: 'idle', connected: false });
+  const [geminiCliAuthState, setGeminiCliAuthState] = useState({ status: 'idle', connected: false });
+  const [geminiCliCode, setGeminiCliCode] = useState('');
   const [monitorRunning, setMonitorRunning] = useState(false);
 
   const fetchData = useCallback(async () => {
@@ -154,6 +185,13 @@ const IntegrationsPanel = () => {
         setCodexAuthState(codexRes.data || { status: 'idle', connected: false });
       } catch {
         setCodexAuthState({ status: 'idle', connected: false });
+      }
+
+      try {
+        const geminiRes = await integrationConfigService.geminiCliAuthStatus();
+        setGeminiCliAuthState(geminiRes.data || { status: 'idle', connected: false });
+      } catch {
+        setGeminiCliAuthState({ status: 'idle', connected: false });
       }
 
       // Check inbox monitor status if Google is connected
@@ -229,6 +267,34 @@ const IntegrationsPanel = () => {
 
     return () => clearInterval(interval);
   }, [claudeAuthState?.status, fetchData]);
+
+  // Poll Gemini CLI auth status while login is pending
+  useEffect(() => {
+    if (!['starting', 'pending'].includes(geminiCliAuthState?.status)) return undefined;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await integrationConfigService.geminiCliAuthStatus();
+        const nextState = res.data || { status: 'idle', connected: false };
+        setGeminiCliAuthState(nextState);
+
+        if (nextState.status === 'connected') {
+          setSuccess('Connected Gemini CLI');
+          setTimeout(() => setSuccess(null), 4000);
+          setGeminiCliCode('');
+          fetchData();
+        } else if (nextState.status === 'failed') {
+          setError(nextState.error || 'Gemini login failed');
+          setTimeout(() => setError(null), 6000);
+        }
+      } catch {
+        setError('Failed to check Gemini login status');
+        setTimeout(() => setError(null), 6000);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [geminiCliAuthState?.status, fetchData]);
 
   // Listen for OAuth popup messages
   useEffect(() => {
@@ -356,6 +422,73 @@ const IntegrationsPanel = () => {
     } catch (err) {
       const detail = err.response?.data?.detail || 'Failed to cancel Claude login';
       setError(detail);
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  // ── Gemini CLI OAuth login (paste-back code flow) ──
+  const handleGeminiCliConnect = async () => {
+    try {
+      setConnectingProvider('gemini_cli');
+      const res = await integrationConfigService.geminiCliAuthStart();
+      const nextState = res.data || { status: 'idle', connected: false };
+      setGeminiCliAuthState(nextState);
+
+      if (nextState.verification_url) {
+        window.open(nextState.verification_url, 'gemini-cli-auth', 'width=700,height=820,scrollbars=yes');
+      }
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Gemini CLI login not available';
+      setError(detail);
+      setTimeout(() => setError(null), 6000);
+    } finally {
+      setConnectingProvider(null);
+    }
+  };
+
+  const handleGeminiCliCancel = async () => {
+    try {
+      setSaving('gemini-cancel');
+      const res = await integrationConfigService.geminiCliAuthCancel();
+      setGeminiCliAuthState(res.data || { status: 'cancelled', connected: false });
+      setGeminiCliCode('');
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Failed to cancel Gemini login';
+      setError(detail);
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleGeminiCliSubmitCode = async () => {
+    if (!geminiCliCode.trim()) return;
+    try {
+      setSaving('gemini-submit');
+      const res = await integrationConfigService.geminiCliAuthSubmitCode(geminiCliCode.trim());
+      setGeminiCliAuthState(res.data || { status: 'pending', connected: false });
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Failed to submit Gemini code';
+      setError(detail);
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleGeminiCliDisconnect = async () => {
+    try {
+      setSaving('gemini-disconnect');
+      await integrationConfigService.geminiCliAuthDisconnect();
+      setGeminiCliAuthState({ status: 'idle', connected: false });
+      setCredentialStatuses((prev) => ({ ...prev, gemini_cli: [] }));
+      setSuccess('Disconnected Gemini CLI');
+      setTimeout(() => setSuccess(null), 3000);
+      await fetchData();
+    } catch (err) {
+      setError('Failed to disconnect Gemini CLI');
       setTimeout(() => setError(null), 5000);
     } finally {
       setSaving(null);
@@ -799,6 +932,149 @@ const IntegrationsPanel = () => {
     );
   };
 
+  const renderGeminiCliExpanded = (skill) => {
+    const config = getConfigForSkill(skill.integration_name);
+    const storedKeys = credentialStatuses[skill.integration_name] || [];
+    const hasStoredAuth = storedKeys.includes('oauth_creds') || storedKeys.includes('oauth_token');
+    const isConnected = geminiCliAuthState.connected || hasStoredAuth;
+    const isPending = ['starting', 'pending'].includes(geminiCliAuthState.status);
+    const isConnecting = connectingProvider === 'gemini_cli';
+    const verificationUrl = geminiCliAuthState.verification_url;
+
+    return (
+      <div className="py-2">
+        {isConnected && !isPending && (
+          <div
+            className="d-flex align-items-center justify-content-between mb-3 p-3"
+            style={{
+              border: '1px solid rgba(45,157,120,0.25)',
+              borderRadius: 10,
+              background: 'rgba(45,157,120,0.08)',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-foreground)' }}>
+                Connected with Google
+              </div>
+              <div style={{ fontSize: '0.74rem', color: 'var(--color-muted)' }}>
+                Gemini CLI oauth_creds.json is stored in the tenant vault
+              </div>
+            </div>
+            {!!config && (
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={handleGeminiCliDisconnect}
+                disabled={saving === 'gemini-disconnect'}
+              >
+                Disconnect
+              </Button>
+            )}
+          </div>
+        )}
+
+        {isPending && (
+          <Alert variant="info" className="mb-3" style={{ fontSize: '0.82rem' }}>
+            <div className="fw-semibold mb-2">Finish Gemini CLI sign-in</div>
+            <div className="mb-2">
+              {verificationUrl ? (
+                <>
+                  Open{' '}
+                  <a href={verificationUrl} target="_blank" rel="noreferrer">
+                    this Google authorization URL
+                  </a>
+                  , approve access with your Gemini account, then paste the code below.
+                </>
+              ) : (
+                'Waiting for the Gemini CLI to print a verification URL...'
+              )}
+            </div>
+            {verificationUrl && (
+              <Form.Group className="mb-2">
+                <Form.Label style={{ fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Authorization code
+                </Form.Label>
+                <div className="d-flex gap-2">
+                  <Form.Control
+                    size="sm"
+                    type="text"
+                    placeholder="Paste the code from Google"
+                    value={geminiCliCode}
+                    onChange={(e) => setGeminiCliCode(e.target.value)}
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleGeminiCliSubmitCode}
+                    disabled={saving === 'gemini-submit' || !geminiCliCode.trim()}
+                  >
+                    Submit
+                  </Button>
+                </div>
+              </Form.Group>
+            )}
+          </Alert>
+        )}
+
+        {geminiCliAuthState.status === 'failed' && geminiCliAuthState.error && (
+          <Alert variant="danger" className="mb-3" style={{ fontSize: '0.8rem' }}>
+            {geminiCliAuthState.error}
+          </Alert>
+        )}
+
+        <div className="d-flex gap-2">
+          <Button
+            size="sm"
+            onClick={handleGeminiCliConnect}
+            disabled={isConnecting || isPending}
+            style={{
+              background: '#1A73E8',
+              color: '#fff',
+              border: 'none',
+              fontWeight: 500,
+              fontSize: '0.85rem',
+              padding: '8px 16px',
+              borderRadius: 6,
+            }}
+          >
+            {isConnecting ? (
+              <Spinner
+                animation="border"
+                size="sm"
+                style={{ width: 14, height: 14, borderWidth: 1.5 }}
+                className="me-2"
+              />
+            ) : (
+              <FaGoogle className="me-2" size={14} />
+            )}
+            {isConnected ? 'Reconnect Gemini' : 'Connect with Google'}
+          </Button>
+
+          {isPending && (
+            <>
+              {verificationUrl && (
+                <Button
+                  variant="outline-secondary"
+                  size="sm"
+                  onClick={() => window.open(verificationUrl, 'gemini-cli-auth', 'width=700,height=820,scrollbars=yes')}
+                >
+                  Open sign-in page
+                </Button>
+              )}
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={handleGeminiCliCancel}
+                disabled={saving === 'gemini-cancel'}
+              >
+                Cancel
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // ---------------------------------------------------------------------------
   // Skill card renderer
   // ---------------------------------------------------------------------------
@@ -812,11 +1088,15 @@ const IntegrationsPanel = () => {
       ? (oauthStatuses[skill.oauth_provider] || { connected: false, accounts: [] })
       : { connected: false, accounts: [] };
     const storedKeys = credentialStatuses[skill.integration_name] || [];
-    const hasStoredCredentials = storedKeys.includes('auth_json') || storedKeys.includes('session_token') || storedKeys.length > 0;
+    const hasStoredCredentials = storedKeys.includes('auth_json') || storedKeys.includes('session_token') || storedKeys.includes('oauth_creds') || storedKeys.length > 0;
     const isConfigured = isOAuth
       ? providerStatus.connected
       : isDeviceAuth
-        ? (skill.integration_name === 'codex' ? (codexAuthState.connected || hasStoredCredentials) : hasStoredCredentials)
+        ? (skill.integration_name === 'codex'
+            ? (codexAuthState.connected || hasStoredCredentials)
+            : skill.integration_name === 'gemini_cli'
+              ? (geminiCliAuthState.connected || hasStoredCredentials)
+              : hasStoredCredentials)
         : isBrowserAuth
         ? (skill.integration_name === 'claude_code' ? (claudeAuthState.connected || hasStoredCredentials) : hasStoredCredentials)
         : !!config;
@@ -942,6 +1222,8 @@ const IntegrationsPanel = () => {
               {isOAuth && renderOAuthExpanded(skill)}
 
               {isDeviceAuth && skill.integration_name === 'codex' && renderCodexExpanded(skill)}
+
+              {isDeviceAuth && skill.integration_name === 'gemini_cli' && renderGeminiCliExpanded(skill)}
 
               {/* Claude Code browser auth */}
               {isBrowserAuth && skill.integration_name === 'claude_code' && (
@@ -1261,7 +1543,7 @@ const IntegrationsPanel = () => {
             </p>
           </div>
         ) : (
-          <Row>{registry.map(renderSkillCard)}</Row>
+          <Row>{[...registry].sort(sortIntegrations).map(renderSkillCard)}</Row>
         )}
       </Card.Body>
     </Card>

@@ -22,6 +22,11 @@ const integrationConfigService = {
   claudeAuthStart: () => api.post('/claude-auth/start'),
   claudeAuthStatus: () => api.get('/claude-auth/status'),
   claudeAuthCancel: () => api.post('/claude-auth/cancel'),
+  geminiCliAuthStart: () => api.post('/gemini-cli-auth/start'),
+  geminiCliAuthStatus: () => api.get('/gemini-cli-auth/status'),
+  geminiCliAuthSubmitCode: (code) => api.post('/gemini-cli-auth/submit-code', { code }),
+  geminiCliAuthCancel: () => api.post('/gemini-cli-auth/cancel'),
+  geminiCliAuthDisconnect: () => api.post('/gemini-cli-auth/disconnect'),
 };
 
 export default integrationConfigService;

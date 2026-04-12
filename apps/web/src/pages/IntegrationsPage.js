@@ -45,6 +45,7 @@ import Layout from '../components/Layout';
 import IntegrationsPanel from '../components/IntegrationsPanel';
 
 import WhatsAppChannelCard from '../components/WhatsAppChannelCard';
+import api from '../services/api';
 import connectorService from '../services/connector';
 import dataPipelineService from '../services/dataPipeline';
 import dataSourceService from '../services/dataSource';
@@ -148,6 +149,29 @@ const IntegrationsPage = () => {
   const [summaryData, setSummaryData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
+
+  // ── Gemini CLI state ──
+  const [showGeminiModal, setShowGeminiModal] = useState(false);
+  const [geminiCode, setGeminiCode] = useState('');
+  const [geminiSubmitting, setGeminiSubmitting] = useState(false);
+
+  const handleGeminiLogin = async (e) => {
+    e.preventDefault();
+    if (!geminiCode) return;
+    
+    try {
+      setGeminiSubmitting(true);
+      await api.post('/oauth/gemini-cli/login', { code: geminiCode });
+      setSuccess("Gemini CLI connected successfully!");
+      setShowGeminiModal(false);
+      setGeminiCode('');
+      // Refresh integrations status if needed
+    } catch (err) {
+      setError(err.response?.data?.detail || "Failed to connect Gemini CLI");
+    } finally {
+      setGeminiSubmitting(false);
+    }
+  };
 
   // ── AI Models (LLM Providers) state ──
   const [llmProviders, setLlmProviders] = useState([]);
@@ -1295,6 +1319,48 @@ const IntegrationsPage = () => {
           <Modal.Footer>
             <Button variant="primary" onClick={() => { setPreviewDataset(null); setPreviewData(null); setSummaryData(null); }}>{t('datasets.close')}</Button>
           </Modal.Footer>
+        </Modal>
+        {/* ── Gemini CLI Manual Login Modal ── */}
+        <Modal show={showGeminiModal} onHide={() => setShowGeminiModal(false)} centered>
+          <Form onSubmit={handleGeminiLogin}>
+            <Modal.Header closeButton>
+              <Modal.Title>Connect Gemini CLI</Modal.Title>
+            </Modal.Header>
+            <Modal.Body>
+              <p className="small text-muted mb-3">
+                To connect Gemini CLI with your Gmail and Code Assist entitlements, 
+                please follow the link below to authorize, then paste the code from the success page.
+              </p>
+              <div className="mb-4 text-center">
+                <Button 
+                  variant="primary" 
+                  href="https://accounts.google.com/v3/signin/accountchooser?access_type=offline&client_id=681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A62347%2Foauth2callback&response_type=code&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.send" 
+                  target="_blank"
+                >
+                  1. Authorize Gemini CLI
+                </Button>
+              </div>
+              <Form.Group className="mb-3">
+                <Form.Label>2. Paste Authorization Code</Form.Label>
+                <Form.Control 
+                  type="text" 
+                  placeholder="Paste code from the success page URL or response" 
+                  value={geminiCode}
+                  onChange={(e) => setGeminiCode(e.target.value)}
+                  required
+                />
+                <Form.Text className="text-muted">
+                  Look for the <code>code=...</code> parameter in the URL of the success page.
+                </Form.Text>
+              </Form.Group>
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="secondary" onClick={() => setShowGeminiModal(false)}>Cancel</Button>
+              <Button variant="primary" type="submit" disabled={geminiSubmitting || !geminiCode}>
+                {geminiSubmitting ? <Spinner size="sm" animation="border" /> : "Complete Connection"}
+              </Button>
+            </Modal.Footer>
+          </Form>
         </Modal>
       </div>
     </Layout>

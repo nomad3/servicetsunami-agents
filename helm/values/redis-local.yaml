@@ -41,7 +41,7 @@ service:
 # Persistent storage
 persistence:
   enabled: true
-  storageClass: hostpath
+  storageClass: local-path
   size: 1Gi
   mountPath: /data
 
