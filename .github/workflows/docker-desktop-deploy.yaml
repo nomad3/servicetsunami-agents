@@ -29,6 +29,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Symlink env files
+        run: |
+          # The .env files are gitignored but persist on the self-hosted runner's
+          # main working copy. Symlink them into the checkout so docker compose
+          # can read them.
+          SRC="$HOME/Documents/GitHub/servicetsunami-agents"
+          for envfile in apps/api/.env .env; do
+            if [ -f "$SRC/$envfile" ] && [ ! -f "$envfile" ]; then
+              ln -sf "$SRC/$envfile" "$envfile"
+              echo "Linked $envfile"
+            fi
+          done
+
       - name: Detect changed services
         id: changes
         run: |
