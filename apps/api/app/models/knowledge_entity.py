@@ -4,12 +4,14 @@ from datetime import datetime
 from sqlalchemy import Column, String, Text, ForeignKey, JSON, DateTime, Float, Integer
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
 
 from app.db.base import Base
 
 
 class KnowledgeEntity(Base):
     """Knowledge graph entity - represents a thing, concept, or person."""
+
     __tablename__ = "knowledge_entities"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -20,6 +22,7 @@ class KnowledgeEntity(Base):
     category = Column(String(50), nullable=True)  # lead, contact, investor, accelerator, signal, organization, person
     name = Column(String, nullable=False, index=True)
     description = Column(Text, nullable=True)  # Entity description for semantic search
+    embedding = Column(Vector(768), nullable=True)
     attributes = Column(JSON, nullable=True)  # Flexible attribute storage
     properties = Column(JSON, nullable=True)  # Structured properties
     aliases = Column(JSON, default=list)  # Alternative names for the entity

@@ -106,34 +106,56 @@ _intent_cache: list | None = None
 # Core: embed text
 # ------------------------------------------------------------------
 
+# Module-level model cache for Python fallback
+_local_model = None
+
+
 def embed_text(
     text_content: str,
     task_type: str = "RETRIEVAL_DOCUMENT",
 ) -> Optional[List[float]]:
-    """Generate a 768-dim embedding for *text_content* via Rust gRPC service."""
+    """Generate a 768-dim embedding for *text_content* via Rust gRPC (hot path) or local Python (fallback)."""
+    global _local_model
+    
+    # 1. Try Rust gRPC (Fastest)
     stub = _get_grpc_stub()
-    if not stub:
-        logger.error("Rust embedding service not available")
-        return None
+    if stub:
+        try:
+            from app.generated import embedding_pb2
+            # Map Python task types to Proto task types
+            rust_task = "search_document"
+            if task_type == "RETRIEVAL_QUERY":
+                rust_task = "search_query"
+            
+            req = embedding_pb2.EmbedRequest(
+                text=text_content[:_MAX_INPUT_CHARS],
+                task_type=rust_task
+            )
+            resp = stub.Embed(req, timeout=5.0)  # Shorter timeout for faster fallback
+            return list(resp.vector)
+        except Exception as e:
+            global _grpc_stub, _grpc_channel
+            _grpc_stub = None
+            _grpc_channel = None
+            logger.debug("Rust embedding failed, falling back to Python: %s", e)
 
+    # 2. Local Python Fallback (Reliability)
     try:
-        from app.generated import embedding_pb2
-        # Map Python task types to Proto task types
-        rust_task = "search_document"
-        if task_type == "RETRIEVAL_QUERY":
-            rust_task = "search_query"
+        if _local_model is None:
+            from sentence_transformers import SentenceTransformer
+            _local_model = SentenceTransformer(
+                "nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True
+            )
         
-        req = embedding_pb2.EmbedRequest(
-            text=text_content[:_MAX_INPUT_CHARS],
-            task_type=rust_task
-        )
-        resp = stub.Embed(req, timeout=10.0)
-        return list(resp.vector)
+        # nomic-embed-text-v1.5 requires prefix
+        prefix = "search_document: "
+        if task_type == "RETRIEVAL_QUERY":
+            prefix = "search_query: "
+            
+        vector = _local_model.encode(prefix + text_content[:_MAX_INPUT_CHARS], normalize_embeddings=True)
+        return vector.tolist()
     except Exception as e:
-        global _grpc_stub, _grpc_channel
-        _grpc_stub = None
-        _grpc_channel = None
-        logger.error("Rust embedding failed: %s", e)
+        logger.error("All embedding paths failed: %s", e)
         return None
 
 
@@ -141,25 +163,49 @@ def embed_batch(
     texts: List[str],
     task_type: str = "RETRIEVAL_DOCUMENT",
 ) -> List[Optional[List[float]]]:
-    """Generate embeddings for a list of strings in bulk via Rust gRPC."""
-    stub = _get_grpc_stub()
-    if not stub:
-        return [None] * len(texts)
+    """Generate embeddings for a list of strings in bulk via Rust gRPC (hot path) or local Python (fallback)."""
+    if not texts:
+        return []
 
+    # 1. Try Rust gRPC
+    stub = _get_grpc_stub()
+    if stub:
+        try:
+            from app.generated import embedding_pb2
+            rust_task = "search_document"
+            if task_type == "RETRIEVAL_QUERY":
+                rust_task = "search_query"
+            
+            req = embedding_pb2.EmbedBatchRequest(
+                texts=[t[:_MAX_INPUT_CHARS] for t in texts],
+                task_type=rust_task
+            )
+            resp = stub.EmbedBatch(req, timeout=30.0)
+            return [list(r.vector) for r in resp.results]
+        except Exception as e:
+            global _grpc_stub, _grpc_channel
+            _grpc_stub = None
+            _grpc_channel = None
+            logger.debug("Rust batch embedding failed, falling back to Python: %s", e)
+
+    # 2. Local Python Fallback
     try:
-        from app.generated import embedding_pb2
-        rust_task = "search_document"
-        if task_type == "RETRIEVAL_QUERY":
-            rust_task = "search_query"
+        global _local_model
+        if _local_model is None:
+            from sentence_transformers import SentenceTransformer
+            _local_model = SentenceTransformer(
+                "nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True
+            )
         
-        req = embedding_pb2.EmbedBatchRequest(
-            texts=[t[:_MAX_INPUT_CHARS] for t in texts],
-            task_type=rust_task
-        )
-        resp = stub.EmbedBatch(req, timeout=60.0)
-        return [list(r.vector) for r in resp.results]
+        prefix = "search_document: "
+        if task_type == "RETRIEVAL_QUERY":
+            prefix = "search_query: "
+            
+        prefixed_texts = [prefix + t[:_MAX_INPUT_CHARS] for t in texts]
+        vectors = _local_model.encode(prefixed_texts, normalize_embeddings=True)
+        return [v.tolist() for v in vectors]
     except Exception as e:
-        logger.error("Rust batch embedding failed: %s", e)
+        logger.error("All batch embedding paths failed: %s", e)
         return [None] * len(texts)
 
 
@@ -244,6 +290,7 @@ def search_similar(
             content_type,
             content_id,
             text_content,
+            created_at,
             1 - (embedding <=> CAST('{vector_literal}' AS vector)) AS similarity
         FROM embeddings
         WHERE (tenant_id = CAST(:tenant_id AS uuid) OR tenant_id IS NULL)
@@ -260,6 +307,7 @@ def search_similar(
             "content_type": r["content_type"],
             "content_id": r["content_id"],
             "text_content": r["text_content"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
             "similarity": float(r["similarity"]),
         }
         for r in rows
@@ -286,11 +334,15 @@ def search_entities_semantic(
     query_embedding: List[float],
     limit: int = 30,
 ) -> List[Dict]:
-    """Search knowledge_entities via cosine similarity on embeddings table."""
+    """Search knowledge_entities via cosine similarity.
+
+    Tries `content_type='entity'` first. Falls back to searching observations
+    (which are always embedded) and mapping back to their parent entities.
+    """
     vector_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
     sql = text(f"""
-        SELECT
+        SELECT DISTINCT ON (ke.id)
             ke.id,
             ke.name,
             ke.entity_type,
@@ -298,13 +350,15 @@ def search_entities_semantic(
             ke.description,
             1 - (e.embedding <=> CAST('{vector_literal}' AS vector)) AS similarity
         FROM embeddings e
+        JOIN knowledge_observations ko
+            ON CAST(ko.id AS text) = e.content_id
+            AND ko.tenant_id = e.tenant_id
         JOIN knowledge_entities ke
-            ON CAST(ke.id AS text) = e.content_id
-            AND ke.tenant_id = e.tenant_id
+            ON ko.entity_id = ke.id
         WHERE e.tenant_id = CAST(:tenant_id AS uuid)
-          AND e.content_type = 'entity'
+          AND e.content_type = 'observation'
           AND ke.deleted_at IS NULL
-        ORDER BY e.embedding <=> CAST('{vector_literal}' AS vector)
+        ORDER BY ke.id, e.embedding <=> CAST('{vector_literal}' AS vector)
         LIMIT :lim
     """)
 

@@ -57,33 +57,27 @@ def search_entities(
 ) -> list[EntitySummary]:
     """Top-K entities by pgvector cosine similarity, scoped by visibility.
 
+    Now uses KnowledgeEntity.embedding column directly for performance.
     Visibility filter (design doc §7) is inlined into the WHERE clause
-    because this query uses raw SQL, not the ORM. The same three rules
-    that `apply_visibility()` enforces on ORM queries apply here:
-      - tenant_wide rows: visible to all agents
-      - agent_scoped rows: visible only to owner_agent_slug == :agent
-      - agent_group rows:  visible when :agent = ANY(visible_to)
+    because this query uses raw SQL, not the ORM.
     """
     if _check_deadline(deadline):
         return []
     vec = "[" + ",".join(str(v) for v in query_embedding) + "]"
     sql = text(f"""
-        SELECT ke.id, ke.name, ke.entity_type, ke.category, ke.description,
-               ke.confidence,
-               1 - (e.embedding <=> CAST('{vec}' AS vector)) AS similarity
-        FROM embeddings e
-        JOIN knowledge_entities ke
-            ON CAST(ke.id AS text) = e.content_id
-            AND ke.tenant_id = e.tenant_id
-        WHERE e.tenant_id = CAST(:tid AS uuid)
-          AND e.content_type = 'entity'
-          AND ke.deleted_at IS NULL
+        SELECT id, name, entity_type, category, description,
+               confidence,
+               1 - (embedding <=> CAST('{vec}' AS vector)) AS similarity
+        FROM knowledge_entities
+        WHERE tenant_id = CAST(:tid AS uuid)
+          AND embedding IS NOT NULL
+          AND deleted_at IS NULL
           AND (
-              ke.visibility = 'tenant_wide'
-              OR (ke.visibility = 'agent_scoped' AND ke.owner_agent_slug = :agent)
-              OR (ke.visibility = 'agent_group'  AND :agent = ANY(ke.visible_to))
+              visibility = 'tenant_wide'
+              OR (visibility = 'agent_scoped' AND owner_agent_slug = :agent)
+              OR (visibility = 'agent_group'  AND :agent = ANY(visible_to))
           )
-        ORDER BY e.embedding <=> CAST('{vec}' AS vector)
+        ORDER BY embedding <=> CAST('{vec}' AS vector)
         LIMIT :lim
     """)
     rows = db.execute(
@@ -186,11 +180,47 @@ def search_commitments(
     tenant_id: uuid.UUID,
     agent_slug: str,
     top_k: int,
+    query_embedding: Optional[list[float]] = None,
     deadline: Optional[float] = None,
 ) -> list[CommitmentSummary]:
-    """Most-recent open commitments. No embedding column on this table."""
+    """Top-K open commitments. Uses semantic search if embedding provided, fallback to recency."""
     if _check_deadline(deadline):
         return []
+
+    if query_embedding:
+        vec = "[" + ",".join(str(v) for v in query_embedding) + "]"
+        sql = text(f"""
+            SELECT id, title, state, due_at, priority,
+                   1 - (embedding <=> CAST('{vec}' AS vector)) AS similarity
+            FROM commitment_records
+            WHERE tenant_id = CAST(:tid AS uuid)
+              AND state = 'open'
+              AND embedding IS NOT NULL
+              AND (
+                  visibility = 'tenant_wide'
+                  OR (visibility = 'agent_scoped' AND owner_agent_slug = :agent)
+                  OR (visibility = 'agent_group'  AND :agent = ANY(visible_to))
+              )
+            ORDER BY embedding <=> CAST('{vec}' AS vector)
+            LIMIT :lim
+        """)
+        rows = db.execute(
+            sql,
+            {"tid": str(tenant_id), "lim": top_k, "agent": agent_slug},
+        ).mappings().all()
+        return [
+            CommitmentSummary(
+                id=r["id"],
+                title=r["title"],
+                state=r["state"],
+                due_at=r["due_at"],
+                priority=r["priority"] or "normal",
+                similarity=float(r["similarity"]),
+            )
+            for r in rows
+        ]
+
+    # Fallback to recency/due_at if no embedding
     q = (
         db.query(CommitmentRecord)
         .filter(
@@ -207,7 +237,7 @@ def search_commitments(
             state=r.state,
             due_at=r.due_at,
             priority=r.priority or "normal",
-            similarity=1.0,  # no embedding match — pinned by recency/state
+            similarity=1.0,
         )
         for r in rows
     ]
@@ -218,11 +248,47 @@ def search_goals(
     tenant_id: uuid.UUID,
     agent_slug: str,
     top_k: int,
+    query_embedding: Optional[list[float]] = None,
     deadline: Optional[float] = None,
 ) -> list[GoalSummary]:
-    """Most-recent active goals (state in active/proposed)."""
+    """Top-K active goals. Uses semantic search if embedding provided, fallback to recency."""
     if _check_deadline(deadline):
         return []
+
+    if query_embedding:
+        vec = "[" + ",".join(str(v) for v in query_embedding) + "]"
+        sql = text(f"""
+            SELECT id, title, state, progress_pct, priority,
+                   1 - (embedding <=> CAST('{vec}' AS vector)) AS similarity
+            FROM goal_records
+            WHERE tenant_id = CAST(:tid AS uuid)
+              AND state IN ('active', 'proposed', 'in_progress')
+              AND embedding IS NOT NULL
+              AND (
+                  visibility = 'tenant_wide'
+                  OR (visibility = 'agent_scoped' AND owner_agent_slug = :agent)
+                  OR (visibility = 'agent_group'  AND :agent = ANY(visible_to))
+              )
+            ORDER BY embedding <=> CAST('{vec}' AS vector)
+            LIMIT :lim
+        """)
+        rows = db.execute(
+            sql,
+            {"tid": str(tenant_id), "lim": top_k, "agent": agent_slug},
+        ).mappings().all()
+        return [
+            GoalSummary(
+                id=r["id"],
+                title=r["title"],
+                state=r["state"],
+                progress_pct=int(r["progress_pct"] or 0),
+                priority=r["priority"] or "normal",
+                similarity=float(r["similarity"]),
+            )
+            for r in rows
+        ]
+
+    # Fallback to recency/updated_at if no embedding
     q = (
         db.query(GoalRecord)
         .filter(

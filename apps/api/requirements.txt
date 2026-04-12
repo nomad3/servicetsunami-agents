@@ -30,8 +30,11 @@ neonize>=0.3.14
 segno
 pdfplumber>=0.10.0
 pgvector>=0.3.6
-# sentence-transformers (Moved to embedding-service)
-# einops (Moved to embedding-service)
-protobuf>=5.26.1,<7.0.0
+# sentence-transformers for local fallback when embedding-service is down
+sentence-transformers
+einops
+protobuf>=7.34.1
 grpcio>=1.62.0
-grpcio-tools>=1.62.0
+# grpcio-tools is build-time only (proto compilation) — installed separately
+# in the Dockerfile builder stage to avoid the protobuf <7 vs >=7 conflict
+# with neonize.

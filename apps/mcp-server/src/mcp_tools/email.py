@@ -298,7 +298,7 @@ def _extract_email_entities(headers: dict, body: str, account_email: str) -> lis
 # Embedding helper (best-effort, asyncpg direct)
 # ---------------------------------------------------------------------------
 
-async def _get_embedding(text: str) -> Optional[list]:
+async def _get_embedding(text: str, task_type: str = "document") -> Optional[list]:
     """Generate a 768-dim embedding via nomic-embed-text-v1.5 (local, no API key)."""
     try:
         from sentence_transformers import SentenceTransformer
@@ -308,7 +308,8 @@ async def _get_embedding(text: str) -> Optional[list]:
                 "nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True
             )
         model = _get_embedding._model
-        prefixed = f"search_document: {text[:8000]}"
+        prefix = "search_document: " if task_type == "document" else "search_query: "
+        prefixed = f"{prefix}{text[:8000]}"
         embedding = model.encode(prefixed, normalize_embeddings=True)
         return embedding.tolist()
     except Exception as e:

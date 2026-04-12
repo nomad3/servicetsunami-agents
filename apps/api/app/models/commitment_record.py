@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import Column, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
 
 from app.db.base import Base
 
@@ -41,6 +42,8 @@ class CommitmentRecord(Base):
     # owner_agent_slug already exists above; visibility/visible_to added here.
     visibility = Column(String(20), nullable=False, default="tenant_wide")
     visible_to = Column(ARRAY(String), nullable=True)
+
+    embedding = Column(Vector(768), nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

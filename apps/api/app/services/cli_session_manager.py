@@ -217,15 +217,40 @@ def generate_cli_instructions(
 
     episodes = memory_context.get("recent_episodes", [])
     if episodes:
-        lines.append("## Recent Conversations")
+        lines.append("## Recent Episode Summaries")
         lines.append("")
         for ep in episodes:
             date = ep.get("date", "")
-            mood = ep.get("mood", "")
-            source = ep.get("source", "")
-            mood_tag = f" [{mood}]" if mood and mood != "neutral" else ""
-            source_tag = f" via {source}" if source else ""
-            lines.append(f"- {date}{source_tag}{mood_tag}: {ep.get('summary', '')}")
+            lines.append(f"- {date}: {ep.get('summary', '')}")
+        lines.append("")
+
+    past_cv = memory_context.get("past_conversations", [])
+    if past_cv:
+        lines.append("## Relevant Past Message Excerpts")
+        lines.append("")
+        for cv in past_cv:
+            date = cv.get("date", "")
+            role = cv.get("role", "user").upper()
+            content = cv.get("content", "")
+            lines.append(f"[{date}] {role}: {content}")
+        lines.append("")
+
+    commitments = memory_context.get("commitments", [])
+    if commitments:
+        lines.append("## Pending Commitments")
+        lines.append("These are promises you have made that are still open:")
+        lines.append("")
+        for c in commitments:
+            lines.append(f"- **{c['title']}** (State: {c['state']}, Due: {c['due_at']}, Priority: {c['priority']})")
+        lines.append("")
+
+    goals = memory_context.get("goals", [])
+    if goals:
+        lines.append("## Active Goals")
+        lines.append("These are your current high-level objectives:")
+        lines.append("")
+        for g in goals:
+            lines.append(f"- **{g['title']}** (State: {g['state']}, Progress: {g['progress']}%, Priority: {g['priority']})")
         lines.append("")
 
     # User preferences (learned from feedback)
@@ -348,13 +373,16 @@ def generate_mcp_config(tenant_id: str, internal_key: str, db: Session = None) -
     Includes the built-in AgentProvision MCP server plus any external MCP servers
     connected to this tenant via MCPServerConnector.
     """
-    mcp_tools_url = os.environ.get("MCP_TOOLS_URL", "http://mcp-tools:8000")
-    mcp_url = f"{mcp_tools_url}/mcp"
+    mcp_tools_url = os.environ.get("MCP_TOOLS_URL", "http://mcp-tools:8086")
+    mcp_url = f"{mcp_tools_url}/sse"
 
     config = {
         "mcpServers": {
             "agentprovision": {
-                "type": "http",
+                # FastMCP runs in SSE mode (see apps/mcp-server/src/mcp_serve.py)
+                # because gemini-cli's HTTP MCP client doesn't negotiate the
+                # streamable-http Accept header correctly.
+                "type": "sse",
                 "url": mcp_url,
                 "headers": {
                     "X-Internal-Key": internal_key,

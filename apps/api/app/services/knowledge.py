@@ -34,9 +34,14 @@ def _safe_embed_entity(db: Session, entity: KnowledgeEntity) -> None:
     """Embed an entity, silently catching errors so CRUD is never blocked."""
     try:
         embed_text = _entity_embed_text(entity)
+        # Store in shared table
         embedding_service.embed_and_store(
             db, entity.tenant_id, "entity", str(entity.id), embed_text,
         )
+        # ALSO store directly on model for faster same-table search
+        vec = embedding_service.embed_text(embed_text)
+        if vec is not None:
+            entity.embedding = vec
     except Exception:
         logger.exception("Failed to embed entity %s — skipping", entity.id)
 

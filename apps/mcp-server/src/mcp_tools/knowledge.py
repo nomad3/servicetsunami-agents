@@ -94,7 +94,7 @@ async def _has_pgvector(conn: asyncpg.Connection) -> bool:
     return _pgvector_available
 
 
-async def _get_embedding(text: str) -> Optional[list]:
+async def _get_embedding(text: str, task_type: str = "document") -> Optional[list]:
     """Generate a 768-dim embedding via nomic-embed-text-v1.5 (local, no API key)."""
     try:
         from sentence_transformers import SentenceTransformer
@@ -104,7 +104,8 @@ async def _get_embedding(text: str) -> Optional[list]:
                 "nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True
             )
         model = _get_embedding._model
-        prefixed = f"search_document: {text[:8000]}"
+        prefix = "search_document: " if task_type == "document" else "search_query: "
+        prefixed = f"{prefix}{text[:8000]}"
         embedding = model.encode(prefixed, normalize_embeddings=True)
         return embedding.tolist()
     except Exception as e:
@@ -228,7 +229,7 @@ async def find_entities(
             type_filter = f"AND entity_type IN ({placeholders})"
 
         if pgvector:
-            embedding = await _get_embedding(query)
+            embedding = await _get_embedding(query, task_type="query")
             if embedding:
                 sql = f"""
                     SELECT id, name, entity_type, category, description, confidence,
@@ -236,6 +237,7 @@ async def find_entities(
                     FROM knowledge_entities
                     WHERE tenant_id = $1
                     AND confidence >= $2
+                    AND embedding IS NOT NULL
                     {type_filter}
                     ORDER BY embedding <=> $3::vector
                     LIMIT {limit}

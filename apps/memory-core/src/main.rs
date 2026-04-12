@@ -221,6 +221,7 @@ impl MemoryCore for MyMemoryCore {
                 e.content_id as session_id,
                 e.text_content as content,
                 'user' as role,
+                e.created_at,
                 (1 - (e.embedding <=> $2::vector)) as similarity
             FROM embeddings e
             WHERE e.tenant_id = $1 AND e.content_type = 'chat_message'
@@ -235,11 +236,15 @@ impl MemoryCore for MyMemoryCore {
         .map_err(|e| Status::internal(format!("DB error (conversations): {}", e)))?;
 
         let past_conversations: Vec<ConversationSnippet> = conversation_rows.iter().map(|r| {
+            let dt: Option<chrono::DateTime<chrono::Utc>> = r.get("created_at");
             ConversationSnippet {
                 session_id: r.get("session_id"),
                 content: r.get("content"),
                 role: r.get("role"),
-                created_at: None, // embeddings table does not have created_at
+                created_at: dt.map(|d| prost_types::Timestamp {
+                    seconds: d.timestamp(),
+                    nanos: d.timestamp_subsec_nanos() as i32,
+                }),
                 similarity: r.get::<f64, _>("similarity") as f32,
             }
         }).collect();

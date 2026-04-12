@@ -5,10 +5,10 @@ ingress:
   # API routes
   - hostname: agentprovision.com
     path: /api/*
-    service: http://api:80
+    service: http://api:8000
   - hostname: luna.agentprovision.com
     path: /api/*
-    service: http://api:80
+    service: http://api:8000
 
   # Luna PWA client
   - hostname: luna.agentprovision.com

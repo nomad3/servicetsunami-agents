@@ -1,0 +1,73 @@
+name: Docker Desktop Deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/docker-desktop-deploy.yaml'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - restart
+          - rebuild-all
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: self-hosted
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Detect changed services
+        id: changes
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "apps/api")
+          SERVICES=""
+          echo "$CHANGED" | grep -q "apps/api/" && SERVICES="$SERVICES api orchestration-worker"
+          echo "$CHANGED" | grep -q "apps/web/" && SERVICES="$SERVICES web"
+          echo "$CHANGED" | grep -q "apps/code-worker/" && SERVICES="$SERVICES code-worker"
+          echo "$CHANGED" | grep -q "apps/embedding-service/" && SERVICES="$SERVICES embedding-service"
+          echo "$CHANGED" | grep -q "apps/memory-core/" && SERVICES="$SERVICES memory-core"
+          echo "$CHANGED" | grep -q "apps/mcp-server/" && SERVICES="$SERVICES mcp-tools"
+          echo "$CHANGED" | grep -q "apps/luna-client/" && SERVICES="$SERVICES luna-client"
+          
+          if [ -z "$SERVICES" ] || [ "${{ github.event.inputs.action }}" = "rebuild-all" ]; then
+            SERVICES="api web code-worker orchestration-worker embedding-service memory-core mcp-tools luna-client"
+          fi
+          
+          # Dedup services
+          SERVICES=$(echo $SERVICES | tr ' ' '\n' | sort -u | tr '\n' ' ')
+          echo "services=$SERVICES" >> $GITHUB_OUTPUT
+          echo "Services to build: $SERVICES"
+
+      - name: Build and update services
+        run: |
+          SERVICES="${{ steps.changes.outputs.services }}"
+          echo "Updating: $SERVICES"
+          
+          # Build only the changed services to save time, but use compose context
+          for svc in $SERVICES; do
+            echo "--- Building $svc ---"
+            # Some services might not be in docker-compose.yml yet or have different names
+            # We use docker compose build <service_name> to respect the compose file
+            docker compose build $svc || echo "Skipping $svc (not in compose or build error)"
+          done
+
+      - name: Up and prune
+        run: |
+          echo "Starting services..."
+          docker compose up -d
+          
+          echo "Cleaning up dangling images..."
+          docker image prune -f || true

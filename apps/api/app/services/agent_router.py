@@ -80,7 +80,11 @@ def _recall_response_to_legacy_dict(resp) -> dict:
         if name:
             if name not in obs_by_name:
                 obs_by_name[name] = []
-            obs_by_name[name].append({"text": o.content, "sentiment": "neutral"})
+            obs_by_name[name].append({
+                "text": o.content,
+                "sentiment": "neutral",
+                "source_ref": getattr(o, "source_ref", "")
+            })
 
     return {
         "recalled_entity_names": [e.name for e in resp.entities],
@@ -102,10 +106,36 @@ def _recall_response_to_legacy_dict(resp) -> dict:
         "recent_episodes": [
             {
                 "summary": ep.summary,
-                "date": ep.created_at.isoformat() if ep.created_at else "",
+                "date": ep.created_at.strftime("%Y-%m-%d %H:%M") if ep.created_at else "",
                 "mood": "neutral"
             } 
             for ep in resp.episodes
+        ],
+        "commitments": [
+            {
+                "title": c.title,
+                "state": c.state,
+                "due_at": c.due_at.strftime("%Y-%m-%d %H:%M") if c.due_at else "No deadline",
+                "priority": c.priority
+            }
+            for c in resp.commitments
+        ],
+        "goals": [
+            {
+                "title": g.title,
+                "state": g.state,
+                "progress": g.progress_pct,
+                "priority": g.priority
+            }
+            for g in resp.goals
+        ],
+        "past_conversations": [
+            {
+                "role": cv.role,
+                "content": cv.content,
+                "date": cv.created_at.strftime("%Y-%m-%d %H:%M") if cv.created_at else ""
+            }
+            for cv in resp.past_conversations
         ],
         "anticipatory_context": "",
         "contradictions": [],
@@ -271,7 +301,10 @@ def route_and_execute(
     if features and hasattr(features, 'default_cli_platform') and features.default_cli_platform:
         platform = features.default_cli_platform
 
-    _pin_to_claude = False 
+    # When the tenant has a CLI subscription (gemini_cli, claude_code, codex),
+    # always route through it — don't fall back to local Gemma 4 for short
+    # messages. Local inference is for free-tier tenants with no subscription.
+    _pin_to_claude = platform in {"gemini_cli", "claude_code", "codex"}
 
     # 2. Get trust profile
     try:

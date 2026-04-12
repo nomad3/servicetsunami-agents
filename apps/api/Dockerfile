@@ -22,6 +22,15 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# Install grpcio-tools (build-time only, needs protobuf<7) and compile protos.
+# The generated *_pb2*.py files will be copied to the production stage;
+# grpcio-tools itself stays in the builder and is NOT in the production venv.
+COPY ./proto /app/proto
+COPY ./scripts/gen_proto.sh /app/scripts/gen_proto.sh
+RUN pip install --no-cache-dir "grpcio-tools>=1.62.0,<2.0" "protobuf>=5.26.1,<7.0.0" && \
+    bash /app/scripts/gen_proto.sh && \
+    pip install --no-cache-dir "protobuf>=7.34.1"
+
 # ===== Production Stage =====
 FROM python:3.11-slim
 
@@ -56,10 +65,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy application code
 COPY --chown=appuser:appgroup ./app /app/app
 
-# Copy proto files and generation script, then compile gRPC stubs
-COPY --chown=appuser:appgroup ./proto /app/proto
-COPY --chown=appuser:appgroup ./scripts/gen_proto.sh /app/scripts/gen_proto.sh
-RUN bash /app/scripts/gen_proto.sh
+# Copy pre-compiled gRPC stubs from builder (proto compilation happened there
+# with grpcio-tools + protobuf<7; production runs protobuf>=7 for neonize compat)
+COPY --from=builder --chown=appuser:appgroup /app/app/generated /app/app/generated
 
 # Create storage directory with correct permissions
 RUN mkdir -p /app/storage && chown -R appuser:appgroup /app/storage

@@ -373,6 +373,7 @@ def recall(db: Session, request: RecallRequest) -> RecallResponse:
             commitments = _query.search_commitments(
                 db, request.tenant_id, request.agent_slug,
                 top_k=request.top_k_per_type,
+                query_embedding=query_embedding,
                 deadline=deadline,
             )
         except Exception:
@@ -382,6 +383,7 @@ def recall(db: Session, request: RecallRequest) -> RecallResponse:
             goals = _query.search_goals(
                 db, request.tenant_id, request.agent_slug,
                 top_k=request.top_k_per_type,
+                query_embedding=query_embedding,
                 deadline=deadline,
             )
         except Exception:
