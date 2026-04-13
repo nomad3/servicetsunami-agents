@@ -19,6 +19,7 @@ class Blackboard(Base):
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
     plan_id = Column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=True)
     goal_id = Column(UUID(as_uuid=True), ForeignKey("goal_records.id"), nullable=True)
+    chat_session_id = Column(UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="SET NULL"), nullable=True)
 
     title = Column(String(500), nullable=False)
     status = Column(String(30), nullable=False, default="active")
