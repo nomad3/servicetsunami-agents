@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     DATA_STORAGE_PATH: str = "/app/storage"
     TEMPORAL_ADDRESS: str | None = "localhost:7233"
     TEMPORAL_NAMESPACE: str = "default"
+    REDIS_URL: str = "redis://redis:6379/0"
 
     DEFAULT_WORKFLOW_TIMEOUT_SECONDS: int = 600
 

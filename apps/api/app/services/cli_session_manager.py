@@ -88,6 +88,9 @@ def generate_cli_instructions(
     lines.append("")
     lines.append(f"Your tenant_id is: {tenant_name}")
     lines.append(f"When calling ANY MCP tool, ALWAYS pass tenant_id=\"{tenant_name}\".")
+    lines.append("MCP tool names in skill descriptions may omit the server prefix for readability.")
+    lines.append("Always call tools using their FULL registered name as shown in your tools list.")
+    lines.append("If a tool described as 'foo_bar' fails with 'not found', use 'mcp_agentprovision_foo_bar' instead.")
     lines.append(f"Session: tenant={tenant_name} user={user_name} channel={channel}")
     lines.append("")
     # Identity section: use identity profile if available, otherwise default to Luna

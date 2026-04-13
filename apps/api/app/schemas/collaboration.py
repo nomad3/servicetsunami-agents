@@ -13,6 +13,7 @@ class CollaborationPattern(str, Enum):
     PLAN_VERIFY = "plan_verify"
     RESEARCH_SYNTHESIZE = "research_synthesize"
     DEBATE_RESOLVE = "debate_resolve"
+    INCIDENT_INVESTIGATION = "incident_investigation"
 
 
 class CollaborationPhase(str, Enum):
@@ -25,6 +26,10 @@ class CollaborationPhase(str, Enum):
     DEBATE = "debate"
     RESOLVE = "resolve"
     COMPLETE = "complete"
+    TRIAGE = "triage"
+    INVESTIGATE = "investigate"
+    ANALYZE = "analyze"
+    COMMAND = "command"
 
 
 PATTERN_PHASES = {
@@ -32,6 +37,7 @@ PATTERN_PHASES = {
     "plan_verify": ["propose", "verify"],
     "research_synthesize": ["research", "synthesize", "verify"],
     "debate_resolve": ["propose", "debate", "resolve"],
+    "incident_investigation": ["triage", "investigate", "analyze", "command"],
 }
 
 PHASE_REQUIRED_ROLES = {
@@ -43,6 +49,10 @@ PHASE_REQUIRED_ROLES = {
     "research": ["researcher"],
     "debate": ["critic", "planner"],
     "resolve": ["synthesizer"],
+    "triage": ["triage_agent"],
+    "investigate": ["investigator"],
+    "analyze": ["analyst"],
+    "command": ["commander"],
 }
 
 

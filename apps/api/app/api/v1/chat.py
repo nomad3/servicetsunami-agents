@@ -371,3 +371,53 @@ def post_message_enhanced(
         user_message=chat_schema.ChatMessage.model_validate(user_msg),
         assistant_message=chat_schema.ChatMessage.model_validate(assistant_msg)
     )
+
+
+@router.get("/sessions/{session_id}/events")
+def session_events_stream(
+    session_id: uuid.UUID,
+    *,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Long-lived SSE stream for session-level events (collaboration_started, etc.)."""
+    session = chat_service.get_session(db, session_id=session_id, tenant_id=current_user.tenant_id)
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+
+    from app.services.collaboration_events import subscribe_session
+
+    return StreamingResponse(
+        subscribe_session(str(session_id)),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/sessions/{session_id}/collaborations")
+def list_session_collaborations(
+    session_id: uuid.UUID,
+    *,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """List all collaborations linked to this chat session."""
+    from app.models.blackboard import Blackboard
+    from app.models.collaboration import CollaborationSession
+    from app.schemas.collaboration import CollaborationSessionInDB
+
+    boards = db.query(Blackboard).filter(
+        Blackboard.tenant_id == current_user.tenant_id,
+        Blackboard.chat_session_id == session_id,
+    ).all()
+
+    board_ids = [b.id for b in boards]
+    if not board_ids:
+        return []
+
+    sessions = db.query(CollaborationSession).filter(
+        CollaborationSession.tenant_id == current_user.tenant_id,
+        CollaborationSession.blackboard_id.in_(board_ids),
+    ).order_by(CollaborationSession.created_at.desc()).all()
+
+    return [CollaborationSessionInDB.model_validate(s) for s in sessions]

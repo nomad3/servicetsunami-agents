@@ -149,7 +149,8 @@ from app.workflows.activities.morning_briefing import (
 from app.workflows.activities.coalition_activities import (
     select_coalition_template,
     initialize_collaboration,
-    execute_collaboration_step,
+    prepare_collaboration_step,
+    record_collaboration_step,
     finalize_collaboration,
 )
 from app.workflows.activities.post_chat_memory_activities import (
@@ -345,7 +346,8 @@ async def run_orchestration_worker():
             # Coalition activities
             select_coalition_template,
             initialize_collaboration,
-            execute_collaboration_step,
+            prepare_collaboration_step,
+            record_collaboration_step,
             finalize_collaboration,
         ],
     )

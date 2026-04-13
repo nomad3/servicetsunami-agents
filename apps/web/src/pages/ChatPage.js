@@ -8,6 +8,7 @@ import { useAuth } from '../App';
 import Layout from '../components/Layout';
 import FeedbackActions from '../components/chat/FeedbackActions';
 import ReportVisualization from '../components/chat/ReportVisualization';
+import CollaborationPanel from '../components/CollaborationPanel';
 // LunaAvatar removed
 import { useLunaPresence } from '../context/LunaPresenceContext';
 import agentKitService from '../services/agentKit';
@@ -50,6 +51,19 @@ const ChatPage = () => {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
+  // Collaboration state
+  const [activeCollaboration, setActiveCollaboration] = useState(null);
+  const [showCollabPanel, setShowCollabPanel] = useState(false);
+  const sessionEventsRef = useRef(null);
+  const API_BASE = process.env.REACT_APP_API_BASE_URL || '';
+
+  const PATTERN_PHASES = {
+    incident_investigation: ['triage', 'investigate', 'analyze', 'command'],
+    research_synthesize: ['research', 'synthesize'],
+    plan_verify: ['plan', 'verify'],
+    propose_critique_revise: ['propose', 'critique', 'revise'],
+  };
+
   // Auto-scroll to bottom when messages change or typing indicator appears
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -85,11 +99,80 @@ const ChatPage = () => {
       if (streamAbortRef.current) {
         streamAbortRef.current.abort();
       }
+      if (sessionEventsRef.current) {
+        sessionEventsRef.current.abort();
+      }
       if (responseEmotionTimerRef.current) {
         clearTimeout(responseEmotionTimerRef.current);
       }
     };
   }, []);
+
+  // Open long-lived session events SSE when a session is selected.
+  // fetch() used instead of EventSource because EventSource cannot send Authorization headers.
+  useEffect(() => {
+    const sessionId = selectedSession?.id;
+    const token = auth.user?.access_token || '';
+    if (!sessionId || !token) return;
+
+    const ctrl = new AbortController();
+    sessionEventsRef.current = ctrl;
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/v1/chat/sessions/${sessionId}/events`,
+          { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal }
+        );
+        if (!res.ok) return;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.event_type === 'collaboration_started' && data.payload) {
+                const { collaboration_id, phases: serverPhases, pattern } = data.payload;
+                const phases = (Array.isArray(serverPhases) && serverPhases.length > 0)
+                  ? serverPhases
+                  : (PATTERN_PHASES[pattern] || ['triage', 'investigate', 'analyze', 'command']);
+                setActiveCollaboration({
+                  id: collaboration_id,
+                  phases,
+                  isCompleted: false,
+                });
+                setShowCollabPanel(true);
+              } else if (data.event_type === 'collaboration_completed') {
+                setActiveCollaboration(prev => prev ? { ...prev, isCompleted: true } : prev);
+                const finalReport = data.payload?.final_report;
+                if (finalReport) {
+                  setMessages(prev => [...prev, {
+                    id: `collab-report-${data.payload?.collaboration_id || Date.now()}`,
+                    role: 'assistant',
+                    content: `**A2A Collaboration Complete**\n\n${finalReport}`,
+                    created_at: new Date().toISOString(),
+                  }]);
+                }
+              }
+            } catch (e) {
+              if (process.env.NODE_ENV === 'development') console.debug('[ChatPage SSE]', e);
+            }
+          }
+        }
+      } catch (e) {
+        if (e.name !== 'AbortError') console.warn('[ChatPage] session SSE error', e);
+      }
+    })();
+
+    return () => { ctrl.abort(); };
+  }, [selectedSession?.id, auth.user?.access_token]);
 
   // Set emotion from assistant response, auto-revert after 10s
   const applyResponseEmotion = (emotion) => {
@@ -221,7 +304,34 @@ const ChatPage = () => {
       setPostingMessage(false);
     }
     setSelectedSession(session);
+    setActiveCollaboration(null);
+    setShowCollabPanel(false);
+    if (sessionEventsRef.current) {
+      sessionEventsRef.current.abort();
+      sessionEventsRef.current = null;
+    }
     loadMessages(session.id);
+
+    // Rehydrate collaboration panel if this session has a prior collaboration
+    const token = auth.user?.access_token || '';
+    if (token) {
+      fetch(`${API_BASE}/api/v1/chat/sessions/${session.id}/collaborations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(res => res.ok ? res.json() : null)
+        .then(collabs => {
+          if (!Array.isArray(collabs) || collabs.length === 0) return;
+          const latest = collabs[0];
+          const phases = PATTERN_PHASES[latest.pattern] || ['triage', 'investigate', 'analyze', 'command'];
+          setActiveCollaboration({
+            id: latest.id,
+            phases,
+            isCompleted: latest.status === 'completed',
+          });
+          setShowCollabPanel(true);
+        })
+        .catch(() => { /* non-fatal */ });
+    }
   };
 
   const handleMessageSubmit = async (event) => {
@@ -488,6 +598,8 @@ const ChatPage = () => {
 
           <Col lg={8} xl={9} className="chat-main-col">
             {globalError && <Alert variant="danger">{globalError}</Alert>}
+            <div style={{ display: 'flex', gap: '1rem', height: '100%' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
             {selectedSession ? (
               <Card className="shadow-sm">
                 {/* ═══ Session Header ═══ */}
@@ -528,6 +640,20 @@ const ChatPage = () => {
                       }}
                     >
                       {ttsEnabled ? '🔊' : '🔇'}
+                    </Button>
+                  )}
+                  {/* A2A Collaboration panel toggle */}
+                  {activeCollaboration && (
+                    <Button
+                      size="sm"
+                      variant={showCollabPanel ? 'outline-info' : 'outline-secondary'}
+                      onClick={() => setShowCollabPanel(v => !v)}
+                      style={{
+                        position: 'absolute', top: 8, right: window.speechSynthesis ? 50 : 8,
+                        fontSize: '0.8rem', opacity: 0.8,
+                      }}
+                    >
+                      {showCollabPanel ? 'Hide A2A' : 'View A2A'}
                     </Button>
                   )}
                 </div>
@@ -709,6 +835,19 @@ const ChatPage = () => {
                 </Card.Body>
               </Card>
             )}
+            </div>
+            {showCollabPanel && activeCollaboration && (
+              <div style={{ width: '420px', flexShrink: 0 }}>
+                <CollaborationPanel
+                  collaborationId={activeCollaboration.id}
+                  phases={activeCollaboration.phases}
+                  apiBaseUrl={`${API_BASE}/api/v1`}
+                  token={auth.user?.access_token || ''}
+                  isCompleted={activeCollaboration.isCompleted}
+                />
+              </div>
+            )}
+            </div>
           </Col>
         </Row>
       </Container>
