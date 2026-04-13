@@ -35,11 +35,15 @@ export default function ChatInterface({ handoff, requestAction }) {
 
   // Load sessions on mount
   useEffect(() => {
-    apiJson('/api/v1/chat/sessions').then(data => {
-      setSessions(data);
-      if (data.length > 0) selectSession(data[0].id);
-    }).catch(() => {});
-  }, []);
+    apiJson('/api/v1/chat/sessions')
+      .then(data => {
+        setSessions(data);
+        if (data.length > 0) selectSession(data[0].id);
+      })
+      .catch(err => {
+        console.error('[Luna] Failed to load sessions:', err);
+      });
+  }, [selectSession]);
 
   const selectSession = useCallback(async (id) => {
     setActiveSession(id);
@@ -117,10 +121,29 @@ export default function ChatInterface({ handoff, requestAction }) {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || !activeSession || streaming) return;
+    if (!input.trim() || streaming) return;
+    
+    let targetSession = activeSession;
     const text = input;
-    const targetSession = activeSession;
     setInput('');
+
+    // Auto-create session if none active
+    if (!targetSession) {
+      try {
+        const session = await apiJson('/api/v1/chat/sessions', {
+          method: 'POST',
+          body: JSON.stringify({ title: 'Luna Chat' }),
+        });
+        setSessions(prev => [session, ...prev]);
+        targetSession = session.id;
+        setActiveSession(session.id);
+        activeSessionRef.current = session.id;
+        window.dispatchEvent(new CustomEvent('luna-session-change', { detail: session.id }));
+      } catch (err) {
+        console.error('[Luna] Failed to auto-create session:', err);
+        return;
+      }
+    }
 
     const tempId = `temp-${Date.now()}`;
     setMessages(prev => [...prev, { id: tempId, role: 'user', content: text }]);
@@ -191,6 +214,17 @@ export default function ChatInterface({ handoff, requestAction }) {
 
         {/* Messages */}
         <div className="messages-area">
+          {messages.length === 0 && !streaming && (
+            <div className="chat-welcome">
+              <h2>Luna OS Spatial Workstation</h2>
+              <p>Type a message below to start your first raid or explore the Knowledge Nebula.</p>
+              <div className="welcome-tips">
+                <div className="tip"><code>Cmd+Shift+L</code> to toggle Spatial HUD</div>
+                <div className="tip"><code>WASD</code> to fly through memory stars</div>
+                <div className="tip"><code>Tab</code> to view Shared Blackboard</div>
+              </div>
+            </div>
+          )}
           {messages.map(msg => (
             <div key={msg.id} className={`message message-${msg.role}`}>
               {msg.role === 'assistant' && msg.context?.recalled_entity_names?.length > 0 && (
