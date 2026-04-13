@@ -908,8 +908,13 @@ class ChatCliResult:
 
 
 @activity.defn
-async def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
-    """Run a conversational CLI turn through the selected provider."""
+def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
+    """Run a conversational CLI turn through the selected provider.
+
+    Sync (not async) so Temporal runs this in a thread-pool executor rather than
+    directly on the asyncio event loop.  This keeps blocking subprocess calls and
+    time.sleep() from starving workflow-decision tasks that share the same worker.
+    """
     logger.info("Executing chat CLI for platform %s, tenant %s", task_input.platform, task_input.tenant_id)
     try:
         # Fetch GitHub token from vault for git operations
@@ -1493,30 +1498,33 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
         p = os.path.join(gemini_home, f)
         logger.info("Gemini home file %s present=%s", f, os.path.exists(p))
 
-    # Use Popen + heartbeat loop so Temporal doesn't kill the activity during long Gemini runs
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=env,
-        cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
-    )
-    start = time.monotonic()
-    while True:
-        if process.poll() is not None:
-            break
-        elapsed = int(time.monotonic() - start)
-        if elapsed >= 1500:
-            process.kill()
-            break
-        try:
-            activity.heartbeat(f"Gemini CLI running... ({elapsed}s elapsed)")
-        except Exception:
-            pass
-        time.sleep(60)
-    stdout, stderr = process.communicate(timeout=30)
-    result = subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+    # Run subprocess in the calling thread (which is a thread-pool thread, not the
+    # event loop).  A background heartbeat thread keeps Temporal from timing out
+    # the activity while Gemini CLI is thinking.
+    import threading as _threading
+    _stop_hb = _threading.Event()
+    def _heartbeat_loop():
+        elapsed = 0
+        while not _stop_hb.wait(60):
+            elapsed += 60
+            try:
+                activity.heartbeat(f"Gemini CLI running... ({elapsed}s elapsed)")
+            except Exception:
+                pass
+    _hb_thread = _threading.Thread(target=_heartbeat_loop, daemon=True)
+    _hb_thread.start()
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=1500,
+            env=env,
+            cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+        )
+    finally:
+        _stop_hb.set()
+        _hb_thread.join(timeout=5)
     logger.info("Gemini CLI exit code: %s", result.returncode)
     if result.stdout:
         logger.info("Gemini CLI stdout: %s", result.stdout[:500])

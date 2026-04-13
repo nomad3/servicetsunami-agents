@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 def _infer_pattern(task_lower: str) -> str:
     """Infer collaboration pattern from task description. Returns underscore format."""
-    if any(k in task_lower for k in ["incident", "investigate", "outage", "degraded", "crash", "alert"]):
+    if any(k in task_lower for k in [
+        "incident", "investigate", "outage", "degraded", "crash", "alert",
+        "failure", "stale", "pipeline", "mdm", "master data", "sync",
+    ]):
         return "incident_investigation"
     if any(k in task_lower for k in ["research", "market", "competitor"]):
         return "research_synthesize"
@@ -30,11 +33,11 @@ def _infer_pattern(task_lower: str) -> str:
 def _required_roles_for_pattern(pattern: str) -> list:
     roles_map = {
         "incident_investigation": ["triage_agent", "investigator", "analyst", "commander"],
-        "research_synthesize": ["researcher", "synthesizer"],
+        "research_synthesize": ["researcher", "synthesizer", "verifier"],
         "plan_verify": ["planner", "verifier"],
-        "propose_critique_revise": ["planner", "critic"],
+        "propose_critique_revise": ["planner", "critic", "verifier"],
     }
-    return roles_map.get(pattern, ["planner", "critic"])
+    return roles_map.get(pattern, ["planner", "critic", "verifier"])
 
 
 def _build_blackboard_context(entries: list) -> str:
