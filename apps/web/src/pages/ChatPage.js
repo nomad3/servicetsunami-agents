@@ -57,6 +57,13 @@ const ChatPage = () => {
   const sessionEventsRef = useRef(null);
   const API_BASE = process.env.REACT_APP_API_BASE_URL || '';
 
+  const PATTERN_PHASES = {
+    incident_investigation: ['triage', 'investigate', 'analyze', 'command'],
+    research_synthesize: ['research', 'synthesize'],
+    plan_verify: ['plan', 'verify'],
+    propose_critique_revise: ['propose', 'critique', 'revise'],
+  };
+
   // Auto-scroll to bottom when messages change or typing indicator appears
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -144,6 +151,15 @@ const ChatPage = () => {
                 setShowCollabPanel(true);
               } else if (data.event_type === 'collaboration_completed') {
                 setActiveCollaboration(prev => prev ? { ...prev, isCompleted: true } : prev);
+                const finalReport = data.payload?.final_report;
+                if (finalReport) {
+                  setMessages(prev => [...prev, {
+                    id: `collab-report-${data.payload?.collaboration_id || Date.now()}`,
+                    role: 'assistant',
+                    content: `**A2A Collaboration Complete**\n\n${finalReport}`,
+                    created_at: new Date().toISOString(),
+                  }]);
+                }
               }
             } catch (e) {
               if (process.env.NODE_ENV === 'development') console.debug('[ChatPage SSE]', e);
@@ -295,6 +311,27 @@ const ChatPage = () => {
       sessionEventsRef.current = null;
     }
     loadMessages(session.id);
+
+    // Rehydrate collaboration panel if this session has a prior collaboration
+    const token = auth.user?.access_token || '';
+    if (token) {
+      fetch(`${API_BASE}/api/v1/chat/sessions/${session.id}/collaborations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(res => res.ok ? res.json() : null)
+        .then(collabs => {
+          if (!Array.isArray(collabs) || collabs.length === 0) return;
+          const latest = collabs[0];
+          const phases = PATTERN_PHASES[latest.pattern] || ['triage', 'investigate', 'analyze', 'command'];
+          setActiveCollaboration({
+            id: latest.id,
+            phases,
+            isCompleted: latest.status === 'completed',
+          });
+          setShowCollabPanel(true);
+        })
+        .catch(() => { /* non-fatal */ });
+    }
   };
 
   const handleMessageSubmit = async (event) => {

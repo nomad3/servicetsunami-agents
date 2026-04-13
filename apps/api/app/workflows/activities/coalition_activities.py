@@ -153,15 +153,18 @@ async def select_coalition_template(tenant_id: str, chat_session_id: str, task_d
 
 
 @activity.defn
-async def initialize_collaboration(tenant_id: str, chat_session_id: str, template: dict) -> dict:
+async def initialize_collaboration(
+    tenant_id: str, chat_session_id: str, template: dict, task_description: str = ""
+) -> dict:
     """Create the Shared Blackboard and start the Collaboration Session."""
     from app.services import collaboration_service
     from app.services.collaboration_events import publish_session_event
 
     db = SessionLocal()
     try:
+        board_title = task_description.strip() if task_description.strip() else template["name"]
         board_in = BlackboardCreate(
-            title=f"Task: {template['name']}",
+            title=board_title,
             chat_session_id=UUID(chat_session_id),
         )
         board = blackboard_service.create_blackboard(db, UUID(tenant_id), board_in)
@@ -246,20 +249,20 @@ async def prepare_collaboration_step(
         entries = blackboard_service.get_active_entries(db, UUID(tenant_id), session.blackboard_id)
         blackboard_context = _build_blackboard_context(entries)
 
-        # Get original task description from the blackboard title
+        # Get original task description from the blackboard title (stored verbatim)
         board = blackboard_service.get_blackboard(db, UUID(tenant_id), session.blackboard_id)
-        task_description = board.title.replace("Task: Dynamic ", "").replace(" Team", "")
+        task_description = board.title if board and board.title else "investigate the incident"
 
         # Resolve CLI platform via RL routing or tenant default
         try:
             from app.services.rl_routing import get_best_platform
             rec = get_best_platform(db, UUID(tenant_id), task_type="collaboration_step")
-            platform = rec.platform or "gemini"
+            platform = rec.platform or "gemini_cli"
         except Exception:
             features = db.query(TenantFeatures).filter(
                 TenantFeatures.tenant_id == UUID(tenant_id)
             ).first()
-            platform = (features.default_cli_platform if features else None) or "gemini"
+            platform = (features.default_cli_platform if features else None) or "gemini_cli"
 
         prompt = _build_phase_prompt(
             phase=current_phase,

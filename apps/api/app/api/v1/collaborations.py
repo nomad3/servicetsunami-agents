@@ -1,6 +1,8 @@
 """Collaboration session API endpoints."""
 
 import json
+import logging
+import time
 import uuid
 from typing import List, Optional
 
@@ -20,6 +22,7 @@ from app.schemas.collaboration import (
 )
 from app.services import collaboration_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -104,22 +107,46 @@ def collaboration_stream(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """SSE stream with Postgres catch-up then live Redis."""
+    """SSE stream with Postgres catch-up then live Redis.
+
+    Subscribes to Redis BEFORE querying Postgres to eliminate the race window
+    where events arriving between the DB query and the Redis subscribe would be
+    silently dropped. After serving catch-up entries, the live Redis stream
+    deduplicates against already-sent board_versions.
+    """
+    import redis as redis_lib
+    from app.core.config import settings
     from app.services.collaboration_events import subscribe_collaboration
 
     collab = collaboration_service.get_session(db, current_user.tenant_id, session_id)
     if not collab:
         raise HTTPException(status_code=404, detail="Collaboration session not found")
 
-    # Pre-fetch catch-up entries before streaming starts (avoid holding db session during stream)
+    channel = f"collaboration:{str(session_id)}"
+
+    # Step 1: Subscribe to Redis FIRST so any events published after this point
+    # are buffered in the pubsub internal queue — even before we call listen().
+    pubsub = None
+    try:
+        r = redis_lib.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+        pubsub = r.pubsub()
+        pubsub.subscribe(channel)
+    except Exception as e:
+        logger.warning("Redis pre-subscribe failed for collab %s: %s", session_id, e)
+        pubsub = None
+
+    # Step 2: Query Postgres for entries already written before we subscribed.
     catch_up_entries = (
         db.query(BlackboardEntry)
         .filter(BlackboardEntry.blackboard_id == collab.blackboard_id)
         .order_by(BlackboardEntry.board_version.asc())
         .all()
     )
-    catch_up_data = [
-        json.dumps({
+    seen_versions: set = set()
+    catch_up_data = []
+    for e in catch_up_entries:
+        seen_versions.add(e.board_version)
+        catch_up_data.append(json.dumps({
             "event_type": "blackboard_entry",
             "payload": {
                 "entry_id": str(e.id),
@@ -132,14 +159,50 @@ def collaboration_stream(
                 "board_version": e.board_version,
             },
             "timestamp": e.created_at.timestamp() if e.created_at else 0,
-        })
-        for e in catch_up_entries
-    ]
+        }))
 
     def _stream():
+        # Yield historical entries from Postgres
         for event_data in catch_up_data:
             yield f"data: {event_data}\n\n"
-        yield from subscribe_collaboration(str(session_id))
+
+        # If pre-subscribe failed, fall back to the generator helper
+        if pubsub is None:
+            yield from subscribe_collaboration(str(session_id))
+            return
+
+        # Drain the pre-subscribed pubsub, skipping duplicates by board_version
+        last_heartbeat = time.time()
+        heartbeat_interval = 15
+        try:
+            for message in pubsub.listen():
+                if message["type"] == "message":
+                    try:
+                        data = json.loads(message["data"])
+                        if data.get("event_type") == "blackboard_entry":
+                            bv = data.get("payload", {}).get("board_version")
+                            if bv is not None and bv in seen_versions:
+                                continue  # already sent from catch-up
+                            if bv is not None:
+                                seen_versions.add(bv)
+                        yield f"data: {message['data']}\n\n"
+                        if data.get("event_type") == "collaboration_completed":
+                            pubsub.unsubscribe(channel)
+                            return
+                    except Exception:
+                        yield f"data: {message['data']}\n\n"
+
+                if time.time() - last_heartbeat > heartbeat_interval:
+                    yield ": heartbeat\n\n"
+                    last_heartbeat = time.time()
+        except Exception as e:
+            logger.warning("Redis pubsub error for collab %s: %s", session_id, e)
+            yield f"data: {json.dumps({'event_type': 'error', 'payload': {'detail': 'Stream connection lost'}})}\n\n"
+        finally:
+            try:
+                pubsub.close()
+            except Exception:
+                pass
 
     return StreamingResponse(
         _stream(),

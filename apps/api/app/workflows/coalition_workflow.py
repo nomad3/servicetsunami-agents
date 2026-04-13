@@ -30,9 +30,11 @@ class CoalitionWorkflow:
         )
 
         # 2. Initialize Shared Blackboard and Collaboration Session
+        # Pass task_description so it is stored verbatim as the blackboard title,
+        # allowing prepare_collaboration_step to reconstruct the original prompt.
         session_info = await workflow.execute_activity(
             initialize_collaboration,
-            args=[tenant_id, chat_session_id, template],
+            args=[tenant_id, chat_session_id, template, task_description],
             start_to_close_timeout=activity_timeout,
             retry_policy=retry,
         )
