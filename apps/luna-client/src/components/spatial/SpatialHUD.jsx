@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import KnowledgeNebula from './KnowledgeNebula';
+import GestureController from './GestureController';
 import { apiJson } from '../../api';
 import './SpatialHUD.css';
 
@@ -50,7 +51,7 @@ export default function SpatialHUD() {
       }
     })();
 
-    // 2. Start native spatial capture
+    // 2. Start native spatial capture (Heartbeat for Sync UI)
     let unlistenFrame;
     (async () => {
       try {
@@ -58,15 +59,14 @@ export default function SpatialHUD() {
         const { listen } = await import('@tauri-apps/api/event');
         await invoke('start_spatial_capture');
         unlistenFrame = await listen('spatial-frame', (event) => {
-          setTrackingActive(true);
           lastFrameRef.current = Date.now();
         });
       } catch (e) {
-        console.warn('Spatial tracking not available:', e);
+        console.warn('Spatial capture failed:', e);
       }
     })();
 
-    // 3. Listen for Live Collaboration Events (Raid Status)
+    // 3. Listen for Live Collaboration Events
     let eventUnlisten;
     (async () => {
       try {
@@ -82,7 +82,6 @@ export default function SpatialHUD() {
                 phase: 'INITIALIZING',
                 progress: 0
               }]);
-              // Spawn the raid party at the origin
               setAgents(payload.agents.map(a => ({
                 id: a.agent_slug,
                 name: a.agent_slug.split('_')[0].toUpperCase(),
@@ -91,23 +90,20 @@ export default function SpatialHUD() {
                 color: AGENT_COLORS[a.agent_slug] || '#ffffff'
               })));
               break;
-
             case 'phase_started':
               setActiveQuests(prev => prev.map(q => 
                 q.id === payload.collaboration_id 
                   ? { ...q, phase: payload.phase.toUpperCase(), progress: Math.min(q.progress + 20, 90) } 
                   : q
               ));
-              // Move the active agent to a relevant node (random for now, or based on source_node_id if we had it)
               setAgents(prev => prev.map(a => {
-                if (a.role === payload.phase) { // Assumption: role name matches phase name
+                if (a.role === payload.phase) {
                    const randomNode = nodes[Math.floor(Math.random() * nodes.length)];
                    return { ...a, targetPosition: randomNode ? randomNode.position : [Math.random()*50, 0, Math.random()*50] };
                 }
                 return a;
               }));
               break;
-
             case 'blackboard_entry':
               setCommsLog(prev => [{
                 time: new Date().toLocaleTimeString(),
@@ -115,18 +111,14 @@ export default function SpatialHUD() {
                 text: payload.content_preview,
                 active: true
               }, ...prev].slice(0, 50));
-              
-              // Trigger a data beam from the author to the blackboard (center)
               const author = agents.find(a => a.id === payload.author_slug);
               if (author) {
                 const newBeam = { start: author.targetPosition, end: [0, 0, 0], active: true };
                 setBeams(prev => [...prev, newBeam]);
                 setTimeout(() => setBeams(prev => prev.filter(b => b !== newBeam)), 2000);
               }
-
               setConsensus(prev => Math.min(prev + 5, 95));
               break;
-
             case 'collaboration_completed':
               setConsensus(100);
               setActiveQuests(prev => prev.map(q => 
@@ -134,7 +126,6 @@ export default function SpatialHUD() {
                   ? { ...q, phase: 'COMPLETED', progress: 100 } 
                   : q
               ));
-              // Return party to origin
               setAgents(prev => prev.map(a => ({ ...a, targetPosition: [0, 0, 0] })));
               break;
           }
@@ -144,20 +135,10 @@ export default function SpatialHUD() {
       }
     })();
 
-    const interval = setInterval(() => {
-      if (Date.now() - lastFrameRef.current > 1000) setTrackingActive(false);
-    }, 1000);
-
     // Keyboard controller
     const handleKeyDown = (e) => {
       switch(e.code) {
-        case 'Tab': 
-          e.preventDefault();
-          setShowInventory(prev => !prev);
-          break;
-        case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4':
-          console.log('Switch Agent Party member:', e.code.replace('Digit', ''));
-          break;
+        case 'Tab': e.preventDefault(); setShowInventory(prev => !prev); break;
         default: break;
       }
     };
@@ -166,14 +147,14 @@ export default function SpatialHUD() {
     return () => {
       unlistenFrame?.();
       eventUnlisten?.();
-      clearInterval(interval);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [nodes, agents]); // Re-bind when nodes/agents update so movement logic has access to them
+  }, [nodes, agents]);
 
   return (
     <div className={`spatial-hud-container ${consensus >= 90 ? 'consensus-glow' : ''}`}>
       <KnowledgeNebula nodes={nodes} agents={agents} beams={beams} />
+      <GestureController onSyncChange={setTrackingActive} />
 
       <header className="hud-top">
         <div className="hud-group">
