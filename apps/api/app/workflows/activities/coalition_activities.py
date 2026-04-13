@@ -169,10 +169,13 @@ async def initialize_collaboration(
         )
         board = blackboard_service.create_blackboard(db, UUID(tenant_id), board_in)
 
+        from app.schemas.collaboration import PATTERN_PHASES
+        pattern_phases = PATTERN_PHASES.get(template["pattern"], [])
         collab_in = CollaborationSessionCreate(
             blackboard_id=board.id,
             pattern=template["pattern"],
             role_assignments=template["roles"],
+            max_rounds=max(len(pattern_phases), 1),
         )
         session = collaboration_service.create_session(db, UUID(tenant_id), collab_in)
 
@@ -184,6 +187,7 @@ async def initialize_collaboration(
         publish_session_event(chat_session_id, "collaboration_started", {
             "collaboration_id": str(session.id),
             "pattern": template["pattern"],
+            "phases": pattern_phases,
             "agents": agents_list,
             "blackboard_id": str(board.id),
         })
@@ -235,15 +239,18 @@ async def prepare_collaboration_step(
                 agent_role = role
                 break
 
-        # Get agent persona if available
+        # Get agent persona if available — prefer persona_prompt (text), fall back to personality JSON
         agent_persona = ""
         if agent_slug:
             agent = db.query(Agent).filter(
                 Agent.tenant_id == UUID(tenant_id),
                 Agent.name.ilike(agent_slug.replace("-", " ") + "%"),
             ).first()
-            if agent and agent.personality:
-                agent_persona = f"You are {agent.name}. {agent.personality.get('description', '')}"
+            if agent:
+                if agent.persona_prompt:
+                    agent_persona = agent.persona_prompt
+                elif agent.personality:
+                    agent_persona = f"You are {agent.name}. {agent.personality.get('description', '')}"
 
         # Read all blackboard entries for context
         entries = blackboard_service.get_active_entries(db, UUID(tenant_id), session.blackboard_id)

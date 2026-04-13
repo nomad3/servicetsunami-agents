@@ -6,6 +6,8 @@ import time
 import uuid
 from typing import List, Optional
 
+import redis as redis_lib
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -114,7 +116,6 @@ def collaboration_stream(
     silently dropped. After serving catch-up entries, the live Redis stream
     deduplicates against already-sent board_versions.
     """
-    import redis as redis_lib
     from app.core.config import settings
     from app.services.collaboration_events import subscribe_collaboration
 

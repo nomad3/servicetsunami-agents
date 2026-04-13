@@ -139,13 +139,13 @@ const ChatPage = () => {
             try {
               const data = JSON.parse(line.slice(6));
               if (data.event_type === 'collaboration_started' && data.payload) {
-                const { collaboration_id, agents } = data.payload;
-                const phases = Array.isArray(agents)
-                  ? agents.map(a => a.phase).filter(Boolean)
-                  : [];
+                const { collaboration_id, phases: serverPhases, pattern } = data.payload;
+                const phases = (Array.isArray(serverPhases) && serverPhases.length > 0)
+                  ? serverPhases
+                  : (PATTERN_PHASES[pattern] || ['triage', 'investigate', 'analyze', 'command']);
                 setActiveCollaboration({
                   id: collaboration_id,
-                  phases: phases.length ? phases : ['triage', 'investigate', 'analyze', 'command'],
+                  phases,
                   isCompleted: false,
                 });
                 setShowCollabPanel(true);
