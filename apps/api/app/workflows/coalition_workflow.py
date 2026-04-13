@@ -1,5 +1,4 @@
 """CoalitionWorkflow — manages structured multi-agent collaboration via ChatCliWorkflow."""
-import os
 from datetime import timedelta
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -41,13 +40,6 @@ class CoalitionWorkflow:
         collaboration_id = session_info["collaboration_id"]
         results = []
 
-        # Connect Temporal client once before the loop (not per-iteration)
-        with workflow.unsafe.imports_passed_through():
-            from temporalio.client import Client as _TClient
-        _tc = await _TClient.connect(
-            os.environ.get("TEMPORAL_ADDRESS", "temporal:7233")
-        )
-
         # 3. Execute collaboration phases: prepare → ChatCliWorkflow → record
         for i in range(session_info["max_rounds"]):
             # 3a. Prepare: read blackboard, build step input dict
@@ -58,24 +50,22 @@ class CoalitionWorkflow:
                 retry_policy=retry,
             )
 
-            # 3b. Execute: dispatch ChatCliWorkflow on agentprovision-code queue via Temporal client.
-            # Pattern mirrors dynamic_executor.py:145-161 — fresh client, string workflow name, dict input.
-            # The code-worker pod registers ChatCliWorkflow; orchestration worker cannot import it directly.
-            cli_handle = await _tc.start_workflow(
+            # 3b. Execute: dispatch ChatCliWorkflow as child workflow on agentprovision-code queue.
+            # workflow.execute_child_workflow() is deterministic — Temporal handles cross-queue routing
+            # natively via task_queue without needing an external client connection.
+            cli_result = await workflow.execute_child_workflow(
                 "ChatCliWorkflow",
-                {
+                args=[{
                     "platform": step_input["platform"],
                     "message": step_input["message"],
                     "tenant_id": tenant_id,
                     "instruction_md_content": step_input["instruction_md_content"],
-                },
+                }],
                 id=f"coalition-{collaboration_id}-step-{i}",
                 task_queue="agentprovision-code",
                 execution_timeout=cli_timeout,
             )
-            cli_result = await cli_handle.result()
-            # cli_result is a dict (Temporal default for callers without the type registered)
-            # Keys: response_text, success, error, metadata
+            # cli_result is deserialized by Temporal — normalize to dict
             if not isinstance(cli_result, dict):
                 cli_result = {"response_text": str(cli_result), "success": True}
 
