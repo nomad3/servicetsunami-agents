@@ -48,7 +48,9 @@ origins = [
     "http://127.0.0.1:8002",
     "http://localhost:5173",  # Luna Client dev (Vite)
     "http://localhost:8009",  # Luna Client Docker
-    "tauri://localhost",      # Luna Client Tauri (macOS/iOS/Android)
+    "tauri://localhost",      # Luna Client Tauri (macOS/Windows)
+    "tauri://*",              # Any Tauri scheme
+    "https://tauri.localhost", # Mobile Tauri
     "https://luna.agentprovision.com",
 ] + _extra_origins
 
