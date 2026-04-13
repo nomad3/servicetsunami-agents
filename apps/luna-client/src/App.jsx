@@ -85,6 +85,13 @@ function AuthenticatedApp() {
     return () => { unlisten?.(); };
   }, []);
 
+  const toggleHUD = useCallback(async () => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('toggle_spatial_hud');
+    } catch {}
+  }, []);
+
   const quickSessionRef = React.useRef(null);
   const handlePaletteSend = useCallback(async (text) => {
     try {
@@ -135,6 +142,9 @@ function AuthenticatedApp() {
             {theme === 'dark' ? '\u2600' : '\u263E'}
           </button>
           <TrustBadge trust={trust} />
+          <button className="theme-toggle" onClick={toggleHUD} title="Spatial HUD (⌘⇧L)">
+            {'\uD83C\uDF0C'}
+          </button>
           <button className="theme-toggle" onClick={() => setSuggestionsOpen(!suggestionsOpen)} title="Workflow suggestions">
             {'\u26A1'}
           </button>

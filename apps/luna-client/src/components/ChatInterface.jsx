@@ -33,13 +33,36 @@ export default function ChatInterface({ handoff, requestAction }) {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Load sessions on mount
+  // Auto-create a session without adding to sidebar (internal helper)
+  const ensureSession = useCallback(async () => {
+    if (activeSessionRef.current) return activeSessionRef.current;
+    try {
+      const session = await apiJson('/api/v1/chat/sessions', {
+        method: 'POST',
+        body: JSON.stringify({ title: 'Luna' }),
+      });
+      setSessions(prev => prev.some(s => s.id === session.id) ? prev : [session, ...prev]);
+      setActiveSession(session.id);
+      activeSessionRef.current = session.id;
+      window.dispatchEvent(new CustomEvent('luna-session-change', { detail: session.id }));
+      return session.id;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Load sessions on mount; auto-create one if the account is fresh
   useEffect(() => {
     apiJson('/api/v1/chat/sessions').then(data => {
       setSessions(data);
-      if (data.length > 0) selectSession(data[0].id);
+      if (data.length > 0) {
+        selectSession(data[0].id);
+      } else {
+        // Fresh account — create default session so the user can chat immediately
+        ensureSession();
+      }
     }).catch(() => {});
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectSession = useCallback(async (id) => {
     setActiveSession(id);
@@ -117,9 +140,14 @@ export default function ChatInterface({ handoff, requestAction }) {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || !activeSession || streaming) return;
+    if (!input.trim() || streaming) return;
+
+    // Auto-create a session if none exists (fresh account or sidebar hidden)
+    const resolvedSession = activeSession || await ensureSession();
+    if (!resolvedSession) return;
+
     const text = input;
-    const targetSession = activeSession;
+    const targetSession = resolvedSession;
     setInput('');
 
     const tempId = `temp-${Date.now()}`;
