@@ -131,7 +131,7 @@ const ChatPage = () => {
             if (!line.startsWith('data: ')) continue;
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.event_type === 'collaboration_started') {
+              if (data.event_type === 'collaboration_started' && data.payload) {
                 const { collaboration_id, agents } = data.payload;
                 const phases = Array.isArray(agents)
                   ? agents.map(a => a.phase).filter(Boolean)
@@ -145,7 +145,9 @@ const ChatPage = () => {
               } else if (data.event_type === 'collaboration_completed') {
                 setActiveCollaboration(prev => prev ? { ...prev, isCompleted: true } : prev);
               }
-            } catch (_) {}
+            } catch (e) {
+              if (process.env.NODE_ENV === 'development') console.debug('[ChatPage SSE]', e);
+            }
           }
         }
       } catch (e) {
