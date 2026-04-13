@@ -1,13 +1,18 @@
 """Collaboration session API endpoints."""
 
+import json
 import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
+from app.models.blackboard import Blackboard, BlackboardEntry
 from app.models.user import User
+from app.schemas.blackboard import BlackboardEntryInDB, BlackboardInDB
 from app.schemas.collaboration import (
     AdvancePhaseRequest,
     CollaborationSessionCreate,
@@ -91,3 +96,112 @@ def advance_phase(
             detail="Session not active or not found",
         )
     return result
+
+
+@router.get("/{session_id}/stream")
+def collaboration_stream(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """SSE stream with Postgres catch-up then live Redis."""
+    from app.services.collaboration_events import subscribe_collaboration
+
+    collab = collaboration_service.get_session(db, current_user.tenant_id, session_id)
+    if not collab:
+        raise HTTPException(status_code=404, detail="Collaboration session not found")
+
+    # Pre-fetch catch-up entries before streaming starts (avoid holding db session during stream)
+    catch_up_entries = (
+        db.query(BlackboardEntry)
+        .filter(BlackboardEntry.blackboard_id == collab.blackboard_id)
+        .order_by(BlackboardEntry.board_version.asc())
+        .all()
+    )
+    catch_up_data = [
+        json.dumps({
+            "event_type": "blackboard_entry",
+            "payload": {
+                "entry_id": str(e.id),
+                "entry_type": e.entry_type,
+                "author_slug": e.author_agent_slug,
+                "author_role": e.author_role,
+                "content_preview": (e.content or "")[:200],
+                "content_full": e.content,
+                "confidence": e.confidence,
+                "board_version": e.board_version,
+            },
+            "timestamp": e.created_at.timestamp() if e.created_at else 0,
+        })
+        for e in catch_up_entries
+    ]
+
+    def _stream():
+        for event_data in catch_up_data:
+            yield f"data: {event_data}\n\n"
+        yield from subscribe_collaboration(str(session_id))
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/{session_id}/detail")
+def collaboration_detail(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Full detail with all blackboard entries — powers replay UI."""
+    collab = collaboration_service.get_session(db, current_user.tenant_id, session_id)
+    if not collab:
+        raise HTTPException(status_code=404, detail="Collaboration session not found")
+
+    entries = (
+        db.query(BlackboardEntry)
+        .filter(BlackboardEntry.blackboard_id == collab.blackboard_id)
+        .order_by(BlackboardEntry.board_version.asc())
+        .all()
+    )
+    board = db.query(Blackboard).filter(Blackboard.id == collab.blackboard_id).first()
+
+    return {
+        "session": CollaborationSessionInDB.model_validate(collab),
+        "blackboard": BlackboardInDB.model_validate(board) if board else None,
+        "entries": [BlackboardEntryInDB.model_validate(e) for e in entries],
+        "entry_count": len(entries),
+        "phases_completed": collab.phase_index,
+        "rounds_completed": collab.rounds_completed,
+    }
+
+
+class CollaborationTriggerRequest(BaseModel):
+    chat_session_id: uuid.UUID
+    task_description: str
+    pattern: Optional[str] = None
+    role_overrides: Optional[dict] = None
+
+
+@router.post("/trigger", status_code=202)
+def trigger_collaboration(
+    request: CollaborationTriggerRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Manually trigger a CoalitionWorkflow. Returns 202 immediately."""
+    from app.services.agent_router import dispatch_coalition
+
+    dispatch_coalition(
+        tenant_id=current_user.tenant_id,
+        chat_session_id=str(request.chat_session_id),
+        task_description=request.task_description,
+    )
+
+    return {
+        "status": "dispatched",
+        "chat_session_id": str(request.chat_session_id),
+        "task_description": request.task_description,
+        "message": "CoalitionWorkflow dispatched. Subscribe to GET /chat/sessions/{id}/events for collaboration_started.",
+    }
