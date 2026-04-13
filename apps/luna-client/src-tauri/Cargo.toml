@@ -26,11 +26,14 @@ tauri-plugin-shell = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
+lazy_static = "1.4"
+umap = "0.1.0"
+ndarray = "0.15"
+
+# Desktop-specific (macOS only for native camera)
+[target.'cfg(target_os = "macos")'.dependencies]
 nokhwa = { version = "0.10", features = ["input-native"] }
 image = "0.24"
-umap-rs = "0.1.0"
-ndarray = "0.15"
-lazy_static = "1.4"
 
 # Mobile (iOS + Android)
 [target.'cfg(mobile)'.dependencies]

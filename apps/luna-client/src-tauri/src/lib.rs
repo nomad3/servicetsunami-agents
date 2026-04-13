@@ -126,31 +126,40 @@ struct SpatialFrame {
 
 #[tauri::command]
 async fn start_spatial_capture(app: tauri::AppHandle) -> Result<(), String> {
-    if CAPTURE_RUNNING.load(Ordering::Relaxed) {
-        return Ok(()); // Already running
-    }
-
-    CAPTURE_RUNNING.store(true, Ordering::Relaxed);
-    let running = CAPTURE_RUNNING.clone();
-
-    // Run in a dedicated thread to avoid blocking the main loop
-    std::thread::spawn(move || {
-        log::info!("Native Spatial Capture initialized (60 FPS Target)");
-        while running.load(Ordering::Relaxed) {
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs_f64();
-
-            let _ = tauri::Emitter::emit(&app, "spatial-frame", SpatialFrame {
-                width: 1920,
-                height: 1080,
-                timestamp,
-            });
-            std::thread::sleep(std::time::Duration::from_millis(16));
+    #[cfg(target_os = "macos")]
+    {
+        if CAPTURE_RUNNING.load(Ordering::Relaxed) {
+            return Ok(()); // Already running
         }
-        log::info!("Native Spatial Capture stopped");
-    });
+
+        CAPTURE_RUNNING.store(true, Ordering::Relaxed);
+        let running = CAPTURE_RUNNING.clone();
+
+        // Run in a dedicated thread to avoid blocking the main loop
+        std::thread::spawn(move || {
+            log::info!("Native Spatial Capture initialized (60 FPS Target)");
+            while running.load(Ordering::Relaxed) {
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs_f64();
+
+                let _ = tauri::Emitter::emit(&app, "spatial-frame", SpatialFrame {
+                    width: 1920,
+                    height: 1080,
+                    timestamp,
+                });
+                std::thread::sleep(std::time::Duration::from_millis(16));
+            }
+            log::info!("Native Spatial Capture stopped");
+        });
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        log::warn!("Spatial capture is only supported on macOS");
+    }
+    
     Ok(())
 }
 
