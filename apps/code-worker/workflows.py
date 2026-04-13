@@ -1493,14 +1493,30 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
         p = os.path.join(gemini_home, f)
         logger.info("Gemini home file %s present=%s", f, os.path.exists(p))
 
-    result = subprocess.run(
+    # Use Popen + heartbeat loop so Temporal doesn't kill the activity during long Gemini runs
+    process = subprocess.Popen(
         cmd,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=1500,
         env=env,
         cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
     )
+    start = time.monotonic()
+    while True:
+        if process.poll() is not None:
+            break
+        elapsed = int(time.monotonic() - start)
+        if elapsed >= 1500:
+            process.kill()
+            break
+        try:
+            activity.heartbeat(f"Gemini CLI running... ({elapsed}s elapsed)")
+        except Exception:
+            pass
+        time.sleep(60)
+    stdout, stderr = process.communicate(timeout=30)
+    result = subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
     logger.info("Gemini CLI exit code: %s", result.returncode)
     if result.stdout:
         logger.info("Gemini CLI stdout: %s", result.stdout[:500])
@@ -1770,7 +1786,7 @@ class ChatCliWorkflow:
             task_input,
             start_to_close_timeout=timedelta(minutes=150),
             schedule_to_close_timeout=timedelta(minutes=165),
-            heartbeat_timeout=timedelta(seconds=300),
+            heartbeat_timeout=timedelta(minutes=5),
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
 

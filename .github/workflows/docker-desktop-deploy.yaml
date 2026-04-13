@@ -41,6 +41,13 @@ jobs:
               echo "Linked $envfile"
             fi
           done
+          # Copy cloudflared credentials that are gitignored but required for the tunnel
+          for cffile in cloudflared/credentials.json cloudflared/cert.pem; do
+            if [ -f "$SRC/$cffile" ] && [ ! -f "$cffile" ]; then
+              cp "$SRC/$cffile" "$cffile"
+              echo "Copied $cffile"
+            fi
+          done
 
       - name: Detect changed services
         id: changes
