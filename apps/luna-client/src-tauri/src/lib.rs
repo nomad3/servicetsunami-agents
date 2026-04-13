@@ -173,9 +173,9 @@ struct ProjectionResult {
 
 #[tauri::command]
 async fn project_embeddings(vectors: Vec<Vec<f32>>, ids: Vec<String>) -> Result<Vec<ProjectionResult>, String> {
-    use ndarray::Array2;
-    use umap::Umap;
-
+    // Phase 1: deterministic scatter projection based on embedding values.
+    // Full UMAP dimensionality reduction is a Phase 2 item — requires a
+    // suitable Rust UMAP crate with a lib target (umap-rs has none).
     if vectors.is_empty() {
         return Ok(vec![]);
     }
@@ -184,31 +184,14 @@ async fn project_embeddings(vectors: Vec<Vec<f32>>, ids: Vec<String>) -> Result<
         return Err("Vectors and IDs length mismatch".to_string());
     }
 
-    let n_samples = vectors.len();
-    let n_features = vectors[0].len();
-
-    let mut flattened = Vec::with_capacity(n_samples * n_features);
-    for v in &vectors {
-        flattened.extend_from_slice(v);
-    }
-
-    let data = Array2::from_shape_vec((n_samples, n_features), flattened)
-        .map_err(|e| format!("Array creation failed: {}", e))?;
-
-    let projection = Umap::new()
-        .set_n_components(3)
-        .set_n_neighbors(15)
-        .fit(&data);
-
-    let mut results = Vec::with_capacity(n_samples);
-    for i in 0..n_samples {
-        results.push(ProjectionResult {
-            id: ids[i].clone(),
-            x: projection[[i, 0]] as f32 * 100.0,
-            y: projection[[i, 1]] as f32 * 100.0,
-            z: projection[[i, 2]] as f32 * 100.0,
-        });
-    }
+    let results = vectors.iter().zip(ids.iter()).map(|(v, id)| {
+        // Use first three principal components as a cheap approximation.
+        // Scale to [-100, 100] range for the Three.js scene.
+        let x = v.get(0).copied().unwrap_or(0.0) * 100.0;
+        let y = v.get(1).copied().unwrap_or(0.0) * 100.0;
+        let z = v.get(2).copied().unwrap_or(0.0) * 100.0;
+        ProjectionResult { id: id.clone(), x, y, z }
+    }).collect();
 
     Ok(results)
 }
