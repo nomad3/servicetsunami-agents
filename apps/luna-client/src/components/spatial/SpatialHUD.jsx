@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import KnowledgeNebula from './KnowledgeNebula';
 import './SpatialHUD.css';
 
 export default function SpatialHUD() {
@@ -29,12 +30,8 @@ export default function SpatialHUD() {
 
   return (
     <div className="spatial-hud-container">
-      {/* 3D Nebula Layer (Placeholder for Phase 2) */}
-      <div className="nebula-placeholder">
-        <div className="nebula-star" style={{top: '20%', left: '30%'}}></div>
-        <div className="nebula-star" style={{top: '50%', left: '70%'}}></div>
-        <div className="nebula-star" style={{top: '80%', left: '40%'}}></div>
-      </div>
+      {/* 3D Nebula Layer */}
+      <KnowledgeNebula />
 
       {/* Top Resource HUD */}
       <header className="hud-top">

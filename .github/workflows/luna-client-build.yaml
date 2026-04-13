@@ -2,7 +2,7 @@ name: Luna Client — Tauri Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/luna-os-spatial-hud]
     paths:
       - 'apps/luna-client/**'
       - '.github/workflows/luna-client-build.yaml'
