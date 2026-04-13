@@ -169,7 +169,7 @@ function AuthenticatedApp() {
 
 function AppContent() {
   const { user, loading } = useAuth();
-  const [windowLabel, setWindowLabel] = useState('main');
+  const [windowLabel, setWindowLabel] = useState(null); // Null until detected
 
   useEffect(() => {
     (async () => {
@@ -178,10 +178,12 @@ function AppContent() {
         const appWindow = getCurrentWebviewWindow();
         setWindowLabel(appWindow.label);
       } catch (e) {
-        // Not in Tauri / PWA mode
+        setWindowLabel('main'); // Fallback for browser/PWA
       }
     })();
   }, []);
+
+  if (windowLabel === null) return <div className="luna-loading">Syncing OS...</div>;
 
   if (windowLabel === 'spatial_hud') {
     return <SpatialHUD />;

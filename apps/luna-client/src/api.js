@@ -32,7 +32,9 @@ export async function apiJson(path, options = {}) {
 
 export function apiStream(path, body, signal) {
   const token = localStorage.getItem('luna_token');
-  return fetch(`${API_BASE}${path}`, {
+  const url = `${API_BASE}${path}`;
+  
+  return fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
