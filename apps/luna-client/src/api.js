@@ -1,4 +1,9 @@
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const rawBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+// If pointing to the bare production domain, ensure we include /api for the tunnel mapping
+const API_BASE = (rawBase === 'https://agentprovision.com' || rawBase === 'https://luna.agentprovision.com') 
+  ? `${rawBase}/api` 
+  : rawBase;
+
 console.log('[Luna OS] Initialization - API Base:', API_BASE || '(relative)');
 
 export async function apiFetch(path, options = {}) {
