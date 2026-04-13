@@ -319,10 +319,14 @@ def _generate_agentic_response(
             if isinstance(part, dict):
                 inline = part.get("inline_data")
                 if inline and inline.get("data"):
-                    image_b64 = inline["data"]  # Already base64
-                    image_mime = inline.get("mime_type", "image/jpeg")
-                    ext = image_mime.split("/")[-1].replace("jpeg", "jpg")
-                    cli_message += f"\n\n[User attached an image (user_image.{ext}) in the working directory. Use your Read tool to view it and analyze its contents.]"
+                    part_mime = inline.get("mime_type", "image/jpeg")
+                    # Only extract image/* types — audio/* and video/* are not supported in CLI path
+                    if part_mime.startswith("image/"):
+                        image_b64 = inline["data"]  # Already base64
+                        image_mime = part_mime
+                        ext = image_mime.split("/")[-1].replace("jpeg", "jpg")
+                        cli_message += f"\n\n[User attached an image (user_image.{ext}) in the working directory. Use your Read tool to view it and analyze its contents.]"
+                    # audio/* and video/* are skipped silently — not supported in Gemini API function_response.parts
                 elif part.get("text"):
                     cli_message += f"\n\n{part['text']}"
 

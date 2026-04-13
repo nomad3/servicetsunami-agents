@@ -64,6 +64,7 @@ def create_blackboard(
         title=board_in.title,
         plan_id=board_in.plan_id,
         goal_id=board_in.goal_id,
+        chat_session_id=board_in.chat_session_id,
         status="active",
         version=0,
     )

@@ -43,6 +43,7 @@ class BlackboardCreate(BaseModel):
     title: str
     plan_id: Optional[uuid.UUID] = None
     goal_id: Optional[uuid.UUID] = None
+    chat_session_id: Optional[uuid.UUID] = None
 
 
 class BlackboardInDB(BaseModel):
@@ -50,6 +51,7 @@ class BlackboardInDB(BaseModel):
     tenant_id: uuid.UUID
     plan_id: Optional[uuid.UUID] = None
     goal_id: Optional[uuid.UUID] = None
+    chat_session_id: Optional[uuid.UUID] = None
     title: str
     status: str
     version: int

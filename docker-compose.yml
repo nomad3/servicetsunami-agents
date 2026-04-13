@@ -32,6 +32,7 @@ services:
       - temporal
       - embedding-service
       - memory-core
+      - redis
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/agentprovision
       - MCP_SERVER_URL=http://mcp-server:8000
@@ -49,6 +50,7 @@ services:
       - MEMORY_CORE_URL=memory-core:50052
       - USE_RUST_EMBEDDING=true
       - USE_RUST_MEMORY=true
+      - REDIS_URL=redis://redis:6379/0
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -206,6 +208,13 @@ services:
       - api
       - web
       - luna-client
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
     restart: unless-stopped
 
   test-db:

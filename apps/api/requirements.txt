@@ -16,6 +16,7 @@ openpyxl
 duckdb
 pyarrow
 temporalio
+redis[hiredis]>=5.0.0
 anthropic
 openai
 pytest

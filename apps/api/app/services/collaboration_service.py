@@ -16,6 +16,50 @@ from app.schemas.collaboration import (
 from app.services import blackboard_service
 
 
+# Phase mapping helpers — extend here when adding new patterns
+_PHASE_TO_ENTRY_TYPE = {
+    "propose": EntryType.PROPOSAL,
+    "critique": EntryType.CRITIQUE,
+    "revise": EntryType.PROPOSAL,
+    "verify": EntryType.EVIDENCE,
+    "synthesize": EntryType.SYNTHESIS,
+    "research": EntryType.EVIDENCE,
+    "debate": EntryType.DISAGREEMENT,
+    "resolve": EntryType.RESOLUTION,
+    "triage": EntryType.EVIDENCE,
+    "investigate": EntryType.EVIDENCE,
+    "analyze": EntryType.CRITIQUE,
+    "command": EntryType.SYNTHESIS,
+}
+
+_PHASE_TO_AUTHOR_ROLE = {
+    "propose": AuthorRole.PLANNER,
+    "critique": AuthorRole.CRITIC,
+    "revise": AuthorRole.PLANNER,
+    "verify": AuthorRole.VERIFIER,
+    "synthesize": AuthorRole.SYNTHESIZER,
+    "research": AuthorRole.RESEARCHER,
+    "debate": AuthorRole.CRITIC,
+    "resolve": AuthorRole.SYNTHESIZER,
+    "triage": AuthorRole.RESEARCHER,
+    "investigate": AuthorRole.RESEARCHER,
+    "analyze": AuthorRole.CRITIC,
+    "command": AuthorRole.SYNTHESIZER,
+}
+
+
+def _phase_entry_type(phase: str) -> EntryType:
+    if phase not in _PHASE_TO_ENTRY_TYPE:
+        raise ValueError(f"Unknown collaboration phase: '{phase}'. Add it to _PHASE_TO_ENTRY_TYPE.")
+    return _PHASE_TO_ENTRY_TYPE[phase]
+
+
+def _phase_author_role(phase: str) -> AuthorRole:
+    if phase not in _PHASE_TO_AUTHOR_ROLE:
+        raise ValueError(f"Unknown collaboration phase: '{phase}'. Add it to _PHASE_TO_AUTHOR_ROLE.")
+    return _PHASE_TO_AUTHOR_ROLE[phase]
+
+
 def _find_last_proposal(db: Session, blackboard_id: uuid.UUID) -> Optional[str]:
     """Find the content of the last proposal/revision entry on the blackboard."""
     from app.models.blackboard import BlackboardEntry
@@ -151,32 +195,11 @@ def advance_phase(
                 f"agent's role: {agent_assigned_role or 'none'}"
             )
 
-    # Map the phase to a blackboard entry type
-    phase_to_entry_type = {
-        "propose": EntryType.PROPOSAL,
-        "critique": EntryType.CRITIQUE,
-        "revise": EntryType.PROPOSAL,
-        "verify": EntryType.EVIDENCE,
-        "synthesize": EntryType.SYNTHESIS,
-        "research": EntryType.EVIDENCE,
-        "debate": EntryType.DISAGREEMENT if not agrees_with_previous else EntryType.EVIDENCE,
-        "resolve": EntryType.RESOLUTION,
-    }
-
-    # Map the phase to an author role
-    phase_to_role = {
-        "propose": AuthorRole.PLANNER,
-        "critique": AuthorRole.CRITIC,
-        "revise": AuthorRole.PLANNER,
-        "verify": AuthorRole.VERIFIER,
-        "synthesize": AuthorRole.SYNTHESIZER,
-        "research": AuthorRole.RESEARCHER,
-        "debate": AuthorRole.CRITIC,
-        "resolve": AuthorRole.SYNTHESIZER,
-    }
-
-    entry_type = phase_to_entry_type.get(current_phase, EntryType.PROPOSAL)
-    author_role = phase_to_role.get(current_phase, AuthorRole.CONTRIBUTOR)
+    entry_type = _phase_entry_type(current_phase)
+    # Debate phase overrides based on agreement
+    if current_phase == "debate" and not agrees_with_previous:
+        entry_type = EntryType.DISAGREEMENT
+    author_role = _phase_author_role(current_phase)
 
     # Post the contribution to the blackboard
     try:
