@@ -42,7 +42,7 @@
       "tooltip": "Luna — AI Assistant"
     },
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://localhost:* https://*.agentprovision.com; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' http://localhost:* https://agentprovision.com https://*.agentprovision.com wss://agentprovision.com wss://*.agentprovision.com; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; worker-src blob:"
     }
   },
   "bundle": {
