@@ -69,7 +69,7 @@ jobs:
       - name: Build Tauri (macOS ARM64)
         working-directory: apps/luna-client
         env:
-          VITE_API_BASE_URL: ${{ secrets.LUNA_API_URL || 'https://agentprovision.com/api' }}
+          VITE_API_BASE_URL: ${{ secrets.LUNA_API_URL || 'https://agentprovision.com' }}
         run: |
           source "$HOME/.cargo/env" 2>/dev/null || true
           cargo tauri build --target aarch64-apple-darwin
