@@ -169,32 +169,53 @@ function AuthenticatedApp() {
 
 function AppContent() {
   const { user, loading } = useAuth();
-  const [windowLabel, setWindowLabel] = useState(null); // Null until detected
+  const [windowLabel, setWindowLabel] = useState(null);
 
   useEffect(() => {
-    // Safety timeout: if detection takes > 2s, fallback to 'main'
-    const timeout = setTimeout(() => {
+    console.log('[Luna OS] Starting window detection...');
+    
+    // Safety fallback: default to 'main' after 1 second if detection is stuck
+    const timer = setTimeout(() => {
       if (windowLabel === null) {
-        console.warn('[Luna OS] Window detection timed out, defaulting to main');
+        console.warn('[Luna OS] Window detection timed out -> main');
         setWindowLabel('main');
       }
-    }, 2000);
+    }, 1000);
 
-    (async () => {
+    const detectWindow = async () => {
       try {
-        const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-        const appWindow = getCurrentWebviewWindow();
-        setWindowLabel(appWindow.label || 'main');
+        // Use a more generic way to detect window label if the specific import fails
+        const tauriWebview = await import('@tauri-apps/api/webviewWindow').catch(() => null);
+        
+        if (tauriWebview && tauriWebview.getCurrentWebviewWindow) {
+          const appWindow = tauriWebview.getCurrentWebviewWindow();
+          console.log('[Luna OS] Detected window:', appWindow.label);
+          setWindowLabel(appWindow.label || 'main');
+        } else {
+          console.log('[Luna OS] Tauri internals not found -> main');
+          setWindowLabel('main');
+        }
       } catch (e) {
-        setWindowLabel('main'); // Fallback for browser/PWA
+        console.error('[Luna OS] Detection error:', e);
+        setWindowLabel('main');
       } finally {
-        clearTimeout(timeout);
+        clearTimeout(timer);
       }
-    })();
-    return () => clearTimeout(timeout);
+    };
+
+    detectWindow();
+    return () => clearTimeout(timer);
   }, []);
 
-  if (windowLabel === null) return <div className="luna-loading">Syncing OS...</div>;
+  // While detecting, show a minimal loader. 
+  // If this stays frozen, it's a React render crash.
+  if (windowLabel === null) {
+    return (
+      <div className="luna-loading" style={{ background: '#000', color: '#64b4ff' }}>
+        Initializing Luna OS...
+      </div>
+    );
+  }
 
   if (windowLabel === 'spatial_hud') {
     return <SpatialHUD />;
