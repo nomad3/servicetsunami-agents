@@ -44,7 +44,7 @@ function useUpdateBanner() {
   const restart = useCallback(async () => {
     // Open the GitHub Release page to download the latest DMG
     // (full auto-install requires Apple Developer code signing)
-    window.open('https://github.com/nomad3/agentprovision-agents/releases/latest', '_blank');
+    window.open('https://github.com/nomad3/servicetsunami-agents/releases/latest', '_blank');
   }, []);
   return { updateVersion, dismiss, restart };
 }
