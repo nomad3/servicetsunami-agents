@@ -1122,14 +1122,35 @@ def _execute_claude_chat(task_input: ChatCliInput, session_dir: str) -> ChatCliR
     env = os.environ.copy()
     env["CLAUDE_CODE_OAUTH_TOKEN"] = token
 
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=1500,
-        env=env,
-        cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
-    )
+    import threading as _threading
+    _stop_hb = _threading.Event()
+    def _heartbeat_loop():
+        elapsed = 0
+        try:
+            activity.heartbeat("Claude Code starting...")
+        except Exception:
+            pass
+        while not _stop_hb.wait(30):
+            elapsed += 30
+            try:
+                activity.heartbeat(f"Claude Code running... ({elapsed}s elapsed)")
+            except Exception:
+                pass
+    _hb_thread = _threading.Thread(target=_heartbeat_loop, daemon=True)
+    _hb_thread.start()
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=1500,
+            env=env,
+            cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+        )
+    finally:
+        _stop_hb.set()
+        _hb_thread.join(timeout=5)
     if result.returncode != 0:
         err = (result.stderr or result.stdout or "")[:1000]
         return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
@@ -1206,14 +1227,35 @@ def _execute_codex_chat(task_input: ChatCliInput, session_dir: str, image_path: 
     env = os.environ.copy()
     env["CODEX_HOME"] = codex_home
 
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=1500,
-        env=env,
-        cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
-    )
+    import threading as _threading
+    _stop_hb = _threading.Event()
+    def _heartbeat_loop():
+        elapsed = 0
+        try:
+            activity.heartbeat("Codex starting...")
+        except Exception:
+            pass
+        while not _stop_hb.wait(30):
+            elapsed += 30
+            try:
+                activity.heartbeat(f"Codex running... ({elapsed}s elapsed)")
+            except Exception:
+                pass
+    _hb_thread = _threading.Thread(target=_heartbeat_loop, daemon=True)
+    _hb_thread.start()
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=1500,
+            env=env,
+            cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+        )
+    finally:
+        _stop_hb.set()
+        _hb_thread.join(timeout=5)
     if result.returncode != 0:
         err = (result.stderr or result.stdout or "")[:2000]
         return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
@@ -1471,6 +1513,8 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
         "-p",
         prompt,
         "-y",
+        "--output-format",
+        "json",
     ]
 
     env = os.environ.copy()
@@ -1505,8 +1549,13 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
     _stop_hb = _threading.Event()
     def _heartbeat_loop():
         elapsed = 0
-        while not _stop_hb.wait(60):
-            elapsed += 60
+        # Heartbeat immediately to signal we've started
+        try:
+            activity.heartbeat("Gemini CLI starting...")
+        except Exception:
+            pass
+        while not _stop_hb.wait(30):
+            elapsed += 30
             try:
                 activity.heartbeat(f"Gemini CLI running... ({elapsed}s elapsed)")
             except Exception:
