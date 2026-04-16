@@ -2,12 +2,12 @@
   "hero": {
     "badge": "Distributed Agent Network",
     "title": "A Network of AI Agents That Runs Your Business",
-    "lead": "agentprovision.com deploys a coordinated network of specialized AI agents across your operations. Each agent owns a domain — code, sales, marketing, data, communications — sharing memory, routing tasks automatically, and getting smarter together.",
+    "lead": "AgentProvision deploys a coordinated network of specialized AI agents across your operations. Each agent owns a domain — code, sales, marketing, data, communications — sharing memory, routing tasks automatically, and getting smarter together.",
     "subtext": "Stop managing one chatbot. Run a network of AI specialists that coordinate in real time, across your entire stack.",
-    "subHighlight": "The distributed agent network built for serious teams.",
+    "subHighlight": "The distributed agent network built for modern enterprises.",
     "spotlight": {
       "heading": "One Network. Every Domain.",
-      "badge": "Production Ready"
+      "badge": "Enterprise Ready"
     },
     "highlights": {
       "governedDataProducts": {
@@ -124,7 +124,7 @@
       },
       "programmablePipelines": {
         "title": "The Memory Problem",
-        "description": "Chatbots forget everything between sessions. agentprovision.com's network shares a single knowledge graph — contacts, deals, preferences, and decisions persist across every agent, every conversation, every channel."
+        "description": "Chatbots forget everything between sessions. AgentProvision's network shares a single knowledge graph — contacts, deals, preferences, and decisions persist across every agent, every conversation, every channel."
       },
       "compliantCollaboration": {
         "title": "The Integration Problem",
@@ -255,18 +255,18 @@
     }
   },
   "testimonials": {
-    "heading": "Built for Builders",
-    "subtitle": "How teams are using agentprovision.com to run operations with a distributed agent network",
+    "heading": "Built for Enterprise",
+    "subtitle": "How industry leaders are using AgentProvision to run operations with a distributed agent network",
     "items": [
       {
-        "quote": "We went from a single chatbot to a full agent network in two weeks. Luna handles client communications while the code agent ships features autonomously. The shared memory means nothing falls through the cracks — every agent knows the full context.",
-        "author": "AI Engineering Lead",
-        "role": "SaaS Platform"
+        "quote": "We transitioned from fragmented tools to a unified agent network in weeks. Luna handles stakeholder communications while the code agent ships features autonomously. The shared memory means nothing falls through the cracks — every agent knows the full corporate context.",
+        "author": "Director of Digital Transformation",
+        "role": "Global Logistics"
       },
       {
-        "quote": "The code agent is unlike anything I've seen. It creates branches, implements features, and opens PRs on its own. Combined with the marketing intelligence agent and shared knowledge graph, it genuinely feels like a team that gets smarter every day.",
-        "author": "CTO",
-        "role": "Technology Startup"
+        "quote": "The autonomous capabilities are unlike anything we've seen. It manages complex pipelines and integrates with our existing stack. Combined with the shared knowledge graph, it genuinely feels like a team that improves every day.",
+        "author": "CIO",
+        "role": "Financial Services"
       }
     ]
   },

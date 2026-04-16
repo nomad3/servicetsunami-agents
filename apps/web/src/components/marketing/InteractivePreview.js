@@ -84,7 +84,7 @@ const InteractivePreview = () => {
             PRODUCT TOUR
           </Badge>
           <h2 className="display-5 fw-bold mb-3" style={{ color: 'var(--color-foreground)' }}>
-            See <span className="gradient-text">agentprovision.com</span> in Action
+            See <span className="gradient-text">AgentProvision</span> in Action
           </h2>
           <p className="text-soft lead mx-auto" style={{ maxWidth: '600px' }}>
             Explore the unified command center for data, AI agents, and
@@ -156,7 +156,7 @@ const InteractivePreview = () => {
                   />
                 </div>
                 <div className="text-soft small font-monospace">
-                  agentprovision.com/{active.key}
+                  AgentProvision.cloud/{active.key}
                 </div>
                 <div className="d-flex align-items-center gap-2">
                   <active.icon className="text-primary" size={14} />

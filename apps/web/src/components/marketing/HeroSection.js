@@ -10,7 +10,7 @@ const HeroSection = ({ onPrimaryCta = noop, onSecondaryCta = noop }) => {
 
   return (
     <section className="hero-section pt-5 pb-4" id="hero">
-      <div className="hero-bg" style={{ backgroundImage: `url(${process.env.PUBLIC_URL}/assets/brand/hero-bg.png)` }} />
+      <div className="hero-bg-enterprise" />
       <NeuralCanvas />
       <div className="hero-overlay" />
       <Container className="hero-content py-5">
