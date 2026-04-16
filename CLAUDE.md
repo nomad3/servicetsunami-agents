@@ -368,7 +368,7 @@ Secrets: `api-secrets` (from `apps/api/.env`), `code-worker-secrets` (GITHUB_TOK
 ### Legacy Docker Compose Ports (root `.env` — no longer used)
 
 ```
-API_PORT=8001    # FastAPI backend
+API_PORT=8000    # FastAPI backend
 WEB_PORT=8002    # React frontend
 DB_PORT=8003     # PostgreSQL
 MCP_PORT=8086    # MCP server (PostgreSQL)
@@ -389,7 +389,7 @@ SECRET_KEY=your-jwt-secret
 TEMPORAL_ADDRESS=temporal:7233  # Use localhost:7233 for local dev
 
 # MCP/PostgreSQL
-MCP_SERVER_URL=http://mcp-server:8000
+MCP_SERVER_URL=http://mcp-tools:8000
 
 # Credential Vault
 ENCRYPTION_KEY=<fernet-key>  # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -404,7 +404,7 @@ GOOGLE_CLIENT_SECRET=xxx
 ### Web Configuration (`apps/web/.env.local`)
 
 ```
-REACT_APP_API_BASE_URL=http://localhost:8001
+REACT_APP_API_BASE_URL=http://localhost:8000
 ```
 
 Uses `REACT_APP_` prefix (Create React App requirement).

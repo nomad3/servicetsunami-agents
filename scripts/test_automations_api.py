@@ -6,7 +6,7 @@ import requests
 import json
 import uuid
 
-BASE_URL = "http://localhost:8001"
+BASE_URL = "http://localhost:8000"
 
 def test_automations_api():
     print("1. Logging in...")

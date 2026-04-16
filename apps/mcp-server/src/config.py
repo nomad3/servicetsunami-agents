@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     """MCP Server settings loaded from environment"""
 
     # AgentProvision API
-    API_BASE_URL: str = "http://localhost:8001"
+    API_BASE_URL: str = "http://localhost:8000"
     API_INTERNAL_KEY: str = "internal-service-key"
 
     # PostgreSQL (shared with API — needed for knowledge tools)
