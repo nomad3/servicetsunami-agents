@@ -177,37 +177,42 @@ def post_message_stream(
     session_id: uuid.UUID,
     payload: chat_schema.ChatMessageCreate,
     *,
-    db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ):
     """SSE endpoint: generate the full response then stream it back 2 words at a time."""
     import json as _json
     import time as _time
-
-    session = chat_service.get_session(db, session_id=session_id, tenant_id=current_user.tenant_id)
-    if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+    import threading as _threading
+    from app.db.session import SessionLocal
 
     # Run generation in a background thread so we can immediately stream
     # heartbeat comments — prevents Cloudflare 524 on slow/long responses.
-    import threading as _threading
-
     result: dict = {}
     done_event = _threading.Event()
 
     def _generate():
+        gen_db = SessionLocal()
         try:
+            session = chat_service.get_session(gen_db, session_id=session_id, tenant_id=current_user.tenant_id)
+            if not session:
+                result["error"] = "Chat session not found"
+                return
+
             user_msg, assistant_msg = chat_service.post_user_message(
-                db,
+                gen_db,
                 session=session,
                 user_id=current_user.id,
                 content=payload.content,
             )
-            result["user_message"] = user_msg
-            result["assistant_message"] = assistant_msg
+            # Eagerly convert to schemas before closing session
+            result["user_message"] = chat_schema.ChatMessage.model_validate(user_msg).model_dump(mode='json')
+            result["assistant_message"] = chat_schema.ChatMessage.model_validate(assistant_msg).model_dump(mode='json')
+            result["content"] = assistant_msg.content or ""
         except Exception as exc:
+            logger.exception("Stream generation failed")
             result["error"] = str(exc)
         finally:
+            gen_db.close()
             done_event.set()
 
     _threading.Thread(target=_generate, daemon=True).start()
@@ -216,7 +221,6 @@ def post_message_stream(
 
     def _event_generator():
         # Send heartbeat comments immediately so Cloudflare sees data flowing.
-        # These are ignored by the SSE parser (lines starting with ':').
         heartbeat_interval = 3  # seconds
         while not done_event.wait(timeout=heartbeat_interval):
             yield ": heartbeat\n\n"
@@ -225,24 +229,21 @@ def post_message_stream(
             yield f"data: {_json.dumps({'type': 'error', 'detail': result['error']})}\n\n"
             return
 
-        user_message = result["user_message"]
-        assistant_message = result["assistant_message"]
-
         # First event: user message saved
-        yield f"data: {_json.dumps({'type': 'user_saved', 'message': chat_schema.ChatMessage.model_validate(user_message).model_dump(mode='json')})}\n\n"
+        yield f"data: {_json.dumps({'type': 'user_saved', 'message': result['user_message']})}\n\n"
 
         # Stream the assistant response 2 words at a time
-        full_text = assistant_message.content or ""
+        full_text = result["content"]
         words = full_text.split(" ")
         for i in range(0, len(words), chunk_size):
             chunk = " ".join(words[i:i + chunk_size])
             if i + chunk_size < len(words):
                 chunk += " "
             yield f"data: {_json.dumps({'type': 'token', 'text': chunk})}\n\n"
-            _time.sleep(0.02)  # 20ms between chunks — smooth without lag
+            _time.sleep(0.01)  # Faster streaming
 
-        # Final event: complete message with ID for feedback/TTS
-        yield f"data: {_json.dumps({'type': 'done', 'message': chat_schema.ChatMessage.model_validate(assistant_message).model_dump(mode='json')})}\n\n"
+        # Final event: complete message
+        yield f"data: {_json.dumps({'type': 'done', 'message': result['assistant_message']})}\n\n"
 
     return StreamingResponse(
         _event_generator(),
@@ -377,13 +378,17 @@ def post_message_enhanced(
 def session_events_stream(
     session_id: uuid.UUID,
     *,
-    db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ):
     """Long-lived SSE stream for session-level events (collaboration_started, etc.)."""
-    session = chat_service.get_session(db, session_id=session_id, tenant_id=current_user.tenant_id)
-    if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+    from app.db.session import SessionLocal
+    db = SessionLocal()
+    try:
+        session = chat_service.get_session(db, session_id=session_id, tenant_id=current_user.tenant_id)
+        if not session:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+    finally:
+        db.close()
 
     from app.services.collaboration_events import subscribe_session
 

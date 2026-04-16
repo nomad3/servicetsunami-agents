@@ -5,7 +5,11 @@ from app.api.v1 import routes as v1_routes
 from app.db.session import SessionLocal
 from app.db.init_db import init_db
 
-init_db(db=SessionLocal())
+db = SessionLocal()
+try:
+    init_db(db=db)
+finally:
+    db.close()
 
 app = FastAPI(redirect_slashes=False)
 
@@ -75,31 +79,33 @@ async def startup_skill_manager():
     # Sync skills to DB registry + embeddings (background — don't block API startup)
     import threading
     def _sync_skills_background():
+        from app.db.session import SessionLocal as _SessionLocal
+        sync_db = _SessionLocal()
         try:
             from app.services.skill_registry_service import sync_skills_to_db
-            from app.db.session import SessionLocal as _SessionLocal
-            sync_db = _SessionLocal()
             sync_skills_to_db(sync_db)
-            sync_db.close()
             _logging.getLogger(__name__).info("Skill registry synced in background")
         except Exception as e:
             _logging.getLogger(__name__).warning(
                 "Skill registry sync failed (pgvector may not be ready): %s", e
             )
+        finally:
+            sync_db.close()
     threading.Thread(target=_sync_skills_background, daemon=True).start()
 
     # Seed native workflow templates
     def _seed_workflow_templates():
+        from app.db.session import SessionLocal as _SessionLocal
+        tmpl_db = _SessionLocal()
         try:
             from app.services.workflow_templates import seed_native_templates
-            from app.db.session import SessionLocal as _SessionLocal
-            tmpl_db = _SessionLocal()
             count = seed_native_templates(tmpl_db)
-            tmpl_db.close()
             if count:
                 _logging.getLogger(__name__).info("Seeded %d native workflow templates", count)
         except Exception as e:
             _logging.getLogger(__name__).debug("Workflow template seeding skipped: %s", e)
+        finally:
+            tmpl_db.close()
     threading.Thread(target=_seed_workflow_templates, daemon=True).start()
 
     # Pre-embed canonical intents for tier routing (light vs full model)

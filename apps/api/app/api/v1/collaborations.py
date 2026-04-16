@@ -106,73 +106,69 @@ def advance_phase(
 @router.get("/{session_id}/stream")
 def collaboration_stream(
     session_id: uuid.UUID,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """SSE stream with Postgres catch-up then live Redis.
 
-    Subscribes to Redis BEFORE querying Postgres to eliminate the race window
-    where events arriving between the DB query and the Redis subscribe would be
-    silently dropped. After serving catch-up entries, the live Redis stream
-    deduplicates against already-sent board_versions.
+    Releases DB connection immediately after catch-up to avoid pool exhaustion.
     """
     from app.core.config import settings
+    from app.db.session import SessionLocal
     from app.services.collaboration_events import subscribe_collaboration
 
-    collab = collaboration_service.get_session(db, current_user.tenant_id, session_id)
-    if not collab:
-        raise HTTPException(status_code=404, detail="Collaboration session not found")
+    db = SessionLocal()
+    try:
+        collab = collaboration_service.get_session(db, current_user.tenant_id, session_id)
+        if not collab:
+            raise HTTPException(status_code=404, detail="Collaboration session not found")
+
+        # Step 1: Query Postgres for entries already written.
+        catch_up_entries = (
+            db.query(BlackboardEntry)
+            .filter(BlackboardEntry.blackboard_id == collab.blackboard_id)
+            .order_by(BlackboardEntry.board_version.asc())
+            .all()
+        )
+        seen_versions: set = set()
+        catch_up_data = []
+        for e in catch_up_entries:
+            seen_versions.add(e.board_version)
+            catch_up_data.append(json.dumps({
+                "event_type": "blackboard_entry",
+                "payload": {
+                    "entry_id": str(e.id),
+                    "entry_type": e.entry_type,
+                    "author_slug": e.author_agent_slug,
+                    "author_role": e.author_role,
+                    "content_preview": (e.content or "")[:200],
+                    "content_full": e.content,
+                    "confidence": e.confidence,
+                    "board_version": e.board_version,
+                },
+                "timestamp": e.created_at.timestamp() if e.created_at else 0,
+            }))
+    finally:
+        db.close()
 
     channel = f"collaboration:{str(session_id)}"
-
-    # Step 1: Subscribe to Redis FIRST so any events published after this point
-    # are buffered in the pubsub internal queue — even before we call listen().
-    pubsub = None
-    try:
-        r = redis_lib.Redis.from_url(settings.REDIS_URL, decode_responses=True)
-        pubsub = r.pubsub()
-        pubsub.subscribe(channel)
-    except Exception as e:
-        logger.warning("Redis pre-subscribe failed for collab %s: %s", session_id, e)
-        pubsub = None
-
-    # Step 2: Query Postgres for entries already written before we subscribed.
-    catch_up_entries = (
-        db.query(BlackboardEntry)
-        .filter(BlackboardEntry.blackboard_id == collab.blackboard_id)
-        .order_by(BlackboardEntry.board_version.asc())
-        .all()
-    )
-    seen_versions: set = set()
-    catch_up_data = []
-    for e in catch_up_entries:
-        seen_versions.add(e.board_version)
-        catch_up_data.append(json.dumps({
-            "event_type": "blackboard_entry",
-            "payload": {
-                "entry_id": str(e.id),
-                "entry_type": e.entry_type,
-                "author_slug": e.author_agent_slug,
-                "author_role": e.author_role,
-                "content_preview": (e.content or "")[:200],
-                "content_full": e.content,
-                "confidence": e.confidence,
-                "board_version": e.board_version,
-            },
-            "timestamp": e.created_at.timestamp() if e.created_at else 0,
-        }))
 
     def _stream():
         # Yield historical entries from Postgres
         for event_data in catch_up_data:
             yield f"data: {event_data}\n\n"
 
-        # If pre-subscribe failed, fall back to the generator helper
-        if pubsub is None:
+        # Subscribe to live Redis stream
+        pubsub = None
+        try:
+            r = redis_lib.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+            pubsub = r.pubsub()
+            pubsub.subscribe(channel)
+        except Exception as e:
+            logger.warning("Redis subscribe failed for collab %s: %s", session_id, e)
             yield from subscribe_collaboration(str(session_id))
             return
 
-        # Drain the pre-subscribed pubsub, skipping duplicates by board_version
+        # Drain the pubsub, skipping duplicates by board_version
         last_heartbeat = time.time()
         heartbeat_interval = 15
         try:
