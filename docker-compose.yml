@@ -35,7 +35,7 @@ services:
       - redis
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/agentprovision
-      - MCP_SERVER_URL=http://mcp-tools:8000
+      - MCP_SERVER_URL=http://mcp-tools:8086
       - PLATFORM_CLAUDE_CODE_TOKEN=${PLATFORM_CLAUDE_CODE_TOKEN:-}
       - HF_HUB_ENABLE_HF_TRANSFER=0
       - HF_HUB_DISABLE_XET=1
@@ -122,7 +122,7 @@ services:
       - embedding-service
       - memory-core
     environment:
-      - MCP_SERVER_URL=http://mcp-tools:8000
+      - MCP_SERVER_URL=http://mcp-tools:8086
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - HF_HUB_ENABLE_HF_TRANSFER=0
       - HF_HUB_DISABLE_XET=1
@@ -142,14 +142,12 @@ services:
       dockerfile: Dockerfile
     command: ["python", "-m", "src.mcp_serve"]
     ports:
-      - "8087:8000"
+      - "8087:8086"
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/agentprovision
       - MCP_API_KEY=${MCP_API_KEY:-dev_mcp_key}
       - API_INTERNAL_KEY=${MCP_API_KEY:-dev_mcp_key}
       - API_BASE_URL=http://api:8000
-      - UVICORN_HOST=0.0.0.0
-      - UVICORN_PORT=8000
     depends_on:
       - db
     restart: unless-stopped

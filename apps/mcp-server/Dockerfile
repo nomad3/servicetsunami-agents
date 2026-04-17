@@ -29,10 +29,9 @@ COPY .env.example .env
 # Set ownership
 RUN chown -R mcpuser:mcpuser /app
 
-# Health check — FastMCP streamable-http exposes /mcp; HEAD returns 405 so
-# probe with curl -fS that will succeed on any 4xx that isn't a connection error.
+# Health check — FastMCP SSE transport exposes /sse (GET returns 200 when ready).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -sf -o /dev/null http://localhost:8086/mcp || curl -sf -o /dev/null -X POST http://localhost:8086/mcp || exit 1
+    CMD curl -sf -o /dev/null http://localhost:8086/sse || exit 1
 
 # Expose MCP port
 EXPOSE 8086
