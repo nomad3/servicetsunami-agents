@@ -1771,3 +1771,32 @@ button:focus-visible {
   position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%);
   width: 32px; height: 2px; background: var(--ap-blue); border-radius: 2px;
 }
+
+/* BentoCard */
+.bento-card {
+  background: var(--ap-bg);
+  border: 1px solid var(--ap-border);
+  border-radius: 16px;
+  padding: 28px;
+  position: relative;
+  overflow: hidden;
+  cursor: default;
+  transition: box-shadow 0.2s;
+}
+.bento-card:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.10); }
+.bento-card--large { padding: 36px; }
+.bento-card--small { background: linear-gradient(135deg, var(--ap-bg-subtle), var(--ap-bg)); }
+.bento-card__accent {
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, var(--ap-blue), var(--ap-teal));
+}
+.bento-card__icon-wrap {
+  width: 48px; height: 48px; border-radius: 12px;
+  background: rgba(37, 99, 235, 0.08);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 16px;
+}
+.bento-card__icon { color: var(--ap-blue); }
+.bento-card__title { font-size: 18px; font-weight: 600; color: var(--ap-text); margin-bottom: 8px; }
+.bento-card__desc { font-size: 15px; color: var(--ap-text-muted); line-height: 1.6; margin: 0; }
+.bento-card__content { margin-top: 20px; }
