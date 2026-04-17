@@ -52,6 +52,7 @@ apps/api/storage/
 /apps/web/public/*
 !/apps/web/public/index.html
 !/apps/web/public/images/
+!/apps/web/public/logos/
 .superpowers/
 .claude/worktrees/
 opencode.json

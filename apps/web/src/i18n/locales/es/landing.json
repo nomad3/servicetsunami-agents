@@ -1,10 +1,20 @@
 {
+  "nav": {
+    "platform": "Plataforma",
+    "features": "Funciones",
+    "integrations": "Integraciones",
+    "pricing": "Precios",
+    "signIn": "Iniciar Sesión",
+    "getStarted": "Comenzar"
+  },
   "hero": {
     "badge": "Plataforma de Orquestacion de Agentes IA",
     "title": "Equipos de IA que Piensan, Aprenden y Ejecutan",
     "lead": "agentprovision.com es la plataforma empresarial para operaciones autonomas con IA. Orquesta equipos de agentes que escriben codigo, monitorean competidores, gestionan campanas publicitarias, clasifican tu inbox y automatizan flujos de negocio — todo con memoria persistente.",
     "subtext": "Deja de construir chatbots desechables. Despliega equipos de agentes que codean de forma autonoma, rastrean senales del mercado y ejecutan workflows reales en tu empresa.",
     "subHighlight": "La plataforma de IA agentica que escala con tu ambicion.",
+    "socialProof": "De confianza en equipos de",
+    "socialProofFallback": "Más de 500 equipos usando AgentProvision",
     "spotlight": {
       "heading": "Construido para Equipos AI-First",
       "badge": "Listo para Produccion"
@@ -240,19 +250,44 @@
       "event3": "+ Follow-up programado por email"
     }
   },
-  "ctaBanner": {
-    "heading": "Tu equipo de IA esta listo para desplegarse",
-    "description": "Crea tu cuenta y empieza a chatear con Luna en minutos. Ella aprendera tus contactos, preferencias y workflows desde el primer dia.",
-    "badges": {
-      "multiTenant": "Aislamiento Multi-Tenant",
-      "encryptedVault": "Vault de Credenciales Encriptadas",
-      "kubernetes": "Nativo en Kubernetes"
-    },
-    "stats": {
-      "agentTeams": "Equipos de Agentes",
-      "builtInTools": "Herramientas Integradas",
-      "integrations": "Integraciones"
+  "statsStrip": {
+    "tools": { "value": "81", "label": "Herramientas MCP" },
+    "workflows": { "value": "25+", "label": "Workflows Nativos" },
+    "responseTime": { "value": "5.5s", "label": "Tiempo Medio de Respuesta" },
+    "improvement": { "value": "88%", "label": "Más Rápido que el Baseline" }
+  },
+  "integrations": {
+    "headline": "Se conecta con todo lo que ya usas"
+  },
+  "productDemo": {
+    "heading": "Míralo en acción",
+    "tabs": {
+      "dashboard": "Dashboard",
+      "memory": "Memoria del Agente",
+      "chat": "IA de Comando",
+      "agents": "Flota de Agentes",
+      "workflows": "Workflows"
     }
+  },
+  "bento": {
+    "heading": "Todo lo que tu equipo necesita",
+    "aiCommand": { "title": "IA de Comando", "desc": "Orquestación de agentes por chat. Lanza tareas en lenguaje natural y observa la ejecución de tu red." },
+    "memory": { "title": "Memoria del Agente", "desc": "Grafo de conocimiento persistente. Cada interacción construye contexto." },
+    "multiAgent": { "title": "Equipos Multi-Agente", "desc": "5 equipos especializados, cero fricción de coordinación." },
+    "workflows": { "title": "Workflows", "desc": "Constructor visual sin código con 25 plantillas nativas." },
+    "security": { "title": "Seguridad Empresarial", "desc": "Aislamiento multi-tenant, vault de credenciales cifrado, autenticación JWT." },
+    "inbox": { "title": "Monitor de Bandeja de Entrada", "desc": "Monitoreo proactivo de email y calendario, 24/7." },
+    "codeAgent": { "title": "Agente de Código", "desc": "Programación autónoma con Claude Code CLI. Crea PRs con trazas de auditoría completas." }
+  },
+  "footer": {
+    "tagline": "Orquestación de IA empresarial, creada para equipos que entregan.",
+    "links": {
+      "platform": "Plataforma",
+      "features": "Funciones",
+      "docs": "Documentación",
+      "github": "GitHub"
+    },
+    "copy": "© {{year}} AgentProvision. Todos los derechos reservados."
   },
   "testimonials": {
     "heading": "Construido para Builders",
@@ -272,6 +307,7 @@
   },
   "cta": {
     "heading": "Listo para Desplegar tu Equipo de Agentes IA?",
-    "description": "Empieza a construir sistemas multi-agente hoy. Crea tu cuenta y ten a Luna, tu co-piloto IA, funcionando en minutos."
+    "subtext": "Empieza a construir sistemas multi-agente hoy. Crea tu cuenta y ten a Luna, tu co-piloto IA, funcionando en minutos.",
+    "button": "Comenzar Gratis"
   }
 }

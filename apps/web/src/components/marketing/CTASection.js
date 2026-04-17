@@ -1,71 +1,36 @@
-import React from "react";
-import { Container, Row, Col, Button } from "react-bootstrap";
-import { useNavigate } from "react-router-dom";
-import { useTranslation } from "react-i18next";
-import { FaArrowRight, FaRocket } from "react-icons/fa";
+import { useRef } from 'react';
+import { motion, useInView, useReducedMotion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
-const CTASection = () => {
+export default function CTASection() {
+  const { t } = useTranslation('landing');
   const navigate = useNavigate();
-  const { t } = useTranslation(["landing", "common"]);
+  const ref = useRef(null);
+  const isInView = useInView(ref, { once: true, margin: '-80px 0px' });
+  const prefersReducedMotion = useReducedMotion();
 
   return (
-    <section className="cta-section py-5">
-      <Container>
-        <Row className="align-items-center">
-          <Col lg={6} className="text-center text-lg-start mb-4 mb-lg-0">
-            <h2 className="display-4 fw-bold text-white mb-3">
-              {t("landing:ctaBanner.heading")}
-            </h2>
-            <p className="lead text-soft mb-4">
-              {t("landing:ctaBanner.description")}
-            </p>
-            <div className="d-flex flex-column flex-md-row gap-3 justify-content-center justify-content-lg-start">
-              <Button
-                size="lg"
-                className="px-5 py-3 cta-primary"
-                onClick={() => navigate("/register")}
-              >
-                <FaRocket className="me-2" />
-                {t("common:cta.startFree")}
-              </Button>
-              <Button
-                size="lg"
-                variant="outline-light"
-                className="px-5 py-3 cta-secondary"
-                onClick={() => navigate("/login")}
-              >
-                {t("common:cta.signIn")}
-                <FaArrowRight className="ms-2" />
-              </Button>
-            </div>
-            <div className="trust-badges mt-4">
-              <span className="badge-item">{t("landing:ctaBanner.badges.multiTenant")}</span>
-              <span className="badge-item">{t("landing:ctaBanner.badges.encryptedVault")}</span>
-              <span className="badge-item">{t("landing:ctaBanner.badges.kubernetes")}</span>
-            </div>
-          </Col>
-          <Col lg={6}>
-            <div className="cta-visual">
-              <div className="cta-stats">
-                <div className="stat-item">
-                  <div className="stat-number">8</div>
-                  <div className="stat-label">{t("landing:ctaBanner.stats.agentTeams")}</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-number">30+</div>
-                  <div className="stat-label">{t("landing:ctaBanner.stats.builtInTools")}</div>
-                </div>
-                <div className="stat-item">
-                  <div className="stat-number">10+</div>
-                  <div className="stat-label">{t("landing:ctaBanner.stats.integrations")}</div>
-                </div>
-              </div>
-            </div>
-          </Col>
-        </Row>
-      </Container>
+    <section className="cta-v2">
+      <motion.div
+        ref={ref}
+        className="cta-v2__inner"
+        initial={prefersReducedMotion ? {} : { opacity: 0, scale: 0.98 }}
+        animate={isInView ? { opacity: 1, scale: 1 } : {}}
+        transition={{ duration: 0.5 }}
+      >
+        <h2 className="cta-v2__heading">{t('cta.heading')}</h2>
+        <p className="cta-v2__sub">{t('cta.subtext')}</p>
+        <motion.button
+          className="cta-v2__btn"
+          onClick={() => navigate('/register')}
+          whileHover={prefersReducedMotion ? {} : { scale: 1.02 }}
+          whileTap={prefersReducedMotion ? {} : { scale: 0.98 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+        >
+          {t('cta.button')}
+        </motion.button>
+      </motion.div>
     </section>
   );
-};
-
-export default CTASection;
+}

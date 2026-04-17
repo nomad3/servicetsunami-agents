@@ -1,10 +1,20 @@
 {
+  "nav": {
+    "platform": "Platform",
+    "features": "Features",
+    "integrations": "Integrations",
+    "pricing": "Pricing",
+    "signIn": "Sign In",
+    "getStarted": "Get Started"
+  },
   "hero": {
     "badge": "Distributed Agent Network",
     "title": "A Network of AI Agents That Runs Your Business",
     "lead": "AgentProvision deploys a coordinated network of specialized AI agents across your operations. Each agent owns a domain — code, sales, marketing, data, communications — sharing memory, routing tasks automatically, and getting smarter together.",
     "subtext": "Stop managing one chatbot. Run a network of AI specialists that coordinate in real time, across your entire stack.",
     "subHighlight": "The distributed agent network built for modern enterprises.",
+    "socialProof": "Trusted by teams at",
+    "socialProofFallback": "500+ teams using AgentProvision",
     "spotlight": {
       "heading": "One Network. Every Domain.",
       "badge": "Enterprise Ready"
@@ -240,19 +250,44 @@
       "event3": "+ Scheduled follow-up via email"
     }
   },
-  "ctaBanner": {
-    "heading": "Your agent network is ready to deploy",
-    "description": "Create your account and launch your first specialists in minutes. Luna comes ready — she'll start learning your contacts, preferences, and workflows from the very first conversation.",
-    "badges": {
-      "multiTenant": "Multi-Tenant Isolation",
-      "encryptedVault": "Encrypted Credential Vault",
-      "kubernetes": "Kubernetes Native"
-    },
-    "stats": {
-      "agentTeams": "Specialized Agents",
-      "builtInTools": "Built-in Tools",
-      "integrations": "Integrations"
+  "statsStrip": {
+    "tools": { "value": "81", "label": "MCP Tools" },
+    "workflows": { "value": "25+", "label": "Native Workflows" },
+    "responseTime": { "value": "5.5s", "label": "Avg Response Time" },
+    "improvement": { "value": "88%", "label": "Faster Than Baseline" }
+  },
+  "integrations": {
+    "headline": "Connects to everything you already use"
+  },
+  "productDemo": {
+    "heading": "See it in action",
+    "tabs": {
+      "dashboard": "Dashboard",
+      "memory": "Agent Memory",
+      "chat": "AI Command",
+      "agents": "Agent Fleet",
+      "workflows": "Workflows"
     }
+  },
+  "bento": {
+    "heading": "Everything your team needs",
+    "aiCommand": { "title": "AI Command", "desc": "Chat-driven agent orchestration. Dispatch multi-step tasks in plain language and watch your agent network execute." },
+    "memory": { "title": "Agent Memory", "desc": "Persistent knowledge graph. Every interaction builds context." },
+    "multiAgent": { "title": "Multi-Agent Teams", "desc": "5 specialized teams, zero coordination overhead." },
+    "workflows": { "title": "Workflows", "desc": "Visual no-code workflow builder with 25 native templates." },
+    "security": { "title": "Enterprise Security", "desc": "Multi-tenant isolation, encrypted credential vault, JWT auth." },
+    "inbox": { "title": "Inbox Monitor", "desc": "Proactive email and calendar monitoring, 24/7." },
+    "codeAgent": { "title": "Code Agent", "desc": "Autonomous coding powered by Claude Code CLI. Creates PRs with full audit trails." }
+  },
+  "footer": {
+    "tagline": "Enterprise AI orchestration, built for teams that ship.",
+    "links": {
+      "platform": "Platform",
+      "features": "Features",
+      "docs": "Docs",
+      "github": "GitHub"
+    },
+    "copy": "© {{year}} AgentProvision. All rights reserved."
   },
   "testimonials": {
     "heading": "Built for Enterprise",
@@ -272,6 +307,7 @@
   },
   "cta": {
     "heading": "Ready to Deploy Your Agent Network?",
-    "description": "Launch a coordinated network of AI specialists today. Create your account and have Luna, your AI chief of staff, running in minutes."
+    "subtext": "Launch a coordinated network of AI specialists today. Create your account and have Luna, your AI chief of staff, running in minutes.",
+    "button": "Get Started Free"
   }
 }
