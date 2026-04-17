@@ -1,1 +1,12 @@
-<svg xmlns='http://www.w3.org/2000/svg' width='80' height='32' viewBox='0 0 80 32'><text x='4' y='22' font-family='sans-serif' font-size='13' fill='#94a3b8'>jira</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 40" height="40">
+  <defs>
+    <linearGradient id="jg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="18%" stop-color="#0052CC"/>
+      <stop offset="100%" stop-color="#2684FF"/>
+    </linearGradient>
+  </defs>
+  <path d="M28.3 20L20 11.7 11.7 20 20 28.3 28.3 20z" fill="url(#jg)"/>
+  <path d="M20 11.7L14.3 6 8.6 11.7l5.7 5.7L20 11.7z" fill="#2684FF"/>
+  <path d="M20 28.3l5.7 5.7 5.7-5.7-5.7-5.7-5.7 5.7z" fill="#0052CC"/>
+  <text x="38" y="26" font-family="sans-serif" font-size="16" font-weight="700" fill="#0052CC">Jira</text>
+</svg>
