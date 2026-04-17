@@ -321,7 +321,8 @@ components/marketing/
 - i18next — all text stays in translation files
 
 **Cleanup required during migration:**
-- `apps/web/package.json`: Remove `animate.css` from dependencies (it is listed there but has no `animate__*` class usages in source — can be dropped safely). Also run `npm uninstall animate.css`.
+- `apps/web/src/index.js`: Remove `import 'animate.css/animate.min.css';` at line 4 — **must be done before or at the same time as the package removal, otherwise the build fails** (module not found).
+- `apps/web/package.json`: Remove `animate.css` from dependencies and run `npm uninstall animate.css`.
 - `LandingPage.css`: Remove the custom scroll-animation CSS classes (`.n-on-scroll`, `.n-stagger`, `.n-slide-in`, etc.) — Framer Motion replaces these entirely.
 - `LandingPage.js`: Remove the existing `scrolled` state and `window.addEventListener('scroll', ...)` — `LandingNav.js` handles blur-on-scroll internally.
 - `components/marketing/HeroSection.js` full rewrite must **not** use `NeuralCanvas`. The current file imports it (`import NeuralCanvas from '../common/NeuralCanvas'`) and renders it as a background. The new hero uses a plain SVG dot grid (CSS background-image). After the new `HeroSection.js` is wired in and verified, check if `NeuralCanvas.js` is referenced anywhere else (`grep -r NeuralCanvas apps/web/src`); if unused, delete `apps/web/src/components/common/NeuralCanvas.js`.
@@ -373,6 +374,7 @@ components/marketing/
 | `apps/web/src/components/marketing/LandingFooter.js` | New |
 | `apps/web/src/components/marketing/hooks/useCountUp.js` | New (create `hooks/` subdirectory first) |
 | `apps/web/src/components/common/NeuralCanvas.js` | Delete after verifying no other components import it |
+| `apps/web/src/index.js` | Remove `import 'animate.css/animate.min.css'` (line 4) |
 | `apps/web/package.json` | Add `framer-motion`, remove `animate.css` |
 | `apps/web/src/i18n/locales/en/landing.json` | Add `nav`, `statsStrip`, `integrations` keys; rename `cta.description`→`cta.subtext`, add `cta.button`; delete `ctaBanner` |
 | `apps/web/src/i18n/locales/es/landing.json` | Same mutations as `en/landing.json` |
