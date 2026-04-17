@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -423,7 +424,10 @@ def get_workflow(
     """Get a single workflow."""
     wf = db.query(DynamicWorkflow).filter(
         DynamicWorkflow.id == workflow_id,
-        DynamicWorkflow.tenant_id == current_user.tenant_id,
+        or_(
+            DynamicWorkflow.tenant_id == current_user.tenant_id,
+            DynamicWorkflow.public == True,
+        ),
     ).first()
     if not wf:
         raise HTTPException(404, "Workflow not found")

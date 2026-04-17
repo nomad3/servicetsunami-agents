@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Badge, Spinner } from 'react-bootstrap';
 import { useNodesState, useEdgesState } from 'reactflow';
-import { FiSave, FiPlay, FiPower, FiCode, FiArrowLeft } from 'react-icons/fi';
+import { FiSave, FiPlay, FiPower, FiCode, FiArrowLeft, FiDownload } from 'react-icons/fi';
 import { useTranslation } from 'react-i18next';
 import './WorkflowBuilder.css';
 
@@ -111,6 +111,17 @@ export default function WorkflowBuilder() {
     }
   };
 
+  const handleInstall = async () => {
+    try {
+      const installed = await dynamicWorkflowService.installTemplate(id);
+      navigate(`/workflows/builder/${installed.id}`, { replace: true });
+    } catch (err) {
+      console.error('Install failed:', err);
+    }
+  };
+
+  const isTemplate = workflow?.tier === 'native' || workflow?.tier === 'community';
+
   const onDrop = useCallback((event) => {
     event.preventDefault();
     const raw = event.dataTransfer.getData('application/workflow-step');
@@ -197,12 +208,19 @@ export default function WorkflowBuilder() {
         <input
           className="workflow-name-input"
           value={workflowName}
-          onChange={(e) => setWorkflowName(e.target.value)}
+          onChange={(e) => !isTemplate && setWorkflowName(e.target.value)}
+          readOnly={isTemplate}
+          style={isTemplate ? { opacity: 0.7, cursor: 'default' } : {}}
         />
-        <Badge bg={workflow?.status === 'active' ? 'success' : 'secondary'}>
-          {workflow?.status || 'draft'}
-        </Badge>
-        {pill.total > 0 && (
+        {isTemplate
+          ? <Badge bg="info">preview</Badge>
+          : (
+            <Badge bg={workflow?.status === 'active' ? 'success' : 'secondary'}>
+              {workflow?.status || 'draft'}
+            </Badge>
+          )
+        }
+        {!isTemplate && pill.total > 0 && (
           <Badge bg={pill.connected === pill.total ? 'success' : 'warning'}>
             {t('builder.integrations')}: {pill.connected}/{pill.total}
           </Badge>
@@ -212,27 +230,38 @@ export default function WorkflowBuilder() {
           <Button variant="outline-secondary" size="sm" onClick={() => setShowJson(!showJson)}>
             <FiCode /> {t('builder.json')}
           </Button>
-          <Button variant="outline-info" size="sm" onClick={handleTest} disabled={!id}>
-            <FiPlay /> {t('builder.test')}
-          </Button>
-          <Button variant="primary" size="sm" onClick={handleSave} disabled={saving}>
-            {saving ? <Spinner size="sm" /> : <><FiSave /> {t('builder.save')}</>}
-          </Button>
-          <Button variant="success" size="sm" onClick={handleActivate}
-            disabled={!id || workflow?.status === 'active' || pill.connected < pill.total}>
-            <FiPower /> {t('builder.activate')}
-          </Button>
+          {isTemplate ? (
+            <Button variant="primary" size="sm" onClick={handleInstall}>
+              <FiDownload /> {t('templates.install')}
+            </Button>
+          ) : (
+            <>
+              <Button variant="outline-info" size="sm" onClick={handleTest} disabled={!id}>
+                <FiPlay /> {t('builder.test')}
+              </Button>
+              <Button variant="primary" size="sm" onClick={handleSave} disabled={saving}>
+                {saving ? <Spinner size="sm" /> : <><FiSave /> {t('builder.save')}</>}
+              </Button>
+              <Button variant="success" size="sm" onClick={handleActivate}
+                disabled={!id || workflow?.status === 'active' || pill.connected < pill.total}>
+                <FiPower /> {t('builder.activate')}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
       {/* Main layout */}
       <div className="builder-layout">
-        <StepPalette mcpTools={Object.keys(toolMapping).filter(k => k)} />
+        {!isTemplate && <StepPalette mcpTools={Object.keys(toolMapping).filter(k => k)} />}
         <WorkflowCanvas
           nodes={nodes} edges={edges}
-          onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+          onNodesChange={isTemplate ? undefined : onNodesChange}
+          onEdgesChange={isTemplate ? undefined : onEdgesChange}
           setEdges={setEdges}
-          onNodeClick={onNodeClick} onDrop={onDrop} onDragOver={onDragOver}
+          onNodeClick={onNodeClick}
+          onDrop={isTemplate ? undefined : onDrop}
+          onDragOver={isTemplate ? undefined : onDragOver}
         />
         {selectedNode && (
           <StepInspector
