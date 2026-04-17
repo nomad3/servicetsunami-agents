@@ -1613,3 +1613,39 @@ button:focus-visible {
 [data-bs-theme="dark"] .section-with-bg::before {
   background: linear-gradient(135deg, rgba(15, 25, 35, 0.92) 0%, rgba(22, 34, 49, 0.88) 100%);
 }
+
+/* LandingNav */
+.landing-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.landing-nav--scrolled {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--ap-border);
+}
+.landing-nav__inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+.landing-nav__logo { font-weight: 800; font-size: 18px; color: var(--ap-text); flex-shrink: 0; }
+.landing-nav__links { display: flex; gap: 28px; flex: 1; justify-content: center; }
+.landing-nav__link { font-size: 15px; color: var(--ap-text-muted); text-decoration: none; transition: color 0.2s; }
+.landing-nav__link:hover { color: var(--ap-text); }
+.landing-nav__actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.landing-nav__signin { background: none; border: none; font-size: 15px; color: var(--ap-text-muted); cursor: pointer; padding: 8px; }
+.landing-nav__signin:hover { color: var(--ap-text); }
+.landing-nav__cta { background: var(--ap-blue); color: #fff; border: none; border-radius: 9999px; padding: 9px 22px; font-size: 15px; font-weight: 600; cursor: pointer; }
+@media (max-width: 767px) {
+  .landing-nav__links { display: none; }
+}
