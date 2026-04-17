@@ -1,1 +1,7 @@
-<svg xmlns='http://www.w3.org/2000/svg' width='80' height='32' viewBox='0 0 80 32'><text x='4' y='22' font-family='sans-serif' font-size='13' fill='#94a3b8'>gmail</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 110 40" height="40">
+  <rect x="6" y="10" width="28" height="20" rx="2" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+  <path d="M6 12l14 9 14-9" fill="none" stroke="#EA4335" stroke-width="2"/>
+  <path d="M6 12l7 7M34 12l-7 7" fill="none" stroke="#EA4335" stroke-width="2"/>
+  <path d="M6 10l14 10 14-10" fill="#EA4335"/>
+  <text x="42" y="26" font-family="sans-serif" font-size="16" font-weight="600" fill="#EA4335">Gmail</text>
+</svg>
