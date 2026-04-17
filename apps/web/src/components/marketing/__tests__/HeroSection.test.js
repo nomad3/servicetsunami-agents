@@ -22,8 +22,11 @@ test('renders hero title and CTAs', () => {
   expect(screen.getByText(/Sign In/i)).toBeInTheDocument();
 });
 
-test('renders both images', () => {
+test('renders background video', () => {
   render(<HeroSection />, { wrapper: Wrapper });
-  const imgs = screen.getAllByRole('img', { hidden: true });
-  expect(imgs.length).toBeGreaterThanOrEqual(2);
+  const video = document.querySelector('video');
+  expect(video).toBeInTheDocument();
+  expect(video).toHaveAttribute('autoplay');
+  expect(video.muted).toBe(true);
+  expect(video).toHaveAttribute('loop');
 });

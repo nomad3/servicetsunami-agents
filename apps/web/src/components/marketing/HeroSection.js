@@ -3,8 +3,8 @@ import { motion, useScroll, useTransform, useReducedMotion } from 'framer-motion
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
-const IMG_SOLO = '/images/Gemini_Generated_Image_lka21blka21blka2-2.png';
-const IMG_PACK = '/images/Gemini_Generated_Image_fovh8nfovh8nfovh.png';
+const VIDEO_SRC = '/images/hero-transition.mp4';
+const VIDEO_POSTER = '/images/Gemini_Generated_Image_fovh8nfovh8nfovh.png';
 
 export default function HeroSection() {
   const { t } = useTranslation('landing');
@@ -16,39 +16,28 @@ export default function HeroSection() {
     offset: ['start start', 'end start'],
   });
 
-  const img1Opacity = useTransform(scrollYProgress, [0, 0.5], [1, 0]);
-  const img2Opacity = useTransform(scrollYProgress, [0.15, 0.6], [0, 1]);
-  const text1Opacity = useTransform(scrollYProgress, [0, 0.25], [1, 0]);
-  const text1Y = useTransform(scrollYProgress, [0, 0.25], ['0px', '-40px']);
-  const text2Opacity = useTransform(scrollYProgress, [0.25, 0.55], [0, 1]);
-  const text2Y = useTransform(scrollYProgress, [0.25, 0.55], ['40px', '0px']);
+  const textOpacity = useTransform(scrollYProgress, [0, 0.45], [1, 0]);
+  const textY = useTransform(scrollYProgress, [0, 0.45], ['0px', '-36px']);
 
   return (
     <section ref={heroRef} className="hero-scroll">
-      <motion.img
-        src={`${process.env.PUBLIC_URL}${IMG_SOLO}`}
-        alt=""
-        aria-hidden="true"
-        className="hero-scroll__img"
-        style={{ opacity: prefersReducedMotion ? 0 : img1Opacity }}
-      />
-      <motion.img
-        src={`${process.env.PUBLIC_URL}${IMG_PACK}`}
-        alt="A coordinated pack of AI agents"
-        className="hero-scroll__img"
-        style={{ opacity: prefersReducedMotion ? 1 : img2Opacity }}
-      />
+      <video
+        className="hero-scroll__video"
+        autoPlay
+        muted
+        loop
+        playsInline
+        poster={`${process.env.PUBLIC_URL}${VIDEO_POSTER}`}
+      >
+        <source src={`${process.env.PUBLIC_URL}${VIDEO_SRC}`} type="video/mp4" />
+      </video>
 
       <div className="hero-scroll__overlay" />
 
       <div className="hero-scroll__content">
         <motion.div
           className="hero-scroll__text-block"
-          style={
-            prefersReducedMotion
-              ? { opacity: 0, pointerEvents: 'none' }
-              : { opacity: text1Opacity, y: text1Y }
-          }
+          style={prefersReducedMotion ? {} : { opacity: textOpacity, y: textY }}
         >
           <h1 className="hero-scroll__title">{t('hero.title')}</h1>
           <div className="hero-scroll__ctas">
@@ -59,17 +48,6 @@ export default function HeroSection() {
               <button className="hero-scroll__cta-ghost">{t('nav.signIn')}</button>
             </Link>
           </div>
-        </motion.div>
-
-        <motion.div
-          className="hero-scroll__text-block"
-          style={
-            prefersReducedMotion
-              ? { opacity: 1 }
-              : { opacity: text2Opacity, y: text2Y }
-          }
-        >
-          <p className="hero-scroll__lead">{t('hero.lead')}</p>
         </motion.div>
       </div>
     </section>
