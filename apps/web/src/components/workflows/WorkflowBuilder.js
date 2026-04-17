@@ -213,7 +213,7 @@ export default function WorkflowBuilder() {
           style={isTemplate ? { opacity: 0.7, cursor: 'default' } : {}}
         />
         {isTemplate
-          ? <Badge bg="info">preview</Badge>
+          ? <Badge bg="info">{t('templates.preview')}</Badge>
           : (
             <Badge bg={workflow?.status === 'active' ? 'success' : 'secondary'}>
               {workflow?.status || 'draft'}
@@ -256,14 +256,12 @@ export default function WorkflowBuilder() {
         {!isTemplate && <StepPalette mcpTools={Object.keys(toolMapping).filter(k => k)} />}
         <WorkflowCanvas
           nodes={nodes} edges={edges}
-          onNodesChange={isTemplate ? undefined : onNodesChange}
-          onEdgesChange={isTemplate ? undefined : onEdgesChange}
+          onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
           setEdges={setEdges}
-          onNodeClick={onNodeClick}
-          onDrop={isTemplate ? undefined : onDrop}
-          onDragOver={isTemplate ? undefined : onDragOver}
+          onNodeClick={onNodeClick} onDrop={onDrop} onDragOver={onDragOver}
+          readOnly={isTemplate}
         />
-        {selectedNode && (
+        {selectedNode && !isTemplate && (
           <StepInspector
             node={selectedNode}
             integrationStatus={getNodeIntegration()}

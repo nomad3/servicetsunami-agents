@@ -717,7 +717,13 @@ def install_template(
     current_user=Depends(deps.get_current_active_user),
 ):
     """Install a template — creates a copy in the tenant's workflows."""
-    template = db.query(DynamicWorkflow).filter(DynamicWorkflow.id == template_id).first()
+    template = db.query(DynamicWorkflow).filter(
+        DynamicWorkflow.id == template_id,
+        or_(
+            DynamicWorkflow.public == True,
+            DynamicWorkflow.tenant_id == current_user.tenant_id,
+        ),
+    ).first()
     if not template:
         raise HTTPException(404, "Template not found")
 
