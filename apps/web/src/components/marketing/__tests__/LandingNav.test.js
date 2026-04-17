@@ -4,7 +4,8 @@ import LandingNav from '../LandingNav';
 
 jest.mock('react-i18next', () => {
   // eslint-disable-next-line global-require
-  const landing = require('../../../i18n/locales/en/landing.json');
+  const path = require('path');
+  const landing = require(path.resolve(__dirname, '../../../i18n/locales/en/landing.json'));
   return {
     useTranslation: (ns) => ({
       t: (key) => {

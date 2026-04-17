@@ -1628,6 +1628,7 @@ button:focus-visible {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--ap-border);
+  box-shadow: 0 1px 8px rgba(0,0,0,0.06);
 }
 .landing-nav__inner {
   max-width: 1200px;

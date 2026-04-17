@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -9,6 +9,7 @@ export default function LandingNav() {
   const { t } = useTranslation('landing');
   const navigate = useNavigate();
   const [scrolled, setScrolled] = useState(false);
+  const prefersReducedMotion = useReducedMotion();
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 50);
@@ -19,9 +20,9 @@ export default function LandingNav() {
   return (
     <motion.nav
       className={`landing-nav ${scrolled ? 'landing-nav--scrolled' : ''}`}
-      initial={{ opacity: 0, y: -8 }}
+      initial={prefersReducedMotion ? {} : { opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
+      transition={{ duration: prefersReducedMotion ? 0 : 0.4 }}
     >
       <div className="landing-nav__inner">
         <span className="landing-nav__logo">AgentProvision</span>
@@ -32,9 +33,9 @@ export default function LandingNav() {
               key={key}
               href={`#${key}`}
               className="landing-nav__link"
-              initial={{ opacity: 0, y: -4 }}
+              initial={prefersReducedMotion ? {} : { opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.06 + 0.2 }}
+              transition={{ delay: prefersReducedMotion ? 0 : i * 0.06 + 0.2 }}
             >
               {t(`nav.${key}`)}
             </motion.a>
