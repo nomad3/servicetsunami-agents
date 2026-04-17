@@ -1,1 +1,10 @@
-<svg xmlns='http://www.w3.org/2000/svg' width='80' height='32' viewBox='0 0 80 32'><text x='4' y='22' font-family='sans-serif' font-size='13' fill='#94a3b8'>redis</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40" height="40">
+  <path d="M8 24l12-5 12 5-12 5z" fill="#912626"/>
+  <path d="M8 24l12-5 12 5" fill="#C6302B"/>
+  <path d="M8 24v4l12 5v-4z" fill="#621B1B"/>
+  <path d="M32 24v4l-12 5v-4z" fill="#7E1F1F"/>
+  <path d="M14 16l6-3 6 3-6 3z" fill="#912626"/>
+  <path d="M14 16l6-3 6 3" fill="#C6302B"/>
+  <ellipse cx="24" cy="13" rx="3" ry="1.5" transform="rotate(-15 24 13)" fill="#C6302B"/>
+  <text x="40" y="26" font-family="sans-serif" font-size="16" font-weight="700" fill="#C6302B">Redis</text>
+</svg>
