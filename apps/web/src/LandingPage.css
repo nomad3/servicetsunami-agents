@@ -50,11 +50,6 @@
 /* HeroSection — scroll-scrub */
 .hero-scroll {
   position: relative;
-  height: 200vh;
-}
-.hero-scroll__stage {
-  position: sticky;
-  top: 0;
   height: 100vh;
   overflow: hidden;
   background: #060d1f;
@@ -153,7 +148,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .hero-scroll { height: auto; }
-  .hero-scroll__stage { position: relative; }
 }
 
 /* ProductDemo */
