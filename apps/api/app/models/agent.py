@@ -42,3 +42,11 @@ class Agent(Base):
 
     # Add relationship to memories
     memories = relationship("AgentMemory", back_populates="agent", cascade="all, delete-orphan")
+
+    # Many-to-many pivot to integration configs
+    agent_integration_configs = relationship(
+        "AgentIntegrationConfig",
+        backref="agent",
+        cascade="all, delete-orphan",
+        foreign_keys="AgentIntegrationConfig.agent_id",
+    )
