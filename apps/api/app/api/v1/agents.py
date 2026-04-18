@@ -17,6 +17,7 @@ from app.models.integration_config import IntegrationConfig
 from app.models.user import User
 from app.schemas.audit import AuditLogEntry
 from app.services import agents as agent_service
+from app.services.agent_registry import registry
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,26 @@ def create_agent(
     """
     item = agent_service.create_tenant_agent(db=db, item_in=item_in, tenant_id=current_user.tenant_id)
     return item
+
+@router.get("/discover")
+def discover_agents(
+    capability: str,
+    max_latency_ms: Optional[int] = None,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    agents = registry.find_by_capability(capability, current_user.tenant_id, db)
+    return [
+        {
+            "id": str(a.id),
+            "name": a.name,
+            "description": a.description,
+            "status": a.status,
+            "capabilities": a.capabilities,
+        }
+        for a in agents
+    ]
+
 
 @router.get("/{agent_id}", response_model=schemas.agent.Agent)
 def read_agent_by_id(
