@@ -74,6 +74,8 @@ from .session_journal import SessionJournal
 from .behavioral_signal import BehavioralSignal
 from .agent_policy import AgentPolicy
 from .agent_audit_log import AgentAuditLog
+from .agent_integration_config import AgentIntegrationConfig
+from .external_agent import ExternalAgent
 
 __all__ = [
     "Tenant", "User",
@@ -115,4 +117,6 @@ __all__ = [
     "DeviceRegistry",
     "SessionJournal",
     "BehavioralSignal",
+    "AgentIntegrationConfig",
+    "ExternalAgent",
 ]

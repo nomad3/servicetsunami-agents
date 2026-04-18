@@ -57,7 +57,7 @@ const AgentsPage = () => {
   const filteredAgents = agents.filter(a => {
     const matchesSearch = a.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       a.description?.toLowerCase().includes(searchTerm.toLowerCase());
-    const agentLifecycle = a.lifecycle_status || 'Draft';
+    const agentLifecycle = a.status || 'draft';
     const matchesFilter = lifecycleFilter === 'All' || agentLifecycle.toLowerCase() === lifecycleFilter.toLowerCase();
     return matchesSearch && matchesFilter;
   });
@@ -337,7 +337,7 @@ const AgentsPage = () => {
                   const skills = getSkills(agent);
                   const stats = tasksByAgent[agent.id] || { active: 0, completed: 0, total: 0 };
                   const successRate = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
-                  const ls = agent.lifecycle_status || 'draft';
+                  const ls = agent.status || 'draft';
                   const lsBadge = lifecycleBadge(ls);
                   const isDeprecated = ls.toLowerCase() === 'deprecated';
                   const canPromote = ['draft', 'staging'].includes(ls.toLowerCase());

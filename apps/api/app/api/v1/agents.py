@@ -259,7 +259,7 @@ def rollback_agent_version(
     snapshot = target.config_snapshot
     agent.name = snapshot.get("name", agent.name)
     agent.description = snapshot.get("description", agent.description)
-    agent.status = "production"
+    agent.status = snapshot.get("status", "production")
     for field in ("persona_prompt", "capabilities", "tool_groups", "config"):
         if field in snapshot and hasattr(agent, field):
             setattr(agent, field, snapshot[field])
@@ -364,12 +364,12 @@ def get_agent_audit_log(
     current_user: User = Depends(deps.get_current_active_user),
     from_dt: Optional[datetime] = None,
     to_dt: Optional[datetime] = None,
-    status: Optional[str] = None,
+    status_filter: Optional[str] = None,
     limit: int = 50,
 ):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent or str(agent.tenant_id) != str(current_user.tenant_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+        raise HTTPException(status_code=404, detail="Agent not found")
 
     q = (
         db.query(AgentAuditLog)
@@ -382,8 +382,8 @@ def get_agent_audit_log(
         q = q.filter(AgentAuditLog.created_at >= from_dt)
     if to_dt:
         q = q.filter(AgentAuditLog.created_at <= to_dt)
-    if status:
-        q = q.filter(AgentAuditLog.status == status)
+    if status_filter:
+        q = q.filter(AgentAuditLog.status == status_filter)
 
     return q.order_by(AgentAuditLog.created_at.desc()).limit(limit).all()
 

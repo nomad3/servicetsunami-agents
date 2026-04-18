@@ -1,6 +1,8 @@
+import ipaddress
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -11,6 +13,29 @@ from app.models.user import User
 from app.schemas.external_agent import ExternalAgentCreate, ExternalAgentInDB, ExternalAgentUpdate
 
 router = APIRouter()
+
+_PRIVATE_RANGES = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local / AWS IMDS
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+)
+
+
+def _validate_external_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=422, detail="Only http/https endpoints are allowed")
+    host = parsed.hostname or ""
+    try:
+        addr = ipaddress.ip_address(host)
+        if any(addr in net for net in _PRIVATE_RANGES):
+            raise HTTPException(status_code=422, detail="Private or internal IP addresses are not allowed")
+    except ValueError:
+        pass  # hostname — DNS-level SSRF is a deeper concern; IP check is the critical guard
 
 
 def _get_agent_or_404(db: Session, agent_id: uuid.UUID, tenant_id: uuid.UUID) -> ExternalAgent:
@@ -38,6 +63,7 @@ def register_external_agent(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ):
+    _validate_external_url(body.endpoint_url)
     agent = ExternalAgent(
         tenant_id=current_user.tenant_id,
         name=body.name,
@@ -75,6 +101,8 @@ def update_external_agent(
 ):
     agent = _get_agent_or_404(db, agent_id, current_user.tenant_id)
     update_data = body.model_dump(exclude_unset=True)
+    if "endpoint_url" in update_data:
+        _validate_external_url(update_data["endpoint_url"])
     # metadata field in schema maps to metadata_ column
     if "metadata" in update_data:
         agent.metadata_ = update_data.pop("metadata")
@@ -143,13 +171,21 @@ def test_task(
 
 
 @router.post("/callback/{agent_id}")
-def webhook_callback(
+async def webhook_callback(
     agent_id: uuid.UUID,
     request: Request,
     db: Session = Depends(deps.get_db),
 ):
-    # Verify the agent exists; full adapter implementation is in Task 18
     agent = db.query(ExternalAgent).filter(ExternalAgent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="External agent not found")
+
+    # For hmac-signed callbacks, require a signature header and verify it.
+    if agent.auth_type == "hmac":
+        sig_header = request.headers.get("X-Signature", "")
+        if not sig_header:
+            raise HTTPException(status_code=401, detail="Missing X-Signature header")
+        # Full HMAC verification requires the stored credential secret — deferred to full adapter
+        # implementation. For now, presence of the header is required.
+
     return {"received": True}

@@ -22,5 +22,6 @@ CREATE TABLE IF NOT EXISTS agent_performance_snapshots (
 CREATE INDEX IF NOT EXISTS idx_agent_perf_agent_id ON agent_performance_snapshots(agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_perf_tenant_id ON agent_performance_snapshots(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_agent_perf_window ON agent_performance_snapshots(window_start DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_perf_unique_window ON agent_performance_snapshots(agent_id, window_start, window_hours);
 
 INSERT INTO _migrations(name) VALUES ('099_agent_performance_rollup') ON CONFLICT DO NOTHING;

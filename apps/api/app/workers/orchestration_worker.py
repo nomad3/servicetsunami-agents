@@ -357,6 +357,19 @@ async def run_orchestration_worker():
         ],
     )
 
+    # Start the hourly performance rollup loop (idempotent — no-op if already running)
+    try:
+        from temporalio.service import RPCError
+        await client.start_workflow(
+            AgentPerformanceRollupWorkflow.run,
+            id="agent-performance-rollup-singleton",
+            task_queue=TASK_QUEUE,
+        )
+        logger.info("AgentPerformanceRollupWorkflow started")
+    except Exception as e:
+        # Already running or other transient error — not fatal
+        logger.debug("AgentPerformanceRollupWorkflow start skipped: %s", e)
+
     logger.info("Orchestration worker started successfully")
     await worker.run()
 

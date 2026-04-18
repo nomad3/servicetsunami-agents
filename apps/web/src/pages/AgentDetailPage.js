@@ -211,7 +211,9 @@ const AgentDetailPage = () => {
 
   const status = agent.status || 'inactive';
 
-  const assignedIds = new Set((assignedIntegrations || []).map(a => a.integration_config_id || a.id));
+  const assignedIds = new Set((assignedIntegrations || []).map(a =>
+    typeof a === 'string' ? a : (a.integration_config_id || a.id)
+  ));
 
   const auditExportUrl = () => {
     let url = `${apiBase}/api/v1/audit/agents/export?agent_id=${id}`;
@@ -485,10 +487,10 @@ const AgentDetailPage = () => {
             ) : (
               <Row className="g-3">
                 {[
-                  { label: 'Invocations', value: performanceData.invocations ?? '\u2014' },
+                  { label: 'Invocations', value: performanceData.invocation_count ?? '\u2014' },
                   { label: 'Success Rate', value: performanceData.success_rate != null ? `${Math.round(performanceData.success_rate * 100)}%` : '\u2014' },
-                  { label: 'p50 Latency (ms)', value: performanceData.p50_latency_ms ?? '\u2014' },
-                  { label: 'p95 Latency (ms)', value: performanceData.p95_latency_ms ?? '\u2014' },
+                  { label: 'p50 Latency (ms)', value: performanceData.latency_p50_ms ?? '\u2014' },
+                  { label: 'p95 Latency (ms)', value: performanceData.latency_p95_ms ?? '\u2014' },
                   { label: 'Avg Quality Score', value: performanceData.avg_quality_score != null ? performanceData.avg_quality_score.toFixed(1) : '\u2014' },
                   { label: 'Total Cost (USD)', value: performanceData.total_cost_usd != null ? `$${performanceData.total_cost_usd.toFixed(4)}` : '\u2014' },
                 ].map(s => (

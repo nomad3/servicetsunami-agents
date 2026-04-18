@@ -55,7 +55,7 @@ def export_agent_audit_logs(
     if to_dt:
         q = q.filter(AgentAuditLog.created_at <= to_dt)
 
-    rows = q.order_by(AgentAuditLog.created_at.desc()).all()
+    rows = q.order_by(AgentAuditLog.created_at.desc()).limit(50_000).all()
 
     output = io.StringIO()
     writer = csv.writer(output)
