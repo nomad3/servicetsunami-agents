@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
 import uuid
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_superuser
 from app.core.config import settings
 from app.models.user import User
 from app.schemas.skill import SkillInDB, SkillCreate, SkillUpdate
@@ -229,7 +229,7 @@ def execute_file_skill_internal(
 def import_from_github(
     payload: GitHubImportRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_superuser),
 ):
     """Import skill(s) from a GitHub repository."""
     # Try to get user's GitHub OAuth token

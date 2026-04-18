@@ -11,7 +11,7 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v.strip()
         return v
-    SECRET_KEY: str = "secret"
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     DATABASE_URL: str = "postgresql://postgres:postgres@db:5432/agentprovision"
@@ -24,11 +24,11 @@ class Settings(BaseSettings):
 
     # MCP Server Configuration
     MCP_SERVER_URL: str = "http://localhost:8085"
-    MCP_API_KEY: str = "dev_mcp_key"  # Change in production
+    MCP_API_KEY: str
     MCP_ENABLED: bool = True  # Feature flag for MCP integration
 
     # Internal API Key (for MCP server to access credentials)
-    API_INTERNAL_KEY: str = "internal-service-key"
+    API_INTERNAL_KEY: str
 
     # Google AI (Gemini Embeddings)
     GOOGLE_API_KEY: str = ""

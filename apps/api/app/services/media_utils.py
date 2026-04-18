@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
-@functools.lru_cache(max_size=1)
+@functools.lru_cache(maxsize=1)
 def get_whisper_model(model_name: str = "base"):
     """Load and cache the whisper model."""
     import whisper

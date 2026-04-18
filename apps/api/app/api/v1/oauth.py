@@ -10,6 +10,7 @@ Endpoints:
   GET  /oauth/internal/token/{integration_name}   — Decrypted token (internal only)
 """
 
+import html as _html
 import logging
 import secrets
 import uuid
@@ -359,6 +360,16 @@ CALLBACK_HTML = """<!DOCTYPE html>
 </html>"""
 
 
+def _cb(msg_type: str, provider: str, email: str, message: str) -> HTMLResponse:
+    """Return CALLBACK_HTML with all user-controlled values HTML-escaped."""
+    return HTMLResponse(CALLBACK_HTML.format(
+        msg_type=_html.escape(msg_type),
+        provider=_html.escape(provider),
+        email=_html.escape(email),
+        message=_html.escape(message),
+    ))
+
+
 @router.get("/{provider}/callback", response_class=HTMLResponse)
 def oauth_callback(
     provider: str,
@@ -369,23 +380,14 @@ def oauth_callback(
 ):
     """Handle OAuth callback from provider. Exchanges code for tokens."""
     if provider not in OAUTH_PROVIDERS:
-        return HTMLResponse(CALLBACK_HTML.format(
-            msg_type="oauth-error", provider=provider, email="",
-            message="Unknown provider",
-        ))
+        return _cb("oauth-error", provider, "", "Unknown provider")
 
     if error:
         logger.warning("OAuth error from %s: %s", provider, error)
-        return HTMLResponse(CALLBACK_HTML.format(
-            msg_type="oauth-error", provider=provider, email="",
-            message=f"Authorization denied: {error}",
-        ))
+        return _cb("oauth-error", provider, "", f"Authorization denied: {error}")
 
     if not code or not state:
-        return HTMLResponse(CALLBACK_HTML.format(
-            msg_type="oauth-error", provider=provider, email="",
-            message="Missing code or state parameter",
-        ))
+        return _cb("oauth-error", provider, "", "Missing code or state parameter")
 
     # Verify state JWT
     try:
@@ -396,10 +398,7 @@ def oauth_callback(
         user_id = uuid.UUID(payload["user_id"])
     except (JWTError, KeyError, ValueError) as e:
         logger.warning("Invalid OAuth state: %s", e)
-        return HTMLResponse(CALLBACK_HTML.format(
-            msg_type="oauth-error", provider=provider, email="",
-            message="Invalid or expired authorization state",
-        ))
+        return _cb("oauth-error", provider, "", "Invalid or expired authorization state")
 
     # Exchange code for tokens
     config = OAUTH_PROVIDERS[provider]
@@ -430,10 +429,7 @@ def oauth_callback(
             tokens = resp.json()
     except Exception as e:
         logger.exception("Token exchange failed for %s: %s", provider, e)
-        return HTMLResponse(CALLBACK_HTML.format(
-            msg_type="oauth-error", provider=provider, email="",
-            message="Failed to exchange authorization code",
-        ))
+        return _cb("oauth-error", provider, "", "Failed to exchange authorization code")
 
     access_token = tokens.get("access_token")
     refresh_token = tokens.get("refresh_token", "")
@@ -445,10 +441,7 @@ def oauth_callback(
 
     if not access_token:
         logger.error("No access_token in response from %s: %s", provider, tokens)
-        return HTMLResponse(CALLBACK_HTML.format(
-            msg_type="oauth-error", provider=provider, email="",
-            message="Provider did not return an access token",
-        ))
+        return _cb("oauth-error", provider, "", "Provider did not return an access token")
 
     # Fetch the authenticated user's email to identify the account
     account_email = _fetch_account_email(provider, access_token)
@@ -601,12 +594,7 @@ def oauth_callback(
             # Don't fail OAuth if monitor start fails
             logger.warning("Auto-start inbox monitor failed (non-fatal): %s", e)
 
-    safe_email = (account_email or "").replace("'", "\\'")
-
-    return HTMLResponse(CALLBACK_HTML.format(
-        msg_type="oauth-success", provider=provider, email=safe_email,
-        message=f"Connected {account_email or provider.title()}! This window will close.",
-    ))
+    return _cb("oauth-success", provider, account_email or "", f"Connected {account_email or provider.title()}! This window will close.")
 
 
 class ManualLogin(BaseModel):

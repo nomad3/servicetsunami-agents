@@ -151,6 +151,14 @@ def _parse_skill_md(skill_dir: Path, tier: str = "native", tenant_id: str = None
         return None
 
 
+_SENSITIVE_ENV_KEYS = frozenset({
+    "SECRET_KEY", "DATABASE_URL", "ENCRYPTION_KEY", "ANTHROPIC_API_KEY",
+    "MCP_API_KEY", "API_INTERNAL_KEY", "GITHUB_TOKEN", "GITHUB_CLIENT_SECRET",
+    "GOOGLE_CLIENT_SECRET", "MICROSOFT_CLIENT_SECRET", "LINKEDIN_CLIENT_SECRET",
+    "GOOGLE_API_KEY", "HCA_SERVICE_KEY",
+})
+
+
 class SkillManager:
     """Singleton — manages three-tier file-based skills."""
 
@@ -447,18 +455,34 @@ class SkillManager:
             logger.exception("Skill execution failed: %s", e)
             return {"error": f"Skill execution failed: {str(e)}"}
 
+    def _safe_env(self) -> dict:
+        return {k: v for k, v in os.environ.items() if k not in _SENSITIVE_ENV_KEYS}
+
     def _execute_python(self, name: str, script_path: str, inputs: dict) -> dict:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("skill_script", script_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        if not hasattr(module, "execute"):
-            return {"error": "Skill script has no 'execute' function."}
-        result = module.execute(inputs)
-        return {"success": True, "skill": name, "result": result}
+        import textwrap
+        runner = textwrap.dedent(f"""
+import sys, json, importlib.util
+spec = importlib.util.spec_from_file_location("skill", {repr(str(script_path))})
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+inputs = json.loads(sys.stdin.read())
+print(json.dumps(mod.execute(inputs)))
+""")
+        proc = subprocess.run(
+            ["python3", "-c", runner],
+            input=json.dumps(inputs),
+            capture_output=True, text=True, timeout=60,
+            env=self._safe_env(),
+        )
+        if proc.returncode != 0:
+            return {"error": f"Skill exited with code {proc.returncode}", "stderr": proc.stderr[:2000]}
+        try:
+            return {"success": True, "skill": name, "result": json.loads(proc.stdout)}
+        except (json.JSONDecodeError, ValueError):
+            return {"error": f"Skill returned non-JSON output: {proc.stdout[:500]}"}
 
     def _execute_shell(self, name: str, script_path: str, inputs: dict) -> dict:
-        env = os.environ.copy()
+        env = self._safe_env()
         for k, v in inputs.items():
             env[f"SKILL_INPUT_{k.upper()}"] = str(v)
         proc = subprocess.run(
