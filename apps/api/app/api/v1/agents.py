@@ -11,7 +11,9 @@ from app.api import deps
 from app.core.config import settings
 from app.models.agent import Agent
 from app.models.agent_audit_log import AgentAuditLog
+from app.models.agent_integration_config import AgentIntegrationConfig
 from app.models.agent_version import AgentVersion
+from app.models.integration_config import IntegrationConfig
 from app.models.user import User
 from app.schemas.audit import AuditLogEntry
 from app.services import agents as agent_service
@@ -231,3 +233,102 @@ def get_agent_audit_log(
         q = q.filter(AgentAuditLog.status == status)
 
     return q.order_by(AgentAuditLog.created_at.desc()).limit(limit).all()
+
+
+# --- Per-agent integration assignment ---
+
+@router.get("/{agent_id}/integrations")
+def list_agent_integrations(
+    agent_id: uuid.UUID,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent or str(agent.tenant_id) != str(current_user.tenant_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    rows = (
+        db.query(AgentIntegrationConfig)
+        .filter(
+            AgentIntegrationConfig.agent_id == agent_id,
+            AgentIntegrationConfig.tenant_id == current_user.tenant_id,
+        )
+        .all()
+    )
+    return [str(r.integration_config_id) for r in rows]
+
+
+@router.post("/{agent_id}/integrations")
+def assign_integration(
+    agent_id: uuid.UUID,
+    body: dict,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent or str(agent.tenant_id) != str(current_user.tenant_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    cfg_id = body.get("integration_config_id")
+    if not cfg_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="integration_config_id required")
+
+    try:
+        cfg_id = uuid.UUID(str(cfg_id))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid integration_config_id")
+
+    cfg = (
+        db.query(IntegrationConfig)
+        .filter(IntegrationConfig.id == cfg_id, IntegrationConfig.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not cfg:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Integration config not found")
+
+    # Idempotent: return 200 if already assigned
+    existing = (
+        db.query(AgentIntegrationConfig)
+        .filter(
+            AgentIntegrationConfig.agent_id == agent_id,
+            AgentIntegrationConfig.integration_config_id == cfg_id,
+        )
+        .first()
+    )
+    if not existing:
+        row = AgentIntegrationConfig(
+            agent_id=agent_id,
+            integration_config_id=cfg_id,
+            tenant_id=current_user.tenant_id,
+        )
+        db.add(row)
+        db.commit()
+
+    return {"agent_id": str(agent_id), "integration_config_id": str(cfg_id)}
+
+
+@router.delete("/{agent_id}/integrations/{cfg_id}")
+def remove_integration(
+    agent_id: uuid.UUID,
+    cfg_id: uuid.UUID,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent or str(agent.tenant_id) != str(current_user.tenant_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    row = (
+        db.query(AgentIntegrationConfig)
+        .filter(
+            AgentIntegrationConfig.agent_id == agent_id,
+            AgentIntegrationConfig.integration_config_id == cfg_id,
+            AgentIntegrationConfig.tenant_id == current_user.tenant_id,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignment not found")
+
+    db.delete(row)
+    db.commit()
+    return {"deleted": True}

@@ -59,6 +59,7 @@ from app.api.v1 import (
     learning_dashboard,
     branding_domain,
     media,
+    external_agents,
 )
 
 _logger = logging.getLogger(__name__)
@@ -140,6 +141,7 @@ router.include_router(learning_dashboard.router, prefix="/learning/dashboard", t
 router.include_router(branding_domain.router, tags=["domain-branding"])
 router.include_router(media.router, prefix="/media", tags=["media"])
 router.include_router(audit.router, prefix="/audit", tags=["audit"])
+router.include_router(external_agents.router, prefix="/external-agents", tags=["external-agents"])
 
 # Register optional modules that loaded successfully
 _optional_routes = {
