@@ -71,10 +71,11 @@ from .device_registry import DeviceRegistry
 from .session_journal import SessionJournal
 from .behavioral_signal import BehavioralSignal
 from .agent_policy import AgentPolicy
+from .agent_audit_log import AgentAuditLog
 
 __all__ = [
     "Tenant", "User",
-    "Agent", "AgentGroup", "AgentKit", "AgentMemory", "AgentPermission", "AgentPolicy",
+    "Agent", "AgentGroup", "AgentKit", "AgentMemory", "AgentPermission", "AgentPolicy", "AgentAuditLog",
     "AgentRelationship", "AgentSkill", "AgentTask",
     "ChannelAccount", "ChannelEvent",
     "ChatSession", "ChatMessage",
