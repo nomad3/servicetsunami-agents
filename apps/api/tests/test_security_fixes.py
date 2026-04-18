@@ -75,3 +75,39 @@ def test_oauth_callback_img_injection_escaped():
     body = resp.text
     assert '<img' not in body, "Raw <img> must not appear"
     assert '&lt;img' in body, "Escaped <img> must appear"
+
+
+def test_skill_github_import_requires_superuser():
+    """Regular (non-superuser) users must receive 403 on skill import."""
+    import uuid
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api import deps
+    from app.models.user import User
+    import app.api.v1.skills_new as skills_module
+
+    # Create a mock non-superuser
+    mock_user = User(
+        id=uuid.uuid4(),
+        email="regular@test.com",
+        tenant_id=uuid.uuid4(),
+        is_active=True,
+        is_superuser=False,
+        hashed_password="x",
+    )
+
+    test_app = FastAPI()
+
+    def _stub_db():
+        yield MagicMock()
+
+    test_app.dependency_overrides[deps.get_db] = _stub_db
+    test_app.dependency_overrides[deps.get_current_active_user] = lambda: mock_user
+    test_app.include_router(skills_module.router, prefix="/api/v1/skills")
+
+    client = TestClient(test_app, raise_server_exceptions=False)
+    resp = client.post(
+        "/api/v1/skills/library/import-github",
+        json={"repo_url": "https://github.com/example/skill"},
+    )
+    assert resp.status_code == 403, f"Expected 403, got {resp.status_code}: {resp.text}"
