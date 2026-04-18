@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.models.agent import Agent
 from app.models.agent_audit_log import AgentAuditLog
 from app.models.agent_integration_config import AgentIntegrationConfig
+from app.models.agent_performance_snapshot import AgentPerformanceSnapshot
 from app.models.agent_version import AgentVersion
 from app.models.integration_config import IntegrationConfig
 from app.models.user import User
@@ -254,6 +255,66 @@ def get_agent_audit_log(
         q = q.filter(AgentAuditLog.status == status)
 
     return q.order_by(AgentAuditLog.created_at.desc()).limit(limit).all()
+
+
+@router.get("/{agent_id}/performance")
+def get_agent_performance(
+    agent_id: uuid.UUID,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+    window: str = "24h",
+):
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent or str(agent.tenant_id) != str(current_user.tenant_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    if window == "7d":
+        start_dt = datetime.utcnow() - timedelta(days=7)
+    elif window == "30d":
+        start_dt = datetime.utcnow() - timedelta(days=30)
+    else:
+        start_dt = datetime.utcnow() - timedelta(hours=24)
+
+    snapshots = (
+        db.query(AgentPerformanceSnapshot)
+        .filter(
+            AgentPerformanceSnapshot.agent_id == agent_id,
+            AgentPerformanceSnapshot.window_start >= start_dt,
+        )
+        .all()
+    )
+
+    invocation_count = sum(s.invocation_count for s in snapshots)
+    success_count = sum(s.success_count for s in snapshots)
+    error_count = sum(s.error_count for s in snapshots)
+    timeout_count = sum(s.timeout_count for s in snapshots)
+    success_rate = (success_count / invocation_count) if invocation_count > 0 else 0.0
+    total_tokens = sum(s.total_tokens for s in snapshots)
+    total_cost_usd = sum(s.total_cost_usd for s in snapshots)
+
+    p50_vals = [s.latency_p50_ms for s in snapshots if s.latency_p50_ms is not None]
+    p95_vals = [s.latency_p95_ms for s in snapshots if s.latency_p95_ms is not None]
+    p99_vals = [s.latency_p99_ms for s in snapshots if s.latency_p99_ms is not None]
+    qs_vals = [s.avg_quality_score for s in snapshots if s.avg_quality_score is not None]
+
+    latency_p50_ms = (sum(p50_vals) / len(p50_vals)) if p50_vals else None
+    latency_p95_ms = (sum(p95_vals) / len(p95_vals)) if p95_vals else None
+    latency_p99_ms = (sum(p99_vals) / len(p99_vals)) if p99_vals else None
+    avg_quality_score = (sum(qs_vals) / len(qs_vals)) if qs_vals else None
+
+    return {
+        "agent_id": str(agent_id),
+        "window": window,
+        "invocation_count": invocation_count,
+        "success_rate": success_rate,
+        "latency_p50_ms": latency_p50_ms,
+        "latency_p95_ms": latency_p95_ms,
+        "latency_p99_ms": latency_p99_ms,
+        "avg_quality_score": avg_quality_score,
+        "total_tokens": total_tokens,
+        "total_cost_usd": total_cost_usd,
+        "snapshot_count": len(snapshots),
+    }
 
 
 # --- Per-agent integration assignment ---

@@ -178,6 +178,8 @@ from app.workflows.activities.inbound_lead_capture import (
     classify_email_as_lead,
     classify_whatsapp_as_lead,
 )
+from app.workflows.activities.agent_performance import compute_agent_performance_snapshot
+from app.workflows.agent_performance_rollup import AgentPerformanceRollupWorkflow
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -222,6 +224,7 @@ async def run_orchestration_worker():
             IdleEpisodeScanWorkflow,
             BackfillEmbeddingsWorkflow,
             CoalitionWorkflow,
+            AgentPerformanceRollupWorkflow,
         ],
         activities=[
             dispatch_task,
@@ -349,6 +352,8 @@ async def run_orchestration_worker():
             prepare_collaboration_step,
             record_collaboration_step,
             finalize_collaboration,
+            # Agent lifecycle: performance snapshots
+            compute_agent_performance_snapshot,
         ],
     )
 
