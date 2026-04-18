@@ -13,7 +13,7 @@ def test_secret_key_has_no_insecure_default():
     with patch.dict(os.environ, env_without_secrets, clear=True):
         # Remove any cached module so the reload triggers a fresh Settings() call
         sys.modules.pop("app.core.config", None)
-        with pytest.raises((ValidationError, Exception)) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             importlib.import_module("app.core.config")
         # Verify the error is about missing required fields, not some unrelated failure
         error_str = str(exc_info.value)
