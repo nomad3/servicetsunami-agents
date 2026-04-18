@@ -1,10 +1,11 @@
 import logging
 from datetime import datetime
-
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from typing import List, Optional
+
 import uuid
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
@@ -193,3 +194,91 @@ def reject_task(
     db.commit()
     db.refresh(task)
     return task
+
+
+class WorkflowApprovalDecision(BaseModel):
+    """Body for approving/rejecting a human_approval workflow step linked to a task."""
+    decision: str  # "approved" | "rejected"
+    comment: Optional[str] = None
+    # Optional: caller may pass these explicitly if the task context doesn't contain them.
+    run_id: Optional[str] = None
+    step_id: Optional[str] = None
+
+
+@router.post("/{task_id}/workflow-approve")
+async def workflow_approve_task(
+    task_id: uuid.UUID,
+    body: WorkflowApprovalDecision,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Send an approval_decision Temporal signal for a human_approval workflow step.
+
+    The task's context may contain ``workflow_run_id`` and ``step_id`` that
+    identify which workflow run and step to signal.  Callers can also pass
+    ``run_id`` / ``step_id`` directly in the request body as a fallback.
+
+    Returns ``{"status": "signal_sent", "decision": decision}`` on success or
+    ``{"status": "not_implemented", ...}`` when the Temporal client is
+    unreachable.
+    """
+    task = service.get_task(db, task_id, current_user.tenant_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if body.decision not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
+
+    # Resolve run_id and step_id from task context or explicit body fields.
+    task_context = task.context or {}
+    run_id = body.run_id or task_context.get("workflow_run_id")
+    step_id = body.step_id or task_context.get("approval_step_id", "approval")
+
+    if not run_id:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Cannot resolve workflow run: provide run_id in the request body "
+                "or store workflow_run_id in the task context."
+            ),
+        )
+
+    # Look up the WorkflowRun to get the Temporal workflow ID.
+    try:
+        from app.models.dynamic_workflow import WorkflowRun
+        run = db.query(WorkflowRun).filter(
+            WorkflowRun.id == run_id,
+            WorkflowRun.tenant_id == current_user.tenant_id,
+        ).first()
+    except Exception as exc:
+        logger.warning("DB lookup for WorkflowRun %s failed: %s", run_id, exc)
+        run = None
+
+    if not run or not run.temporal_workflow_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Workflow run not found or has no associated Temporal workflow ID.",
+        )
+
+    # Send the Temporal signal.
+    try:
+        from app.core.config import settings
+        from temporalio.client import Client
+
+        client = await Client.connect(settings.TEMPORAL_ADDRESS)
+        handle = client.get_workflow_handle(run.temporal_workflow_id)
+        await handle.signal("approval_decision", step_id, body.decision)
+
+        logger.info(
+            "approval_decision signal sent: run=%s step=%s decision=%s by user=%s",
+            run_id, step_id, body.decision, current_user.id,
+        )
+        return {"status": "signal_sent", "decision": body.decision, "step_id": step_id, "run_id": run_id}
+
+    except Exception as exc:
+        logger.warning("Temporal signal failed for run=%s: %s", run_id, exc)
+        return {
+            "status": "not_implemented",
+            "reason": f"Temporal signal client error: {exc}",
+            "decision": body.decision,
+        }

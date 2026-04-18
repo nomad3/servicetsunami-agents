@@ -71,6 +71,9 @@ async def execute_dynamic_step(
             activity.heartbeat("Delegating to CLI execution")
             params = step.get("params", {})
             result = {"delegated_to": "agentprovision-code", "task": params.get("task", step.get("task", ""))}
+        elif step_type == "human_approval":
+            # Notify and return a marker; the workflow executor handles the actual signal wait.
+            result = await _notify_approval_requested(step, tenant_id, run_id)
         else:
             result = {"error": f"Unknown step type: {step_type}"}
 
@@ -382,6 +385,64 @@ def _resolve_path(path: str, context: dict) -> Any:
         else:
             return None
     return value
+
+
+async def _notify_approval_requested(step: dict, tenant_id: str, run_id: str) -> dict:
+    """Create a high-priority notification so a human knows approval is needed."""
+    step_id = step.get("id", "approval")
+    step_name = step.get("name", step_id)
+    timeout_hours = step.get("timeout_hours", 24)
+    on_timeout = step.get("on_timeout", "reject")
+
+    try:
+        from app.db.session import SessionLocal
+        from app.models.notification import Notification
+
+        db = SessionLocal()
+        try:
+            notif = Notification(
+                tenant_id=uuid.UUID(tenant_id),
+                title="Approval Required",
+                body=f"Workflow step '{step_name}' is waiting for your approval.",
+                source="system",
+                priority="high",
+                reference_id=run_id,
+                reference_type="workflow_approval",
+                event_metadata={
+                    "run_id": run_id,
+                    "step_id": step_id,
+                    "step_name": step_name,
+                    "timeout_hours": timeout_hours,
+                    "on_timeout": on_timeout,
+                },
+            )
+            db.add(notif)
+            db.commit()
+            logger.info(
+                "Approval notification created for run=%s step=%s", run_id[:8], step_id
+            )
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("Failed to create approval notification: %s", e)
+
+    return {
+        "__type": "approval_requested",
+        "step_id": step_id,
+        "timeout_hours": timeout_hours,
+        "on_timeout": on_timeout,
+    }
+
+
+@activity.defn
+async def notify_approval_requested(
+    step: dict,
+    tenant_id: str,
+    run_id: str,
+) -> dict:
+    """Temporal activity: create an approval notification and return the marker dict."""
+    activity.heartbeat(f"Creating approval notification for step: {step.get('id', 'approval')}")
+    return await _notify_approval_requested(step, tenant_id, run_id)
 
 
 def _log_step(run_id: str, step_id: str, step_type: str, status: str,

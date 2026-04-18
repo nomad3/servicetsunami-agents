@@ -15,7 +15,11 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from app.workflows.activities.dynamic_step import execute_dynamic_step, finalize_workflow_run
+    from app.workflows.activities.dynamic_step import (
+        execute_dynamic_step,
+        finalize_workflow_run,
+        notify_approval_requested,
+    )
 
 
 @dataclass
@@ -101,6 +105,7 @@ class DynamicWorkflowExecutor:
 
     def __init__(self):
         self._approvals: Dict[str, bool] = {}
+        self._approval_decisions: Dict[str, str] = {}  # step_id → "approved" | "rejected"
 
     @workflow.run
     async def run(self, input: DynamicWorkflowInput) -> DynamicWorkflowResult:
@@ -119,7 +124,7 @@ class DynamicWorkflowExecutor:
                 elif step_type == "parallel":
                     result = await self._execute_parallel(step, context, input)
                 elif step_type == "human_approval":
-                    result = await self._wait_for_approval(step)
+                    result = await self._wait_for_approval(step, input.tenant_id, input.run_id)
                 elif step_type == "wait":
                     duration_s = _parse_duration(step.get("duration", "60s"))
                     await workflow.sleep(timedelta(seconds=duration_s))
@@ -281,21 +286,53 @@ class DynamicWorkflowExecutor:
 
     @workflow.signal
     async def approve_step(self, step_id: str, approved: bool):
-        """Signal handler for human approval steps."""
+        """Signal handler for human approval steps (legacy boolean form)."""
         self._approvals[step_id] = approved
+        # Also store in the string-decision map so _wait_for_approval sees it.
+        self._approval_decisions[step_id] = "approved" if approved else "rejected"
 
-    async def _wait_for_approval(self, step: dict) -> dict:
-        """Wait for human signal — survives days/weeks."""
+    @workflow.signal
+    async def approval_decision(self, step_id: str, decision: str):
+        """Signal handler — accepts 'approved' or 'rejected' string decision."""
+        self._approval_decisions[step_id] = decision
+        self._approvals[step_id] = decision == "approved"
+
+    async def _wait_for_approval(self, step: dict, tenant_id: str, run_id: str) -> dict:
+        """Fire notification, then wait for human signal — survives days/weeks."""
         step_id = step.get("id", "approval")
-        timeout_days = step.get("timeout_days", 30)
+        timeout_hours = step.get("timeout_hours", 24)
+        timeout_days = step.get("timeout_days", None)
+        on_timeout = step.get("on_timeout", "reject")
+
+        # Derive effective timeout
+        if timeout_days is not None:
+            effective_timeout = timedelta(days=timeout_days)
+        else:
+            effective_timeout = timedelta(hours=timeout_hours)
+
+        # Fire notification activity (non-blocking, tolerates failure)
+        try:
+            await workflow.execute_activity(
+                notify_approval_requested,
+                args=[step, tenant_id, run_id],
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            )
+        except Exception:
+            workflow.logger.warning("Approval notification activity failed for step %s", step_id)
+
         try:
             await workflow.wait_condition(
-                lambda: step_id in self._approvals,
-                timeout=timedelta(days=timeout_days),
+                lambda: step_id in self._approval_decisions,
+                timeout=effective_timeout,
             )
-            return {"approved": self._approvals.get(step_id, False), "step_id": step_id}
+            decision = self._approval_decisions.get(step_id, on_timeout)
+            approved = decision == "approved"
+            return {"approved": approved, "decision": decision, "step_id": step_id}
         except asyncio.TimeoutError:
-            return {"approved": False, "step_id": step_id, "timeout": True}
+            decision = on_timeout
+            approved = decision == "approved"
+            return {"approved": approved, "decision": decision, "step_id": step_id, "timeout": True}
 
 
 def _resolve_value(ref: str, context: dict) -> Any:
