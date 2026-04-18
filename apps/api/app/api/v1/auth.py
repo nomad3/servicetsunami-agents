@@ -1,11 +1,16 @@
-from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import timedelta, datetime
+import hashlib
+import hmac
+import secrets
+import logging
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.schemas import token as token_schema
 from app.schemas import user as user_schema
 from app.schemas import tenant as tenant_schema
+from app.schemas import auth as auth_schema
 from app.api import deps
 from app.core import security
 from app.core.config import settings
@@ -13,6 +18,7 @@ from app.services import base as base_service
 from app.services import users as user_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.post("/login", response_model=token_schema.Token)
 def login_for_access_token(
@@ -61,3 +67,63 @@ def read_users_me(
     Get current user.
     """
     return current_user
+
+@router.post("/password-recovery/{email}")
+def recover_password(email: str, db: Session = Depends(deps.get_db)):
+    """
+    Password recovery
+    """
+    user = user_service.get_user_by_email(db, email=email)
+
+    if not user:
+        # We don't want to reveal if a user exists or not for security reasons
+        return {"message": "Password reset email sent if user exists"}
+
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    user.password_reset_token = token_hash
+    user.password_reset_expires = datetime.utcnow() + timedelta(hours=24)
+    db.add(user)
+    db.commit()
+
+    # In a real app, send an email here. For now, log it.
+    logger.info(f"Password reset token generated for {email}")
+
+    return {"message": "Password reset instructions sent if email exists"}
+
+@router.post("/reset-password")
+def reset_password(
+    body: auth_schema.PasswordResetConfirm,
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Reset password
+    """
+    user = user_service.get_user_by_email(db, email=body.email)
+
+    if not user or not user.password_reset_token or not user.password_reset_expires:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired token",
+        )
+
+    if user.password_reset_expires < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired token",
+        )
+
+    submitted_hash = hashlib.sha256(body.token.encode()).hexdigest()
+    if not hmac.compare_digest(user.password_reset_token, submitted_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired token",
+        )
+
+    user.hashed_password = security.get_password_hash(body.new_password)
+    user.password_reset_token = None
+    user.password_reset_expires = None
+    db.add(user)
+    db.commit()
+
+    return {"message": "Password updated successfully"}
