@@ -1,6 +1,7 @@
 import logging
 from fastapi import APIRouter
 from app.api.v1 import (
+    audit,
     auth,
     channels,
     data_sources,
@@ -138,6 +139,7 @@ router.include_router(learning.router, prefix="/learning", tags=["learning"])
 router.include_router(learning_dashboard.router, prefix="/learning/dashboard", tags=["learning-dashboard"])
 router.include_router(branding_domain.router, tags=["domain-branding"])
 router.include_router(media.router, prefix="/media", tags=["media"])
+router.include_router(audit.router, prefix="/audit", tags=["audit"])
 
 # Register optional modules that loaded successfully
 _optional_routes = {

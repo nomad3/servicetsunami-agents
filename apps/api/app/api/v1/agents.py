@@ -1,7 +1,7 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -10,8 +10,10 @@ from app import schemas
 from app.api import deps
 from app.core.config import settings
 from app.models.agent import Agent
+from app.models.agent_audit_log import AgentAuditLog
 from app.models.agent_version import AgentVersion
 from app.models.user import User
+from app.schemas.audit import AuditLogEntry
 from app.services import agents as agent_service
 
 logger = logging.getLogger(__name__)
@@ -198,3 +200,34 @@ def agent_heartbeat(
         db.commit()
 
     return {"status": "ok", "agent_id": str(agent_id)}
+
+
+@router.get("/{agent_id}/audit-log", response_model=List[AuditLogEntry])
+def get_agent_audit_log(
+    agent_id: uuid.UUID,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+    from_dt: Optional[datetime] = None,
+    to_dt: Optional[datetime] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+):
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent or str(agent.tenant_id) != str(current_user.tenant_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    q = (
+        db.query(AgentAuditLog)
+        .filter(
+            AgentAuditLog.agent_id == agent_id,
+            AgentAuditLog.tenant_id == current_user.tenant_id,
+        )
+    )
+    if from_dt:
+        q = q.filter(AgentAuditLog.created_at >= from_dt)
+    if to_dt:
+        q = q.filter(AgentAuditLog.created_at <= to_dt)
+    if status:
+        q = q.filter(AgentAuditLog.status == status)
+
+    return q.order_by(AgentAuditLog.created_at.desc()).limit(limit).all()

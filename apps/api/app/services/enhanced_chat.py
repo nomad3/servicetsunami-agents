@@ -1,4 +1,5 @@
 """Enhanced chat service integrating orchestration, memory, and multi-LLM."""
+import time
 from typing import Optional, Tuple, Dict, Any
 import uuid
 
@@ -6,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.chat import ChatSession, ChatMessage
 from app.services import chat as base_chat_service
+from app.services.audit_log import write_audit_log
 from app.services.memory.memory_service import MemoryService
 from app.services.llm.router import LLMRouter
 
@@ -53,6 +55,7 @@ class EnhancedChatService:
         agent_id: Optional[uuid.UUID] = None,
     ) -> Tuple[ChatMessage, ChatMessage]:
         """Post message with memory recall and storage."""
+        _start = time.time()
         # Recall relevant memories for context
         memories = []
         if agent_id:
@@ -96,6 +99,19 @@ class EnhancedChatService:
                 importance=0.5,
                 source="conversation",
             )
+
+        response_text = assistant_msg.content if assistant_msg else ""
+        write_audit_log(
+            tenant_id=self.tenant_id,
+            agent_id=agent_id,
+            invoked_by_user_id=user_id,
+            session_id=session.id,
+            invocation_type="chat",
+            input_summary=content[:500],
+            output_summary=response_text[:500],
+            latency_ms=int((time.time() - _start) * 1000),
+            status="success",
+        )
 
         return user_msg, assistant_msg
 
