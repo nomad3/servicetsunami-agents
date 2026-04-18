@@ -9,6 +9,7 @@ from .agent_kit import AgentKit
 from .agent_memory import AgentMemory
 from .agent_permission import AgentPermission
 from .agent_performance_snapshot import AgentPerformanceSnapshot
+from .agent_version import AgentVersion
 from .agent_relationship import AgentRelationship
 from .agent_skill import AgentSkill
 from .agent_task import AgentTask
@@ -76,7 +77,7 @@ from .agent_audit_log import AgentAuditLog
 
 __all__ = [
     "Tenant", "User",
-    "Agent", "AgentGroup", "AgentKit", "AgentMemory", "AgentPermission", "AgentPerformanceSnapshot", "AgentPolicy", "AgentAuditLog",
+    "Agent", "AgentGroup", "AgentKit", "AgentMemory", "AgentPermission", "AgentPerformanceSnapshot", "AgentVersion", "AgentPolicy", "AgentAuditLog",
     "AgentRelationship", "AgentSkill", "AgentTask",
     "ChannelAccount", "ChannelEvent",
     "ChatSession", "ChatMessage",
