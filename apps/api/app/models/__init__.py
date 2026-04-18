@@ -7,6 +7,7 @@ from .agent import Agent
 from .agent_group import AgentGroup
 from .agent_kit import AgentKit
 from .agent_memory import AgentMemory
+from .agent_permission import AgentPermission
 from .agent_relationship import AgentRelationship
 from .agent_skill import AgentSkill
 from .agent_task import AgentTask
@@ -69,10 +70,11 @@ from .user_activity import UserActivity
 from .device_registry import DeviceRegistry
 from .session_journal import SessionJournal
 from .behavioral_signal import BehavioralSignal
+from .agent_policy import AgentPolicy
 
 __all__ = [
     "Tenant", "User",
-    "Agent", "AgentGroup", "AgentKit", "AgentMemory",
+    "Agent", "AgentGroup", "AgentKit", "AgentMemory", "AgentPermission", "AgentPolicy",
     "AgentRelationship", "AgentSkill", "AgentTask",
     "ChannelAccount", "ChannelEvent",
     "ChatSession", "ChatMessage",
