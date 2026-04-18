@@ -24,7 +24,7 @@ class AgentBase(BaseModel):
     escalation_agent_id: Optional[uuid.UUID] = None
 
 class AgentCreate(AgentBase):
-    pass
+    status: str = "production"
 
 class AgentUpdate(AgentBase):
     pass
@@ -42,6 +42,11 @@ class Agent(AgentBase):
 
     class Config:
         from_attributes = True
+
+
+class AgentImportRequest(BaseModel):
+    content: str
+    filename: str = "agent.yaml"
 
 
 class AgentPromoteRequest(BaseModel):

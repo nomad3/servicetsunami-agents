@@ -18,6 +18,7 @@ from app.models.integration_config import IntegrationConfig
 from app.models.user import User
 from app.schemas.audit import AuditLogEntry
 from app.services import agents as agent_service
+from app.services.agent_importer import parse_agent_definition
 from app.services.agent_registry import registry
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,26 @@ def discover_agents(
         }
         for a in agents
     ]
+
+
+@router.post("/import", response_model=schemas.agent.Agent, status_code=status.HTTP_201_CREATED)
+def import_agent(
+    *,
+    db: Session = Depends(deps.get_db),
+    body: schemas.agent.AgentImportRequest,
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    parsed = parse_agent_definition(body.content, body.filename)
+    item_in = schemas.agent.AgentCreate(
+        name=parsed.get("name", "Imported Agent"),
+        description=parsed.get("description"),
+        persona_prompt=parsed.get("persona_prompt"),
+        capabilities=parsed.get("capabilities") or [],
+        config=parsed.get("config"),
+        status="draft",
+    )
+    item = agent_service.create_tenant_agent(db=db, item_in=item_in, tenant_id=current_user.tenant_id)
+    return item
 
 
 @router.get("/{agent_id}", response_model=schemas.agent.Agent)
