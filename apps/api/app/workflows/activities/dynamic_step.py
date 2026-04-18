@@ -18,7 +18,7 @@ from temporalio import activity
 logger = logging.getLogger(__name__)
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://api:8000")
-API_INTERNAL_KEY = os.environ.get("API_INTERNAL_KEY", "dev_mcp_key")
+API_INTERNAL_KEY = os.environ.get("API_INTERNAL_KEY", "")
 MCP_TOOLS_URL = os.environ.get("MCP_TOOLS_URL", "http://mcp-tools:8000")
 
 
@@ -257,7 +257,7 @@ async def _call_internal_api(step: dict, context: dict, tenant_id: str) -> dict:
     activity.heartbeat(f"Calling internal API: {path}")
 
     api_base = os.environ.get("API_BASE_URL", "http://localhost:8000")
-    api_key = os.environ.get("API_INTERNAL_KEY", "dev_internal_key")
+    api_key = os.environ.get("API_INTERNAL_KEY", "")
 
     kwargs = {
         "headers": {"X-Internal-Key": api_key, "X-Tenant-Id": tenant_id},
