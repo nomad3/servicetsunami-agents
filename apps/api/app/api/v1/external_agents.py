@@ -128,9 +128,15 @@ def test_task(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ):
+    from app.services.external_agent_adapter import adapter
     agent = _get_agent_or_404(db, agent_id, current_user.tenant_id)
+    task = body.get("task", "")
+    try:
+        result = adapter.dispatch(agent, task, {}, db)
+    except Exception as e:
+        result = str(e)
     return {
-        "result": "Test task received. External agent dispatch adapter not yet connected.",
+        "result": result,
         "agent_id": str(agent_id),
         "protocol": agent.protocol,
     }
