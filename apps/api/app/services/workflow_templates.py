@@ -219,6 +219,77 @@ NATIVE_TEMPLATES = [
         },
     },
     {
+        "name": "Cardiac Report Generator",
+        "description": "HealthPets: fetch patient echo PDF from Gmail, extract content, generate DACVIM cardiac evaluation report, save as Google Doc in Drive",
+        "tier": "native",
+        "public": True,
+        "tags": ["healthpets", "vet", "cardiac", "echocardiogram", "google-drive", "report"],
+        "trigger_config": {"type": "manual"},
+        "definition": {
+            "steps": [
+                {
+                    "id": "find_patient_email",
+                    "type": "mcp_tool",
+                    "tool": "search_emails",
+                    "params": {
+                        "query": "{{input.email_query}}",
+                        "max_results": 1,
+                        "account_email": "{{input.account_email}}",
+                    },
+                    "output": "email_search",
+                },
+                {
+                    "id": "read_patient_email",
+                    "type": "mcp_tool",
+                    "tool": "read_email",
+                    "params": {
+                        "message_id": "{{email_search.emails[0].id}}",
+                        "account_email": "{{input.account_email}}",
+                    },
+                    "output": "email_content",
+                },
+                {
+                    "id": "extract_echo_pdf",
+                    "type": "mcp_tool",
+                    "tool": "download_attachment",
+                    "params": {
+                        "message_id": "{{email_search.emails[0].id}}",
+                        "attachment_id": "{{email_content.attachments[0].id}}",
+                        "account_email": "{{input.account_email}}",
+                    },
+                    "output": "echo_pdf",
+                },
+                {
+                    "id": "generate_cardiac_report",
+                    "type": "agent",
+                    "agent": "luna",
+                    "prompt": "You are a board-certified veterinary cardiologist (DACVIM-Cardiology). Generate a complete cardiac evaluation report in DACVIM format.\n\nPatient: {{input.patient_name}}\nEmail body: {{email_content.body}}\nEcho PDF content: {{echo_pdf.content}}\n\nProduce a professional cardiac evaluation report in markdown with these sections:\n# Cardiac Evaluation Report\n## History (Signalment, Presenting Complaint)\n## Exam (Physical Exam narrative, Echocardiogram summary, Echo Measurements table)\n## Assessment (Problem List, Concurrent Conditions)\n## Plan (Medications with dosages, Anesthesia/Fluid/Steroid Risk, Follow-up Diagnostics)\n\nUse professional veterinary cardiology terminology. Include ACVIM stage (dogs) or HCM stage (cats). Only include sections where data is available.",
+                    "output": "report",
+                },
+                {
+                    "id": "save_to_drive",
+                    "type": "mcp_tool",
+                    "tool": "create_drive_file",
+                    "params": {
+                        "name": "Cardiac Report — {{input.patient_name}} — {{input.visit_date}}",
+                        "content": "{{report.response}}",
+                        "mime_type": "application/vnd.google-apps.document",
+                        "folder_id": "{{input.drive_folder_id}}",
+                        "account_email": "{{input.account_email}}",
+                    },
+                    "output": "drive_doc",
+                },
+            ],
+            "input_schema": {
+                "patient_name": {"type": "string", "description": "Patient name (e.g. Buster Sugisawa)"},
+                "visit_date": {"type": "string", "description": "Visit date (e.g. 2026-04-19)"},
+                "email_query": {"type": "string", "description": "Gmail search query to find the patient email (e.g. 'from:jumbomail.com subject:Buster has:attachment')"},
+                "account_email": {"type": "string", "description": "Google account email (btcvetmobile@gmail.com)"},
+                "drive_folder_id": {"type": "string", "description": "Google Drive folder ID where reports are saved. Leave empty for root."},
+            },
+        },
+    },
+    {
         "name": "Monthly Billing",
         "description": "1st of each month: aggregate completed visits per clinic, generate invoices, send them, schedule payment follow-ups",
         "tier": "native",
