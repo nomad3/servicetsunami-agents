@@ -931,6 +931,7 @@ class WhatsAppService:
         try:
             from app.services import chat as chat_service
             from app.models.agent import Agent
+            from app.services._agent_ordering import agent_status_rank
             from app.models.user import User
 
             tid = uuid.UUID(tenant_id)
@@ -941,11 +942,15 @@ class WhatsAppService:
                 logger.error(f"No user found for tenant {tenant_id}")
                 return None
 
-            # Find the tenant's primary agent (Luna by default, otherwise first agent)
+            # Find the tenant's primary agent — prefer Luna, then production > staging > draft
             agent = (
                 db.query(Agent)
                 .filter(Agent.tenant_id == tid)
-                .order_by(Agent.created_at.asc())
+                .order_by(
+                    (Agent.name == "Luna").desc(),
+                    agent_status_rank.asc(),
+                    Agent.id.asc(),
+                )
                 .first()
             )
             if not agent:

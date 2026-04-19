@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import secrets
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,7 @@ from app.core import security
 from app.core.config import settings
 from app.services import base as base_service
 from app.services import users as user_service
+from app.core.rate_limit import limiter
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -24,7 +25,9 @@ _PASSWORD_RESET_MESSAGE = "Password reset instructions sent if email is register
 
 
 @router.post("/login", response_model=token_schema.Token)
+@limiter.limit("10/minute")
 def login_for_access_token(
+    request: Request,
     db: Session = Depends(deps.get_db), form_data: OAuth2PasswordRequestForm = Depends()
 ):
     user = base_service.authenticate_user(db, email=form_data.username, password=form_data.password)
@@ -72,7 +75,8 @@ def read_users_me(
     return current_user
 
 @router.post("/password-recovery/{email}")
-def recover_password(email: str, db: Session = Depends(deps.get_db)):
+@limiter.limit("3/hour")
+def recover_password(request: Request, email: str, db: Session = Depends(deps.get_db)):
     """
     Password recovery
     """
@@ -95,7 +99,9 @@ def recover_password(email: str, db: Session = Depends(deps.get_db)):
     return {"message": _PASSWORD_RESET_MESSAGE}
 
 @router.post("/reset-password")
+@limiter.limit("5/hour")
 def reset_password(
+    request: Request,
     body: auth_schema.PasswordResetConfirm,
     db: Session = Depends(deps.get_db)
 ):

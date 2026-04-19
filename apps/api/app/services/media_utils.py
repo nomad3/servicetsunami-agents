@@ -160,18 +160,15 @@ def _build_image_parts(
     ]
 
 
-def transcribe_audio_bytes(audio_bytes: bytes) -> str | None:
-    """
-    Transcribe audio bytes locally using Whisper (no ffmpeg required).
-    Uses soundfile to decode OGG/WAV directly into a numpy array.
-    Returns transcript string, or None if transcription fails.
+def _transcribe_from_source(source) -> str | None:
+    """Internal helper: soundfile reads `source` (a path or file-like), whisper transcribes.
+
+    `source` must be something soundfile.read accepts (str path, pathlib.Path, or file-like).
     """
     try:
-        import numpy as np
         import soundfile as sf
 
-        buf = io.BytesIO(audio_bytes)
-        data, sr = sf.read(buf, dtype="float32")
+        data, sr = sf.read(source, dtype="float32")
         if len(data.shape) > 1:
             data = data.mean(axis=1)  # stereo → mono
 
@@ -190,6 +187,20 @@ def transcribe_audio_bytes(audio_bytes: bytes) -> str | None:
     except Exception:
         logger.exception("Local Whisper transcription failed")
         return None
+
+
+def transcribe_audio_bytes(audio_bytes: bytes) -> str | None:
+    """Transcribe audio bytes via Whisper. Used by inline message handlers."""
+    return _transcribe_from_source(io.BytesIO(audio_bytes))
+
+
+def transcribe_audio_path(path: str) -> str | None:
+    """Transcribe an audio file on disk via Whisper without loading it into memory first.
+
+    Preferred for large uploads — soundfile mmaps the file itself. Use this
+    instead of `transcribe_audio_bytes` when you have a disk-backed temp file.
+    """
+    return _transcribe_from_source(path)
 
 
 def _build_audio_parts(

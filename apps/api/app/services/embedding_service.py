@@ -408,6 +408,36 @@ def initialize_intent_embeddings():
         logger.error("Failed to initialize intent embeddings: %s", e)
 
 
+def _expand_intents_with_translations() -> list:
+    """Use local inference to translate intent definitions into other languages.
+    
+    Controlled by INTENT_EXPANSION_LANGUAGES env var (e.g. 'Spanish,Portuguese').
+    Used during startup or testing to expand the intent embedding cache.
+    """
+    langs_str = os.environ.get("INTENT_EXPANSION_LANGUAGES", "")
+    if not langs_str:
+        return []
+    
+    languages = [l.strip() for l in langs_str.split(",") if l.strip()]
+    if not languages:
+        return []
+        
+    from app.services.local_inference import generate_sync
+    
+    expanded = []
+    for lang in languages:
+        logger.info("Expanding intents for language: %s", lang)
+        for intent in INTENT_DEFINITIONS:
+            prompt = f"Translate this intent into {lang}: '{intent['name']}'. Respond with ONLY the translation."
+            translation = generate_sync(prompt, temperature=0.0, max_tokens=50)
+            if translation:
+                expanded.append({
+                    **intent,
+                    "name": translation.strip().strip("'\""),
+                })
+    return expanded
+
+
 def match_intent(message: str) -> dict:
     """Embed message and cosine-match against cached intent vectors."""
     if not _intent_cache:

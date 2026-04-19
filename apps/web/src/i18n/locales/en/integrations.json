@@ -3,6 +3,7 @@
   "subtitle": "Connected apps, connectors, data sources, and datasets in one place",
   "tabs": {
     "integrations": "Integrations",
+    "devices": "Devices",
     "connectors": "Connectors",
     "dataSources": "Data Sources",
     "datasets": "Datasets",

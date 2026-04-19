@@ -43,6 +43,7 @@ import {
 import { useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import IntegrationsPanel from '../components/IntegrationsPanel';
+import DevicePanel from '../components/DevicePanel';
 
 import WhatsAppChannelCard from '../components/WhatsAppChannelCard';
 import api from '../services/api';
@@ -96,7 +97,7 @@ const CONNECTOR_FIELDS = {
   ]
 };
 
-const TAB_KEYS = ['integrations', 'connectors', 'data-sources', 'datasets', 'ai-models', 'skills'];
+const TAB_KEYS = ['integrations', 'devices', 'connectors', 'data-sources', 'datasets', 'ai-models', 'skills'];
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -1002,6 +1003,9 @@ const IntegrationsPage = () => {
             <Nav.Link eventKey="integrations"><FaPlug className="me-2" />{t('tabs.integrations')}</Nav.Link>
           </Nav.Item>
           <Nav.Item>
+            <Nav.Link eventKey="devices"><FaMicrochip className="me-2" />{t('tabs.devices') || 'Devices'}</Nav.Link>
+          </Nav.Item>
+          <Nav.Item>
             <Nav.Link eventKey="connectors"><FaBolt className="me-2" />{t('tabs.connectors')}</Nav.Link>
           </Nav.Item>
           <Nav.Item>
@@ -1017,6 +1021,7 @@ const IntegrationsPage = () => {
 
         {/* Tab Content */}
         {activeTab === 'integrations' && renderSkillsTab()}
+        {activeTab === 'devices' && <DevicePanel />}
         {activeTab === 'connectors' && (
           <div className="tab-content-inner">
             {renderConnectorsTab()}

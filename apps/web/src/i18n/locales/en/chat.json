@@ -36,10 +36,10 @@
     "create": "Create session"
   },
   "errors": {
-    "loadKits": "Failed to load agent kits.",
+    "loadKits": "Failed to load agents.",
     "loadSessions": "Failed to fetch chat sessions.",
     "loadMessages": "Failed to load messages.",
-    "createSession": "Unable to create chat session. Ensure the selected agent kit is valid.",
+    "createSession": "Unable to create chat session. Ensure the selected agent is valid.",
     "timeout": "Luna is taking longer than expected. Please try again in a moment.",
     "connection": "Luna is temporarily unavailable. Please try again in a couple of minutes.",
     "genericDetail": "Something went wrong: {{detail}}",

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.agent import Agent
+from app.services._agent_ordering import agent_status_rank
 from app.models.chat import ChatSession as ChatSessionModel, ChatMessage
 from app.services import datasets as dataset_service
 from app.services.agent_identity import resolve_primary_agent_slug
@@ -86,11 +87,16 @@ def create_session(
         if not agent or str(agent.tenant_id) != str(tenant_id):
             raise ValueError("Agent not found for tenant")
     else:
-        # Auto-select the tenant's Luna/first production agent when none specified
+        # Auto-select: prefer Luna, then production > staging > draft > deprecated,
+        # stable tiebreak by id
         agent = (
             db.query(Agent)
             .filter(Agent.tenant_id == tenant_id)
-            .order_by(Agent.created_at.asc())
+            .order_by(
+                (Agent.name == "Luna").desc(),
+                agent_status_rank.asc(),
+                Agent.id.asc(),
+            )
             .first()
         )
 

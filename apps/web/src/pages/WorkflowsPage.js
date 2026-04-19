@@ -547,7 +547,6 @@ const TYPE_ICONS = {
   ScheduledSyncWorkflow: FaSyncAlt,
   TaskExecutionWorkflow: FaClipboardList,
   KnowledgeExtractionWorkflow: FaDatabase,
-  AgentKitExecutionWorkflow: FaRobot,
   InboxMonitorWorkflow: FaEnvelope,
   ChannelHealthMonitorWorkflow: FaHeartbeat,
   ProspectingPipelineWorkflow: FaBullseye,

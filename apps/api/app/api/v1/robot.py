@@ -3,6 +3,7 @@ import base64
 import hashlib
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_optional, get_db
+from app.core.config import settings
 from app.models.device_registry import DeviceRegistry
 from app.models.user import User
 from app.services.media_utils import transcribe_audio_bytes
@@ -22,8 +24,16 @@ def _resolve_tenant(
     x_device_token: Optional[str],
     db: Session,
     current_user: Optional[User] = None,
+    x_internal_key: Optional[str] = None,
+    x_tenant_id: Optional[str] = None,
 ) -> Tuple[uuid.UUID, Optional[uuid.UUID]]:
-    """Resolve tenant_id (and optional user_id) from JWT user or device token."""
+    """Resolve tenant_id (and optional user_id) from JWT, device token, or internal key.
+
+    Internal callers (MCP tools, scheduler) authenticate by sending
+    X-Internal-Key matching API_INTERNAL_KEY / MCP_API_KEY plus an
+    X-Tenant-Id header. This path is used by agent-side code that
+    doesn't have a user session (e.g. capture_camera_snapshot).
+    """
     if current_user:
         return current_user.tenant_id, current_user.id
     if x_device_token:
@@ -33,6 +43,13 @@ def _resolve_tenant(
         ).first()
         if device:
             return device.tenant_id, None
+    if x_internal_key and x_tenant_id:
+        valid_keys = {k for k in (settings.API_INTERNAL_KEY, settings.MCP_API_KEY) if k}
+        if x_internal_key in valid_keys:
+            try:
+                return uuid.UUID(x_tenant_id), None
+            except (ValueError, AttributeError):
+                raise HTTPException(status_code=400, detail="Invalid X-Tenant-Id")
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
@@ -70,6 +87,7 @@ def robot_interact(
     from app.services.chat import post_user_message
     from app.models.chat import ChatSession
     from app.models.agent import Agent
+    from app.services._agent_ordering import agent_status_rank
 
     # Get or create robot session
     session = None
@@ -83,9 +101,16 @@ def robot_interact(
             pass
 
     if not session:
-        agent = db.query(Agent).filter(
-            Agent.tenant_id == tenant_id,
-        ).order_by(Agent.created_at.asc()).first()
+        agent = (
+            db.query(Agent)
+            .filter(Agent.tenant_id == tenant_id)
+            .order_by(
+                (Agent.name == "Luna").desc(),
+                agent_status_rank.asc(),
+                Agent.id.asc(),
+            )
+            .first()
+        )
         session = ChatSession(
             title="Robot Session",
             tenant_id=tenant_id,
@@ -150,6 +175,7 @@ def vision_analyze(
     """Analyze an image from a camera/robot."""
     tenant_id, _user_id = _resolve_tenant(x_device_token, db, current_user)
 
+    stored = False
     try:
         from app.services.knowledge import create_observation
         create_observation(
@@ -160,12 +186,69 @@ def vision_analyze(
             source_channel="camera",
         )
         db.commit()
+        stored = True
     except Exception:
         logger.exception("Failed to store vision observation")
+        db.rollback()
 
     return {
-        "description": f"Image received ({len(body.image_b64)} bytes b64). Vision analysis pending — local vision model not yet configured.",
-        "context": body.context,
+        "status": "stored" if stored else "error",
+        "description": f"Camera frame. Context: {body.context[:200]}",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+class VisionRequest(BaseModel):
+    image_b64: str
+    source: str = "camera"
+    context: Optional[str] = None
+
+@router.post("/vision/snapshot")
+def upload_snapshot(
+    body: VisionRequest,
+    x_device_token: Optional[str] = Header(None, alias="X-Device-Token"),
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-Id"),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Upload a camera snapshot for vision processing.
+
+    Accepts JWT user, device token, or internal key + tenant id auth.
+    """
+    tenant_id, _user_id = _resolve_tenant(
+        x_device_token, db, current_user,
+        x_internal_key=x_internal_key, x_tenant_id=x_tenant_id,
+    )
+
+    stored = False
+    try:
+        from app.services.knowledge import create_observation
+        obs_text = f"Visual snapshot from {body.source}."
+        if body.context:
+            obs_text += f" Context: {body.context}"
+
+        create_observation(
+            db, tenant_id,
+            observation_text=obs_text,
+            observation_type="vision",
+            source_type="camera_snapshot",
+            source_channel=body.source,
+            # In production, image_b64 would be uploaded to S3/GCS
+        )
+        db.commit()
+        stored = True
+    except Exception:
+        logger.exception("Failed to store vision observation")
+        db.rollback()
+
+    return {
+        "status": "stored" if stored else "error",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "message": (
+            "Snapshot received and stored for knowledge extraction."
+            if stored else "Snapshot received but could not be stored; see server logs."
+        ),
     }
 
 
