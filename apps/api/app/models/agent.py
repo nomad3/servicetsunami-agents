@@ -38,7 +38,7 @@ class Agent(Base):
     team_id = Column(UUID(as_uuid=True), ForeignKey("agent_groups.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Lifecycle
-    status = Column(String(20), nullable=False, default="production")  # draft|staging|production|deprecated
+    status = Column(String(20), nullable=False, default="draft")  # draft|staging|production|deprecated
     version = Column(Integer, nullable=False, default=1)
     successor_agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
 

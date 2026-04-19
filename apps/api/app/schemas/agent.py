@@ -24,7 +24,7 @@ class AgentBase(BaseModel):
     escalation_agent_id: Optional[uuid.UUID] = None
 
 class AgentCreate(AgentBase):
-    status: str = "production"
+    status: str = "draft"
 
 class AgentUpdate(AgentBase):
     pass
