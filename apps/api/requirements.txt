@@ -42,3 +42,4 @@ grpcio>=1.62.0
 openai-whisper
 soundfile
 librosa
+slowapi>=0.1.9
