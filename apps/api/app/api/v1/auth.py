@@ -16,7 +16,7 @@ from app.core import security
 from app.core.config import settings
 from app.services import base as base_service
 from app.services import users as user_service
-from app.main import limiter
+from app.core.rate_limit import limiter
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

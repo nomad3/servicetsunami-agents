@@ -56,12 +56,24 @@ const CameraView = ({ device }) => {
       const offer = await pc.createOffer({ offerToReceiveVideo: true });
       await pc.setLocalDescription(offer);
 
-      // 4. Send to bridge (assuming bridge is at .local or same host for now)
-      // In production, the main API would proxy this to the bridge.
+      // 4. Send to bridge. In production the main API will proxy this to the
+      // bridge so the browser doesn't have to hit the LAN directly.
       const bridgeUrl = device.config?.bridge_url || 'http://localhost:8088';
+
+      if (window.location.protocol === 'https:' && bridgeUrl.startsWith('http:')) {
+        throw new Error(
+          'Mixed content blocked: page served over HTTPS cannot fetch bridge on HTTP. ' +
+          'Configure the bridge behind HTTPS or proxy via the main API.'
+        );
+      }
+
+      const bridgeToken = device.config?.bridge_token || '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (bridgeToken) headers['X-Bridge-Token'] = bridgeToken;
+
       const response = await fetch(`${bridgeUrl}/bridge/connect`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           device_id: device.device_id,
           sdp: pc.localDescription.sdp,

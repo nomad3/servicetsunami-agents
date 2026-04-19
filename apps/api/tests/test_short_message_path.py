@@ -2,6 +2,8 @@ import os
 import uuid
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.services.agent_router import _format_memory_for_local, _should_use_local_path
 from app.services.embedding_service import INTENT_DEFINITIONS, _expand_intents_with_translations
 from app.services.rl_experience_service import DECISION_POINTS
@@ -85,19 +87,18 @@ def test_format_memory_for_local_caps_at_three_entities():
 # Task 2: Integration tests for route_and_execute
 # ---------------------------------------------------------------------------
 
-def _make_db_mock():
-    """Build a DB mock that simulates TenantFeatures and User lookup."""
+@pytest.fixture
+def db_mock():
+    """Fixture providing a DB mock with TenantFeatures + User lookup and
+    `is_v2_enabled` patched to False. Tears down cleanly on test exit."""
     db = MagicMock()
-    
-    # Mock TenantFeatures
+
     features = MagicMock()
     features.default_cli_platform = "local_inference"
-    
-    # Mock User
+
     user = MagicMock()
     user.full_name = "Test User"
 
-    # db.query() needs to return a mock that handles filter().first()
     def query_side_effect(model):
         q = MagicMock()
         if "TenantFeatures" in str(model):
@@ -111,15 +112,12 @@ def _make_db_mock():
     db.query.side_effect = query_side_effect
     db.execute.return_value.fetchall.return_value = []
     db.execute.return_value.first.return_value = None
-    
-    # Patch is_v2_enabled to False for these tests
-    patcher = patch("app.services.agent_router.is_v2_enabled", return_value=False)
-    patcher.start()
-    
-    return db
+
+    with patch("app.services.agent_router.is_v2_enabled", return_value=False):
+        yield db
 
 
-@patch("app.services.embedding_service.match_intent", return_value=None)
+@patch("app.services.agent_router.match_intent", return_value=None)
 @patch("app.services.agent_router.generate_agent_response_sync", return_value="¡Hola!")
 @patch("app.services.agent_router.rl_experience_service.log_experience")
 @patch("app.services.agent_router.build_memory_context_with_git", return_value={})
@@ -127,13 +125,13 @@ def _make_db_mock():
 @patch("app.services.agent_router.resolve_primary_agent_slug", return_value="luna")
 @patch("app.services.agent_router.run_agent_session", return_value=(None, {}))
 def test_short_spanish_routes_to_local(
-    mock_run, mock_resolve, mock_trust, mock_memory, mock_rl, mock_gen, mock_intent
+    mock_run, mock_resolve, mock_trust, mock_memory, mock_rl, mock_gen, mock_intent, db_mock
 ):
     """Short Spanish message with no intent match must use local inference path."""
     from app.services.agent_router import route_and_execute
 
     response, metadata = route_and_execute(
-        db=_make_db_mock(),
+        db=db_mock,
         tenant_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
         message="hola",
@@ -150,7 +148,7 @@ def test_short_spanish_routes_to_local(
 @patch("app.services.agent_router.build_memory_context_with_git", return_value={})
 @patch("app.services.agent_router.safety_trust.get_agent_trust_profile", return_value=None)
 def test_long_message_bypasses_local_path(
-    mock_trust, mock_memory, mock_run, mock_intent
+    mock_trust, mock_memory, mock_run, mock_intent, db_mock
 ):
     """Long message (>100 chars) with no intent must NOT use local path — goes to CLI."""
     from app.services.agent_router import route_and_execute
@@ -161,7 +159,7 @@ def test_long_message_bypasses_local_path(
     )
 
     response, metadata = route_and_execute(
-        db=_make_db_mock(),
+        db=db_mock,
         tenant_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
         message=long_message,
@@ -176,13 +174,13 @@ def test_long_message_bypasses_local_path(
 @patch("app.services.agent_router.build_memory_context_with_git", return_value={})
 @patch("app.services.agent_router.safety_trust.get_agent_trust_profile", return_value=None)
 def test_pinned_cli_session_bypasses_local_path(
-    mock_trust, mock_memory, mock_run, mock_intent
+    mock_trust, mock_memory, mock_run, mock_intent, db_mock
 ):
     """Active CLI session (pinned) must NEVER use local path even for short messages."""
     from app.services.agent_router import route_and_execute
 
     response, metadata = route_and_execute(
-        db=_make_db_mock(),
+        db=db_mock,
         tenant_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
         message="ok",
@@ -233,7 +231,7 @@ def test_expand_intents_two_languages(mock_gen):
 # Task 4: E2E smoke tests
 # ---------------------------------------------------------------------------
 
-@patch("app.services.embedding_service.match_intent", return_value=None)
+@patch("app.services.agent_router.match_intent", return_value=None)
 @patch("app.services.agent_router.generate_agent_response_sync", return_value="Bonjour!")
 @patch("app.services.agent_router.rl_experience_service.log_experience")
 @patch("app.services.agent_router.build_memory_context_with_git", return_value={
@@ -243,13 +241,13 @@ def test_expand_intents_two_languages(mock_gen):
 @patch("app.services.agent_router.resolve_primary_agent_slug", return_value="luna")
 @patch("app.services.agent_router.run_agent_session", return_value=(None, {}))
 def test_short_message_includes_memory_context(
-    mock_run, mock_resolve, mock_trust, mock_memory, mock_rl, mock_gen, mock_intent
+    mock_run, mock_resolve, mock_trust, mock_memory, mock_rl, mock_gen, mock_intent, db_mock
 ):
     """Memory context is formatted and injected into the local inference call."""
     from app.services.agent_router import route_and_execute
 
     response, metadata = route_and_execute(
-        db=_make_db_mock(),
+        db=db_mock,
         tenant_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
         message="bonjour",
@@ -268,13 +266,13 @@ def test_short_message_includes_memory_context(
 @patch("app.services.agent_router.build_memory_context_with_git", return_value={})
 @patch("app.services.agent_router.safety_trust.get_agent_trust_profile", return_value=None)
 def test_local_inference_failure_falls_through_to_cli(
-    mock_trust, mock_memory, mock_run, mock_gen_none, mock_intent
+    mock_trust, mock_memory, mock_run, mock_gen_none, mock_intent, db_mock
 ):
     """If local inference returns None (Ollama down), fall through to full CLI."""
     from app.services.agent_router import route_and_execute
 
     response, metadata = route_and_execute(
-        db=_make_db_mock(),
+        db=db_mock,
         tenant_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
         message="hi",

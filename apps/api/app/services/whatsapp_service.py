@@ -930,6 +930,7 @@ class WhatsAppService:
         db = self._get_db()
         try:
             from app.services import chat as chat_service
+            from sqlalchemy import case
             from app.models.agent import Agent
             from app.models.user import User
 
@@ -941,13 +942,20 @@ class WhatsAppService:
                 logger.error(f"No user found for tenant {tenant_id}")
                 return None
 
-            # Find the tenant's primary agent — prefer Luna, production over draft
+            # Find the tenant's primary agent — prefer Luna, then production > staging > draft
+            status_rank = case(
+                (Agent.status == "production", 0),
+                (Agent.status == "staging", 1),
+                (Agent.status == "draft", 2),
+                (Agent.status == "deprecated", 3),
+                else_=4,
+            )
             agent = (
                 db.query(Agent)
                 .filter(Agent.tenant_id == tid)
                 .order_by(
                     (Agent.name == "Luna").desc(),
-                    Agent.status.desc(),
+                    status_rank.asc(),
                     Agent.id.asc(),
                 )
                 .first()

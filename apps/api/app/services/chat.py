@@ -5,10 +5,20 @@ import time
 from typing import Any, Dict, List, Tuple
 import uuid
 
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.agent import Agent
+
+
+_AGENT_STATUS_RANK = case(
+    (Agent.status == "production", 0),
+    (Agent.status == "staging", 1),
+    (Agent.status == "draft", 2),
+    (Agent.status == "deprecated", 3),
+    else_=4,
+)
 from app.models.chat import ChatSession as ChatSessionModel, ChatMessage
 from app.services import datasets as dataset_service
 from app.services.agent_identity import resolve_primary_agent_slug
@@ -86,13 +96,14 @@ def create_session(
         if not agent or str(agent.tenant_id) != str(tenant_id):
             raise ValueError("Agent not found for tenant")
     else:
-        # Auto-select: prefer Luna, then production over draft, stable tiebreak by id
+        # Auto-select: prefer Luna, then production > staging > draft > deprecated,
+        # stable tiebreak by id
         agent = (
             db.query(Agent)
             .filter(Agent.tenant_id == tenant_id)
             .order_by(
                 (Agent.name == "Luna").desc(),
-                Agent.status.desc(),
+                _AGENT_STATUS_RANK.asc(),
                 Agent.id.asc(),
             )
             .first()

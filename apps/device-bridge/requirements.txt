@@ -1,7 +1,8 @@
 fastapi
 uvicorn[standard]
-websockets
+httpx
 aiortc
 aiohttp
 pydantic
 python-multipart
+opencv-python
