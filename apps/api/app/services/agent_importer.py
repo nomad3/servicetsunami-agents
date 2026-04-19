@@ -101,9 +101,15 @@ def parse_agent_definition(content: str, filename: str = "") -> dict:
     if fmt == "autogen":
         return import_autogen(parsed)
 
+    # Native / generic format — accept any dict with at least a name or description
+    name = parsed.get("name") or parsed.get("role") or filename or "Imported Agent"
+    caps = parsed.get("capabilities") or parsed.get("skills") or parsed.get("tools") or []
+    if caps and isinstance(caps[0], dict):
+        caps = [c.get("name", str(c)) for c in caps]
     return {
-        "name": filename or "Imported Agent",
-        "description": "Imported agent (unknown format)",
-        "capabilities": [],
-        "config": {"metadata": {"source": "unknown", "raw": str(content)[:500]}},
+        "name": name,
+        "description": parsed.get("description") or parsed.get("goal") or "",
+        "persona_prompt": parsed.get("persona_prompt") or parsed.get("system_prompt") or parsed.get("system_message") or "",
+        "capabilities": caps,
+        "config": parsed.get("config") or {"metadata": {"source": "native"}},
     }

@@ -122,17 +122,21 @@ const PersonalityStep = ({ data, onChange }) => {
             </Form.Group>
 
             <Form.Group className="mb-3">
-              <Form.Label>Custom System Prompt (Advanced)</Form.Label>
+              <Form.Label className="d-flex justify-content-between">
+                <span>System Prompt</span>
+                <small className="text-muted">{(data.system_prompt || '').length} / 4000</small>
+              </Form.Label>
               <Form.Control
                 as="textarea"
-                rows={4}
+                rows={8}
                 placeholder="You are a helpful assistant that..."
                 value={data.system_prompt}
                 onChange={(e) => handlePromptChange(e.target.value)}
-                maxLength={2000}
+                maxLength={4000}
+                style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}
               />
               <Form.Text className="text-muted">
-                Override the default system prompt. Leave empty to use template default.
+                The system prompt defines your agent's behaviour, tools it uses, and how it responds. The template provides a production-ready default — customize it as needed.
               </Form.Text>
             </Form.Group>
           </Accordion.Body>

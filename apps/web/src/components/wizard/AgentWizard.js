@@ -132,23 +132,30 @@ const AgentWizard = () => {
       setCreating(true);
 
       // Build agent config
+      const selectedSkills = Object.entries(wizardData.skills)
+        .filter(([, enabled]) => enabled)
+        .map(([slug]) => slug);
+
+      const resolvedPrompt = wizardData.personality.system_prompt || wizardData.template?.config?.system_prompt || '';
+
       const agentData = {
         name: wizardData.basicInfo.name,
         description: wizardData.basicInfo.description,
         tool_groups: wizardData.tool_groups,
         default_model_tier: wizardData.default_model_tier,
         memory_domains: wizardData.memory_domains,
+        // Top-level fields the CLI session manager reads directly
+        persona_prompt: resolvedPrompt,
+        capabilities: selectedSkills,
         config: {
           model: wizardData.template?.config?.model || 'gpt-4',
           temperature: wizardData.personality.temperature,
           max_tokens: wizardData.personality.max_tokens,
-          system_prompt: wizardData.personality.system_prompt || wizardData.template?.config?.system_prompt,
+          system_prompt: resolvedPrompt,
           personality_preset: wizardData.personality.preset,
           template_used: wizardData.template?.id,
           avatar: wizardData.basicInfo.avatar,
-          skills: Object.entries(wizardData.skills)
-            .filter(([, enabled]) => enabled)
-            .map(([slug]) => slug),
+          skills: selectedSkills,
           entity_schema: wizardData.template?.config?.entity_schema || null,
         },
       };

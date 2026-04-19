@@ -24,6 +24,9 @@ const AgentsPage = () => {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importContent, setImportContent] = useState('');
   const [importing, setImporting] = useState(false);
+  const [hireModalOpen, setHireModalOpen] = useState(false);
+  const [hireForm, setHireForm] = useState({ name: '', description: '', endpoint_url: '', protocol: 'openai_chat', auth_type: 'bearer', auth_credential: '', capabilities: '' });
+  const [hiring, setHiring] = useState(false);
 
   const loadAgents = () =>
     agentService.getAll().then(r => setAgents(r.data || []));
@@ -150,6 +153,34 @@ const AgentsPage = () => {
     }
   };
 
+  const handleHire = async () => {
+    if (!hireForm.name.trim() || !hireForm.endpoint_url.trim()) return;
+    try {
+      setHiring(true);
+      const payload = {
+        name: hireForm.name.trim(),
+        description: hireForm.description.trim() || undefined,
+        endpoint_url: hireForm.endpoint_url.trim(),
+        protocol: hireForm.protocol,
+        auth_type: hireForm.auth_type,
+        capabilities: hireForm.capabilities ? hireForm.capabilities.split(',').map(s => s.trim()).filter(Boolean) : [],
+      };
+      await api.post('/external-agents', payload);
+      const r = await api.get('/external-agents');
+      setExternalAgents(r.data || []);
+      setHireModalOpen(false);
+      setHireForm({ name: '', description: '', endpoint_url: '', protocol: 'openai_chat', auth_type: 'bearer', auth_credential: '', capabilities: '' });
+      setSuccess('External agent hired successfully.');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      console.error(err);
+      const detail = err.response?.data?.detail || 'Hire failed. Check the endpoint URL.';
+      setError(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    } finally {
+      setHiring(false);
+    }
+  };
+
   const getSkills = (agent) => {
     const configSkills = agent.config?.skills || agent.config?.tools || [];
     const agentSkills = (agent.skills || []).map(s => s.skill_name);
@@ -215,12 +246,12 @@ const AgentsPage = () => {
               onClick={() => setImportModalOpen(true)}
               style={{ fontSize: '0.78rem' }}
             >
-              Import Agent
+              + Import Agent
             </Button>
             <Button
               variant="outline-secondary"
               size="sm"
-              onClick={() => alert('Hire External Agent wizard coming soon')}
+              onClick={() => setHireModalOpen(true)}
               style={{ fontSize: '0.82rem' }}
             >
               + Hire External Agent
@@ -578,21 +609,81 @@ const AgentsPage = () => {
         </Modal.Body>
       </Modal>
 
+      {/* Hire External Agent Modal */}
+      <Modal show={hireModalOpen} onHide={() => setHireModalOpen(false)} centered>
+        <Modal.Header style={{ background: 'var(--surface-elevated)', borderBottom: '1px solid var(--color-border)' }}>
+          <Modal.Title style={{ fontSize: '0.95rem', fontWeight: 600 }}>Hire External Agent</Modal.Title>
+        </Modal.Header>
+        <Modal.Body style={{ background: 'var(--surface-elevated)' }}>
+          <p style={{ fontSize: '0.78rem', color: 'var(--color-muted)', marginBottom: 16 }}>
+            Register an external agent (OpenAI-compatible API, webhook, or A2A endpoint) so this platform can route tasks to it.
+          </p>
+          <Form.Group className="mb-3">
+            <Form.Label style={{ fontSize: '0.82rem' }}>Name *</Form.Label>
+            <Form.Control size="sm" value={hireForm.name} onChange={e => setHireForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Billing Agent" />
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label style={{ fontSize: '0.82rem' }}>Description</Form.Label>
+            <Form.Control size="sm" value={hireForm.description} onChange={e => setHireForm(f => ({ ...f, description: e.target.value }))} placeholder="What does this agent do?" />
+          </Form.Group>
+          <Form.Group className="mb-3">
+            <Form.Label style={{ fontSize: '0.82rem' }}>Endpoint URL *</Form.Label>
+            <Form.Control size="sm" value={hireForm.endpoint_url} onChange={e => setHireForm(f => ({ ...f, endpoint_url: e.target.value }))} placeholder="https://agent.example.com/v1/chat" />
+            <Form.Text className="text-muted" style={{ fontSize: '0.72rem' }}>Must be a public HTTPS URL. Private IPs are blocked.</Form.Text>
+          </Form.Group>
+          <Row className="mb-3">
+            <Col>
+              <Form.Label style={{ fontSize: '0.82rem' }}>Protocol</Form.Label>
+              <Form.Select size="sm" value={hireForm.protocol} onChange={e => setHireForm(f => ({ ...f, protocol: e.target.value }))}>
+                <option value="openai_chat">OpenAI Chat</option>
+                <option value="webhook">Webhook</option>
+                <option value="a2a">A2A</option>
+                <option value="mcp">MCP</option>
+                <option value="grpc">gRPC</option>
+              </Form.Select>
+            </Col>
+            <Col>
+              <Form.Label style={{ fontSize: '0.82rem' }}>Auth Type</Form.Label>
+              <Form.Select size="sm" value={hireForm.auth_type} onChange={e => setHireForm(f => ({ ...f, auth_type: e.target.value }))}>
+                <option value="none">None</option>
+                <option value="bearer">Bearer Token</option>
+                <option value="api_key">API Key</option>
+                <option value="hmac">HMAC</option>
+              </Form.Select>
+            </Col>
+          </Row>
+          <Form.Group className="mb-3">
+            <Form.Label style={{ fontSize: '0.82rem' }}>Capabilities (comma-separated)</Form.Label>
+            <Form.Control size="sm" value={hireForm.capabilities} onChange={e => setHireForm(f => ({ ...f, capabilities: e.target.value }))} placeholder="sql_query, data_summary, report_generation" />
+            <Form.Text className="text-muted" style={{ fontSize: '0.72rem' }}>Skills this agent can handle. Used for auto-routing.</Form.Text>
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer style={{ background: 'var(--surface-elevated)', borderTop: '1px solid var(--color-border)' }}>
+          <Button variant="outline-secondary" size="sm" onClick={() => setHireModalOpen(false)}>Cancel</Button>
+          <Button variant="primary" size="sm" onClick={handleHire} disabled={hiring || !hireForm.name.trim() || !hireForm.endpoint_url.trim()}>
+            {hiring ? 'Hiring...' : 'Hire Agent'}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
       {/* Import Agent Modal */}
       <Modal show={importModalOpen} onHide={() => setImportModalOpen(false)} centered>
         <Modal.Header style={{ background: 'var(--surface-elevated)', borderBottom: '1px solid var(--color-border)' }}>
           <Modal.Title style={{ fontSize: '0.95rem', fontWeight: 600 }}>Import Agent</Modal.Title>
         </Modal.Header>
         <Modal.Body style={{ background: 'var(--surface-elevated)' }}>
-          <p style={{ fontSize: '0.78rem', color: 'var(--color-muted)', marginBottom: 12 }}>
-            Paste YAML or JSON definition for the agent.
+          <p style={{ fontSize: '0.78rem', color: 'var(--color-muted)', marginBottom: 8 }}>
+            Paste a YAML or JSON agent definition. Supports CrewAI, LangChain, AutoGen, and native formats.
+          </p>
+          <p style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: 12 }}>
+            Minimum required fields: <code>name</code> and <code>description</code>. Optional: <code>capabilities</code>, <code>persona_prompt</code>, <code>role</code>.
           </p>
           <Form.Control
             as="textarea"
             rows={10}
             value={importContent}
             onChange={e => setImportContent(e.target.value)}
-            placeholder="name: MyAgent&#10;description: ..."
+            placeholder={'name: My Agent\ndescription: What this agent does\ncapabilities:\n  - knowledge_search\n  - sql_query\npersona_prompt: You are a helpful agent that...'}
             style={{ fontSize: '0.78rem', fontFamily: 'monospace' }}
           />
         </Modal.Body>
