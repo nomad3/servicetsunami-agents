@@ -104,8 +104,6 @@ def import_agent(
     db.commit()
     db.refresh(item)
     return item
-
-
 @router.get("/{agent_id}", response_model=schemas.agent.Agent)
 def read_agent_by_id(
     agent_id: uuid.UUID,
