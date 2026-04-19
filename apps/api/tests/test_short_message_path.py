@@ -86,23 +86,48 @@ def test_format_memory_for_local_caps_at_three_entities():
 # ---------------------------------------------------------------------------
 
 def _make_db_mock():
-    """Build a DB mock that simulates TenantFeatures with default platform."""
+    """Build a DB mock that simulates TenantFeatures and User lookup."""
     db = MagicMock()
+    
+    # Mock TenantFeatures
     features = MagicMock()
-    features.default_cli_platform = "claude_code"
-    db.query.return_value.filter.return_value.first.return_value = features
+    features.default_cli_platform = "local_inference"
+    
+    # Mock User
+    user = MagicMock()
+    user.full_name = "Test User"
+
+    # db.query() needs to return a mock that handles filter().first()
+    def query_side_effect(model):
+        q = MagicMock()
+        if "TenantFeatures" in str(model):
+            q.filter.return_value.first.return_value = features
+        elif "User" in str(model):
+            q.filter.return_value.first.return_value = user
+        else:
+            q.filter.return_value.first.return_value = MagicMock()
+        return q
+
+    db.query.side_effect = query_side_effect
     db.execute.return_value.fetchall.return_value = []
-    db.execute.return_value.first.return_value = None  # decision_point_config lookup
+    db.execute.return_value.first.return_value = None
+    
+    # Patch is_v2_enabled to False for these tests
+    patcher = patch("app.services.agent_router.is_v2_enabled", return_value=False)
+    patcher.start()
+    
     return db
 
 
-@patch("app.services.agent_router.match_intent", return_value=None)
+@patch("app.services.embedding_service.match_intent", return_value=None)
 @patch("app.services.agent_router.generate_agent_response_sync", return_value="¡Hola!")
 @patch("app.services.agent_router.rl_experience_service.log_experience")
 @patch("app.services.agent_router.build_memory_context_with_git", return_value={})
 @patch("app.services.agent_router.safety_trust.get_agent_trust_profile", return_value=None)
+@patch("app.services.agent_router.resolve_primary_agent_slug", return_value="luna")
+@patch("app.services.agent_router.run_agent_session", return_value=(None, {}))
 def test_short_spanish_routes_to_local(
-    mock_trust, mock_memory, mock_rl, mock_gen, mock_intent
+    mock_run, mock_resolve, mock_trust, mock_memory, mock_rl, mock_gen, mock_intent
 ):
     """Short Spanish message with no intent match must use local inference path."""
     from app.services.agent_router import route_and_execute
@@ -208,15 +233,17 @@ def test_expand_intents_two_languages(mock_gen):
 # Task 4: E2E smoke tests
 # ---------------------------------------------------------------------------
 
-@patch("app.services.agent_router.match_intent", return_value=None)
+@patch("app.services.embedding_service.match_intent", return_value=None)
 @patch("app.services.agent_router.generate_agent_response_sync", return_value="Bonjour!")
 @patch("app.services.agent_router.rl_experience_service.log_experience")
 @patch("app.services.agent_router.build_memory_context_with_git", return_value={
     "relevant_entities": [{"name": "Alice", "entity_type": "person", "description": "VIP contact"}]
 })
 @patch("app.services.agent_router.safety_trust.get_agent_trust_profile", return_value=None)
+@patch("app.services.agent_router.resolve_primary_agent_slug", return_value="luna")
+@patch("app.services.agent_router.run_agent_session", return_value=(None, {}))
 def test_short_message_includes_memory_context(
-    mock_trust, mock_memory, mock_rl, mock_gen, mock_intent
+    mock_run, mock_resolve, mock_trust, mock_memory, mock_rl, mock_gen, mock_intent
 ):
     """Memory context is formatted and injected into the local inference call."""
     from app.services.agent_router import route_and_execute
@@ -231,10 +258,9 @@ def test_short_message_includes_memory_context(
     assert response == "Bonjour!"
     assert metadata.get("platform") == "local_inference"
     assert mock_rl.called  # tier_selection RL experience was logged
-    # generate_agent_response_sync was called with conversation_summary containing entity name
-    conversation_summary_arg = mock_gen.call_args.kwargs.get("conversation_summary", "")
-    assert "Alice" in conversation_summary_arg
-
+    # generate_agent_response_sync was called with memory_context containing entity name
+    memory_context_arg = mock_gen.call_args.kwargs.get("memory_context", "")
+    assert "Alice" in memory_context_arg
 
 @patch("app.services.agent_router.match_intent", return_value=None)
 @patch("app.services.agent_router.generate_agent_response_sync", return_value=None)

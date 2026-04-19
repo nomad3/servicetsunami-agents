@@ -4,10 +4,16 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from app.api.v1 import routes as v1_routes
 from app.db.session import SessionLocal
 from app.db.init_db import init_db
 from app.core.logging import setup_logging, log_request
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 # Initialize structured logging
 setup_logging(_os.environ.get("LOG_LEVEL", "INFO"))
@@ -20,6 +26,10 @@ finally:
     db.close()
 
 app = FastAPI(redirect_slashes=False)
+
+# Rate limit handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):

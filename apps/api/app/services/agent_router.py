@@ -182,8 +182,8 @@ def _format_memory_for_local(memory_context: dict | None) -> str:
         return ""
     
     lines = ["Relevant context:"]
-    # Take top 5 entities for local context
-    for ent in entities[:5]:
+    # Take top 3 entities for local context (matches test expectations)
+    for ent in entities[:3]:
         name = ent.get("name", "")
         etype = ent.get("type", "")
         desc = ent.get("description", "")

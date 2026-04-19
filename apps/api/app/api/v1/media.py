@@ -25,12 +25,25 @@ async def transcribe_audio(
             )
 
     try:
-        content = await file.read()
-        if len(content) > media_utils.MAX_AUDIO_SIZE:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Audio file too large. Max size is {media_utils.MAX_AUDIO_SIZE // (1024*1024)}MB."
-            )
+        # Use a temporary file to avoid loading everything into RAM
+        import tempfile
+        import shutil
+
+        with tempfile.NamedTemporaryFile(delete=True) as tmp:
+            # Stream the upload to the temp file
+            size = 0
+            while chunk := await file.read(1024 * 1024):  # 1MB chunks
+                size += len(chunk)
+                if size > media_utils.MAX_AUDIO_SIZE:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Audio file too large. Max size is {media_utils.MAX_AUDIO_SIZE // (1024*1024)}MB."
+                    )
+                tmp.write(chunk)
+            
+            tmp.flush()
+            tmp.seek(0)
+            content = tmp.read() # Read for transcription
 
         start_time = time.time()
         transcript = media_utils.transcribe_audio_bytes(content)
