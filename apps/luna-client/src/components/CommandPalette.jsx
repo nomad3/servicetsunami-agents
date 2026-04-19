@@ -1,12 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useVoice } from '../hooks/useVoice';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useVoiceContext } from '../context/VoiceContext';
 
 export default function CommandPalette({ visible, onClose, onSend }) {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
-  const { isRecording, transcribing, startRecording, stopRecording } = useVoice();
+  const { isRecording, transcribing, startRecording, stopRecording } = useVoiceContext();
   const inputRef = useRef(null);
+
+  // Refs keep event handlers seeing current state without re-registering the
+  // window listener on every render (avoids stale-closure bugs on PTT toggle).
+  const visibleRef = useRef(visible);
+  const recordingRef = useRef(isRecording);
+  useEffect(() => { visibleRef.current = visible; }, [visible]);
+  useEffect(() => { recordingRef.current = isRecording; }, [isRecording]);
 
   useEffect(() => {
     if (visible) {
@@ -16,18 +23,17 @@ export default function CommandPalette({ visible, onClose, onSend }) {
     }
   }, [visible]);
 
-  // Listen for voice events
+  // Voice event bridge — registered once, reads live state via refs
   useEffect(() => {
     const handleStart = () => {
-      if (visible) startRecording();
+      if (visibleRef.current) startRecording();
     };
     const handleStop = async () => {
-      if (visible && isRecording) {
+      if (visibleRef.current && recordingRef.current) {
         const transcript = await stopRecording();
         if (transcript) {
           setQuery(transcript);
-          // Auto-submit after voice
-          handleSubmit(null, transcript);
+          submitText(transcript);
         }
       }
     };
@@ -38,7 +44,8 @@ export default function CommandPalette({ visible, onClose, onSend }) {
       window.removeEventListener('luna-voice-start', handleStart);
       window.removeEventListener('luna-voice-stop', handleStop);
     };
-  }, [visible, isRecording, startRecording, stopRecording]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startRecording, stopRecording]);
 
   // Close on Escape
   useEffect(() => {
@@ -51,10 +58,9 @@ export default function CommandPalette({ visible, onClose, onSend }) {
     }
   }, [visible, onClose]);
 
-  const handleSubmit = async (e, overrideText) => {
-    if (e) e.preventDefault();
-    const text = overrideText || query;
-    if (!text.trim() || loading || transcribing) return;
+  const submitText = useCallback(async (rawText) => {
+    const text = (rawText || '').trim();
+    if (!text || transcribing) return;
     setLoading(true);
     setResult(null);
 
@@ -66,15 +72,20 @@ export default function CommandPalette({ visible, onClose, onSend }) {
       if (app.app) appContext = `[User is in ${app.app}${app.title ? ': ' + app.title : ''}] `;
     } catch {}
 
-    // Quick command — send to Luna via active session and show result inline
     if (onSend) {
-      onSend(appContext + text.trim());
+      onSend(appContext + text);
       setQuery('');
       setLoading(false);
       onClose();
     } else {
       setLoading(false);
     }
+  }, [onSend, onClose, transcribing]);
+
+  const handleSubmit = (e) => {
+    if (e) e.preventDefault();
+    if (loading || transcribing) return;
+    submitText(query);
   };
 
   if (!visible) return null;

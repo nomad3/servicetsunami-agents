@@ -1,7 +1,48 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { apiFetch, API_BASE } from '../api';
+import { API_BASE } from '../api';
+
+// Build a WAV (PCM 16-bit) container from Float32 mono samples.
+// Whisper/transcription APIs reject raw PCM — they need a proper RIFF header.
+function encodeWav(samples, sampleRate, channels) {
+  const numSamples = samples.length;
+  const bytesPerSample = 2; // PCM 16-bit
+  const blockAlign = channels * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = numSamples * bytesPerSample;
+
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  const writeStr = (off, s) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+  };
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true); // fmt chunk size
+  view.setUint16(20, 1, true);  // PCM
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true); // bits per sample
+  writeStr(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  // Convert Float32 [-1,1] to Int16 PCM
+  let offset = 44;
+  for (let i = 0; i < numSamples; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    offset += 2;
+  }
+
+  return new Blob([view], { type: 'audio/wav' });
+}
 
 export function useVoice() {
   const [isRecording, setIsRecording] = useState(false);
@@ -9,30 +50,52 @@ export function useVoice() {
   const [error, setError] = useState(null);
   const chunksRef = useRef([]);
   const unlistenRef = useRef(null);
+  const configRef = useRef({ sampleRate: 48000, channels: 1 });
+  const recordingRef = useRef(false);
+
+  // Keep ref in sync so external handlers (global shortcut) see current state
+  useEffect(() => {
+    recordingRef.current = isRecording;
+  }, [isRecording]);
 
   const startRecording = useCallback(async () => {
+    if (recordingRef.current) return; // already recording
     try {
       setError(null);
       chunksRef.current = [];
-      
-      // Listen for chunks from native side
+
+      // Subscribe BEFORE starting capture to avoid dropping initial chunks
       unlistenRef.current = await listen('audio-chunk', (event) => {
         chunksRef.current.push(event.payload);
       });
 
-      await invoke('start_audio_capture');
+      // start_audio_capture returns { sample_rate, channels }
+      const cfg = await invoke('start_audio_capture');
+      if (cfg && typeof cfg.sample_rate === 'number') {
+        configRef.current = {
+          sampleRate: cfg.sample_rate,
+          channels: cfg.channels || 1,
+        };
+      }
+      recordingRef.current = true;
       setIsRecording(true);
     } catch (err) {
       console.error('[Luna Voice] Start failed:', err);
+      if (unlistenRef.current) {
+        unlistenRef.current();
+        unlistenRef.current = null;
+      }
       setError('Failed to access microphone');
     }
   }, []);
 
   const stopRecording = useCallback(async () => {
+    if (!recordingRef.current) return null;
     try {
+      recordingRef.current = false;
       setIsRecording(false);
       await invoke('stop_audio_capture');
-      
+
       if (unlistenRef.current) {
         unlistenRef.current();
         unlistenRef.current = null;
@@ -40,37 +103,32 @@ export function useVoice() {
 
       if (chunksRef.current.length === 0) return null;
 
-      // Process chunks into a single Blob
       setTranscribing(true);
-      
-      // Convert base64 chunks back to Float32Array samples
-      const allSamples = [];
+
+      // Decode base64 chunks back to Float32 samples
+      const parts = [];
+      let totalLen = 0;
       for (const b64 of chunksRef.current) {
         const bin = atob(b64);
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        const floatData = new Float32Array(bytes.buffer);
-        allSamples.push(floatData);
+        const floatData = new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
+        parts.push(floatData);
+        totalLen += floatData.length;
       }
 
-      // Flatten samples
-      const totalLen = allSamples.reduce((acc, s) => acc + s.length, 0);
       const combined = new Float32Array(totalLen);
       let offset = 0;
-      for (const s of allSamples) {
-        combined.set(s, offset);
-        offset += s.length;
+      for (const p of parts) {
+        combined.set(p, offset);
+        offset += p.length;
       }
 
-      // Create a WAV or OGG blob (simplified: send as raw PCM or wrapped)
-      // For apps/api/app/api/v1/media.py, it uses soundfile which can read many formats.
-      // Let's wrap it in a simple WAV header or use a library.
-      // For now, let's create a Blob from the raw bytes (le_bytes from Rust).
-      const rawBytes = new Uint8Array(combined.buffer);
-      const blob = new Blob([rawBytes], { type: 'audio/wav' }); // soundfile will try to detect
+      const { sampleRate, channels } = configRef.current;
+      const wavBlob = encodeWav(combined, sampleRate, channels);
 
       const formData = new FormData();
-      formData.append('file', blob, 'voice-input.wav');
+      formData.append('file', wavBlob, 'voice-input.wav');
 
       const token = localStorage.getItem('luna_token');
       const res = await fetch(`${API_BASE}/api/v1/media/transcribe`, {
@@ -79,9 +137,8 @@ export function useVoice() {
         body: formData,
       });
 
-      if (!res.ok) throw new Error('Transcription failed');
+      if (!res.ok) throw new Error(`Transcription failed (${res.status})`);
       const data = await res.json();
-      
       return data.transcript;
     } catch (err) {
       console.error('[Luna Voice] Stop/Transcribe failed:', err);
@@ -89,16 +146,23 @@ export function useVoice() {
       return null;
     } finally {
       setTranscribing(false);
+      chunksRef.current = [];
     }
   }, []);
 
-  // Cleanup
+  // Cleanup on unmount: stop capture and remove listener
   useEffect(() => {
     return () => {
-      if (unlistenRef.current) unlistenRef.current();
-      if (isRecording) invoke('stop_audio_capture').catch(() => {});
+      if (unlistenRef.current) {
+        unlistenRef.current();
+        unlistenRef.current = null;
+      }
+      if (recordingRef.current) {
+        invoke('stop_audio_capture').catch(() => {});
+        recordingRef.current = false;
+      }
     };
-  }, [isRecording]);
+  }, []);
 
   return {
     isRecording,

@@ -1034,6 +1034,31 @@
   cursor: wait;
 }
 
+.voice-input-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.recording-wave {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.25);
+  animation: recordingRipple 1.2s ease-out infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes recordingRipple {
+  0%   { transform: scale(0.6); opacity: 0.9; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
 /* Responsive */
 @media (max-width: 640px) {
   .chat-sidebar {
