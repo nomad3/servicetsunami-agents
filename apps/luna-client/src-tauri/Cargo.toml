@@ -27,6 +27,11 @@ tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
 lazy_static = "1.4"
+base64 = "0.22"
+
+# Desktop-only (macOS, Windows, Linux) — cpal native audio capture
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+cpal = "0.15"
 
 # Mobile (iOS + Android)
 [target.'cfg(mobile)'.dependencies]

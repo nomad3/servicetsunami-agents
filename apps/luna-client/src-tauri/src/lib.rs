@@ -1,14 +1,19 @@
 use tauri::Manager;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(desktop)]
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+#[cfg(desktop)]
+use base64::{Engine as _, engine::general_purpose};
 
 lazy_static::lazy_static! {
     static ref CAPTURE_RUNNING: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    static ref AUDIO_CAPTURE_RUNNING: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 }
 
 #[cfg(desktop)]
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
 };
 
@@ -101,6 +106,120 @@ async fn read_clipboard() -> Result<String, String> {
         .output()
         .map_err(|e| format!("Clipboard read failed: {}", e))?;
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[derive(Clone, serde::Serialize)]
+struct AudioConfig {
+    sample_rate: u32,
+    channels: u16,
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+async fn start_audio_capture(app: tauri::AppHandle) -> Result<AudioConfig, String> {
+    if AUDIO_CAPTURE_RUNNING.load(Ordering::Relaxed) {
+        // Already running — return the last-known config from state.
+        // Frontend should only call start once; this branch is a defensive no-op.
+        let host = cpal::default_host();
+        let device = host.default_input_device()
+            .ok_or_else(|| "No input device found".to_string())?;
+        let config = device.default_input_config()
+            .map_err(|e| format!("Failed to get default input config: {}", e))?;
+        return Ok(AudioConfig {
+            sample_rate: config.sample_rate().0,
+            channels: config.channels(),
+        });
+    }
+
+    // Query device + config on the calling thread (Device is Send on all cpal backends;
+    // the Stream is NOT Send on CoreAudio, which is why the stream is built AND dropped
+    // inside the same std::thread below — never moved across threads).
+    let host = cpal::default_host();
+    let device = host.default_input_device()
+        .ok_or_else(|| "No input device found".to_string())?;
+
+    let default_cfg = device.default_input_config()
+        .map_err(|e| format!("Failed to get default input config: {}", e))?;
+    let sample_rate = default_cfg.sample_rate().0;
+    let channels = default_cfg.channels();
+
+    AUDIO_CAPTURE_RUNNING.store(true, Ordering::Relaxed);
+    let running = AUDIO_CAPTURE_RUNNING.clone();
+
+    // Synchronous handshake so errors inside the capture thread propagate back
+    // to the frontend rather than being silently swallowed.
+    let (start_tx, start_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+
+    std::thread::spawn(move || {
+        let running_cb = running.clone();
+        let stream = match device.build_input_stream(
+            &default_cfg.into(),
+            move |data: &[f32], _: &_| {
+                if !running_cb.load(Ordering::Relaxed) {
+                    return;
+                }
+                // Convert f32 PCM samples to little-endian bytes, then base64.
+                // JS side decodes back to Float32Array and wraps in a WAV header.
+                let mut bytes = Vec::with_capacity(data.len() * 4);
+                for &sample in data {
+                    bytes.extend_from_slice(&sample.to_le_bytes());
+                }
+                let b64 = general_purpose::STANDARD.encode(&bytes);
+                let _ = tauri::Emitter::emit(&app, "audio-chunk", b64);
+            },
+            |err| {
+                log::error!("Audio capture error: {}", err);
+            },
+            None,
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = start_tx.send(Err(format!("Failed to build input stream: {}", e)));
+                return;
+            }
+        };
+
+        if let Err(e) = stream.play() {
+            let _ = start_tx.send(Err(format!("Failed to start stream: {}", e)));
+            return;
+        }
+
+        // Signal start success only after the stream is actually playing.
+        let _ = start_tx.send(Ok(()));
+
+        // Hold the stream on this thread until stop is requested; the Stream is
+        // dropped here on the same thread where it was built (CoreAudio-safe).
+        while running.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        drop(stream);
+    });
+
+    // Wait for the capture thread to either start the stream or report an error.
+    match start_rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        Ok(Ok(())) => Ok(AudioConfig { sample_rate, channels }),
+        Ok(Err(msg)) => {
+            AUDIO_CAPTURE_RUNNING.store(false, Ordering::Relaxed);
+            Err(msg)
+        }
+        Err(_) => {
+            AUDIO_CAPTURE_RUNNING.store(false, Ordering::Relaxed);
+            Err("Timed out waiting for audio capture to start".to_string())
+        }
+    }
+}
+
+#[cfg(mobile)]
+#[tauri::command]
+async fn start_audio_capture(_app: tauri::AppHandle) -> Result<AudioConfig, String> {
+    Err("Native audio capture is desktop-only".to_string())
+}
+
+#[tauri::command]
+async fn stop_audio_capture() -> Result<(), String> {
+    AUDIO_CAPTURE_RUNNING.store(false, Ordering::Relaxed);
+    Ok(())
 }
 
 #[tauri::command]
@@ -355,8 +474,11 @@ fn base64_encode(data: &[u8]) -> String {
 #[cfg(desktop)]
 fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_item = MenuItem::with_id(app, "open", "Open Luna", true, None::<&str>)?;
+    let voice_item = MenuItem::with_id(app, "voice", "Voice Input (Hold Cmd+Shift+Space)", true, None::<&str>)?;
+    let hud_item = MenuItem::with_id(app, "hud", "Toggle Spatial HUD (Cmd+Shift+L)", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit Luna", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+    let menu = Menu::with_items(app, &[&open_item, &voice_item, &hud_item, &separator, &quit_item])?;
 
     let _tray = TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
@@ -368,6 +490,16 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
+            }
+            "voice" => {
+                let _ = tauri::Emitter::emit(app, "toggle-palette", ());
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "hud" => {
+                let _ = tauri::Emitter::emit(app, "toggle-spatial-hud", ());
             }
             "quit" => {
                 app.exit(0);
@@ -399,6 +531,8 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
         if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
             // Emit to frontend — React handles showing the command palette
             let _ = tauri::Emitter::emit(app, "toggle-palette", ());
+            let _ = tauri::Emitter::emit(app, "voice-start", ());
+            
             // Also ensure window is visible
             if let Some(window) = app.get_webview_window("main") {
                 if !window.is_visible().unwrap_or(true) {
@@ -406,6 +540,8 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
                     let _ = window.set_focus();
                 }
             }
+        } else if event.state == tauri_plugin_global_shortcut::ShortcutState::Released {
+            let _ = tauri::Emitter::emit(app, "voice-stop", ());
         }
     })?;
 
@@ -606,12 +742,23 @@ pub fn run() {
                 }
             });
 
-            // Stop clipboard watcher + activity tracker on app exit
+            // Stop background threads + release system resources on app exit
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(desktop)]
+                let shortcut_handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::Destroyed = event {
                         clip_running.store(false, std::sync::atomic::Ordering::Relaxed);
                         activity_running.store(false, std::sync::atomic::Ordering::Relaxed);
+                        // Stop audio capture thread so its Stream is dropped cleanly.
+                        AUDIO_CAPTURE_RUNNING.store(false, std::sync::atomic::Ordering::Relaxed);
+                        CAPTURE_RUNNING.store(false, std::sync::atomic::Ordering::Relaxed);
+                        // Release system-wide shortcuts so they don't linger.
+                        #[cfg(desktop)]
+                        {
+                            use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                            let _ = shortcut_handle.global_shortcut().unregister_all();
+                        }
                     }
                 });
             }
@@ -624,6 +771,8 @@ pub fn run() {
             capture_screenshot,
             get_active_app,
             read_clipboard,
+            start_audio_capture,
+            stop_audio_capture,
             haptic_feedback,
             toggle_spatial_hud,
             start_spatial_capture,

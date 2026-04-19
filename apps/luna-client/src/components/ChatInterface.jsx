@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MemoryPanel from './MemoryPanel';
+import LunaAvatar from './luna/LunaAvatar';
+import VoiceInput from './VoiceInput';
 import { useLunaStream } from '../hooks/useLunaStream';
 import { apiJson, API_BASE } from '../api';
 
@@ -119,11 +121,11 @@ export default function ChatInterface({ handoff, requestAction }) {
     }
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || streaming) return;
+  const handleSend = async (overrideText) => {
+    const text = typeof overrideText === 'string' ? overrideText : input;
+    if (!text.trim() || streaming) return;
     
     let targetSession = activeSession;
-    const text = input;
     setInput('');
 
     // Auto-create session if none active
@@ -172,6 +174,10 @@ export default function ChatInterface({ handoff, requestAction }) {
     } catch {}
   };
 
+  const handleVoiceTranscript = (text) => {
+    handleSend(text);
+  };
+
   const effectiveState = emotion || (streaming ? 'thinking' : 'idle');
 
   return (
@@ -196,7 +202,10 @@ export default function ChatInterface({ handoff, requestAction }) {
       <main className="chat-main">
         {/* Luna header */}
         <div className="luna-header">
-          <span className="luna-status">{effectiveState === 'thinking' ? 'Thinking...' : 'Luna'}</span>
+          <div className="luna-identity">
+            <LunaAvatar state={effectiveState} size="sm" />
+            <span className="luna-status">{effectiveState === 'thinking' ? 'Thinking...' : 'Luna'}</span>
+          </div>
           <button
             className="luna-btn luna-btn-sm memory-toggle"
             onClick={() => setMemoryOpen(!memoryOpen)}
@@ -274,6 +283,9 @@ export default function ChatInterface({ handoff, requestAction }) {
           <button type="button" className="luna-btn screenshot-btn" onClick={handleScreenshot} title="Capture screenshot">
             {'\uD83D\uDCF7'}
           </button>
+          {window.__TAURI_INTERNALS__ && (
+            <VoiceInput onTranscript={handleVoiceTranscript} disabled={streaming} />
+          )}
           <button type="submit" className="luna-btn send-btn" disabled={streaming || !input.trim()}>
             {streaming ? '...' : 'Send'}
           </button>

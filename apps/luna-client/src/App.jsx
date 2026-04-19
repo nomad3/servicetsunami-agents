@@ -13,6 +13,7 @@ import { useShellPresence } from './hooks/useShellPresence';
 import { useSessionEvents } from './hooks/useSessionEvents';
 import { useTrustProfile } from './hooks/useTrustProfile';
 import { useActivityTracker } from './hooks/useActivityTracker';
+import { VoiceProvider } from './context/VoiceContext';
 import { apiJson } from './api';
 import './App.css';
 
@@ -73,16 +74,26 @@ function AuthenticatedApp() {
 
   // Listen for toggle-palette event from Tauri global shortcut
   useEffect(() => {
-    let unlisten;
+    let unlistenPalette, unlistenVoiceStart, unlistenVoiceStop;
     (async () => {
       try {
         const { listen } = await import('@tauri-apps/api/event');
-        unlisten = await listen('toggle-palette', () => {
+        unlistenPalette = await listen('toggle-palette', () => {
           setPaletteOpen(prev => !prev);
+        });
+        unlistenVoiceStart = await listen('voice-start', () => {
+          window.dispatchEvent(new CustomEvent('luna-voice-start'));
+        });
+        unlistenVoiceStop = await listen('voice-stop', () => {
+          window.dispatchEvent(new CustomEvent('luna-voice-stop'));
         });
       } catch {}
     })();
-    return () => { unlisten?.(); };
+    return () => { 
+      unlistenPalette?.();
+      unlistenVoiceStart?.();
+      unlistenVoiceStop?.();
+    };
   }, []);
 
   const quickSessionRef = React.useRef(null);
@@ -127,43 +138,45 @@ function AuthenticatedApp() {
   }, []);
 
   return (
-    <div className="luna-app">
-      <nav className="luna-nav">
-        <span className="luna-brand">Luna</span>
-        <div className="nav-actions">
-          <button className="theme-toggle" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
-            {theme === 'dark' ? '\u2600' : '\u263E'}
-          </button>
-          <TrustBadge trust={trust} />
-          <button className="theme-toggle" onClick={() => setSuggestionsOpen(!suggestionsOpen)} title="Workflow suggestions">
-            {'\u26A1'}
-          </button>
-          <NotificationBell />
-          <button className="luna-btn luna-btn-sm" onClick={logout}>Logout</button>
-        </div>
-      </nav>
-      {updateVersion && (
-        <div className="update-banner">
-          <span>Luna {updateVersion} is available</span>
-          <button className="luna-btn luna-btn-sm" onClick={restartForUpdate}>Download update</button>
-          <button className="update-dismiss" onClick={dismissUpdate}>&times;</button>
-        </div>
-      )}
-      <ChatInterface handoff={handoff} requestAction={requestAction} />
-      <ActionApproval
-        action={pendingAction}
-        onApprove={handleApprove}
-        onDeny={handleDeny}
-        onDismiss={handleDeny}
-      />
-      <CommandPalette
-        visible={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        onSend={handlePaletteSend}
-      />
-      <ClipboardToast />
-      <WorkflowSuggestions visible={suggestionsOpen} onClose={() => setSuggestionsOpen(false)} />
-    </div>
+    <VoiceProvider>
+      <div className="luna-app">
+        <nav className="luna-nav">
+          <span className="luna-brand">Luna</span>
+          <div className="nav-actions">
+            <button className="theme-toggle" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+              {theme === 'dark' ? '\u2600' : '\u263E'}
+            </button>
+            <TrustBadge trust={trust} />
+            <button className="theme-toggle" onClick={() => setSuggestionsOpen(!suggestionsOpen)} title="Workflow suggestions">
+              {'\u26A1'}
+            </button>
+            <NotificationBell />
+            <button className="luna-btn luna-btn-sm" onClick={logout}>Logout</button>
+          </div>
+        </nav>
+        {updateVersion && (
+          <div className="update-banner">
+            <span>Luna {updateVersion} is available</span>
+            <button className="luna-btn luna-btn-sm" onClick={restartForUpdate}>Download update</button>
+            <button className="update-dismiss" onClick={dismissUpdate}>&times;</button>
+          </div>
+        )}
+        <ChatInterface handoff={handoff} requestAction={requestAction} />
+        <ActionApproval
+          action={pendingAction}
+          onApprove={handleApprove}
+          onDeny={handleDeny}
+          onDismiss={handleDeny}
+        />
+        <CommandPalette
+          visible={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          onSend={handlePaletteSend}
+        />
+        <ClipboardToast />
+        <WorkflowSuggestions visible={suggestionsOpen} onClose={() => setSuggestionsOpen(false)} />
+      </div>
+    </VoiceProvider>
   );
 }
 
