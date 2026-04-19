@@ -244,8 +244,8 @@ const AgentDetailPage = () => {
                 {agent.description || 'No description'}
               </p>
               <div className="d-flex gap-2 flex-wrap">
-                <Badge bg="none" style={{ fontSize: '0.7rem', backgroundColor: 'var(--surface-contrast, rgba(255,255,255,0.06))', color: 'var(--color-muted)' }}>
-                  {agent.config?.model || 'gpt-4'}
+                <Badge bg="none" style={{ fontSize: '0.7rem', backgroundColor: 'var(--surface-contrast, rgba(255,255,255,0.06))', color: 'var(--color-muted)' }} title="Model tier — actual model is selected by the tenant's routed CLI platform">
+                  {agent.default_model_tier || 'full'} tier
                 </Badge>
                 {agent.role && (
                   <Badge bg="none" style={{ fontSize: '0.7rem', backgroundColor: ROLE_COLORS[agent.role] || '#6c757d' }}>
@@ -431,13 +431,16 @@ const AgentDetailPage = () => {
             )}
 
             <div style={{ fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--color-muted)', marginBottom: 8 }}>
-              Parameters
+              Routing
             </div>
+            <p style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginTop: 0, marginBottom: 12 }}>
+              The actual LLM and model are chosen by the tenant's routed CLI platform (Gemini CLI, Claude Code, or Codex). Agents don't bind to a specific model.
+            </p>
             <Row className="g-3 mb-4">
               {[
-                { label: 'Model', value: agent.config?.model || 'gpt-4' },
-                { label: 'Temperature', value: agent.config?.temperature ?? 0.7 },
-                { label: 'Max Tokens', value: agent.config?.max_tokens ?? 2000 },
+                { label: 'Model Tier', value: agent.default_model_tier || 'full' },
+                { label: 'Temperature', value: agent.config?.temperature ?? '—' },
+                { label: 'Max Tokens', value: agent.config?.max_tokens ?? '—' },
                 { label: 'Autonomy', value: agent.autonomy_level || 'supervised' },
               ].map(p => (
                 <Col md={3} sm={6} key={p.label}>
@@ -455,7 +458,11 @@ const AgentDetailPage = () => {
               Raw Configuration
             </div>
             <div className="config-block">
-              {JSON.stringify(agent.config || {}, null, 2)}
+              {JSON.stringify(
+                Object.fromEntries(Object.entries(agent.config || {}).filter(([k]) => k !== 'model')),
+                null,
+                2
+              )}
             </div>
           </div>
         )}

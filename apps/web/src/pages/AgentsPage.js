@@ -422,8 +422,8 @@ const AgentsPage = () => {
                               fontSize: '0.68rem', padding: '2px 8px', borderRadius: 4,
                               background: 'var(--surface-contrast, rgba(255,255,255,0.06))',
                               color: 'var(--color-muted)', fontWeight: 500,
-                            }}>
-                              {agent.config?.model || agent.model || 'gpt-4'}
+                            }} title="Model tier — actual model is selected by the tenant's routed CLI platform">
+                              {agent.default_model_tier || 'full'} tier
                             </span>
                           </div>
                         </div>

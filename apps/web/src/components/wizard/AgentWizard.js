@@ -148,7 +148,6 @@ const AgentWizard = () => {
         persona_prompt: resolvedPrompt,
         capabilities: selectedSkills,
         config: {
-          model: wizardData.template?.config?.model || 'gpt-4',
           temperature: wizardData.personality.temperature,
           max_tokens: wizardData.personality.max_tokens,
           system_prompt: resolvedPrompt,

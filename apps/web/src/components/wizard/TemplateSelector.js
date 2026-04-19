@@ -7,7 +7,6 @@ const TEMPLATES = [
     name: 'Customer Support Agent',
     description: 'Handles customer inquiries, FAQ, order lookups, and general conversation via WhatsApp and chat',
     config: {
-      model: 'gpt-4',
       personality: 'friendly',
       temperature: 0.5,
       max_tokens: 2000,
@@ -41,7 +40,6 @@ RULES:
     name: 'Data Analyst Agent',
     description: 'Analytical and precise. Generates insights from your data using SQL queries',
     config: {
-      model: 'gpt-4',
       personality: 'formal',
       temperature: 0.3,
       max_tokens: 3000,
@@ -77,7 +75,6 @@ RULES:
     name: 'Sales Assistant',
     description: 'Full sales automation: lead qualification, outreach drafting, pipeline management, and proposal generation',
     config: {
-      model: 'gpt-4',
       personality: 'friendly',
       temperature: 0.6,
       max_tokens: 2500,
@@ -114,7 +111,6 @@ RULES:
     name: 'General Assistant',
     description: 'Balanced and versatile. Good for general questions, calculations, and tasks',
     config: {
-      model: 'gpt-4',
       personality: 'friendly',
       temperature: 0.7,
       max_tokens: 2000,
@@ -147,7 +143,6 @@ RULES:
     name: 'Content Writer',
     description: 'Creative and expressive. Helps draft content, emails, campaigns, and documents',
     config: {
-      model: 'gpt-4',
       personality: 'creative',
       temperature: 0.8,
       max_tokens: 3000,
@@ -182,7 +177,6 @@ RULES:
     name: 'Research Agent',
     description: 'Extract entities from conversations and documents. Build and enrich the knowledge graph',
     config: {
-      model: 'gpt-4',
       personality: 'formal',
       temperature: 0.3,
       max_tokens: 2500,
@@ -219,7 +213,6 @@ RULES:
     name: 'Lead Generation Agent',
     description: 'Identify prospects, companies, and contacts. Build structured lead databases from conversations',
     config: {
-      model: 'gpt-4',
       personality: 'friendly',
       temperature: 0.5,
       max_tokens: 2000,
@@ -260,7 +253,6 @@ RULES:
     name: 'Knowledge Manager',
     description: 'Curate, verify, and organize your knowledge graph. Maintain entity accuracy and relationships',
     config: {
-      model: 'gpt-4',
       personality: 'formal',
       temperature: 0.4,
       max_tokens: 2500,
@@ -295,7 +287,6 @@ RULES:
     name: 'Deal Intelligence Agent',
     description: 'Score companies on sell-likelihood for M&A advisory using ownership, market timing, and performance signals',
     config: {
-      model: 'gpt-4',
       personality: 'formal',
       temperature: 0.3,
       max_tokens: 2500,
@@ -335,7 +326,6 @@ RULES:
     name: 'Marketing Intelligence Agent',
     description: 'Score leads by marketing engagement, ad response, intent signals, and firmographic fit',
     config: {
-      model: 'gpt-4',
       personality: 'formal',
       temperature: 0.3,
       max_tokens: 2500,
