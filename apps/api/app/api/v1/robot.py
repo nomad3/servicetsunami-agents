@@ -84,10 +84,10 @@ def robot_interact(
 
     tenant_id, user_id = _resolve_tenant(x_device_token, db, current_user)
 
-    from sqlalchemy import case
     from app.services.chat import post_user_message
     from app.models.chat import ChatSession
     from app.models.agent import Agent
+    from app.services._agent_ordering import agent_status_rank
 
     # Get or create robot session
     session = None
@@ -101,19 +101,12 @@ def robot_interact(
             pass
 
     if not session:
-        status_rank = case(
-            (Agent.status == "production", 0),
-            (Agent.status == "staging", 1),
-            (Agent.status == "draft", 2),
-            (Agent.status == "deprecated", 3),
-            else_=4,
-        )
         agent = (
             db.query(Agent)
             .filter(Agent.tenant_id == tenant_id)
             .order_by(
                 (Agent.name == "Luna").desc(),
-                status_rank.asc(),
+                agent_status_rank.asc(),
                 Agent.id.asc(),
             )
             .first()
@@ -228,12 +221,13 @@ def upload_snapshot(
         x_internal_key=x_internal_key, x_tenant_id=x_tenant_id,
     )
 
+    stored = False
     try:
         from app.services.knowledge import create_observation
         obs_text = f"Visual snapshot from {body.source}."
         if body.context:
             obs_text += f" Context: {body.context}"
-        
+
         create_observation(
             db, tenant_id,
             observation_text=obs_text,
@@ -243,13 +237,18 @@ def upload_snapshot(
             # In production, image_b64 would be uploaded to S3/GCS
         )
         db.commit()
+        stored = True
     except Exception:
         logger.exception("Failed to store vision observation")
+        db.rollback()
 
     return {
-        "status": "stored",
+        "status": "stored" if stored else "error",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "message": "Snapshot received and stored for knowledge extraction.",
+        "message": (
+            "Snapshot received and stored for knowledge extraction."
+            if stored else "Snapshot received but could not be stored; see server logs."
+        ),
     }
 
 

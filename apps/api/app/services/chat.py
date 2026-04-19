@@ -5,20 +5,11 @@ import time
 from typing import Any, Dict, List, Tuple
 import uuid
 
-from sqlalchemy import case
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.agent import Agent
-
-
-_AGENT_STATUS_RANK = case(
-    (Agent.status == "production", 0),
-    (Agent.status == "staging", 1),
-    (Agent.status == "draft", 2),
-    (Agent.status == "deprecated", 3),
-    else_=4,
-)
+from app.services._agent_ordering import agent_status_rank
 from app.models.chat import ChatSession as ChatSessionModel, ChatMessage
 from app.services import datasets as dataset_service
 from app.services.agent_identity import resolve_primary_agent_slug
@@ -103,7 +94,7 @@ def create_session(
             .filter(Agent.tenant_id == tenant_id)
             .order_by(
                 (Agent.name == "Luna").desc(),
-                _AGENT_STATUS_RANK.asc(),
+                agent_status_rank.asc(),
                 Agent.id.asc(),
             )
             .first()
