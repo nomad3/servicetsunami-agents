@@ -94,12 +94,15 @@ class DynamicWorkflowInDB(BaseModel):
     tags: List[str]
     tier: str
     public: bool
-    run_count: int
-    last_run_at: Optional[datetime]
-    avg_duration_ms: Optional[int]
-    success_rate: Optional[float]
+    # Defensive defaults so legacy rows with NULL counters don't poison the
+    # whole /templates/browse response (an earlier direct SQL insert left these
+    # NULL and returned 500 on the endpoint — one bad row hid all templates).
+    run_count: Optional[int] = 0
+    last_run_at: Optional[datetime] = None
+    avg_duration_ms: Optional[int] = None
+    success_rate: Optional[float] = None
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
