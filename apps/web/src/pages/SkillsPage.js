@@ -9,6 +9,8 @@ import {
   FaHistory, FaPlay, FaPlug, FaPlus, FaRocket, FaSearch, FaTerminal,
   FaTimes, FaTrash,
 } from 'react-icons/fa';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 import Layout from '../components/Layout';
 import {
@@ -16,16 +18,21 @@ import {
   deleteFileSkill, executeFileSkill, getSkillVersions, importFromGithub,
   getMcpManifest, exportSkill,
 } from '../services/skills';
+import './SkillsPage.css';
 
+// Category accent colors — muted to match the Agent Fleet palette. Used for the
+// category badge on each card. The chip row (above the grid) is driven by the
+// shared .skills-chip class in SkillsPage.css — not by these colors — so all
+// inactive chips read as one family.
 const CATEGORY_COLORS = {
-  sales: '#4ecdc4',
-  marketing: '#ff6b6b',
-  data: '#45b7d1',
-  coding: '#96ceb4',
-  communication: '#dda0dd',
-  automation: '#ffd93d',
-  general: '#95a5a6',
-  'auto-generated': '#64748b',
+  sales: '#3b9d86',        // teal (Fleet accent)
+  marketing: '#c2650c',    // amber
+  data: '#2b7de9',         // primary blue
+  coding: '#5b6fb3',       // muted indigo
+  communication: '#8b5cf6',// purple
+  automation: '#c27803',   // gold
+  general: '#64748b',      // slate
+  'auto-generated': '#94a3b8',
 };
 
 const CATEGORIES = ['all', 'sales', 'marketing', 'data', 'coding', 'communication', 'automation', 'general'];
@@ -378,94 +385,96 @@ const SkillsPage = () => {
     const catColor = CATEGORY_COLORS[skill.category] || CATEGORY_COLORS.general;
 
     return (
-      <Card
-        style={{
-          background: 'var(--surface-elevated)', backdropFilter: 'blur(20px)',
-          border: '1px solid var(--color-border)', borderRadius: 16,
-          transition: 'all 0.2s ease', boxShadow: '0 2px 12px rgba(100,130,170,0.08)',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 8px 24px rgba(100,130,170,0.18)'; }}
-        onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 12px rgba(100,130,170,0.08)'; }}
-      >
-        <Card.Body className="d-flex flex-column" style={{ padding: '1.25rem', cursor: 'pointer' }} onClick={() => setExpandedSkill(isExpanded ? null : skill.slug)}>
+      <Card className="skill-card">
+        <div className="skill-card-body" onClick={() => setExpandedSkill(isExpanded ? null : skill.slug)}>
           {/* Header row */}
           <div className="d-flex align-items-start justify-content-between mb-2">
             <div className="d-flex align-items-center gap-2" style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(99,102,241,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <EngineIcon size={16} style={{ color: 'var(--color-primary, #6366f1)' }} />
+              <div className="skill-icon">
+                <EngineIcon size={16} />
               </div>
-              <h6 className="mb-0" style={{ color: 'var(--color-foreground)', fontSize: '0.95rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {skill.name}
-              </h6>
+              <h6 className="skill-card-title">{skill.name}</h6>
             </div>
             <div className="d-flex align-items-center gap-1" style={{ flexShrink: 0 }}>
-              <Badge bg="dark" style={{ fontSize: '0.65rem', borderRadius: 6, padding: '3px 7px', textTransform: 'capitalize' }}>{skill.engine}</Badge>
-              {skill.version && <Badge bg="secondary" style={{ fontSize: '0.62rem', borderRadius: 6, padding: '3px 6px' }}>{t('version', { version: skill.version })}</Badge>}
+              <span className="skill-engine-badge">{skill.engine}</span>
+              {skill.version && <span className="skill-version-badge">{t('version', { version: skill.version })}</span>}
             </div>
           </div>
 
-          {/* Category + Tier badges */}
-          <div className="d-flex align-items-center gap-2 mb-2">
-            <Badge style={{ background: catColor + '22', color: catColor, fontSize: '0.68rem', borderRadius: 6, padding: '3px 8px', border: `1px solid ${catColor}44` }}>
+          {/* Category + Tier badges — plain spans so Bootstrap can't override the background */}
+          <div className="d-flex align-items-center gap-2 mb-2 flex-wrap">
+            <span
+              className="skill-category-badge"
+              style={{ background: catColor + '1f', color: catColor, borderColor: catColor + '3d' }}
+            >
               {t(`categories.${skill.category}`, { defaultValue: skill.category })}
-            </Badge>
-            <Badge bg={skill.tier === 'native' ? 'info' : skill.tier === 'custom' ? 'success' : 'warning'} style={{ fontSize: '0.62rem', borderRadius: 6, padding: '3px 6px' }}>
+            </span>
+            <span className={`skill-tier-badge skill-tier-${skill.tier || 'native'}`}>
               {t(`tabs.${skill.tier === 'custom' ? 'mySkills' : skill.tier}`)}
-            </Badge>
+            </span>
           </div>
 
-          {/* Description */}
+          {/* Description — plain-text clamp when collapsed; full markdown when expanded.
+              Many skills embed rubric tables and sub-headings in their descriptions;
+              rendering as text-only at a glance but with full fidelity on expand keeps
+              the grid skimmable. */}
           {skill.description && (
-            <p className="mb-2" style={{ fontSize: '0.82rem', color: 'var(--color-foreground-muted)', lineHeight: 1.5, display: isExpanded ? 'block' : '-webkit-box', WebkitLineClamp: isExpanded ? 'unset' : 2, WebkitBoxOrient: 'vertical', overflow: isExpanded ? 'visible' : 'hidden' }}>
-              {skill.description}
-            </p>
+            isExpanded ? (
+              <div className="skill-description-full mb-2">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{skill.description}</ReactMarkdown>
+              </div>
+            ) : (
+              <p className="skill-description mb-2">{skill.description}</p>
+            )
           )}
 
           {/* Auto-trigger / Chain indicators */}
-          {skill.auto_trigger && <p className="mb-1" style={{ fontSize: '0.72rem', color: 'var(--color-foreground-muted)' }}><FaRocket size={10} className="me-1" />Auto-triggers on: {skill.auto_trigger}</p>}
-          {skill.chain_to && skill.chain_to.length > 0 && <p className="mb-1" style={{ fontSize: '0.72rem', color: 'var(--color-foreground-muted)' }}><FaCodeBranch size={10} className="me-1" />Chains to: {skill.chain_to.join(', ')}</p>}
+          {skill.auto_trigger && <div className="skill-auto-trigger"><FaRocket size={10} />Auto-triggers on: {skill.auto_trigger}</div>}
+          {skill.chain_to && skill.chain_to.length > 0 && <div className="skill-chain-to"><FaCodeBranch size={10} />Chains to: {skill.chain_to.join(', ')}</div>}
 
           {/* Expanded details */}
           {isExpanded && (
-            <div className="mt-2 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+            <div className="skill-expanded-section">
               {skill.inputs && skill.inputs.length > 0 && (
                 <div className="mb-2">
-                  <small className="text-muted fw-semibold d-block mb-1" style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t('inputs')}</small>
+                  <div className="skill-expanded-heading">{t('inputs')}</div>
                   {skill.inputs.map(inp => (
-                    <div key={inp.name} className="d-flex align-items-center gap-2 mb-1">
-                      <code style={{ fontSize: '0.76rem', color: 'var(--color-primary, #6366f1)', background: 'rgba(99,102,241,0.08)', padding: '1px 6px', borderRadius: 4 }}>{inp.name}</code>
-                      <span className="text-muted" style={{ fontSize: '0.7rem' }}>({inp.type || 'string'})</span>
-                      <Badge bg={inp.required ? 'primary' : 'secondary'} style={{ fontSize: '0.6rem' }}>{inp.required ? t('required') : t('optional')}</Badge>
+                    <div key={inp.name} className="skill-input-row">
+                      <code className="skill-input-name">{inp.name}</code>
+                      <span className="skill-input-type">({inp.type || 'string'})</span>
+                      <span className={inp.required ? 'skill-input-required' : 'skill-input-optional'}>
+                        {inp.required ? t('required') : t('optional')}
+                      </span>
                     </div>
                   ))}
                 </div>
               )}
               {skill.sub_prompts && skill.sub_prompts.length > 0 && (
                 <div className="mb-2">
-                  <small className="text-muted fw-semibold d-block mb-1" style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sub-prompts</small>
-                  {skill.sub_prompts.map((sp, i) => <div key={i} className="text-muted" style={{ fontSize: '0.75rem' }}>- {sp.name || sp}</div>)}
+                  <div className="skill-expanded-heading">Sub-prompts</div>
+                  {skill.sub_prompts.map((sp, i) => <div key={i} className="skill-input-type">- {sp.name || sp}</div>)}
                 </div>
               )}
               {skill.tags && skill.tags.length > 0 && (
-                <div className="d-flex gap-1 flex-wrap">
-                  {skill.tags.map(tag => <Badge key={tag} bg="dark" style={{ fontSize: '0.62rem', fontWeight: 400 }}>#{tag}</Badge>)}
+                <div className="d-flex flex-wrap">
+                  {skill.tags.map(tag => <span key={tag} className="skill-tag">#{tag}</span>)}
                 </div>
               )}
             </div>
           )}
-        </Card.Body>
+        </div>
 
         {/* Footer */}
-        <div className="d-flex align-items-center justify-content-between px-3 pb-3 pt-0">
-          <Button variant="primary" size="sm" onClick={e => { e.stopPropagation(); handleOpenExecute(skill); }} style={{ borderRadius: 8, fontSize: '0.82rem' }}>
+        <div className="skill-card-footer">
+          <Button className="skill-try-btn" size="sm" onClick={e => { e.stopPropagation(); handleOpenExecute(skill); }}>
             <FaPlay className="me-1" size={10} /> {t('tryIt')}
           </Button>
           <div className="d-flex align-items-center gap-1">
-            <span style={{ cursor: 'pointer', color: 'var(--color-foreground-muted)', padding: 4 }} onClick={e => { e.stopPropagation(); setExpandedSkill(isExpanded ? null : skill.slug); }}>
+            <span className="skill-action-icon" onClick={e => { e.stopPropagation(); setExpandedSkill(isExpanded ? null : skill.slug); }}>
               {isExpanded ? <FaChevronUp size={12} /> : <FaChevronDown size={12} />}
             </span>
             <Dropdown onClick={e => e.stopPropagation()}>
-              <Dropdown.Toggle as="span" style={{ cursor: 'pointer', color: 'var(--color-foreground-muted)', padding: 4 }}><FaEllipsisV size={12} /></Dropdown.Toggle>
+              <Dropdown.Toggle as="span" className="skill-action-icon"><FaEllipsisV size={12} /></Dropdown.Toggle>
               <Dropdown.Menu align="end" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--color-border)', borderRadius: 10, minWidth: 180 }}>
                 {skill.tier === 'native' && (
                   <>
@@ -503,16 +512,16 @@ const SkillsPage = () => {
 
   return (
     <Layout>
-      <div className="py-3 px-3" style={{ maxWidth: 1200, margin: '0 auto', background: 'var(--surface-page)' }}>
+      <div className="skills-page">
         {/* Header */}
-        <div className="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
-          <div className="d-flex align-items-center gap-3">
-            <div style={{ width: 48, height: 48, borderRadius: 12, background: 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(139,92,246,0.2))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <FaRocket size={22} style={{ color: 'var(--color-primary, #6366f1)' }} />
+        <div className="skills-page-header">
+          <div className="skills-identity">
+            <div className="skills-page-icon">
+              <FaRocket size={22} />
             </div>
             <div>
-              <h2 className="mb-0" style={{ color: 'var(--color-foreground)', fontSize: '1.5rem' }}>{t('title')}</h2>
-              <p className="text-muted mb-0 small">{t('subtitle')}</p>
+              <h2 className="skills-page-title">{t('title')}</h2>
+              <p className="skills-page-subtitle">{t('subtitle')}</p>
             </div>
           </div>
           <div className="d-flex gap-2 flex-wrap">
@@ -529,60 +538,46 @@ const SkillsPage = () => {
         </div>
 
         {/* Search */}
-        <InputGroup className="mb-3" style={{ maxWidth: 480 }}>
-          <InputGroup.Text style={{ ...inputStyle, borderRight: 'none', borderTopRightRadius: 0, borderBottomRightRadius: 0 }}>
-            <FaSearch size={14} style={{ color: 'var(--color-foreground-muted)' }} />
+        <InputGroup className="skills-search-wrapper">
+          <InputGroup.Text style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}>
+            <FaSearch size={14} />
           </InputGroup.Text>
           <Form.Control
             placeholder={t('search.placeholder')}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            style={{ ...inputStyle, borderLeft: 'none', borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
+            style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
           />
         </InputGroup>
 
-        {/* Tabs */}
-        <Nav variant="pills" className="mb-3 gap-1">
+        {/* Tabs — plain divs, not react-bootstrap Nav.Pills, so Bootstrap's .nav-link.active
+            doesn't stomp our palette. */}
+        <div className="skills-tabs">
           {['native', 'my', 'community'].map(tab => (
-            <Nav.Item key={tab}>
-              <Nav.Link
-                active={activeTab === tab}
-                onClick={() => setActiveTab(tab)}
-                style={{
-                  borderRadius: 8, fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer',
-                  background: activeTab === tab ? 'var(--color-primary, #6366f1)' : 'var(--surface-elevated)',
-                  color: activeTab === tab ? '#fff' : 'var(--color-foreground-muted)',
-                  border: '1px solid ' + (activeTab === tab ? 'transparent' : 'var(--color-border)'),
-                }}
-              >
-                {tab === 'my' ? t('tabs.mySkills') : t(`tabs.${tab}`)}
-              </Nav.Link>
-            </Nav.Item>
+            <div
+              key={tab}
+              role="button"
+              className={`skills-tab ${activeTab === tab ? 'active' : ''}`}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab === 'my' ? t('tabs.mySkills') : t(`tabs.${tab}`)}
+            </div>
           ))}
-        </Nav>
+        </div>
 
-        {/* Category chips */}
-        <div className="d-flex gap-2 mb-4 flex-wrap">
-          {CATEGORIES.map(cat => {
-            const isActive = activeCategory === cat;
-            const color = cat === 'all' ? '#6366f1' : (CATEGORY_COLORS[cat] || '#95a5a6');
-            return (
-              <Badge
-                key={cat}
-                role="button"
-                onClick={() => setActiveCategory(cat)}
-                style={{
-                  fontSize: '0.78rem', fontWeight: 500, padding: '6px 14px', borderRadius: 20, cursor: 'pointer',
-                  background: isActive ? color : 'var(--surface-elevated)',
-                  color: isActive ? '#fff' : 'var(--color-foreground-muted)',
-                  border: `1px solid ${isActive ? color : 'var(--color-border)'}`,
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                {t(`categories.${cat}`)}
-              </Badge>
-            );
-          })}
+        {/* Category chips — plain spans so Bootstrap's .badge (bg-primary default) can't
+            override the tinted inactive state that made them all read as "selected". */}
+        <div className="skills-category-chips">
+          {CATEGORIES.map(cat => (
+            <span
+              key={cat}
+              role="button"
+              className={`skills-chip ${activeCategory === cat ? 'active' : ''}`}
+              onClick={() => setActiveCategory(cat)}
+            >
+              {t(`categories.${cat}`)}
+            </span>
+          ))}
         </div>
 
         {/* Alerts */}
@@ -599,11 +594,11 @@ const SkillsPage = () => {
 
         {/* Empty */}
         {!loading && filtered.length === 0 && (
-          <Card className="text-center py-5" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--color-border)', borderRadius: 16 }}>
+          <Card className="skill-card text-center py-5">
             <Card.Body>
-              <FaRocket size={48} className="mb-3" style={{ color: 'var(--color-foreground-muted)', opacity: 0.4 }} />
-              <h5 style={{ color: 'var(--color-foreground)' }}>{t('noSkills')}</h5>
-              <p className="text-muted mb-3">{t('noSkillsDesc')}</p>
+              <FaRocket size={48} className="mb-3" style={{ color: 'rgba(45, 65, 90, 0.35)' }} />
+              <h5 style={{ color: '#1a2b3c' }}>{t('noSkills')}</h5>
+              <p className="mb-3" style={{ color: 'rgba(45, 65, 90, 0.65)' }}>{t('noSkillsDesc')}</p>
               <Button variant="primary" onClick={openCreate}><FaPlus className="me-2" size={12} />{t('createSkill')}</Button>
             </Card.Body>
           </Card>
@@ -612,7 +607,7 @@ const SkillsPage = () => {
         {/* Grid */}
         {!loading && filtered.length > 0 && (
           <>
-            <div className="mb-3" style={{ fontSize: '0.82rem', color: 'var(--color-foreground-muted)' }}>
+            <div className="skills-count">
               {filtered.length} {t('totalSkills')}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.25rem' }}>
