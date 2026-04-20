@@ -33,7 +33,8 @@
     "coding": "Código",
     "communication": "Comunicación",
     "automation": "Automatización",
-    "general": "General"
+    "general": "General",
+    "auto-generated": "Auto-generado"
   },
   "actions": {
     "fork": "Copiar a Mis Skills",
@@ -41,7 +42,20 @@
     "delete": "Eliminar",
     "versions": "Historial de Versiones",
     "viewGithub": "Ver en GitHub",
-    "import": "Importar de GitHub"
+    "import": "Importar de GitHub",
+    "exportAs": "Exportar como"
+  },
+  "validation": {
+    "nameRequired": "El nombre del skill es requerido.",
+    "pythonSignature": "Los skills de Python deben definir una función `execute(inputs)`.",
+    "markdownMissingInputs": "La plantilla referencia entradas no declaradas: {{vars}}. Agrégalas en la sección Entradas del Skill."
+  },
+  "mcp": {
+    "connectExternal": "Conectar Agente Externo",
+    "intro": "Expón los skills de este tenant como herramientas MCP para que Claude Code, Gemini CLI o VS Code Copilot puedan llamarlos directamente.",
+    "serverUrl": "URL del Servidor MCP",
+    "toolsAvailable": "{{count}} skill(s) disponibles como herramientas MCP para tu tenant.",
+    "authNote": "El header X-Tenant-Id vincula los skills a tu tenant. Para uso en producción, incluye también Authorization: Bearer <tu-api-token>."
   },
   "search": {
     "placeholder": "Buscar skills..."

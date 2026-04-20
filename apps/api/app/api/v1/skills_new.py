@@ -1,5 +1,11 @@
 """API routes for skills management."""
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
+import ast
+import json
+import re
+from pathlib import Path
+
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
@@ -62,6 +68,157 @@ class FileSkillUpdateRequest(BaseModel):
 
 class GitHubImportRequest(BaseModel):
     repo_url: str
+
+
+# ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
+
+_MD_TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([a-zA-Z_][\w]*)\s*\}\}")
+
+
+def _validate_python_script(script: str) -> Optional[str]:
+    """Return an error string if the Python script can't serve as a skill.
+
+    A valid skill exposes ``def execute(inputs): ...``. We parse to AST first so
+    a syntactic error surfaces with a clear message; a pure regex would accept
+    broken code.
+    """
+    try:
+        tree = ast.parse(script)
+    except SyntaxError as e:
+        return f"Python syntax error on line {e.lineno}: {e.msg}"
+
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "execute":
+            args = node.args.args
+            if len(args) != 1:
+                return "`execute` must take exactly one argument (inputs)."
+            return None
+
+    return "Python skill must define a top-level `def execute(inputs):` function."
+
+
+def _validate_markdown_script(script: str, input_names: List[str]) -> Optional[str]:
+    refs = _MD_TEMPLATE_VAR_RE.findall(script)
+    known = set(input_names)
+    missing = [r for r in refs if r not in known]
+    if missing:
+        unique = sorted(set(missing))
+        return f"Template references undeclared inputs: {', '.join(unique)}"
+    return None
+
+
+def _validate_skill_payload(engine: str, script: str, inputs: List[dict]) -> None:
+    """Raise HTTPException(400) if the skill script is invalid for its engine."""
+    input_names = [i.get("name", "") for i in inputs if i.get("name")]
+    if engine == "python":
+        err = _validate_python_script(script)
+    elif engine == "markdown":
+        err = _validate_markdown_script(script, input_names)
+    else:
+        err = None  # shell is free-form — no structural contract to enforce
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+
+def _skill_to_mcp_tool(skill: FileSkill) -> dict:
+    """Convert a FileSkill into an MCP/OpenAI-compatible tool definition."""
+    properties: Dict[str, dict] = {}
+    required: List[str] = []
+    type_map = {"string": "string", "number": "number", "boolean": "boolean"}
+    for inp in skill.inputs or []:
+        properties[inp.name] = {
+            "type": type_map.get(getattr(inp, "type", "string"), "string"),
+            "description": getattr(inp, "description", "") or "",
+        }
+        if getattr(inp, "required", False):
+            required.append(inp.name)
+    return {
+        "name": f"skill_{skill.slug or skill.name}",
+        "description": (skill.description or skill.name)[:1024],
+        "inputSchema": {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        },
+    }
+
+
+def _skill_to_superpowers_md(skill: FileSkill) -> str:
+    """Superpowers/Claude Code SKILL.md with YAML frontmatter + body."""
+    frontmatter_lines = [
+        "---",
+        f"name: {skill.name}",
+        f"description: {skill.description or ''}",
+        f"engine: {skill.engine}",
+        f"version: {skill.version}",
+        f"category: {skill.category}",
+    ]
+    if skill.tags:
+        frontmatter_lines.append(f"tags: [{', '.join(skill.tags)}]")
+    if skill.auto_trigger:
+        frontmatter_lines.append(f"auto_trigger: {skill.auto_trigger}")
+    frontmatter_lines.append("---")
+
+    body_lines = [f"# {skill.name}", ""]
+    if skill.description:
+        body_lines.extend([skill.description, ""])
+    if skill.inputs:
+        body_lines.append("## Inputs")
+        for inp in skill.inputs:
+            req = "(required)" if getattr(inp, "required", False) else "(optional)"
+            body_lines.append(
+                f"- `{inp.name}` ({getattr(inp, 'type', 'string')}) {req} — {getattr(inp, 'description', '') or ''}"
+            )
+        body_lines.append("")
+    # Source script goes in a fenced block so humans can read + Claude Code can parse
+    fence_lang = {"python": "python", "shell": "bash", "markdown": "markdown"}.get(skill.engine, "text")
+    source = _read_skill_source(skill)
+    if source:
+        body_lines.extend(["## Source", f"```{fence_lang}", source, "```"])
+    return "\n".join(frontmatter_lines + [""] + body_lines) + "\n"
+
+
+def _read_skill_source(skill: FileSkill) -> str:
+    """Load the skill's script file from disk. Returns '' if unreadable."""
+    try:
+        script_path = Path(skill.skill_dir) / skill.script_path
+        if script_path.is_file():
+            return script_path.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    return ""
+
+
+def _skill_to_gws_md(skill: FileSkill) -> str:
+    """Google Workspace SKILL.md — almost identical but uses different fields."""
+    lines = [
+        "---",
+        f"title: {skill.name}",
+        f"summary: {skill.description or ''}",
+        f"engine: {skill.engine}",
+        f"category: {skill.category}",
+        "---",
+        "",
+        f"# {skill.name}",
+        "",
+        skill.description or "",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _skill_to_openai_function(skill: FileSkill) -> dict:
+    """OpenAI function-calling JSON schema."""
+    tool = _skill_to_mcp_tool(skill)
+    return {
+        "type": "function",
+        "function": {
+            "name": tool["name"],
+            "description": tool["description"],
+            "parameters": tool["inputSchema"],
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +307,7 @@ def create_file_skill(
 ):
     """Create a new file-based skill from the UI."""
     tenant_id = str(current_user.tenant_id)
+    _validate_skill_payload(payload.engine, payload.script, [inp.dict() for inp in payload.inputs])
     result = skill_manager.create_skill(
         tenant_id=tenant_id,
         name=payload.name,
@@ -277,8 +435,63 @@ def import_from_github(
 
 
 # ---------------------------------------------------------------------------
+# MCP manifest — lets external agents (Claude Code, Gemini, Copilot)
+# discover the tenant's skills as MCP/OpenAI-compatible tools.
+# ---------------------------------------------------------------------------
+
+@router.get("/mcp-manifest")
+def get_mcp_manifest(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Return MCP tool definitions for every skill available to this tenant."""
+    tenant_id = str(current_user.tenant_id)
+    skills = skill_manager.list_skills(tenant_id)
+    # Skip broken auto-generated import artifacts — they shouldn't be advertised
+    # to external agents as callable tools.
+    def _is_auto_generated(s):
+        return s.category == "auto-generated" or (
+            s.description and "response timeout pattern" in s.description.lower()
+        )
+    skills = [s for s in skills if not _is_auto_generated(s)]
+
+    # Derive server URL from the request so this works for agentprovision.com
+    # AND localhost dev AND custom domains without hardcoding.
+    base_url = str(request.base_url).rstrip("/")
+    server_url = f"{base_url}/api/v1/mcp"
+
+    return {
+        "server_url": server_url,
+        "tenant_id": tenant_id,
+        "tools": [_skill_to_mcp_tool(s) for s in skills],
+        "openai_functions": [_skill_to_openai_function(s) for s in skills],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Slug-based library endpoints — MUST come after all fixed-path routes
 # ---------------------------------------------------------------------------
+
+@router.get("/library/{slug}/export")
+def export_skill(
+    slug: str,
+    format: str = Query("superpowers", description="superpowers | gws | openai"),
+    current_user: User = Depends(get_current_user),
+):
+    """Export a single skill in one of several portable formats."""
+    tenant_id = str(current_user.tenant_id)
+    skill = skill_manager.get_skill_by_slug(slug, tenant_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    if format == "superpowers":
+        return PlainTextResponse(_skill_to_superpowers_md(skill), media_type="text/markdown")
+    if format == "gws":
+        return PlainTextResponse(_skill_to_gws_md(skill), media_type="text/markdown")
+    if format == "openai":
+        return _skill_to_openai_function(skill)
+    raise HTTPException(status_code=400, detail=f"Unknown format '{format}'. Use superpowers, gws, or openai.")
+
 
 @router.get("/library/{slug}/versions")
 def get_skill_versions(
@@ -303,6 +516,16 @@ def update_file_skill(
     updates = payload.dict(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update.")
+
+    # If script or engine changed, re-validate. Inputs come from the current skill
+    # unless the update includes new ones.
+    if "script" in updates or "engine" in updates:
+        current_skill = skill_manager.get_skill_by_slug(slug, tenant_id)
+        engine = updates.get("engine") or (current_skill.engine if current_skill else "python")
+        script = updates.get("script") or ""
+        inputs = [i.dict() if hasattr(i, "dict") else i for i in (current_skill.inputs if current_skill else [])]
+        if script:
+            _validate_skill_payload(engine, script, inputs)
 
     result = skill_manager.update_skill(tenant_id, slug, updates)
     if "error" in result:

@@ -78,3 +78,16 @@ export const getSkillVersions = (slug) =>
 
 export const importFromGithub = (repoUrl) =>
   api.post('/skills/library/import-github', { repo_url: repoUrl });
+
+// Returns MCP manifest (server_url, tenant_id, list of tool definitions) so
+// external agents — Claude Code, Gemini CLI, VS Code Copilot — can connect.
+export const getMcpManifest = () => api.get('/skills/mcp-manifest');
+
+// Export a single skill as SKILL.md (superpowers/gws) or OpenAI function JSON.
+// The API returns the raw content; the UI wraps it in a Blob for download.
+export const exportSkill = (slug, format) =>
+  api.get(`/skills/library/${slug}/export`, {
+    params: { format },
+    // force text/json passthrough — browser may otherwise parse as JSON and choke on md
+    transformResponse: [(data) => data],
+  });
