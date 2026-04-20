@@ -765,7 +765,7 @@ const ChatPage = () => {
                               type="button"
                               variant={isRecording ? 'danger' : 'outline-secondary'}
                               title={isRecording ? 'Stop recording' : 'Record voice message'}
-                              onClick={isRecording ? stopRecording : startRecording}
+                              onClick={isRecording ? stopVoice : startVoice}
                               style={{ flex: '0 0 auto', position: 'relative' }}
                             >
                               {isRecording ? (
