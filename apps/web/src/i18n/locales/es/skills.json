@@ -52,10 +52,11 @@
   },
   "mcp": {
     "connectExternal": "Conectar Agente Externo",
-    "intro": "Expón los skills de este tenant como herramientas MCP para que Claude Code, Gemini CLI o VS Code Copilot puedan llamarlos directamente.",
+    "intro": "Expón los skills de este tenant como herramientas MCP para que Claude Code, Gemini CLI o VS Code Copilot puedan llamarlos directamente vía JSON-RPC.",
     "serverUrl": "URL del Servidor MCP",
     "toolsAvailable": "{{count}} skill(s) disponibles como herramientas MCP para tu tenant.",
-    "authNote": "El header X-Tenant-Id vincula los skills a tu tenant. Para uso en producción, incluye también Authorization: Bearer <tu-api-token>."
+    "tokenMissing": "No has iniciado sesión, por lo que las configuraciones siguientes usan un placeholder para Authorization. Inicia sesión y vuelve a abrir este modal — tu token real se rellenará automáticamente.",
+    "authNote": "Las solicitudes se autentican con el header Authorization: Bearer estándar. El header X-Tenant-Id es opcional — tu JWT ya establece el tenant."
   },
   "search": {
     "placeholder": "Buscar skills..."

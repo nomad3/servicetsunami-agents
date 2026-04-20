@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Alert, Badge, Button, Card, Col, Dropdown, Form,
   InputGroup, Modal, Nav, Row, Spinner,
@@ -272,12 +272,80 @@ const SkillsPage = () => {
     }
   };
 
+  // navigator.clipboard is gated on secure contexts. On HTTP/localhost dev and
+  // older browsers it's undefined — fall back to the legacy textarea/execCommand
+  // trick so the Copy buttons never silently fail.
   const copyToClipboard = (text, key) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(key);
-      setTimeout(() => setCopied(null), 1500);
-    }).catch(() => flash(setError, 'Copy failed', 2000));
+    const mark = () => { setCopied(key); setTimeout(() => setCopied(null), 1500); };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(mark).catch(() => fallback());
+      return;
+    }
+    fallback();
+    function fallback() {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        mark();
+      } catch {
+        flash(setError, 'Copy failed — please select and copy manually', 3000);
+      }
+    }
   };
+
+  // Single source of truth for the MCP endpoint the modal advertises. Used by
+  // all three snippets and the clipboard buttons so they can never drift.
+  // The current user's JWT lives under localStorage 'user' (not 'authToken') —
+  // see apps/web/src/services/api.js request interceptor.
+  const mcpServerUrl = mcpManifest?.server_url || `${window.location.origin}/api/v1/mcp`;
+  const mcpTenantId = mcpManifest?.tenant_id || '<your-tenant-id>';
+  const storedUser = (() => { try { return JSON.parse(localStorage.getItem('user') || 'null'); } catch { return null; } })();
+  const mcpToken = storedUser?.access_token || '<your-api-token>';
+
+  const mcpConfigs = useMemo(() => ({
+    claude: {
+      mcpServers: {
+        agentprovision: {
+          transport: 'http',
+          url: mcpServerUrl,
+          headers: {
+            Authorization: `Bearer ${mcpToken}`,
+            'X-Tenant-Id': mcpTenantId,
+          },
+        },
+      },
+    },
+    gemini: {
+      mcp: {
+        servers: {
+          agentprovision: {
+            url: mcpServerUrl,
+            headers: {
+              Authorization: `Bearer ${mcpToken}`,
+              'X-Tenant-Id': mcpTenantId,
+            },
+          },
+        },
+      },
+    },
+    copilot: {
+      'github.copilot.chat.mcp.servers': {
+        agentprovision: {
+          url: mcpServerUrl,
+          headers: {
+            Authorization: `Bearer ${mcpToken}`,
+            'X-Tenant-Id': mcpTenantId,
+          },
+        },
+      },
+    },
+  }), [mcpServerUrl, mcpTenantId, mcpToken]);
 
   const handleExport = async (skill, format) => {
     try {
@@ -734,8 +802,8 @@ const SkillsPage = () => {
                 <div className="mb-3">
                   <Form.Label style={{ fontSize: '0.82rem', color: 'var(--color-foreground)' }}>{t('mcp.serverUrl')}</Form.Label>
                   <InputGroup>
-                    <Form.Control readOnly value={mcpManifest?.server_url || `${window.location.origin}/api/v1/mcp`} style={inputStyle} />
-                    <Button variant="outline-secondary" onClick={() => copyToClipboard(mcpManifest?.server_url || `${window.location.origin}/api/v1/mcp`, 'url')}>
+                    <Form.Control readOnly value={mcpServerUrl} style={inputStyle} />
+                    <Button variant="outline-secondary" onClick={() => copyToClipboard(mcpServerUrl, 'url')}>
                       {copied === 'url' ? '✓' : <FaCopy size={12} />}
                     </Button>
                   </InputGroup>
@@ -748,71 +816,40 @@ const SkillsPage = () => {
                   </Alert>
                 )}
 
+                {/* Warn if the user isn't logged in — auth token placeholder is useless */}
+                {!storedUser?.access_token && (
+                  <Alert variant="warning" className="py-2" style={{ fontSize: '0.78rem' }}>
+                    {t('mcp.tokenMissing')}
+                  </Alert>
+                )}
+
                 {/* Claude Code config */}
-                <div className="mb-3">
-                  <Form.Label style={{ fontSize: '0.82rem', color: 'var(--color-foreground)' }}>Claude Code — <code style={{ fontSize: '0.78rem' }}>~/.claude/mcp.json</code></Form.Label>
-                  <div style={{ position: 'relative' }}>
-                    <pre style={{ background: 'rgba(0,0,0,0.3)', color: '#e2e8f0', padding: '0.75rem', borderRadius: 8, fontSize: '0.78rem', margin: 0, overflow: 'auto' }}>
-{JSON.stringify({
-  mcpServers: {
-    agentprovision: {
-      transport: 'http',
-      url: mcpManifest?.server_url || `${window.location.origin}/api/v1/mcp`,
-      headers: { 'X-Tenant-Id': mcpManifest?.tenant_id || '<your-tenant-id>' },
-    },
-  },
-}, null, 2)}
-                    </pre>
-                    <Button variant="outline-secondary" size="sm" style={{ position: 'absolute', top: 6, right: 6, padding: '2px 6px' }}
-                      onClick={() => copyToClipboard(JSON.stringify({ mcpServers: { agentprovision: { transport: 'http', url: mcpManifest?.server_url, headers: { 'X-Tenant-Id': mcpManifest?.tenant_id } } } }, null, 2), 'claude')}>
-                      {copied === 'claude' ? '✓' : <FaCopy size={11} />}
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Gemini CLI config */}
-                <div className="mb-3">
-                  <Form.Label style={{ fontSize: '0.82rem', color: 'var(--color-foreground)' }}>Gemini CLI — <code style={{ fontSize: '0.78rem' }}>~/.gemini/config.json</code></Form.Label>
-                  <div style={{ position: 'relative' }}>
-                    <pre style={{ background: 'rgba(0,0,0,0.3)', color: '#e2e8f0', padding: '0.75rem', borderRadius: 8, fontSize: '0.78rem', margin: 0, overflow: 'auto' }}>
-{JSON.stringify({
-  mcp: {
-    servers: {
-      agentprovision: {
-        url: mcpManifest?.server_url || `${window.location.origin}/api/v1/mcp`,
-        headers: { 'X-Tenant-Id': mcpManifest?.tenant_id || '<your-tenant-id>' },
-      },
-    },
-  },
-}, null, 2)}
-                    </pre>
-                    <Button variant="outline-secondary" size="sm" style={{ position: 'absolute', top: 6, right: 6, padding: '2px 6px' }}
-                      onClick={() => copyToClipboard(JSON.stringify({ mcp: { servers: { agentprovision: { url: mcpManifest?.server_url, headers: { 'X-Tenant-Id': mcpManifest?.tenant_id } } } } }, null, 2), 'gemini')}>
-                      {copied === 'gemini' ? '✓' : <FaCopy size={11} />}
-                    </Button>
-                  </div>
-                </div>
-
-                {/* VS Code Copilot */}
-                <div className="mb-3">
-                  <Form.Label style={{ fontSize: '0.82rem', color: 'var(--color-foreground)' }}>VS Code Copilot — <code style={{ fontSize: '0.78rem' }}>settings.json</code></Form.Label>
-                  <div style={{ position: 'relative' }}>
-                    <pre style={{ background: 'rgba(0,0,0,0.3)', color: '#e2e8f0', padding: '0.75rem', borderRadius: 8, fontSize: '0.78rem', margin: 0, overflow: 'auto' }}>
-{JSON.stringify({
-  'github.copilot.chat.mcp.servers': {
-    agentprovision: {
-      url: mcpManifest?.server_url || `${window.location.origin}/api/v1/mcp`,
-      headers: { 'X-Tenant-Id': mcpManifest?.tenant_id || '<your-tenant-id>' },
-    },
-  },
-}, null, 2)}
-                    </pre>
-                    <Button variant="outline-secondary" size="sm" style={{ position: 'absolute', top: 6, right: 6, padding: '2px 6px' }}
-                      onClick={() => copyToClipboard(JSON.stringify({ 'github.copilot.chat.mcp.servers': { agentprovision: { url: mcpManifest?.server_url, headers: { 'X-Tenant-Id': mcpManifest?.tenant_id } } } }, null, 2), 'copilot')}>
-                      {copied === 'copilot' ? '✓' : <FaCopy size={11} />}
-                    </Button>
-                  </div>
-                </div>
+                {[
+                  { key: 'claude', label: 'Claude Code', path: '~/.claude/mcp.json' },
+                  { key: 'gemini', label: 'Gemini CLI', path: '~/.gemini/config.json' },
+                  { key: 'copilot', label: 'VS Code Copilot', path: 'settings.json' },
+                ].map(({ key, label, path }) => {
+                  const serialized = JSON.stringify(mcpConfigs[key], null, 2);
+                  return (
+                    <div key={key} className="mb-3">
+                      <Form.Label style={{ fontSize: '0.82rem', color: 'var(--color-foreground)' }}>
+                        {label} — <code style={{ fontSize: '0.78rem' }}>{path}</code>
+                      </Form.Label>
+                      <div style={{ position: 'relative' }}>
+                        <pre style={{ background: 'rgba(0,0,0,0.3)', color: '#e2e8f0', padding: '0.75rem', borderRadius: 8, fontSize: '0.78rem', margin: 0, overflow: 'auto' }}>
+                          {serialized}
+                        </pre>
+                        <Button
+                          variant="outline-secondary" size="sm"
+                          style={{ position: 'absolute', top: 6, right: 6, padding: '2px 6px' }}
+                          onClick={() => copyToClipboard(serialized, key)}
+                        >
+                          {copied === key ? '✓' : <FaCopy size={11} />}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
 
                 <Alert variant="secondary" className="py-2 mb-0" style={{ fontSize: '0.78rem' }}>
                   {t('mcp.authNote')}

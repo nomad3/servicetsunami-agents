@@ -4,7 +4,8 @@ import json
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
+import yaml
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -64,6 +65,10 @@ class FileSkillUpdateRequest(BaseModel):
     auto_trigger: Optional[str] = None
     chain_to: Optional[List[str]] = None
     tags: Optional[List[str]] = None
+    # Allow callers to re-declare inputs in the same PUT. Without this the
+    # markdown-validator would always read stale inputs and reject legitimate
+    # edits that add a new {{variable}} reference.
+    inputs: Optional[List[FileSkillCreateInput]] = None
 
 
 class GitHubImportRequest(BaseModel):
@@ -75,6 +80,28 @@ class GitHubImportRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 _MD_TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([a-zA-Z_][\w]*)\s*\}\}")
+
+# MCP and OpenAI both require tool names match ^[a-zA-Z0-9_-]{1,64}$
+_TOOL_NAME_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+def _is_auto_generated_skill(s: FileSkill) -> bool:
+    """Single source of truth for 'this skill is import-noise, hide it'.
+
+    Used by the MCP manifest (so external agents don't discover garbage) and
+    could be called from other endpoints in the future. The frontend mirrors
+    this for fast filtering but the server remains authoritative.
+    """
+    if s.category == "auto-generated":
+        return True
+    desc = (s.description or "").lower()
+    return "response timeout pattern" in desc
+
+
+def _sanitize_tool_name(raw: str) -> str:
+    """Produce a tool-name-safe slug. MCP/OpenAI reject spaces and punctuation."""
+    slug = _TOOL_NAME_SANITIZE_RE.sub("_", raw.lower()).strip("_-")
+    return slug or "skill"
 
 
 def _validate_python_script(script: str) -> Optional[str]:
@@ -92,8 +119,12 @@ def _validate_python_script(script: str) -> Optional[str]:
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == "execute":
             args = node.args.args
+            # Allow exactly one positional arg. `*args`/`**kwargs`/keyword-only are
+            # tolerated because runtime only passes `inputs` positionally, but
+            # rejecting multi-positional catches the common "def execute(inputs, ctx)"
+            # mistake loudly.
             if len(args) != 1:
-                return "`execute` must take exactly one argument (inputs)."
+                return "`execute` must take exactly one positional argument (inputs)."
             return None
 
     return "Python skill must define a top-level `def execute(inputs):` function."
@@ -134,8 +165,9 @@ def _skill_to_mcp_tool(skill: FileSkill) -> dict:
         }
         if getattr(inp, "required", False):
             required.append(inp.name)
+    tool_name = "skill_" + _sanitize_tool_name(skill.slug or skill.name)
     return {
-        "name": f"skill_{skill.slug or skill.name}",
+        "name": tool_name[:64],  # hard cap per OpenAI spec
         "description": (skill.description or skill.name)[:1024],
         "inputSchema": {
             "type": "object",
@@ -146,20 +178,26 @@ def _skill_to_mcp_tool(skill: FileSkill) -> dict:
 
 
 def _skill_to_superpowers_md(skill: FileSkill) -> str:
-    """Superpowers/Claude Code SKILL.md with YAML frontmatter + body."""
-    frontmatter_lines = [
-        "---",
-        f"name: {skill.name}",
-        f"description: {skill.description or ''}",
-        f"engine: {skill.engine}",
-        f"version: {skill.version}",
-        f"category: {skill.category}",
-    ]
+    """Claude Code superpowers SKILL.md — YAML frontmatter + body + optional source fence.
+
+    Frontmatter is serialized via yaml.safe_dump so descriptions with colons,
+    newlines, or special characters don't corrupt the YAML. Round-trip through
+    `yaml.safe_load` works for everything we emit.
+    """
+    frontmatter: Dict[str, object] = {
+        "name": skill.name,
+        "description": skill.description or "",
+        "engine": skill.engine,
+        "version": skill.version,
+        "category": skill.category,
+    }
     if skill.tags:
-        frontmatter_lines.append(f"tags: [{', '.join(skill.tags)}]")
+        # Stringify defensively — legacy imports occasionally yield non-str tags
+        frontmatter["tags"] = [str(t) for t in skill.tags]
     if skill.auto_trigger:
-        frontmatter_lines.append(f"auto_trigger: {skill.auto_trigger}")
-    frontmatter_lines.append("---")
+        frontmatter["auto_trigger"] = skill.auto_trigger
+
+    yaml_block = yaml.safe_dump(frontmatter, default_flow_style=False, sort_keys=False).rstrip()
 
     body_lines = [f"# {skill.name}", ""]
     if skill.description:
@@ -172,12 +210,13 @@ def _skill_to_superpowers_md(skill: FileSkill) -> str:
                 f"- `{inp.name}` ({getattr(inp, 'type', 'string')}) {req} — {getattr(inp, 'description', '') or ''}"
             )
         body_lines.append("")
-    # Source script goes in a fenced block so humans can read + Claude Code can parse
+
     fence_lang = {"python": "python", "shell": "bash", "markdown": "markdown"}.get(skill.engine, "text")
     source = _read_skill_source(skill)
     if source:
         body_lines.extend(["## Source", f"```{fence_lang}", source, "```"])
-    return "\n".join(frontmatter_lines + [""] + body_lines) + "\n"
+
+    return f"---\n{yaml_block}\n---\n\n" + "\n".join(body_lines) + "\n"
 
 
 def _read_skill_source(skill: FileSkill) -> str:
@@ -192,20 +231,18 @@ def _read_skill_source(skill: FileSkill) -> str:
 
 
 def _skill_to_gws_md(skill: FileSkill) -> str:
-    """Google Workspace SKILL.md — almost identical but uses different fields."""
-    lines = [
-        "---",
-        f"title: {skill.name}",
-        f"summary: {skill.description or ''}",
-        f"engine: {skill.engine}",
-        f"category: {skill.category}",
-        "---",
-        "",
-        f"# {skill.name}",
-        "",
-        skill.description or "",
-    ]
-    return "\n".join(lines) + "\n"
+    """Google Workspace SKILL.md — uses `title`/`summary` field names instead of name/description."""
+    frontmatter: Dict[str, object] = {
+        "title": skill.name,
+        "summary": skill.description or "",
+        "engine": skill.engine,
+        "category": skill.category,
+    }
+    if skill.tags:
+        frontmatter["tags"] = [str(t) for t in skill.tags]
+    yaml_block = yaml.safe_dump(frontmatter, default_flow_style=False, sort_keys=False).rstrip()
+    body = f"# {skill.name}\n\n{skill.description or ''}\n"
+    return f"---\n{yaml_block}\n---\n\n{body}"
 
 
 def _skill_to_openai_function(skill: FileSkill) -> dict:
@@ -449,11 +486,7 @@ def get_mcp_manifest(
     skills = skill_manager.list_skills(tenant_id)
     # Skip broken auto-generated import artifacts — they shouldn't be advertised
     # to external agents as callable tools.
-    def _is_auto_generated(s):
-        return s.category == "auto-generated" or (
-            s.description and "response timeout pattern" in s.description.lower()
-        )
-    skills = [s for s in skills if not _is_auto_generated(s)]
+    skills = [s for s in skills if not _is_auto_generated_skill(s)]
 
     # Derive server URL from the request so this works for agentprovision.com
     # AND localhost dev AND custom domains without hardcoding.
@@ -484,12 +517,29 @@ def export_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
+    safe_slug = _sanitize_tool_name(skill.slug or skill.name)
+
     if format == "superpowers":
-        return PlainTextResponse(_skill_to_superpowers_md(skill), media_type="text/markdown")
+        filename = f"{safe_slug}.superpowers.md"
+        return PlainTextResponse(
+            _skill_to_superpowers_md(skill),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     if format == "gws":
-        return PlainTextResponse(_skill_to_gws_md(skill), media_type="text/markdown")
+        filename = f"{safe_slug}.gws.md"
+        return PlainTextResponse(
+            _skill_to_gws_md(skill),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     if format == "openai":
-        return _skill_to_openai_function(skill)
+        filename = f"{safe_slug}.openai.json"
+        return Response(
+            content=json.dumps(_skill_to_openai_function(skill), indent=2),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     raise HTTPException(status_code=400, detail=f"Unknown format '{format}'. Use superpowers, gws, or openai.")
 
 
@@ -517,13 +567,17 @@ def update_file_skill(
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update.")
 
-    # If script or engine changed, re-validate. Inputs come from the current skill
-    # unless the update includes new ones.
-    if "script" in updates or "engine" in updates:
+    # Re-validate on script/engine/inputs change. Prefer the incoming payload's
+    # inputs over the stored skill's inputs so a single PUT can add a new
+    # {{var}} AND declare the input at the same time.
+    if any(k in updates for k in ("script", "engine", "inputs")):
         current_skill = skill_manager.get_skill_by_slug(slug, tenant_id)
         engine = updates.get("engine") or (current_skill.engine if current_skill else "python")
-        script = updates.get("script") or ""
-        inputs = [i.dict() if hasattr(i, "dict") else i for i in (current_skill.inputs if current_skill else [])]
+        script = updates.get("script") or _read_skill_source(current_skill) if current_skill else ""
+        if "inputs" in updates:
+            inputs = updates["inputs"]
+        else:
+            inputs = [i.dict() if hasattr(i, "dict") else i for i in (current_skill.inputs if current_skill else [])]
         if script:
             _validate_skill_payload(engine, script, inputs)
 
