@@ -33,7 +33,8 @@
     "coding": "Código",
     "communication": "Comunicación",
     "automation": "Automatización",
-    "general": "General"
+    "general": "General",
+    "auto-generated": "Auto-generado"
   },
   "actions": {
     "fork": "Copiar a Mis Skills",
@@ -41,7 +42,21 @@
     "delete": "Eliminar",
     "versions": "Historial de Versiones",
     "viewGithub": "Ver en GitHub",
-    "import": "Importar de GitHub"
+    "import": "Importar de GitHub",
+    "exportAs": "Exportar como"
+  },
+  "validation": {
+    "nameRequired": "El nombre del skill es requerido.",
+    "pythonSignature": "Los skills de Python deben definir una función `execute(inputs)`.",
+    "markdownMissingInputs": "La plantilla referencia entradas no declaradas: {{vars}}. Agrégalas en la sección Entradas del Skill."
+  },
+  "mcp": {
+    "connectExternal": "Conectar Agente Externo",
+    "intro": "Expón los skills de este tenant como herramientas MCP para que Claude Code, Gemini CLI o VS Code Copilot puedan llamarlos directamente vía JSON-RPC.",
+    "serverUrl": "URL del Servidor MCP",
+    "toolsAvailable": "{{count}} skill(s) disponibles como herramientas MCP para tu tenant.",
+    "tokenMissing": "No has iniciado sesión, por lo que las configuraciones siguientes usan un placeholder para Authorization. Inicia sesión y vuelve a abrir este modal — tu token real se rellenará automáticamente.",
+    "authNote": "Las solicitudes se autentican con el header Authorization: Bearer estándar. El header X-Tenant-Id es opcional — tu JWT ya establece el tenant."
   },
   "search": {
     "placeholder": "Buscar skills..."

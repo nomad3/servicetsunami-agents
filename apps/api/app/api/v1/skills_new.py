@@ -1,5 +1,12 @@
 """API routes for skills management."""
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
+import ast
+import json
+import re
+from pathlib import Path
+
+import yaml
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request, Response
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Dict, List, Optional
@@ -58,10 +65,197 @@ class FileSkillUpdateRequest(BaseModel):
     auto_trigger: Optional[str] = None
     chain_to: Optional[List[str]] = None
     tags: Optional[List[str]] = None
+    # Allow callers to re-declare inputs in the same PUT. Without this the
+    # markdown-validator would always read stale inputs and reject legitimate
+    # edits that add a new {{variable}} reference.
+    inputs: Optional[List[FileSkillCreateInput]] = None
 
 
 class GitHubImportRequest(BaseModel):
     repo_url: str
+
+
+# ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
+
+_MD_TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([a-zA-Z_][\w]*)\s*\}\}")
+
+# MCP and OpenAI both require tool names match ^[a-zA-Z0-9_-]{1,64}$
+_TOOL_NAME_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+def _is_auto_generated_skill(s: FileSkill) -> bool:
+    """Single source of truth for 'this skill is import-noise, hide it'.
+
+    Used by the MCP manifest (so external agents don't discover garbage) and
+    could be called from other endpoints in the future. The frontend mirrors
+    this for fast filtering but the server remains authoritative.
+    """
+    if s.category == "auto-generated":
+        return True
+    desc = (s.description or "").lower()
+    return "response timeout pattern" in desc
+
+
+def _sanitize_tool_name(raw: str) -> str:
+    """Produce a tool-name-safe slug. MCP/OpenAI reject spaces and punctuation."""
+    slug = _TOOL_NAME_SANITIZE_RE.sub("_", raw.lower()).strip("_-")
+    return slug or "skill"
+
+
+def _validate_python_script(script: str) -> Optional[str]:
+    """Return an error string if the Python script can't serve as a skill.
+
+    A valid skill exposes ``def execute(inputs): ...``. We parse to AST first so
+    a syntactic error surfaces with a clear message; a pure regex would accept
+    broken code.
+    """
+    try:
+        tree = ast.parse(script)
+    except SyntaxError as e:
+        return f"Python syntax error on line {e.lineno}: {e.msg}"
+
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "execute":
+            args = node.args.args
+            # Allow exactly one positional arg. `*args`/`**kwargs`/keyword-only are
+            # tolerated because runtime only passes `inputs` positionally, but
+            # rejecting multi-positional catches the common "def execute(inputs, ctx)"
+            # mistake loudly.
+            if len(args) != 1:
+                return "`execute` must take exactly one positional argument (inputs)."
+            return None
+
+    return "Python skill must define a top-level `def execute(inputs):` function."
+
+
+def _validate_markdown_script(script: str, input_names: List[str]) -> Optional[str]:
+    refs = _MD_TEMPLATE_VAR_RE.findall(script)
+    known = set(input_names)
+    missing = [r for r in refs if r not in known]
+    if missing:
+        unique = sorted(set(missing))
+        return f"Template references undeclared inputs: {', '.join(unique)}"
+    return None
+
+
+def _validate_skill_payload(engine: str, script: str, inputs: List[dict]) -> None:
+    """Raise HTTPException(400) if the skill script is invalid for its engine."""
+    input_names = [i.get("name", "") for i in inputs if i.get("name")]
+    if engine == "python":
+        err = _validate_python_script(script)
+    elif engine == "markdown":
+        err = _validate_markdown_script(script, input_names)
+    else:
+        err = None  # shell is free-form — no structural contract to enforce
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+
+def _skill_to_mcp_tool(skill: FileSkill) -> dict:
+    """Convert a FileSkill into an MCP/OpenAI-compatible tool definition."""
+    properties: Dict[str, dict] = {}
+    required: List[str] = []
+    type_map = {"string": "string", "number": "number", "boolean": "boolean"}
+    for inp in skill.inputs or []:
+        properties[inp.name] = {
+            "type": type_map.get(getattr(inp, "type", "string"), "string"),
+            "description": getattr(inp, "description", "") or "",
+        }
+        if getattr(inp, "required", False):
+            required.append(inp.name)
+    tool_name = "skill_" + _sanitize_tool_name(skill.slug or skill.name)
+    return {
+        "name": tool_name[:64],  # hard cap per OpenAI spec
+        "description": (skill.description or skill.name)[:1024],
+        "inputSchema": {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        },
+    }
+
+
+def _skill_to_superpowers_md(skill: FileSkill) -> str:
+    """Claude Code superpowers SKILL.md — YAML frontmatter + body + optional source fence.
+
+    Frontmatter is serialized via yaml.safe_dump so descriptions with colons,
+    newlines, or special characters don't corrupt the YAML. Round-trip through
+    `yaml.safe_load` works for everything we emit.
+    """
+    frontmatter: Dict[str, object] = {
+        "name": skill.name,
+        "description": skill.description or "",
+        "engine": skill.engine,
+        "version": skill.version,
+        "category": skill.category,
+    }
+    if skill.tags:
+        # Stringify defensively — legacy imports occasionally yield non-str tags
+        frontmatter["tags"] = [str(t) for t in skill.tags]
+    if skill.auto_trigger:
+        frontmatter["auto_trigger"] = skill.auto_trigger
+
+    yaml_block = yaml.safe_dump(frontmatter, default_flow_style=False, sort_keys=False).rstrip()
+
+    body_lines = [f"# {skill.name}", ""]
+    if skill.description:
+        body_lines.extend([skill.description, ""])
+    if skill.inputs:
+        body_lines.append("## Inputs")
+        for inp in skill.inputs:
+            req = "(required)" if getattr(inp, "required", False) else "(optional)"
+            body_lines.append(
+                f"- `{inp.name}` ({getattr(inp, 'type', 'string')}) {req} — {getattr(inp, 'description', '') or ''}"
+            )
+        body_lines.append("")
+
+    fence_lang = {"python": "python", "shell": "bash", "markdown": "markdown"}.get(skill.engine, "text")
+    source = _read_skill_source(skill)
+    if source:
+        body_lines.extend(["## Source", f"```{fence_lang}", source, "```"])
+
+    return f"---\n{yaml_block}\n---\n\n" + "\n".join(body_lines) + "\n"
+
+
+def _read_skill_source(skill: FileSkill) -> str:
+    """Load the skill's script file from disk. Returns '' if unreadable."""
+    try:
+        script_path = Path(skill.skill_dir) / skill.script_path
+        if script_path.is_file():
+            return script_path.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    return ""
+
+
+def _skill_to_gws_md(skill: FileSkill) -> str:
+    """Google Workspace SKILL.md — uses `title`/`summary` field names instead of name/description."""
+    frontmatter: Dict[str, object] = {
+        "title": skill.name,
+        "summary": skill.description or "",
+        "engine": skill.engine,
+        "category": skill.category,
+    }
+    if skill.tags:
+        frontmatter["tags"] = [str(t) for t in skill.tags]
+    yaml_block = yaml.safe_dump(frontmatter, default_flow_style=False, sort_keys=False).rstrip()
+    body = f"# {skill.name}\n\n{skill.description or ''}\n"
+    return f"---\n{yaml_block}\n---\n\n{body}"
+
+
+def _skill_to_openai_function(skill: FileSkill) -> dict:
+    """OpenAI function-calling JSON schema."""
+    tool = _skill_to_mcp_tool(skill)
+    return {
+        "type": "function",
+        "function": {
+            "name": tool["name"],
+            "description": tool["description"],
+            "parameters": tool["inputSchema"],
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +344,7 @@ def create_file_skill(
 ):
     """Create a new file-based skill from the UI."""
     tenant_id = str(current_user.tenant_id)
+    _validate_skill_payload(payload.engine, payload.script, [inp.dict() for inp in payload.inputs])
     result = skill_manager.create_skill(
         tenant_id=tenant_id,
         name=payload.name,
@@ -277,8 +472,76 @@ def import_from_github(
 
 
 # ---------------------------------------------------------------------------
+# MCP manifest — lets external agents (Claude Code, Gemini, Copilot)
+# discover the tenant's skills as MCP/OpenAI-compatible tools.
+# ---------------------------------------------------------------------------
+
+@router.get("/mcp-manifest")
+def get_mcp_manifest(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Return MCP tool definitions for every skill available to this tenant."""
+    tenant_id = str(current_user.tenant_id)
+    skills = skill_manager.list_skills(tenant_id)
+    # Skip broken auto-generated import artifacts — they shouldn't be advertised
+    # to external agents as callable tools.
+    skills = [s for s in skills if not _is_auto_generated_skill(s)]
+
+    # Derive server URL from the request so this works for agentprovision.com
+    # AND localhost dev AND custom domains without hardcoding.
+    base_url = str(request.base_url).rstrip("/")
+    server_url = f"{base_url}/api/v1/mcp"
+
+    return {
+        "server_url": server_url,
+        "tenant_id": tenant_id,
+        "tools": [_skill_to_mcp_tool(s) for s in skills],
+        "openai_functions": [_skill_to_openai_function(s) for s in skills],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Slug-based library endpoints — MUST come after all fixed-path routes
 # ---------------------------------------------------------------------------
+
+@router.get("/library/{slug}/export")
+def export_skill(
+    slug: str,
+    format: str = Query("superpowers", description="superpowers | gws | openai"),
+    current_user: User = Depends(get_current_user),
+):
+    """Export a single skill in one of several portable formats."""
+    tenant_id = str(current_user.tenant_id)
+    skill = skill_manager.get_skill_by_slug(slug, tenant_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    safe_slug = _sanitize_tool_name(skill.slug or skill.name)
+
+    if format == "superpowers":
+        filename = f"{safe_slug}.superpowers.md"
+        return PlainTextResponse(
+            _skill_to_superpowers_md(skill),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    if format == "gws":
+        filename = f"{safe_slug}.gws.md"
+        return PlainTextResponse(
+            _skill_to_gws_md(skill),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    if format == "openai":
+        filename = f"{safe_slug}.openai.json"
+        return Response(
+            content=json.dumps(_skill_to_openai_function(skill), indent=2),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    raise HTTPException(status_code=400, detail=f"Unknown format '{format}'. Use superpowers, gws, or openai.")
+
 
 @router.get("/library/{slug}/versions")
 def get_skill_versions(
@@ -303,6 +566,20 @@ def update_file_skill(
     updates = payload.dict(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update.")
+
+    # Re-validate on script/engine/inputs change. Prefer the incoming payload's
+    # inputs over the stored skill's inputs so a single PUT can add a new
+    # {{var}} AND declare the input at the same time.
+    if any(k in updates for k in ("script", "engine", "inputs")):
+        current_skill = skill_manager.get_skill_by_slug(slug, tenant_id)
+        engine = updates.get("engine") or (current_skill.engine if current_skill else "python")
+        script = updates.get("script") or _read_skill_source(current_skill) if current_skill else ""
+        if "inputs" in updates:
+            inputs = updates["inputs"]
+        else:
+            inputs = [i.dict() if hasattr(i, "dict") else i for i in (current_skill.inputs if current_skill else [])]
+        if script:
+            _validate_skill_payload(engine, script, inputs)
 
     result = skill_manager.update_skill(tenant_id, slug, updates)
     if "error" in result:

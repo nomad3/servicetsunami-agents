@@ -335,7 +335,7 @@ class SkillManager:
         metadata["version"] = new_version
 
         # Apply updates
-        for key in ("name", "description", "category", "auto_trigger", "tags", "chain_to", "engine"):
+        for key in ("name", "description", "category", "auto_trigger", "tags", "chain_to", "engine", "inputs"):
             if key in updates and key != "description":
                 metadata[key] = updates[key]
 

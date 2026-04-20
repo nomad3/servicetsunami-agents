@@ -33,7 +33,8 @@
     "coding": "Coding",
     "communication": "Communication",
     "automation": "Automation",
-    "general": "General"
+    "general": "General",
+    "auto-generated": "Auto-generated"
   },
   "actions": {
     "fork": "Fork to My Skills",
@@ -41,7 +42,21 @@
     "delete": "Delete",
     "versions": "Version History",
     "viewGithub": "View on GitHub",
-    "import": "Import from GitHub"
+    "import": "Import from GitHub",
+    "exportAs": "Export as"
+  },
+  "validation": {
+    "nameRequired": "Skill name is required.",
+    "pythonSignature": "Python skills must define an `execute(inputs)` function.",
+    "markdownMissingInputs": "Template references undeclared inputs: {{vars}}. Add them in the Skill Inputs section."
+  },
+  "mcp": {
+    "connectExternal": "Connect External Agent",
+    "intro": "Expose this tenant's skills as MCP tools so Claude Code, Gemini CLI, or VS Code Copilot can call them directly over JSON-RPC.",
+    "serverUrl": "MCP Server URL",
+    "toolsAvailable": "{{count}} skill(s) available as MCP tools for your tenant.",
+    "tokenMissing": "You're not logged in, so the configs below use a placeholder for Authorization. Log in first, then reopen this modal — your real token will be filled in automatically.",
+    "authNote": "Requests authenticate via the standard Authorization: Bearer header. The X-Tenant-Id header is optional and only used for cross-tenant support calls — your JWT already scopes the tenant."
   },
   "search": {
     "placeholder": "Search skills..."
