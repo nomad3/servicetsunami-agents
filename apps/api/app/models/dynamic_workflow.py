@@ -25,14 +25,15 @@ class DynamicWorkflow(Base):
     trigger_config = Column(JSON)
     created_by = Column(UUID(as_uuid=True))
     tags = Column(ARRAY(String), default=[])
-    # Marketplace
+    # Marketplace — counters are NOT NULL (migration 103) so future partial
+    # inserts can't poison the /templates/browse response.
     tier = Column(String(20), default="custom")
     source_template_id = Column(UUID(as_uuid=True))
     public = Column(Boolean, default=False)
-    installs = Column(Integer, default=0)
-    rating = Column(Float)
+    installs = Column(Integer, nullable=False, default=0)
+    rating = Column(Float, nullable=False, default=0)
     # Stats
-    run_count = Column(Integer, default=0)
+    run_count = Column(Integer, nullable=False, default=0)
     last_run_at = Column(DateTime)
     avg_duration_ms = Column(Integer)
     success_rate = Column(Float)

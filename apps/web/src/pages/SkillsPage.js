@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  Alert, Badge, Button, Card, Col, Dropdown, Form,
-  InputGroup, Modal, Nav, Row, Spinner,
+  Alert, Button, Card, Col, Dropdown, Form,
+  InputGroup, Modal, Row, Spinner,
 } from 'react-bootstrap';
 import {
   FaCode, FaCodeBranch, FaChevronDown, FaChevronUp, FaCopy, FaDownload,
@@ -20,10 +20,12 @@ import {
 } from '../services/skills';
 import './SkillsPage.css';
 
-// Category accent colors — muted to match the Agent Fleet palette. Used for the
-// category badge on each card. The chip row (above the grid) is driven by the
-// shared .skills-chip class in SkillsPage.css — not by these colors — so all
-// inactive chips read as one family.
+// Category accent colors — muted to match the Agent Fleet palette. Used only
+// for the category badge on each card. The chip row above the grid is driven
+// by the shared .skills-chip class in SkillsPage.css (active chips are always
+// primary-tinted, by design — mirrors Agent Fleet's filter pills). Auto-generated
+// skills are filtered out server-side before reaching this page, so we don't
+// keep a color entry for them.
 const CATEGORY_COLORS = {
   sales: '#3b9d86',        // teal (Fleet accent)
   marketing: '#c2650c',    // amber
@@ -32,7 +34,6 @@ const CATEGORY_COLORS = {
   communication: '#8b5cf6',// purple
   automation: '#c27803',   // gold
   general: '#64748b',      // slate
-  'auto-generated': '#94a3b8',
 };
 
 const CATEGORIES = ['all', 'sales', 'marketing', 'data', 'coding', 'communication', 'automation', 'general'];
@@ -539,44 +540,48 @@ const SkillsPage = () => {
 
         {/* Search */}
         <InputGroup className="skills-search-wrapper">
-          <InputGroup.Text style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}>
+          <InputGroup.Text>
             <FaSearch size={14} />
           </InputGroup.Text>
           <Form.Control
             placeholder={t('search.placeholder')}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
           />
         </InputGroup>
 
-        {/* Tabs — plain divs, not react-bootstrap Nav.Pills, so Bootstrap's .nav-link.active
-            doesn't stomp our palette. */}
-        <div className="skills-tabs">
+        {/* Tabs — native <button> gives us baseline keyboard handling (Enter/Space),
+            tab-stop ordering, and screen-reader semantics for free. Bootstrap's
+            .nav-link.active classes are avoided so they can't override our palette. */}
+        <div className="skills-tabs" role="tablist">
           {['native', 'my', 'community'].map(tab => (
-            <div
+            <button
               key={tab}
-              role="button"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab}
               className={`skills-tab ${activeTab === tab ? 'active' : ''}`}
               onClick={() => setActiveTab(tab)}
             >
               {tab === 'my' ? t('tabs.mySkills') : t(`tabs.${tab}`)}
-            </div>
+            </button>
           ))}
         </div>
 
-        {/* Category chips — plain spans so Bootstrap's .badge (bg-primary default) can't
-            override the tinted inactive state that made them all read as "selected". */}
-        <div className="skills-category-chips">
+        {/* Category chips — real buttons, not Badge, so Bootstrap's .badge (bg-primary
+            default) can't override the tinted inactive state, and keyboard users can
+            activate them with Enter/Space. */}
+        <div className="skills-category-chips" role="group" aria-label={t('categories.all')}>
           {CATEGORIES.map(cat => (
-            <span
+            <button
               key={cat}
-              role="button"
+              type="button"
+              aria-pressed={activeCategory === cat}
               className={`skills-chip ${activeCategory === cat ? 'active' : ''}`}
               onClick={() => setActiveCategory(cat)}
             >
               {t(`categories.${cat}`)}
-            </span>
+            </button>
           ))}
         </div>
 

@@ -216,3 +216,27 @@
     color: rgba(45, 65, 90, 0.6);
   }
 }
+
+/* Inline link button — <button> styled to look like an anchor. Used inside
+   flow text where a link would normally go but we want a click handler,
+   not a navigation. */
+.inline-link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #2b7de9;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  text-decoration: underline;
+}
+
+.inline-link-button:hover {
+  color: #1e68c8;
+}
+
+.inline-link-button:focus-visible {
+  outline: 2px solid rgba(43, 125, 233, 0.6);
+  outline-offset: 2px;
+  border-radius: 3px;
+}

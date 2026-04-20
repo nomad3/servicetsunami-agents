@@ -490,8 +490,9 @@ const AgentsPage = () => {
                 <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', margin: 0 }}>
                   No external agents hired yet.{' '}
                   <button
+                    type="button"
                     onClick={() => setHireModalOpen(true)}
-                    style={{ background: 'none', border: 'none', color: '#4dabf7', cursor: 'pointer', fontSize: '0.85rem', padding: 0, textDecoration: 'underline' }}
+                    className="inline-link-button"
                   >
                     Hire one now.
                   </button>
