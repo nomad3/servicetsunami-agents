@@ -1,52 +1,10 @@
-/* Skills Marketplace — palette aligned with Agent Fleet (AgentsPage.css).
-   Primary #2b7de9, accent teal #5ec5b0, muted blue-grey surfaces. */
+/* Skills Marketplace — consumes design tokens from tokens.css.
+   Shared layout/components live in components.css. */
 
 .skills-page {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 1rem 0.75rem;
-}
-
-.skills-page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.skills-identity {
-  display: flex;
-  align-items: center;
-  gap: 0.875rem;
-}
-
-.skills-page-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(43, 125, 233, 0.15), rgba(94, 197, 176, 0.12));
-  border: 1px solid rgba(43, 125, 233, 0.25);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #2b7de9;
-  flex-shrink: 0;
-}
-
-.skills-page-title {
-  color: #1a2b3c;
-  font-weight: 700;
-  font-size: 1.5rem;
-  margin: 0;
-  letter-spacing: -0.01em;
-}
-
-.skills-page-subtitle {
-  color: rgba(45, 65, 90, 0.7);
-  font-size: 0.95rem;
-  margin: 0.125rem 0 0 0;
+  padding: var(--ap-space-4) var(--ap-space-3);
 }
 
 /* Tab pills: Native / My Skills / Community */
@@ -471,11 +429,6 @@
 }
 
 /* Dark mode overrides — explicit, so contrast stays usable */
-\[data-bs-theme="dark"\] .skills-page-title {
-  color: #e2e8f0;
-}
-
-\[data-bs-theme="dark"\] .skills-page-subtitle,
 \[data-bs-theme="dark"\] .skills-count {
   color: rgba(226, 232, 240, 0.6);
 }

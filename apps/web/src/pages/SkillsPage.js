@@ -515,28 +515,23 @@ const SkillsPage = () => {
     <Layout>
       <div className="skills-page">
         {/* Header */}
-        <div className="skills-page-header">
-          <div className="skills-identity">
-            <div className="skills-page-icon">
-              <FaRocket size={22} />
-            </div>
-            <div>
-              <h2 className="skills-page-title">{t('title')}</h2>
-              <p className="skills-page-subtitle">{t('subtitle')}</p>
-            </div>
+        <header className="ap-page-header">
+          <div>
+            <h1 className="ap-page-title">{t('title')}</h1>
+            <p className="ap-page-subtitle">{t('subtitle')}</p>
           </div>
-          <div className="d-flex gap-2 flex-wrap">
-            <Button variant="outline-primary" onClick={openMcpConnect} style={{ borderRadius: 8 }} title={t('mcp.connectExternal')}>
-              <FaPlug className="me-2" size={13} />{t('mcp.connectExternal')}
-            </Button>
-            <Button variant="outline-secondary" onClick={() => setShowImport(true)} style={{ borderRadius: 8 }}>
-              <FaGithub className="me-2" size={14} />{t('actions.import')}
-            </Button>
-            <Button variant="primary" onClick={openCreate} style={{ borderRadius: 8 }}>
-              <FaPlus className="me-2" size={12} />{t('createSkill')}
-            </Button>
+          <div className="ap-page-actions">
+            <button type="button" className="ap-btn-secondary" onClick={openMcpConnect} title={t('mcp.connectExternal')}>
+              <FaPlug size={13} />{t('mcp.connectExternal')}
+            </button>
+            <button type="button" className="ap-btn-secondary" onClick={() => setShowImport(true)}>
+              <FaGithub size={14} />{t('actions.import')}
+            </button>
+            <button type="button" className="ap-btn-primary" onClick={openCreate}>
+              <FaPlus size={12} />{t('createSkill')}
+            </button>
           </div>
-        </div>
+        </header>
 
         {/* Search */}
         <InputGroup className="skills-search-wrapper">
