@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Form, Button, Row, Col, Badge, Spinner, Alert } from 'react-bootstrap';
+import { Form, Row, Col, Spinner, Alert } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
-import { FaCog, FaUser, FaBell, FaShieldAlt, FaCreditCard, FaCloud } from 'react-icons/fa';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import './SettingsPage.css';
@@ -49,23 +48,19 @@ const SettingsPage = () => {
   return (
     <Layout>
       <div className="settings-page">
-        <div className="page-header">
-          <h1 className="page-title">
-            <FaCog className="title-icon" />
-            {t('title')}
-          </h1>
-          <p className="page-subtitle">{t('subtitle')}</p>
-        </div>
+        <header className="ap-page-header">
+          <div>
+            <h1 className="ap-page-title">{t('title')}</h1>
+            <p className="ap-page-subtitle">{t('subtitle')}</p>
+          </div>
+        </header>
 
         <Row className="g-4">
           {/* Profile Settings */}
           <Col md={12}>
-            <Card className="settings-card">
-              <Card.Body>
-                <div className="settings-section-header">
-                  <FaUser className="section-icon" />
-                  <h3 className="section-title">{t('profile.title')}</h3>
-                </div>
+            <article className="ap-card">
+              <div className="ap-card-body">
+                <h3 className="ap-card-title settings-section-title">{t('profile.title')}</h3>
                 <Form>
                   <Row className="g-3">
                     <Col md={6}>
@@ -88,21 +83,18 @@ const SettingsPage = () => {
                     </Col>
                   </Row>
                   <div className="settings-actions">
-                    <Button variant="primary">{t('profile.saveChanges')}</Button>
+                    <button type="button" className="ap-btn-primary">{t('profile.saveChanges')}</button>
                   </div>
                 </Form>
-              </Card.Body>
-            </Card>
+              </div>
+            </article>
           </Col>
 
           {/* Notification Settings */}
           <Col md={12}>
-            <Card className="settings-card">
-              <Card.Body>
-                <div className="settings-section-header">
-                  <FaBell className="section-icon" />
-                  <h3 className="section-title">{t('notifications.title')}</h3>
-                </div>
+            <article className="ap-card">
+              <div className="ap-card-body">
+                <h3 className="ap-card-title settings-section-title">{t('notifications.title')}</h3>
                 <Form>
                   <Form.Check
                     type="switch"
@@ -132,53 +124,47 @@ const SettingsPage = () => {
                     defaultChecked
                   />
                 </Form>
-              </Card.Body>
-            </Card>
+              </div>
+            </article>
           </Col>
 
           {/* Security Settings */}
           <Col md={12}>
-            <Card className="settings-card">
-              <Card.Body>
-                <div className="settings-section-header">
-                  <FaShieldAlt className="section-icon" />
-                  <h3 className="section-title">{t('security.title')}</h3>
-                </div>
+            <article className="ap-card">
+              <div className="ap-card-body">
+                <h3 className="ap-card-title settings-section-title">{t('security.title')}</h3>
                 <div className="security-item">
                   <div className="security-info">
                     <strong>{t('security.password')}</strong>
                     <p className="security-text">{t('security.passwordLastChanged')}</p>
                   </div>
-                  <Button variant="outline-primary" size="sm">{t('security.changePassword')}</Button>
+                  <button type="button" className="ap-btn-secondary ap-btn-sm">{t('security.changePassword')}</button>
                 </div>
                 <div className="security-item">
                   <div className="security-info">
                     <strong>{t('security.twoFactor')}</strong>
                     <p className="security-text">
-                      <Badge bg="warning">{t('security.twoFactorNotEnabled')}</Badge> {t('security.twoFactorDescription')}
+                      <span className="ap-status ap-status-draft">{t('security.twoFactorNotEnabled')}</span> {t('security.twoFactorDescription')}
                     </p>
                   </div>
-                  <Button variant="outline-primary" size="sm">{t('security.enable2FA')}</Button>
+                  <button type="button" className="ap-btn-secondary ap-btn-sm">{t('security.enable2FA')}</button>
                 </div>
-              </Card.Body>
-            </Card>
+              </div>
+            </article>
           </Col>
 
           {/* Plan & Billing */}
           <Col md={12}>
-            <Card className="settings-card">
-              <Card.Body>
-                <div className="settings-section-header">
-                  <FaCreditCard className="section-icon" />
-                  <h3 className="section-title">{t('billing.title')}</h3>
-                </div>
+            <article className="ap-card">
+              <div className="ap-card-body">
+                <h3 className="ap-card-title settings-section-title">{t('billing.title')}</h3>
                 <div className="plan-info">
                   <div className="current-plan">
                     <div>
                       <h4 className="plan-name">{t('billing.planName')}</h4>
                       <p className="plan-description">{t('billing.planDescription')}</p>
                     </div>
-                    <Badge bg="success" className="plan-badge">{t('billing.active')}</Badge>
+                    <span className="ap-status ap-status-production">{t('billing.active')}</span>
                   </div>
                   <div className="billing-details">
                     <div className="billing-item">
@@ -191,12 +177,12 @@ const SettingsPage = () => {
                     </div>
                   </div>
                   <div className="settings-actions">
-                    <Button variant="outline-primary">{t('billing.manageSubscription')}</Button>
-                    <Button variant="link">{t('billing.viewHistory')}</Button>
+                    <button type="button" className="ap-btn-secondary">{t('billing.manageSubscription')}</button>
+                    <button type="button" className="ap-btn-ghost">{t('billing.viewHistory')}</button>
                   </div>
                 </div>
-              </Card.Body>
-            </Card>
+              </div>
+            </article>
           </Col>
         </Row>
       </div>
