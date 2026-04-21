@@ -520,6 +520,17 @@ const ChatPage = () => {
 
   return (
     <Layout>
+      <header className="ap-page-header chat-page-header">
+        <div>
+          <h1 className="ap-page-title">{t('title', 'AI Chat')}</h1>
+          <p className="ap-page-subtitle">{t('subtitle', 'Conversations with agents')}</p>
+        </div>
+        <div className="ap-page-actions">
+          <button type="button" className="ap-btn-primary" onClick={handleCreateSessionModal}>
+            + {t('newSession', 'New Session')}
+          </button>
+        </div>
+      </header>
       <Container fluid className="chat-page-container">
         <Row className="g-4">
           <Col lg={4} xl={3} className="chat-sessions-col">
@@ -776,14 +787,14 @@ const ChatPage = () => {
                               ) : '🎙️'}
                             </Button>
                           )}
-                          <Button
+                          <button
                             type="submit"
-                            variant="primary"
+                            className="ap-btn-primary"
                             disabled={postingMessage || (!messageDraft.trim() && !attachedFile) || isRecording}
                             style={{ flex: 1 }}
                           >
                             {postingMessage ? t('sending') : t('send')}
-                          </Button>
+                          </button>
                         </div>
                       </Col>
                     </Row>

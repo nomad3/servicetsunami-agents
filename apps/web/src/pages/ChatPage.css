@@ -1,4 +1,6 @@
-/* ═══ Chat Page — viewport-locked layout ═══ */
+/* Chat Page — consumes design tokens from tokens.css.
+   Shared layout/components (.ap-page-header, .ap-btn-*) live in components.css.
+   Everything below is chat-specific composition. */
 
 /* The entire chat page fills the viewport with no page-level scroll.
    Sessions list and chat messages scroll independently. */
@@ -35,6 +37,18 @@
   overflow: hidden;
 }
 
+/* Sessions list hover + active states use design tokens */
+.chat-sessions-col .list-group-item-action:hover {
+  background: var(--ap-primary-tint);
+  color: var(--ap-text);
+}
+
+.chat-sessions-col .list-group-item.active {
+  background: var(--ap-primary-tint);
+  color: var(--ap-primary);
+  border-left: 3px solid var(--ap-primary);
+}
+
 /* Chat markdown rendering */
 .chat-markdown p {
   margin-bottom: 0.5rem;
@@ -46,26 +60,26 @@
   width: 100%;
   border-collapse: collapse;
   margin: 0.5rem 0;
-  font-size: 0.85rem;
+  font-size: var(--ap-fs-sm);
 }
 .chat-markdown th,
 .chat-markdown td {
-  border: 1px solid var(--color-border, rgba(255,255,255,0.1));
+  border: 1px solid var(--ap-border);
   padding: 6px 10px;
   text-align: left;
 }
 .chat-markdown th {
-  background: var(--surface-elevated, rgba(255,255,255,0.05));
+  background: var(--ap-primary-tint);
   font-weight: 600;
 }
 .chat-markdown code {
-  background: var(--surface-elevated, rgba(255,255,255,0.08));
+  background: var(--ap-code-bg);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.85em;
 }
 .chat-markdown pre {
-  background: var(--surface-elevated, rgba(0,0,0,0.2));
+  background: var(--ap-code-bg);
   padding: 12px;
   border-radius: 8px;
   overflow-x: auto;
@@ -84,19 +98,19 @@
 }
 .chat-markdown hr {
   border: none;
-  border-top: 1px solid var(--color-border, rgba(255,255,255,0.1));
+  border-top: 1px solid var(--ap-border);
   margin: 0.75rem 0;
 }
 .chat-markdown strong {
   font-weight: 600;
 }
 .chat-markdown h1, .chat-markdown h2, .chat-markdown h3 {
-  font-size: 1rem;
+  font-size: var(--ap-fs-md);
   font-weight: 600;
   margin: 0.5rem 0 0.25rem;
 }
 .chat-markdown blockquote {
-  border-left: 3px solid var(--bs-info, #60a5fa);
+  border-left: 3px solid var(--ap-primary);
   padding-left: 12px;
   margin: 0.5rem 0;
   opacity: 0.85;
@@ -125,10 +139,10 @@
     width: 100% !important;
     max-width: 100% !important;
     overflow-y: auto;
-    border-bottom: 1px solid var(--bs-border-color, rgba(255,255,255,0.08));
+    border-bottom: 1px solid var(--ap-border);
   }
   .chat-sessions-col h3 {
-    font-size: 1rem;
+    font-size: var(--ap-fs-md);
   }
   .chat-sessions-col .list-group-item {
     padding: 6px 12px;
