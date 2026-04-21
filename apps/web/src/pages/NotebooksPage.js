@@ -2,7 +2,6 @@ import { useState } from 'react';
 import {
   Badge,
   Button,
-  Card,
   Col,
   Form,
   InputGroup,
@@ -13,10 +12,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import {
   FaBalanceScale,
-  FaBuilding,
-  FaCalendarCheck,
   FaChartLine,
-  FaClock,
   FaExchangeAlt,
   FaFileExport,
   FaFileInvoiceDollar,
@@ -27,7 +23,6 @@ import {
   FaTachometerAlt
 } from 'react-icons/fa';
 import Layout from '../components/Layout';
-import PremiumCard from '../components/common/PremiumCard';
 import './NotebooksPage.css';
 
 const CATEGORY_COLORS = {
@@ -192,95 +187,68 @@ const NotebooksPage = () => {
   return (
     <Layout>
       <div className="notebooks-page">
-        <div className="page-header mb-4">
+        <header className="ap-page-header">
           <div>
-            <h2 className="page-title">
-              <FaFileInvoiceDollar className="me-2" size={32} />
-              {t('title')}
-            </h2>
-            <p className="page-subtitle">
-              {t('subtitle')}
-            </p>
+            <h1 className="ap-page-title">{t('title')}</h1>
+            <p className="ap-page-subtitle">{t('subtitle')}</p>
           </div>
-          <Badge bg="primary" className="bg-opacity-25 text-primary border border-primary px-3 py-2">
-            {t('enterpriseSuite')}
-          </Badge>
-        </div>
+          <div className="ap-page-actions">
+            <span className="ap-badge-outline">{t('enterpriseSuite')}</span>
+          </div>
+        </header>
 
         <Row className="g-4 mb-4">
           <Col md={3}>
-            <PremiumCard className="h-100">
-              <div className="d-flex align-items-center justify-content-between mb-3">
-                <div className="icon-pill-sm">
-                  <FaFileInvoiceDollar size={20} />
-                </div>
-                <Badge bg="primary" className="bg-opacity-25 text-primary border border-primary">Reports</Badge>
+            <article className="ap-card h-100">
+              <div className="ap-card-body">
+                <div className="notebooks-stat-label">{t('stats.totalReports')}</div>
+                <div className="notebooks-stat-value">{REPORT_TEMPLATES.length}</div>
+                <div className="notebooks-stat-hint">{t('stats.financialTemplates')}</div>
               </div>
-              <h6 className="text-soft mb-1">{t('stats.totalReports')}</h6>
-              <div className="display-6 fw-bold text-primary">{REPORT_TEMPLATES.length}</div>
-              <div className="mt-2 small text-info">{t('stats.financialTemplates')}</div>
-            </PremiumCard>
+            </article>
           </Col>
           <Col md={3}>
-            <PremiumCard className="h-100">
-              <div className="d-flex align-items-center justify-content-between mb-3">
-                <div className="icon-pill-sm">
-                  <FaBuilding size={20} />
-                </div>
-                <Badge bg="success" className="bg-opacity-25 text-success border border-success">Coverage</Badge>
+            <article className="ap-card h-100">
+              <div className="ap-card-body">
+                <div className="notebooks-stat-label">{t('stats.coverage')}</div>
+                <div className="notebooks-stat-value">All</div>
+                <div className="notebooks-stat-hint">{t('stats.allUnits')}</div>
               </div>
-              <h6 className="text-soft mb-1">{t('stats.coverage')}</h6>
-              <div className="display-6 fw-bold text-primary">All</div>
-              <div className="mt-2 small text-success">{t('stats.allUnits')}</div>
-            </PremiumCard>
+            </article>
           </Col>
           <Col md={3}>
-            <PremiumCard className="h-100">
-              <div className="d-flex align-items-center justify-content-between mb-3">
-                <div className="icon-pill-sm">
-                  <FaClock size={20} />
-                </div>
-                <Badge bg="warning" className="bg-opacity-25 text-warning border border-warning">Scheduled</Badge>
+            <article className="ap-card h-100">
+              <div className="ap-card-body">
+                <div className="notebooks-stat-label">{t('stats.automated')}</div>
+                <div className="notebooks-stat-value">{scheduledCount}</div>
+                <div className="notebooks-stat-hint">{t('stats.ofScheduled', { total: REPORT_TEMPLATES.length })}</div>
               </div>
-              <h6 className="text-soft mb-1">{t('stats.automated')}</h6>
-              <div className="display-6 fw-bold text-primary">{scheduledCount}</div>
-              <div className="mt-2 small text-warning">{t('stats.ofScheduled', { total: REPORT_TEMPLATES.length })}</div>
-            </PremiumCard>
+            </article>
           </Col>
           <Col md={3}>
-            <PremiumCard className="h-100">
-              <div className="d-flex align-items-center justify-content-between mb-3">
-                <div className="icon-pill-sm">
-                  <FaCalendarCheck size={20} />
-                </div>
-                <Badge bg="info" className="bg-opacity-25 text-info border border-info">Fresh</Badge>
+            <article className="ap-card h-100">
+              <div className="ap-card-body">
+                <div className="notebooks-stat-label">{t('stats.lastUpdated')}</div>
+                <div className="notebooks-stat-value">{t('stats.today')}</div>
+                <div className="notebooks-stat-hint">{t('stats.allCurrent')}</div>
               </div>
-              <h6 className="text-soft mb-1">{t('stats.lastUpdated')}</h6>
-              <div className="display-6 fw-bold text-primary">{t('stats.today')}</div>
-              <div className="mt-2 small text-info">{t('stats.allCurrent')}</div>
-            </PremiumCard>
+            </article>
           </Col>
         </Row>
 
-        <Card className="data-card mb-4">
-          <Card.Body>
-            <InputGroup>
-              <InputGroup.Text className="search-icon-wrapper">
-                <FaSearch />
-              </InputGroup.Text>
-              <Form.Control
-                type="text"
-                placeholder={t('searchPlaceholder')}
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="search-input"
-              />
-            </InputGroup>
-          </Card.Body>
-        </Card>
+        <div className="ap-search-wrap mb-4" style={{ maxWidth: 'none' }}>
+          <FaSearch size={14} />
+          <input
+            type="text"
+            className="ap-search-input"
+            placeholder={t('searchPlaceholder')}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
 
-        <Card className="data-card">
-          <Table hover responsive className="reports-table mb-0">
+        <article className="ap-card">
+          <Table hover responsive className="reports-table mb-0 ap-table">
             <thead>
               <tr>
                 <th>{t('table.reportName')}</th>
@@ -301,9 +269,7 @@ const NotebooksPage = () => {
                   >
                     <td>
                       <div className="d-flex align-items-center gap-2">
-                        <div className="report-icon">
-                          <IconComponent size={18} />
-                        </div>
+                        <IconComponent size={16} aria-hidden="true" />
                         <div>
                           <strong>{report.name}</strong>
                           <div className="text-muted small">{report.description}</div>
@@ -318,8 +284,8 @@ const NotebooksPage = () => {
                         {report.category}
                       </Badge>
                     </td>
-                    <td className="text-soft">{report.entities}</td>
-                    <td className="text-soft">{report.frequency}</td>
+                    <td className="text-muted">{report.entities}</td>
+                    <td className="text-muted">{report.frequency}</td>
                     <td>
                       <Badge
                         bg={STATUS_COLORS[report.status]}
@@ -340,7 +306,7 @@ const NotebooksPage = () => {
               )}
             </tbody>
           </Table>
-        </Card>
+        </article>
 
         <Modal
           show={!!selectedReport}
@@ -353,9 +319,7 @@ const NotebooksPage = () => {
             <>
               <Modal.Header closeButton>
                 <Modal.Title className="d-flex align-items-center gap-3">
-                  <div className="report-modal-icon">
-                    <selectedReport.icon size={22} />
-                  </div>
+                  <selectedReport.icon size={20} aria-hidden="true" />
                   <div>
                     <div>{selectedReport.name}</div>
                     <div className="d-flex align-items-center gap-2 mt-1">
@@ -373,9 +337,9 @@ const NotebooksPage = () => {
                 </Modal.Title>
               </Modal.Header>
               <Modal.Body>
-                <p className="text-soft mb-3">{selectedReport.description}</p>
+                <p className="text-muted mb-3">{selectedReport.description}</p>
                 <div className="table-responsive">
-                  <Table className="report-data-table mb-0">
+                  <Table className="report-data-table ap-table mb-0">
                     <thead>
                       <tr>
                         {selectedReport.data.columns.map((col) => (
@@ -398,14 +362,14 @@ const NotebooksPage = () => {
                 </div>
               </Modal.Body>
               <Modal.Footer>
-                <Button variant="outline-secondary" onClick={() => setSelectedReport(null)}>
-                  <FaFileExport className="me-1" />
+                <button type="button" className="ap-btn-secondary" onClick={() => setSelectedReport(null)}>
+                  <FaFileExport size={12} />
                   {t('modal.exportCsv')}
-                </Button>
-                <Button variant="outline-primary">
-                  <FaFilePdf className="me-1" />
+                </button>
+                <button type="button" className="ap-btn-primary">
+                  <FaFilePdf size={12} />
                   {t('modal.exportPdf')}
-                </Button>
+                </button>
               </Modal.Footer>
             </>
           )}

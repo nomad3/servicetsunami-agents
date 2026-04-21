@@ -3,78 +3,59 @@
   margin: 0 auto;
 }
 
-/* Report table - reuses agents-table pattern */
-.reports-table {
-  color: #1a2b3c;
-}
-
-.reports-table thead th {
-  background: rgba(43, 125, 233, 0.06);
-  border-bottom: 2px solid rgba(43, 125, 233, 0.2);
-  color: rgba(45, 65, 90, 0.85);
+/* Stat tile typography */
+.notebooks-stat-label {
+  color: var(--ap-text-subtle);
+  font-size: var(--ap-fs-xs);
   font-weight: 600;
-  font-size: 0.875rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 1rem;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--ap-space-2);
 }
 
-.reports-table tbody tr {
-  border-bottom: 1px solid rgba(180, 200, 220, 0.2);
-  transition: all 0.2s ease;
+.notebooks-stat-value {
+  color: var(--ap-text);
+  font-size: var(--ap-fs-xl);
+  font-weight: 700;
+  line-height: var(--ap-lh-tight);
 }
 
-.reports-table tbody td {
-  padding: 1rem;
-  vertical-align: middle;
+.notebooks-stat-hint {
+  color: var(--ap-text-muted);
+  font-size: var(--ap-fs-xs);
+  margin-top: var(--ap-space-2);
 }
 
+/* Report table rows are clickable */
 .report-row {
   cursor: pointer;
 }
 
-.report-row:hover {
-  background: rgba(43, 125, 233, 0.04) !important;
-}
-
-.report-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, rgba(43, 125, 233, 0.15), rgba(94, 197, 176, 0.12));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #2b7de9;
-  border: 1px solid rgba(43, 125, 233, 0.25);
-  flex-shrink: 0;
-}
-
-/* Report detail modal */
+/* Report detail modal — keep neutral, use tokens */
 .report-modal .modal-content {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.95) 100%);
-  border: 1px solid rgba(180, 200, 220, 0.3);
-  border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(100, 130, 170, 0.15);
+  background: var(--ap-card-bg);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--ap-radius-lg);
+  box-shadow: var(--ap-shadow-card-hover);
 }
 
 .report-modal .modal-header {
-  border-bottom: 1px solid rgba(180, 200, 220, 0.25);
-  background: rgba(43, 125, 233, 0.04);
+  border-bottom: 1px solid var(--ap-border);
+  background: var(--ap-primary-tint);
 }
 
 .report-modal .modal-title {
-  color: #1a2b3c;
+  color: var(--ap-text);
   font-weight: 600;
 }
 
 .report-modal .modal-body {
-  padding: 1.5rem;
+  padding: var(--ap-space-6);
 }
 
 .report-modal .modal-footer {
-  border-top: 1px solid rgba(180, 200, 220, 0.25);
-  background: rgba(240, 245, 250, 0.5);
+  border-top: 1px solid var(--ap-border);
+  background: var(--ap-page-bg);
 }
 
 .report-modal .btn-close {
@@ -86,76 +67,13 @@
   opacity: 1;
 }
 
-.report-modal-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, rgba(43, 125, 233, 0.15), rgba(94, 197, 176, 0.12));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #2b7de9;
-  border: 1px solid rgba(43, 125, 233, 0.25);
-  flex-shrink: 0;
-}
-
-/* Financial data table inside modal */
-.report-data-table {
-  color: #1a2b3c;
-}
-
-.report-data-table thead th {
-  background: rgba(43, 125, 233, 0.05);
-  border-bottom: 2px solid rgba(43, 125, 233, 0.15);
-  color: rgba(45, 65, 90, 0.75);
-  font-weight: 600;
-  font-size: 0.825rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.75rem;
-}
-
-.report-data-table tbody tr {
-  border-bottom: 1px solid rgba(180, 200, 220, 0.15);
-}
-
-.report-data-table tbody tr:hover {
-  background: rgba(43, 125, 233, 0.03);
-}
-
+/* Financial data table inside modal — tabular numerics */
 .report-data-table tbody td {
-  padding: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 768px) {
   .reports-table {
-    font-size: 0.875rem;
-  }
-
-  .reports-table thead {
-    display: none;
-  }
-
-  .reports-table tbody tr {
-    display: block;
-    margin-bottom: 1rem;
-    border: 1px solid rgba(180, 200, 220, 0.3);
-    border-radius: 10px;
-    padding: 1rem;
-  }
-
-  .reports-table tbody td {
-    display: block;
-    text-align: right;
-    padding: 0.5rem 0;
-    border: none;
-  }
-
-  .reports-table tbody td::before {
-    content: attr(data-label);
-    float: left;
-    font-weight: 600;
-    color: rgba(45, 65, 90, 0.6);
+    font-size: var(--ap-fs-sm);
   }
 }
