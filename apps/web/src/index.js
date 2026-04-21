@@ -1,5 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './styles/tokens.css';
+import './styles/components.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './index.css';
 import './i18n/i18n';

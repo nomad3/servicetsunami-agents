@@ -1,0 +1,389 @@
+/* Shared component classes for internal AgentProvision pages.
+   Consumes tokens from tokens.css. Page CSS files import this and compose
+   additional page-specific classes on top. */
+
+/* ==========================================================================
+   Page header — title + subtitle + right-aligned actions
+   Used by every internal page (AgentsPage, SkillsPage, WorkflowsPage, etc.)
+   ========================================================================== */
+
+.ap-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--ap-space-4);
+  margin-bottom: var(--ap-space-6);
+}
+
+.ap-page-title {
+  color: var(--ap-text);
+  font-family: var(--ap-font-sans);
+  font-size: var(--ap-fs-xl);
+  font-weight: 700;
+  line-height: var(--ap-lh-tight);
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.ap-page-subtitle {
+  color: var(--ap-text-muted);
+  font-size: var(--ap-fs-sm);
+  margin: var(--ap-space-1) 0 0;
+}
+
+.ap-page-actions {
+  display: flex;
+  gap: var(--ap-space-2);
+  flex-wrap: wrap;
+}
+
+/* ==========================================================================
+   Section label — uppercase eyebrow (e.g. "AGENTS", "EXTERNAL AGENTS")
+   ========================================================================== */
+
+.ap-section-label {
+  color: var(--ap-text-subtle);
+  font-size: var(--ap-fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 var(--ap-space-3);
+}
+
+/* ==========================================================================
+   Card — flat white surface with subtle border + shadow
+   NO gradients, NO decorative icons inside. Content first.
+   ========================================================================== */
+
+.ap-card {
+  background: var(--ap-card-bg);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--ap-radius-lg);
+  box-shadow: var(--ap-shadow-card);
+  transition: var(--ap-transition);
+  overflow: hidden;
+}
+
+.ap-card:hover {
+  border-color: var(--ap-border-strong);
+  background: var(--ap-card-bg-hover);
+  box-shadow: var(--ap-shadow-card-hover);
+}
+
+.ap-card-body {
+  padding: var(--ap-space-5);
+}
+
+.ap-card-title {
+  color: var(--ap-text);
+  font-size: var(--ap-fs-md);
+  font-weight: 600;
+  margin: 0 0 var(--ap-space-2);
+}
+
+.ap-card-text {
+  color: var(--ap-text-muted);
+  font-size: var(--ap-fs-sm);
+  line-height: var(--ap-lh-normal);
+  margin: 0;
+}
+
+/* ==========================================================================
+   Buttons — primary, secondary, ghost, danger. Flat. No gradients.
+   ========================================================================== */
+
+.ap-btn,
+.ap-btn-primary,
+.ap-btn-secondary,
+.ap-btn-ghost,
+.ap-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ap-space-2);
+  font-family: var(--ap-font-sans);
+  font-size: var(--ap-fs-sm);
+  font-weight: 500;
+  line-height: var(--ap-lh-tight);
+  padding: 0.45rem 0.9rem;
+  border-radius: var(--ap-radius-md);
+  cursor: pointer;
+  transition: var(--ap-transition);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.ap-btn-primary {
+  background: var(--ap-primary);
+  color: #ffffff;
+  border-color: var(--ap-primary);
+}
+
+.ap-btn-primary:hover {
+  background: var(--ap-primary-hover);
+  border-color: var(--ap-primary-hover);
+}
+
+.ap-btn-secondary {
+  background: var(--ap-card-bg);
+  color: var(--ap-text);
+  border-color: var(--ap-border);
+}
+
+.ap-btn-secondary:hover {
+  background: var(--ap-primary-tint);
+  border-color: var(--ap-border-strong);
+  color: var(--ap-primary);
+}
+
+.ap-btn-ghost {
+  background: transparent;
+  color: var(--ap-text-muted);
+  border-color: transparent;
+  padding: 0.35rem 0.6rem;
+}
+
+.ap-btn-ghost:hover {
+  background: var(--ap-primary-tint);
+  color: var(--ap-primary);
+}
+
+.ap-btn-danger {
+  background: transparent;
+  color: var(--ap-danger);
+  border-color: transparent;
+  padding: 0.35rem 0.6rem;
+}
+
+.ap-btn-danger:hover {
+  background: var(--ap-danger-tint);
+}
+
+.ap-btn:focus-visible,
+.ap-btn-primary:focus-visible,
+.ap-btn-secondary:focus-visible,
+.ap-btn-ghost:focus-visible,
+.ap-btn-danger:focus-visible {
+  outline: 2px solid var(--ap-primary-ring);
+  outline-offset: 2px;
+}
+
+.ap-btn-sm {
+  font-size: var(--ap-fs-xs);
+  padding: 0.3rem 0.7rem;
+}
+
+/* ==========================================================================
+   Status badge — small capsule with colored fill (e.g. Production, Draft)
+   Badge tier — outlined capsule for neutral metadata (e.g. "full tier")
+   ========================================================================== */
+
+.ap-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ap-space-1);
+  padding: 2px 8px;
+  border-radius: var(--ap-radius-sm);
+  font-size: var(--ap-fs-xs);
+  font-weight: 600;
+  line-height: var(--ap-lh-tight);
+  text-transform: capitalize;
+  border: 1px solid transparent;
+}
+
+.ap-status-production { background: var(--ap-success-tint); color: var(--ap-success); border-color: var(--ap-success-tint); }
+.ap-status-staging    { background: var(--ap-primary-tint); color: var(--ap-primary); border-color: var(--ap-primary-tint); }
+.ap-status-draft      { background: var(--ap-warning-tint); color: var(--ap-warning); border-color: var(--ap-warning-tint); }
+.ap-status-deprecated { background: var(--ap-danger-tint);  color: var(--ap-danger);  border-color: var(--ap-danger-tint); }
+
+.ap-status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.ap-badge-outline {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--ap-radius-sm);
+  font-size: var(--ap-fs-xs);
+  font-weight: 500;
+  color: var(--ap-text-muted);
+  background: transparent;
+  border: 1px solid var(--ap-border);
+}
+
+.ap-badge-solid {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--ap-radius-sm);
+  font-size: var(--ap-fs-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* ==========================================================================
+   Filter chip — used for category filters (Skills), lifecycle filter (Agents)
+   ========================================================================== */
+
+.ap-chip-filter {
+  font-family: var(--ap-font-sans);
+  font-size: var(--ap-fs-sm);
+  font-weight: 500;
+  line-height: var(--ap-lh-tight);
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--ap-radius-md);
+  cursor: pointer;
+  background: var(--ap-card-bg);
+  color: var(--ap-text-muted);
+  border: 1px solid var(--ap-border);
+  transition: var(--ap-transition);
+  white-space: nowrap;
+}
+
+.ap-chip-filter:hover {
+  background: var(--ap-primary-tint);
+  color: var(--ap-text);
+  border-color: var(--ap-border-strong);
+}
+
+.ap-chip-filter.active {
+  background: var(--ap-primary-tint);
+  color: var(--ap-primary);
+  border-color: var(--ap-border-strong);
+  font-weight: 600;
+}
+
+.ap-chip-filter:focus-visible {
+  outline: 2px solid var(--ap-primary-ring);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Search input (icon prefix + text field)
+   ========================================================================== */
+
+.ap-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  max-width: 480px;
+  background: var(--ap-card-bg);
+  border: 1px solid var(--ap-border);
+  border-radius: var(--ap-radius-md);
+  padding: 0 var(--ap-space-3);
+  transition: var(--ap-transition);
+}
+
+.ap-search-wrap:focus-within {
+  border-color: var(--ap-border-strong);
+  box-shadow: 0 0 0 3px var(--ap-primary-ring);
+}
+
+.ap-search-wrap svg {
+  color: var(--ap-text-subtle);
+  flex-shrink: 0;
+}
+
+.ap-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: var(--ap-fs-sm);
+  color: var(--ap-text);
+  padding: var(--ap-space-2) var(--ap-space-2);
+}
+
+.ap-search-input::placeholder {
+  color: var(--ap-text-subtle);
+}
+
+/* ==========================================================================
+   Table — dense, bordered, hover highlight
+   ========================================================================== */
+
+.ap-table {
+  width: 100%;
+  font-size: var(--ap-fs-sm);
+  color: var(--ap-text);
+  border-collapse: collapse;
+}
+
+.ap-table thead th {
+  background: var(--ap-primary-tint);
+  color: var(--ap-text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: var(--ap-fs-xs);
+  letter-spacing: 0.05em;
+  padding: var(--ap-space-3) var(--ap-space-4);
+  border-bottom: 2px solid var(--ap-border-strong);
+  text-align: left;
+}
+
+.ap-table tbody td {
+  padding: var(--ap-space-3) var(--ap-space-4);
+  border-bottom: 1px solid var(--ap-border);
+  vertical-align: middle;
+}
+
+.ap-table tbody tr:hover {
+  background: var(--ap-primary-tint);
+}
+
+/* ==========================================================================
+   Inline link button — <button> styled as anchor (for flow text)
+   ========================================================================== */
+
+.ap-inline-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ap-primary);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+.ap-inline-link:hover {
+  color: var(--ap-primary-hover);
+}
+
+.ap-inline-link:focus-visible {
+  outline: 2px solid var(--ap-primary-ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* ==========================================================================
+   Empty state — used when a list/grid is empty
+   ========================================================================== */
+
+.ap-empty {
+  text-align: center;
+  padding: var(--ap-space-10) var(--ap-space-6);
+  background: var(--ap-card-bg);
+  border: 1px dashed var(--ap-border);
+  border-radius: var(--ap-radius-lg);
+  color: var(--ap-text-muted);
+}
+
+.ap-empty-title {
+  font-size: var(--ap-fs-md);
+  font-weight: 600;
+  color: var(--ap-text);
+  margin: 0 0 var(--ap-space-2);
+}
+
+.ap-empty-text {
+  font-size: var(--ap-fs-sm);
+  color: var(--ap-text-muted);
+  margin: 0 0 var(--ap-space-4);
+}
