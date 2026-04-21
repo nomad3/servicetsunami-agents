@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Container, Spinner } from 'react-bootstrap';
+import { Alert, Container, Spinner } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import { FaCloudUploadAlt, FaFileAlt, FaLightbulb, FaPlus, FaSearch, FaTrash } from 'react-icons/fa';
 import EntityCard from '../components/memory/EntityCard';
@@ -206,22 +206,31 @@ function MemoryPage() {
     <Layout>
       <Container fluid className="py-2">
         {/* Page Header */}
-        <div className="memory-page-header">
+        <header className="ap-page-header">
           <div>
-            <h2 className="page-title">{t('title')}</h2>
-            <p className="page-subtitle">{t('subtitle')}</p>
+            <h1 className="ap-page-title">{t('title')}</h1>
+            <p className="ap-page-subtitle">{t('subtitle')}</p>
           </div>
-          <Button variant="primary" size="sm" onClick={() => setShowCreateModal(true)}>
-            <FaPlus size={11} className="me-1" /> {t('addEntity')}
-          </Button>
-        </div>
+          <div className="ap-page-actions">
+            <button
+              type="button"
+              className="ap-btn-primary ap-btn-sm"
+              onClick={() => setShowCreateModal(true)}
+            >
+              <FaPlus size={11} /> {t('addEntity')}
+            </button>
+          </div>
+        </header>
 
         {/* Tabs */}
-        <div className="memory-tabs">
+        <div className="ap-chip-row" role="tablist">
           {['overview', 'entities', 'relations', 'memories', 'episodes', 'activity', 'import'].map(tab => (
             <button
               key={tab}
-              className={`memory-tab-btn ${activeTab === tab ? 'active' : ''}`}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab}
+              className={`ap-chip-filter ${activeTab === tab ? 'active' : ''}`}
               onClick={() => setActiveTab(tab)}
             >
               {tabLabels[tab]}
@@ -283,10 +292,14 @@ function MemoryPage() {
                   {t('entities.selectAll')}
                 </label>
                 {selectedIds.size > 0 && (
-                  <Button variant="outline-danger" size="sm" onClick={handleBulkDelete}>
-                    <FaTrash size={11} className="me-1" />
+                  <button
+                    type="button"
+                    className="ap-btn-danger ap-btn-sm"
+                    onClick={handleBulkDelete}
+                  >
+                    <FaTrash size={11} />
                     {t('entities.deleteCount', { count: selectedIds.size })}
-                  </Button>
+                  </button>
                 )}
               </div>
             </div>
@@ -322,14 +335,14 @@ function MemoryPage() {
 
                 {hasMore && (
                   <div className="memory-load-more">
-                    <Button
-                      variant="outline-secondary"
-                      size="sm"
+                    <button
+                      type="button"
+                      className="ap-btn-secondary ap-btn-sm"
                       onClick={() => loadEntities(false)}
                       disabled={loading}
                     >
                       {loading ? <Spinner size="sm" animation="border" /> : t('entities.loadMore')}
-                    </Button>
+                    </button>
                   </div>
                 )}
               </>
@@ -346,9 +359,9 @@ function MemoryPage() {
         {activeTab === 'activity' && <ActivityFeed />}
 
         {activeTab === 'import' && (
-          <div style={{ maxWidth: 700 }}>
-            <h5 className="mb-1" style={{ color: 'var(--color-foreground)' }}>{t('import.title')}</h5>
-            <p className="text-muted small mb-3">{t('import.subtitle')}</p>
+          <div className="memory-import">
+            <h5 className="memory-import-title">{t('import.title')}</h5>
+            <p className="memory-import-subtitle">{t('import.subtitle')}</p>
 
             {importMessage && (
               <Alert variant={importMessage.type} dismissible onClose={() => setImportMessage(null)}>
@@ -356,42 +369,33 @@ function MemoryPage() {
               </Alert>
             )}
 
-            <div className="d-flex gap-3 flex-wrap">
+            <div className="memory-import-tiles">
               {[
-                { id: 'chatgpt', label: t('import.chatgpt'), file: 'conversations.json', color: '#34d399', provider: 'chatgpt' },
-                { id: 'claude', label: t('import.claude'), file: 'conversations.json', color: '#fbbf24', provider: 'claude' },
+                { id: 'chatgpt', label: t('import.chatgpt'), file: 'conversations.json', accent: 'var(--ap-success)', provider: 'chatgpt' },
+                { id: 'claude', label: t('import.claude'), file: 'conversations.json', accent: 'var(--ap-warning)', provider: 'claude' },
               ].map(imp => (
-                <div
-                  key={imp.id}
-                  style={{
-                    flex: 1,
-                    minWidth: 260,
-                    padding: '1.5rem',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: 10,
-                    background: 'var(--surface-elevated)',
-                    textAlign: 'center',
-                  }}
-                >
-                  <FaFileAlt size={36} style={{ color: imp.color, marginBottom: '0.75rem' }} />
-                  <h6 style={{ color: 'var(--color-foreground)' }}>{imp.label}</h6>
-                  <p className="text-muted small mb-3">{t('import.uploadYour')} <code>{imp.file}</code></p>
-                  <input
-                    type="file"
-                    id={`${imp.id}-upload`}
-                    accept=".json"
-                    style={{ display: 'none' }}
-                    onChange={(e) => handleImport(e, imp.provider)}
-                    disabled={importing}
-                  />
-                  <Button
-                    variant={`outline-${imp.id === 'chatgpt' ? 'success' : 'warning'}`}
-                    size="sm"
-                    onClick={() => document.getElementById(`${imp.id}-upload`).click()}
-                    disabled={importing}
-                  >
-                    {importing ? <Spinner animation="border" size="sm" /> : <><FaCloudUploadAlt className="me-1" /> {t('import.upload')}</>}
-                  </Button>
+                <div key={imp.id} className="ap-card memory-import-tile">
+                  <div className="ap-card-body memory-import-tile-body">
+                    <FaFileAlt size={36} className="memory-import-icon" style={{ color: imp.accent }} />
+                    <h6 className="ap-card-title">{imp.label}</h6>
+                    <p className="memory-import-hint">{t('import.uploadYour')} <code>{imp.file}</code></p>
+                    <input
+                      type="file"
+                      id={`${imp.id}-upload`}
+                      accept=".json"
+                      style={{ display: 'none' }}
+                      onChange={(e) => handleImport(e, imp.provider)}
+                      disabled={importing}
+                    />
+                    <button
+                      type="button"
+                      className="ap-btn-secondary ap-btn-sm"
+                      onClick={() => document.getElementById(`${imp.id}-upload`).click()}
+                      disabled={importing}
+                    >
+                      {importing ? <Spinner animation="border" size="sm" /> : <><FaCloudUploadAlt /> {t('import.upload')}</>}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
