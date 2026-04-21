@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Badge, Button, Card, Col, Form, Modal, Row, Spinner } from 'react-bootstrap';
+import { Alert, Badge, Button, Col, Form, Modal, Row, Spinner } from 'react-bootstrap';
 import {
   FaBolt, FaCheck, FaClock, FaCog, FaEdit, FaPause, FaPlay, FaPlus, FaRocket,
   FaStore, FaTimesCircle, FaTrash,
@@ -38,49 +38,51 @@ function WorkflowCard({ workflow, onRun, onToggle, onDelete, onSelect, onEdit })
   const trigger = workflow.trigger_config?.type || 'manual';
 
   return (
-    <Card
-      className="h-100 border-0 shadow-sm"
-      style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
-      onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.1)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}
+    <article
+      className="ap-card h-100"
+      style={{ cursor: 'pointer' }}
       onClick={() => onSelect(workflow)}
     >
-      <Card.Body className="p-4">
+      <div className="ap-card-body">
         <div className="d-flex justify-content-between align-items-start mb-3">
           <div className="d-flex align-items-center gap-2">
             <Badge bg={statusColors[workflow.status]} className="text-uppercase" style={{ fontSize: '0.65rem' }}>
               <StatusIcon size={10} className="me-1" />
               {workflow.status}
             </Badge>
-            <Badge bg="outline-secondary" className="border" style={{ fontSize: '0.65rem', color: 'var(--color-muted)' }}>
+            <span className="ap-badge-outline">
               {triggerLabels[trigger] || trigger}
-            </Badge>
+            </span>
           </div>
           <div className="d-flex gap-1">
             {workflow.status === 'active' ? (
-              <Button size="sm" variant="outline-warning" onClick={(e) => { e.stopPropagation(); onToggle(workflow.id, 'pause'); }} title="Pause">
+              <button type="button" className="ap-btn-ghost" title="Pause"
+                onClick={(e) => { e.stopPropagation(); onToggle(workflow.id, 'pause'); }}>
                 <FaPause size={10} />
-              </Button>
+              </button>
             ) : workflow.status !== 'archived' ? (
-              <Button size="sm" variant="outline-success" onClick={(e) => { e.stopPropagation(); onToggle(workflow.id, 'activate'); }} title="Activate">
+              <button type="button" className="ap-btn-ghost" title="Activate"
+                onClick={(e) => { e.stopPropagation(); onToggle(workflow.id, 'activate'); }}>
                 <FaPlay size={10} />
-              </Button>
+              </button>
             ) : null}
-            <Button size="sm" variant="outline-secondary" onClick={(e) => { e.stopPropagation(); onEdit(workflow.id); }} title="Edit in builder">
+            <button type="button" className="ap-btn-ghost" title="Edit in builder"
+              onClick={(e) => { e.stopPropagation(); onEdit(workflow.id); }}>
               <FaEdit size={10} />
-            </Button>
-            <Button size="sm" variant="outline-primary" onClick={(e) => { e.stopPropagation(); onRun(workflow.id); }} title="Run now">
+            </button>
+            <button type="button" className="ap-btn-ghost" title="Run now"
+              onClick={(e) => { e.stopPropagation(); onRun(workflow.id); }}>
               <FaRocket size={10} />
-            </Button>
+            </button>
           </div>
         </div>
 
-        <h5 className="fw-bold mb-1" style={{ fontSize: '1rem' }}>{workflow.name}</h5>
-        <p className="text-muted mb-3" style={{ fontSize: '0.82rem', lineHeight: 1.4 }}>
+        <h3 className="ap-card-title">{workflow.name}</h3>
+        <p className="ap-card-text mb-3">
           {workflow.description || 'No description'}
         </p>
 
-        <div className="d-flex justify-content-between align-items-center" style={{ fontSize: '0.75rem', color: 'var(--color-muted)' }}>
+        <div className="d-flex justify-content-between align-items-center" style={{ fontSize: 'var(--ap-fs-xs)', color: 'var(--ap-text-muted)' }}>
           <span><FaBolt className="me-1" />{stepCount} steps</span>
           <span><FaPlay className="me-1" />{workflow.run_count || 0} runs</span>
           {workflow.success_rate != null && (
@@ -94,12 +96,12 @@ function WorkflowCard({ workflow, onRun, onToggle, onDelete, onSelect, onEdit })
         {workflow.tags?.length > 0 && (
           <div className="mt-2 d-flex gap-1 flex-wrap">
             {workflow.tags.map(tag => (
-              <Badge key={tag} bg="light" text="dark" style={{ fontSize: '0.65rem' }}>{tag}</Badge>
+              <span key={tag} className="ap-badge-outline">{tag}</span>
             ))}
           </div>
         )}
-      </Card.Body>
-    </Card>
+      </div>
+    </article>
   );
 }
 
@@ -318,30 +320,30 @@ export default function DynamicWorkflowsTab() {
           placeholder="Search workflows..."
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          style={{ maxWidth: 300, fontSize: '0.85rem' }}
+          style={{ maxWidth: 300, fontSize: 'var(--ap-fs-sm)' }}
         />
         <div className="d-flex gap-2">
-          <Button size="sm" variant="outline-secondary" onClick={loadWorkflows}>
+          <button type="button" className="ap-btn-secondary ap-btn-sm" onClick={loadWorkflows}>
             Refresh
-          </Button>
-          <Button size="sm" onClick={() => setShowCreate(true)}>
-            <FaPlus className="me-1" /> New Workflow
-          </Button>
+          </button>
+          <button type="button" className="ap-btn-primary ap-btn-sm" onClick={() => setShowCreate(true)}>
+            <FaPlus /> New Workflow
+          </button>
         </div>
       </div>
 
       {filtered.length === 0 ? (
-        <div className="text-center py-5" style={{ color: 'var(--color-muted)' }}>
+        <div className="ap-empty">
           <FaBolt size={40} className="mb-3" style={{ opacity: 0.3 }} />
-          <p style={{ fontSize: '0.95rem' }}>No dynamic workflows yet</p>
-          <p style={{ fontSize: '0.82rem' }}>Create your first workflow or install a template from the marketplace.</p>
+          <div className="ap-empty-title">No dynamic workflows yet</div>
+          <div className="ap-empty-text">Create your first workflow or install a template from the marketplace.</div>
           <div className="d-flex gap-2 justify-content-center mt-3">
-            <Button size="sm" onClick={() => setShowCreate(true)}>
-              <FaPlus className="me-1" /> Create Workflow
-            </Button>
-            <Button size="sm" variant="outline-secondary">
-              <FaStore className="me-1" /> Browse Templates
-            </Button>
+            <button type="button" className="ap-btn-primary ap-btn-sm" onClick={() => setShowCreate(true)}>
+              <FaPlus /> Create Workflow
+            </button>
+            <button type="button" className="ap-btn-secondary ap-btn-sm">
+              <FaStore /> Browse Templates
+            </button>
           </div>
         </div>
       ) : (

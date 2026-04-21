@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Button, Badge, Spinner } from 'react-bootstrap';
+import { Row, Col, Spinner } from 'react-bootstrap';
 import { FiDownload, FiEye } from 'react-icons/fi';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -36,9 +36,9 @@ export default function TemplatesTab() {
 
   if (templates.length === 0) {
     return (
-      <div className="text-center p-5 template-empty">
-        <h5>{t('templates.noTemplates')}</h5>
-        <p>{t('templates.noTemplatesDesc')}</p>
+      <div className="ap-empty">
+        <div className="ap-empty-title">{t('templates.noTemplates')}</div>
+        <div className="ap-empty-text">{t('templates.noTemplatesDesc')}</div>
       </div>
     );
   }
@@ -47,32 +47,33 @@ export default function TemplatesTab() {
     <Row xs={1} md={2} lg={3} className="g-3">
       {templates.map((tmpl) => (
         <Col key={tmpl.id}>
-          <Card className="h-100 template-card">
-            <Card.Body>
-              <Card.Title style={{ fontSize: 14 }}>{tmpl.name}</Card.Title>
-              <Card.Text className="card-text">
-                {tmpl.description}
-              </Card.Text>
+          <article className="ap-card template-card h-100">
+            <div className="ap-card-body">
+              <h3 className="ap-card-title">{tmpl.name}</h3>
+              <p className="ap-card-text card-text">{tmpl.description}</p>
               <div className="d-flex gap-1 flex-wrap">
-                <Badge bg="secondary" style={{ fontSize: 10 }}>
+                <span className="ap-badge-outline">
                   {TRIGGER_LABELS[tmpl.trigger_config?.type] || 'Manual'}
-                </Badge>
-                <Badge bg="info" style={{ fontSize: 10 }}>
+                </span>
+                <span className="ap-badge-outline">
                   {t('templates.steps', { count: (tmpl.definition?.steps || []).length })}
-                </Badge>
-                <Badge bg="primary" style={{ fontSize: 10 }}>{tmpl.tier}</Badge>
+                </span>
+                <span className="ap-badge-outline">{tmpl.tier}</span>
               </div>
-            </Card.Body>
-            <Card.Footer className="card-footer d-flex gap-2">
-              <Button variant="outline-primary" size="sm" onClick={() => handleInstall(tmpl.id)}>
+            </div>
+            <footer className="card-footer d-flex gap-2 p-3">
+              <button type="button" className="ap-btn-primary ap-btn-sm" onClick={() => handleInstall(tmpl.id)}>
                 <FiDownload size={12} /> {t('templates.install')}
-              </Button>
-              <Button variant="outline-secondary" size="sm"
-                onClick={() => navigate(`/workflows/builder/${tmpl.id}`)}>
+              </button>
+              <button
+                type="button"
+                className="ap-btn-secondary ap-btn-sm"
+                onClick={() => navigate(`/workflows/builder/${tmpl.id}`)}
+              >
                 <FiEye size={12} /> {t('templates.preview')}
-              </Button>
-            </Card.Footer>
-          </Card>
+              </button>
+            </footer>
+          </article>
         </Col>
       ))}
     </Row>

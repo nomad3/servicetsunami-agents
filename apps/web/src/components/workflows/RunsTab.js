@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Table, Badge, Button, Form, Spinner } from 'react-bootstrap';
+import { Table, Badge, Form, Spinner } from 'react-bootstrap';
 import { FiRefreshCw, FiPlay } from 'react-icons/fi';
 import { useTranslation } from 'react-i18next';
 import dynamicWorkflowService from '../../services/dynamicWorkflowService';
@@ -51,10 +51,13 @@ export default function RunsTab({ workflows = [] }) {
   if (selectedRunId && runDetail) {
     return (
       <div>
-        <Button variant="link" size="sm" onClick={() => { setSelectedRunId(null); setRunDetail(null); }}
-          className="runs-back-btn">
+        <button
+          type="button"
+          className="ap-btn-ghost runs-back-btn"
+          onClick={() => { setSelectedRunId(null); setRunDetail(null); }}
+        >
           {t('runs.backToRuns')}
-        </Button>
+        </button>
         <div className="runs-detail-panel">
           <div className="d-flex align-items-center gap-2 mb-3">
             <Badge bg={STATUS_COLORS[runDetail.status]}>{runDetail.status}</Badge>
@@ -111,16 +114,16 @@ export default function RunsTab({ workflows = [] }) {
           <option value="completed">{t('runs.completed')}</option>
           <option value="failed">{t('runs.failed')}</option>
         </Form.Select>
-        <Button variant="outline-secondary" size="sm" onClick={loadRuns}>
+        <button type="button" className="ap-btn-secondary ap-btn-sm" onClick={loadRuns}>
           <FiRefreshCw size={12} /> {t('runs.refresh')}
-        </Button>
+        </button>
       </div>
 
       {loading ? (
         <div className="text-center p-4"><Spinner /></div>
       ) : runs.length === 0 ? (
-        <div className="text-center p-5 runs-empty">
-          <p>{t('runs.noRuns')}</p>
+        <div className="ap-empty">
+          <div className="ap-empty-text">{t('runs.noRuns')}</div>
         </div>
       ) : (
         <Table hover size="sm" className="runs-table">
@@ -145,10 +148,14 @@ export default function RunsTab({ workflows = [] }) {
                 <td>{run.total_cost_usd ? `$${run.total_cost_usd.toFixed(4)}` : '-'}</td>
                 <td>{run.started_at ? new Date(run.started_at).toLocaleString() : '-'}</td>
                 <td>
-                  <Button variant="link" size="sm" style={{ padding: 0 }}
-                    onClick={(e) => { e.stopPropagation(); }}>
+                  <button
+                    type="button"
+                    className="ap-btn-ghost"
+                    style={{ padding: 0 }}
+                    onClick={(e) => { e.stopPropagation(); }}
+                  >
                     <FiPlay size={10} />
-                  </Button>
+                  </button>
                 </td>
               </tr>
             ))}

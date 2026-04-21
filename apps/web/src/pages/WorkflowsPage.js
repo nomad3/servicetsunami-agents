@@ -336,7 +336,7 @@ const FlowchartStep = ({ step, index, isLast }) => (
           {step.retry && <span className="wf-retry-badge"><FaRedo size={7} /> {step.retry}</span>}
         </div>
         {step.description && (
-          <div style={{ fontSize: '0.65rem', color: 'var(--color-muted)', marginTop: '0.15rem', lineHeight: 1.3 }}>
+          <div style={{ fontSize: '0.65rem', color: 'var(--ap-text-muted)', marginTop: '0.15rem', lineHeight: 1.3 }}>
             {step.description}
           </div>
         )}
@@ -367,7 +367,7 @@ const WorkflowCard = ({ workflow }) => {
         <div className="wf-card-info">
           <div className="wf-card-name">{workflow.name}</div>
           {workflow.temporalName && (
-            <div style={{ fontSize: '0.62rem', color: 'var(--color-muted)', fontFamily: '"SF Mono", "Fira Code", monospace', marginBottom: '0.15rem' }}>
+            <div style={{ fontSize: '0.62rem', color: 'var(--ap-text-muted)', fontFamily: 'var(--ap-font-mono)', marginBottom: '0.15rem' }}>
               {workflow.temporalName}
             </div>
           )}
@@ -400,11 +400,11 @@ const WorkflowCard = ({ workflow }) => {
             <div style={{
               marginTop: '0.75rem',
               padding: '0.4rem 0.6rem',
-              borderRadius: '6px',
-              background: 'rgba(96, 165, 250, 0.06)',
-              border: '1px solid rgba(96, 165, 250, 0.15)',
+              borderRadius: 'var(--ap-radius-sm)',
+              background: 'var(--ap-primary-tint)',
+              border: '1px solid var(--ap-border)',
               fontSize: '0.68rem',
-              color: 'var(--color-muted)',
+              color: 'var(--ap-text-muted)',
               fontStyle: 'italic',
             }}>
               {workflow.note}
@@ -424,37 +424,21 @@ const DesignsTab = () => {
   return (
   <div>
     <div style={{ marginBottom: '1rem' }}>
-      <p style={{ color: 'var(--color-muted)', fontSize: '0.82rem', margin: 0 }}>
+      <p style={{ color: 'var(--ap-text-muted)', fontSize: 'var(--ap-fs-sm)', margin: 0 }}>
         {t('designs.description')}
       </p>
     </div>
 
     {/* Queue summary */}
     <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-      <div style={{
-        padding: '0.5rem 0.85rem',
-        borderRadius: '8px',
-        background: 'rgba(96, 165, 250, 0.06)',
-        border: '1px solid rgba(96, 165, 250, 0.15)',
-        fontSize: '0.72rem',
-        color: '#60a5fa',
-        fontWeight: 600,
-      }}>
-        <FaServer size={10} style={{ marginRight: '0.3rem' }} />
+      <span className="ap-badge-outline wf-queue-chip wf-queue-chip--orchestration">
+        <FaServer size={10} />
         {t('designs.orchestrationQueue')} — {WORKFLOW_DEFINITIONS.filter(w => w.queue === 'orchestration').length} workflows
-      </div>
-      <div style={{
-        padding: '0.5rem 0.85rem',
-        borderRadius: '8px',
-        background: 'rgba(34, 211, 238, 0.06)',
-        border: '1px solid rgba(34, 211, 238, 0.15)',
-        fontSize: '0.72rem',
-        color: '#22d3ee',
-        fontWeight: 600,
-      }}>
-        <FaServer size={10} style={{ marginRight: '0.3rem' }} />
+      </span>
+      <span className="ap-badge-outline wf-queue-chip wf-queue-chip--code">
+        <FaServer size={10} />
         {t('designs.codeQueue')} — {WORKFLOW_DEFINITIONS.filter(w => w.queue === 'code').length} workflows
-      </div>
+      </span>
     </div>
 
     {/* Grouped by category */}
@@ -481,7 +465,7 @@ const DesignsTab = () => {
             borderBottom: `1px solid ${cat.color}25`,
           }}>
             {t(`designs.categories.${cat.key}`)}
-            <span style={{ fontWeight: 500, color: 'var(--color-muted)', marginLeft: '0.5rem', fontSize: '0.65rem' }}>
+            <span style={{ fontWeight: 500, color: 'var(--ap-text-muted)', marginLeft: '0.5rem', fontSize: '0.65rem' }}>
               {catWorkflows.length} workflow{catWorkflows.length !== 1 ? 's' : ''}
             </span>
           </h6>
@@ -1492,59 +1476,42 @@ const WorkflowsPage = () => {
     dynamicWorkflowService.list().then(setDynamicWorkflows).catch(() => {});
   }, []);
 
+  const MAIN_TABS = [
+    { key: 'workflows',  icon: FaBolt,             label: 'My Workflows' },
+    { key: 'templates',  icon: FaLayerGroup,       label: 'Templates' },
+    { key: 'runs',       icon: FaStream,           label: 'Runs' },
+    { key: 'executions', icon: FaCog,              label: t('tabs.executions') },
+    { key: 'designs',    icon: FaDraftingCompass,  label: t('tabs.designs') },
+  ];
+
   return (
     <Layout>
       <div style={{ padding: '1.5rem' }}>
-        <div style={{ marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <header className="ap-page-header">
           <div>
-            <h4 style={{ color: 'var(--color-foreground)', marginBottom: '0.25rem', fontWeight: 600 }}>
-              {t('title')}
-            </h4>
-            <p style={{ color: 'var(--color-muted)', fontSize: '0.85rem', margin: 0 }}>
-              {t('subtitle')}
-            </p>
+            <h1 className="ap-page-title">{t('title')}</h1>
+            <p className="ap-page-subtitle">{t('subtitle')}</p>
           </div>
-          <Button variant="primary" size="sm" href="/workflows/builder">
-            + New Workflow
-          </Button>
-        </div>
+          <div className="ap-page-actions">
+            <a className="ap-btn-primary ap-btn-sm" href="/workflows/builder">
+              <FaBolt size={12} /> New Workflow
+            </a>
+          </div>
+        </header>
 
-        <div className="workflows-tabs">
-          <button
-            className={`workflows-tab-btn ${activeMainTab === 'workflows' ? 'active' : ''}`}
-            onClick={() => setTab('workflows')}
-          >
-            <FaBolt size={12} style={{ marginRight: '0.4rem' }} />
-            My Workflows
-          </button>
-          <button
-            className={`workflows-tab-btn ${activeMainTab === 'templates' ? 'active' : ''}`}
-            onClick={() => setTab('templates')}
-          >
-            <FaLayerGroup size={12} style={{ marginRight: '0.4rem' }} />
-            Templates
-          </button>
-          <button
-            className={`workflows-tab-btn ${activeMainTab === 'runs' ? 'active' : ''}`}
-            onClick={() => setTab('runs')}
-          >
-            <FaStream size={12} style={{ marginRight: '0.4rem' }} />
-            Runs
-          </button>
-          <button
-            className={`workflows-tab-btn ${activeMainTab === 'executions' ? 'active' : ''}`}
-            onClick={() => setTab('executions')}
-          >
-            <FaCog size={12} style={{ marginRight: '0.4rem' }} />
-            {t('tabs.executions')}
-          </button>
-          <button
-            className={`workflows-tab-btn ${activeMainTab === 'designs' ? 'active' : ''}`}
-            onClick={() => setTab('designs')}
-          >
-            <FaDraftingCompass size={12} style={{ marginRight: '0.4rem' }} />
-            {t('tabs.designs')}
-          </button>
+        <div className="ap-chip-row" role="tablist">
+          {MAIN_TABS.map(({ key, icon: Icon, label }) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={activeMainTab === key}
+              className={`ap-chip-filter ${activeMainTab === key ? 'active' : ''}`}
+              onClick={() => setTab(key)}
+            >
+              <Icon size={12} /> {label}
+            </button>
+          ))}
         </div>
 
         {activeMainTab === 'workflows' && <DynamicWorkflowsTab />}
