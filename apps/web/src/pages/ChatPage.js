@@ -571,10 +571,10 @@ const ChatPage = () => {
 
           <Col lg={8} xl={9} className="chat-main-col">
             {globalError && <Alert variant="danger">{globalError}</Alert>}
-            <div style={{ display: 'flex', gap: '1rem', height: '100%' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', gap: '1rem', flex: '1 1 auto', minHeight: 0 }}>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             {selectedSession ? (
-              <Card className="shadow-sm">
+              <Card className="shadow-sm" style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                 {/* ═══ Session Header ═══ */}
                 <div
                   className="luna-tamagotchi-panel"
@@ -802,7 +802,7 @@ const ChatPage = () => {
                 </Card.Body>
               </Card>
             ) : (
-              <Card className="shadow-sm">
+              <Card className="shadow-sm" style={{ flex: '1 1 auto', minHeight: 0 }}>
                 <Card.Body className="text-center text-muted">
                   <p className="mb-0">{t('selectSession')}</p>
                 </Card.Body>
