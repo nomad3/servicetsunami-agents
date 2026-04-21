@@ -675,48 +675,48 @@ const IntegrationsPage = () => {
       {/* Stats */}
       <Row className="g-4 mb-4">
         <Col md={3}>
-          <Card className="stat-card stat-total">
-            <Card.Body>
+          <article className="ap-card stat-card stat-total">
+            <div className="ap-card-body stat-card-body">
               <div className="stat-icon"><FaDatabase size={24} /></div>
               <div className="stat-content">
                 <div className="stat-value">{connectorStats.total}</div>
                 <div className="stat-label">{t('connectors.total')}</div>
               </div>
-            </Card.Body>
-          </Card>
+            </div>
+          </article>
         </Col>
         <Col md={3}>
-          <Card className="stat-card stat-active">
-            <Card.Body>
+          <article className="ap-card stat-card stat-active">
+            <div className="ap-card-body stat-card-body">
               <div className="stat-icon"><FaCheckCircle size={24} /></div>
               <div className="stat-content">
                 <div className="stat-value">{connectorStats.active}</div>
                 <div className="stat-label">{t('connectors.active')}</div>
               </div>
-            </Card.Body>
-          </Card>
+            </div>
+          </article>
         </Col>
         <Col md={3}>
-          <Card className="stat-card stat-syncs">
-            <Card.Body>
+          <article className="ap-card stat-card stat-syncs">
+            <div className="ap-card-body stat-card-body">
               <div className="stat-icon"><FaSyncAlt size={24} /></div>
               <div className="stat-content">
                 <div className="stat-value">{connectorStats.syncsActive}</div>
                 <div className="stat-label">{t('connectors.activeSyncs')}</div>
               </div>
-            </Card.Body>
-          </Card>
+            </div>
+          </article>
         </Col>
         <Col md={3}>
-          <Card className="stat-card stat-error">
-            <Card.Body>
+          <article className="ap-card stat-card stat-error">
+            <div className="ap-card-body stat-card-body">
               <div className="stat-icon"><FaExclamationTriangle size={24} /></div>
               <div className="stat-content">
                 <div className="stat-value">{connectorStats.error}</div>
                 <div className="stat-label">{t('connectors.needAttention')}</div>
               </div>
-            </Card.Body>
-          </Card>
+            </div>
+          </article>
         </Col>
       </Row>
 
@@ -725,22 +725,22 @@ const IntegrationsPage = () => {
       ) : (
         <Row className="g-4">
           <Col lg={8}>
-            <Card className="activity-card">
-              <Card.Header className="d-flex justify-content-between align-items-center">
+            <section className="ap-card activity-card">
+              <header className="activity-card-header">
                 <h5 className="mb-0"><FaBolt className="me-2" />{t('connectors.connectedSystems')}</h5>
-                <Button variant="primary" size="sm" onClick={() => handleOpenConnectorModal()}>
-                  <FaPlus className="me-2" />{t('connectors.addConnector')}
-                </Button>
-              </Card.Header>
-              <Card.Body className="p-0">
+                <button type="button" className="ap-btn-primary ap-btn-sm" onClick={() => handleOpenConnectorModal()}>
+                  <FaPlus />{t('connectors.addConnector')}
+                </button>
+              </header>
+              <div className="p-0">
                 {connectors.length === 0 ? (
                   <div className="text-center py-5">
                     <FaCloudUploadAlt size={48} className="text-muted mb-3" />
                     <h5>{t('connectors.noConnectors')}</h5>
                     <p className="text-muted">{t('connectors.noConnectorsDesc')}</p>
-                    <Button variant="primary" onClick={() => handleOpenConnectorModal()}>
-                      <FaPlus className="me-2" />{t('connectors.connectFirst')}
-                    </Button>
+                    <button type="button" className="ap-btn-primary" onClick={() => handleOpenConnectorModal()}>
+                      <FaPlus />{t('connectors.connectFirst')}
+                    </button>
                   </div>
                 ) : (
                   <Table hover className="mb-0 connectors-table">
@@ -760,31 +760,31 @@ const IntegrationsPage = () => {
                           <td>{getStatusBadge(connector.status)}</td>
                           <td><small className="text-muted">{connector.last_test_at ? new Date(connector.last_test_at).toLocaleDateString() : t('connectors.never')}</small></td>
                           <td className="text-end">
-                            <Button variant="outline-success" size="sm" className="me-1" onClick={() => handleTestConnector(connector.id)} disabled={testing === connector.id}>
+                            <button type="button" className="ap-btn-ghost" onClick={() => handleTestConnector(connector.id)} disabled={testing === connector.id}>
                               {testing === connector.id ? <Spinner size="sm" /> : <FaPlay />}
-                            </Button>
-                            <Button variant="outline-primary" size="sm" className="me-1" onClick={() => handleOpenSyncModal(connector)} disabled={connector.status !== 'active'}>
+                            </button>
+                            <button type="button" className="ap-btn-ghost" onClick={() => handleOpenSyncModal(connector)} disabled={connector.status !== 'active'}>
                               <FaSyncAlt />
-                            </Button>
-                            <Button variant="outline-secondary" size="sm" className="me-1" onClick={() => handleOpenConnectorModal(connector)}>
+                            </button>
+                            <button type="button" className="ap-btn-ghost" onClick={() => handleOpenConnectorModal(connector)}>
                               <FaPen />
-                            </Button>
-                            <Button variant="outline-danger" size="sm" onClick={() => handleDeleteConnector(connector.id)}>
+                            </button>
+                            <button type="button" className="ap-btn-danger" onClick={() => handleDeleteConnector(connector.id)}>
                               <FaTrash />
-                            </Button>
+                            </button>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </Table>
                 )}
-              </Card.Body>
-            </Card>
+              </div>
+            </section>
           </Col>
           <Col lg={4}>
-            <Card className="syncs-card">
-              <Card.Header><h5 className="mb-0"><FaCalendarAlt className="me-2" />{t('connectors.dataSyncs')}</h5></Card.Header>
-              <Card.Body className="p-0">
+            <section className="ap-card syncs-card">
+              <header className="activity-card-header"><h5 className="mb-0"><FaCalendarAlt className="me-2" />{t('connectors.dataSyncs')}</h5></header>
+              <div className="p-0">
                 {syncs.length === 0 ? (
                   <div className="text-center py-4">
                     <FaSyncAlt size={32} className="text-muted mb-2" />
@@ -798,15 +798,15 @@ const IntegrationsPage = () => {
                           <div className="sync-name">{sync.name}</div>
                           <small className="text-muted">{sync.config?.frequency || 'Manual'} &bull; {sync.config?.mode || 'Full'}</small>
                         </div>
-                        <Button variant="link" size="sm" onClick={() => handleRunSync(sync.id)} disabled={syncing === sync.id}>
+                        <button type="button" className="ap-btn-ghost" onClick={() => handleRunSync(sync.id)} disabled={syncing === sync.id}>
                           {syncing === sync.id ? <Spinner size="sm" /> : <FaPlay />}
-                        </Button>
+                        </button>
                       </div>
                     ))}
                   </div>
                 )}
-              </Card.Body>
-            </Card>
+              </div>
+            </section>
           </Col>
         </Row>
       )}
@@ -821,9 +821,9 @@ const IntegrationsPage = () => {
     <div className="tab-content-inner">
       <div className="d-flex justify-content-between align-items-center mb-4">
         <p className="text-muted mb-0">{t('dataSources.subtitle')}</p>
-        <Button variant="primary" onClick={() => handleShowDsModal()}>
-          <FaPlusCircle className="me-2" />{t('dataSources.addSource')}
-        </Button>
+        <button type="button" className="ap-btn-primary" onClick={() => handleShowDsModal()}>
+          <FaPlusCircle />{t('dataSources.addSource')}
+        </button>
       </div>
 
       {dsLoading ? (
@@ -832,41 +832,39 @@ const IntegrationsPage = () => {
         <Row xs={1} md={2} lg={3} className="g-4">
           {dataSources.map(ds => (
             <Col key={ds.id}>
-              <Card className="h-100 datasource-card">
-                <Card.Body>
+              <article className="ap-card datasource-card h-100">
+                <div className="ap-card-body">
                   <div className="d-flex justify-content-between align-items-start mb-3">
                     <div className="datasource-icon-wrapper">{getDsTypeIcon(ds.type)}</div>
-                    <div>
-                      <Button variant="link" className="text-primary p-0 me-2" onClick={() => handleShowDsModal(ds)}><FaEdit size={16} /></Button>
-                      <Button variant="link" className="text-danger p-0" onClick={() => handleDeleteDs(ds.id)}><FaTrash size={16} /></Button>
+                    <div className="d-flex gap-1">
+                      <button type="button" className="ap-btn-ghost" onClick={() => handleShowDsModal(ds)}><FaEdit size={14} /></button>
+                      <button type="button" className="ap-btn-danger" onClick={() => handleDeleteDs(ds.id)}><FaTrash size={14} /></button>
                     </div>
                   </div>
-                  <Card.Title>{ds.name}</Card.Title>
+                  <h3 className="ap-card-title">{ds.name}</h3>
                   <div className="mb-2">
-                    <Badge className="border" style={{ background: 'var(--surface-contrast)', color: 'var(--color-soft)', borderColor: 'var(--color-border)' }}>
-                      {ds.type}
-                    </Badge>
+                    <span className="ap-badge-outline">{ds.type}</span>
                   </div>
-                  <Card.Text className="text-muted small">
+                  <p className="ap-card-text">
                     {ds.config?.host ? <span className="text-truncate d-block" title={ds.config.host}>Host: {ds.config.host}</span>
                       : ds.config?.base_url ? <span className="text-truncate d-block" title={ds.config.base_url}>{ds.config.base_url}</span>
                         : <span>Configured</span>}
-                  </Card.Text>
-                  <div className="mt-3 pt-3 border-top">
-                    <div className="d-flex align-items-center text-success small">
+                  </p>
+                  <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--ap-border)' }}>
+                    <div className="d-flex align-items-center small" style={{ color: 'var(--ap-success)' }}>
                       <FaCheckCircle className="me-1" />{t('dataSources.connected')}
                     </div>
                   </div>
-                </Card.Body>
-              </Card>
+                </div>
+              </article>
             </Col>
           ))}
           {dataSources.length === 0 && (
             <Col xs={12}>
-              <div className="text-center py-5 text-muted">
+              <div className="ap-empty">
                 <FaDatabase size={48} className="mb-3 opacity-50" />
-                <h5>{t('dataSources.noSources')}</h5>
-                <p>{t('dataSources.noSourcesDesc')}</p>
+                <div className="ap-empty-title">{t('dataSources.noSources')}</div>
+                <div className="ap-empty-text">{t('dataSources.noSourcesDesc')}</div>
               </div>
             </Col>
           )}
@@ -979,45 +977,43 @@ const IntegrationsPage = () => {
   // RENDER: Page
   // ═══════════════════════════════════════════════════════════════════════════
 
+  const MAIN_TABS = [
+    { key: 'integrations', icon: FaPlug,      label: t('tabs.integrations') },
+    { key: 'devices',      icon: FaMicrochip, label: t('tabs.devices') || 'Devices' },
+    { key: 'connectors',   icon: FaBolt,      label: t('tabs.connectors') },
+    { key: 'data-sources', icon: FaDatabase,  label: t('tabs.dataSources') },
+    { key: 'datasets',     icon: FaFileUpload, label: t('tabs.datasets') },
+    { key: 'ai-models',    icon: FaMicrochip, label: t('tabs.aiModels') },
+  ];
+
   return (
     <Layout>
       <div className="integrations-page">
-        <div className="page-header mb-4">
+        <header className="ap-page-header">
           <div>
-            <h1 className="page-title">
-              <FaPlug className="me-2" />
-              {t('title')}
-            </h1>
-            <p className="page-subtitle text-muted">
-              {t('subtitle')}
-            </p>
+            <h1 className="ap-page-title">{t('title')}</h1>
+            <p className="ap-page-subtitle">{t('subtitle')}</p>
           </div>
-        </div>
+        </header>
 
         {error && <Alert variant="danger" onClose={() => setError(null)} dismissible>{error}</Alert>}
         {success && <Alert variant="success" onClose={() => setSuccess(null)} dismissible>{success}</Alert>}
 
         {/* Tab Navigation */}
-        <Nav variant="tabs" activeKey={activeTab} onSelect={handleTabChange} className="mb-4 integrations-tabs">
-          <Nav.Item>
-            <Nav.Link eventKey="integrations"><FaPlug className="me-2" />{t('tabs.integrations')}</Nav.Link>
-          </Nav.Item>
-          <Nav.Item>
-            <Nav.Link eventKey="devices"><FaMicrochip className="me-2" />{t('tabs.devices') || 'Devices'}</Nav.Link>
-          </Nav.Item>
-          <Nav.Item>
-            <Nav.Link eventKey="connectors"><FaBolt className="me-2" />{t('tabs.connectors')}</Nav.Link>
-          </Nav.Item>
-          <Nav.Item>
-            <Nav.Link eventKey="data-sources"><FaDatabase className="me-2" />{t('tabs.dataSources')}</Nav.Link>
-          </Nav.Item>
-          <Nav.Item>
-            <Nav.Link eventKey="datasets"><FaFileUpload className="me-2" />{t('tabs.datasets')}</Nav.Link>
-          </Nav.Item>
-          <Nav.Item>
-            <Nav.Link eventKey="ai-models"><FaMicrochip className="me-2" />{t('tabs.aiModels')}</Nav.Link>
-          </Nav.Item>
-        </Nav>
+        <div className="ap-chip-row" role="tablist">
+          {MAIN_TABS.map(({ key, icon: Icon, label }) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === key}
+              className={`ap-chip-filter ${activeTab === key ? 'active' : ''}`}
+              onClick={() => handleTabChange(key)}
+            >
+              <Icon size={12} /> {label}
+            </button>
+          ))}
+        </div>
 
         {/* Tab Content */}
         {activeTab === 'integrations' && renderSkillsTab()}
@@ -1038,18 +1034,16 @@ const IntegrationsPage = () => {
               <Row xs={1} md={2} lg={3} className="g-4">
                 {llmProviders.map((provider) => (
                   <Col key={provider.name}>
-                    <Card className="h-100" style={{ background: 'var(--surface-elevated)', border: '1px solid var(--color-border)' }}>
-                      <Card.Body>
+                    <article className="ap-card h-100">
+                      <div className="ap-card-body">
                         <div className="d-flex align-items-center justify-content-between mb-3">
                           <strong>{provider.display_name}</strong>
                           {provider.configured ? (
-                            <Badge bg="success" className="bg-opacity-25 text-success border border-success">
-                              <FaCheckCircle className="me-1" size={10} /> {t('aiModels.connected')}
-                            </Badge>
+                            <span className="ap-status ap-status-production">
+                              <FaCheckCircle size={10} /> {t('aiModels.connected')}
+                            </span>
                           ) : (
-                            <Badge bg="secondary" className="bg-opacity-25 text-secondary border border-secondary">
-                              {t('aiModels.notConfigured')}
-                            </Badge>
+                            <span className="ap-badge-outline">{t('aiModels.notConfigured')}</span>
                           )}
                         </div>
                         <Form.Label className="small text-muted"><FaKey className="me-1" size={10} />{t('aiModels.apiKey')}</Form.Label>
@@ -1062,31 +1056,30 @@ const IntegrationsPage = () => {
                             onChange={(e) => handleLlmKeyChange(provider.name, e.target.value)}
                             disabled={llmSaving === provider.name}
                           />
-                          <Button
-                            variant="outline-secondary"
-                            size="sm"
+                          <button
+                            type="button"
+                            className="ap-btn-secondary ap-btn-sm"
                             onClick={() => setLlmShowKeys(prev => ({ ...prev, [provider.name]: !prev[provider.name] }))}
                           >
                             {llmShowKeys[provider.name] ? <FaEyeSlash size={12} /> : <FaEye size={12} />}
-                          </Button>
+                          </button>
                         </div>
                         {llmSaveSuccess[provider.name] && (
                           <small className="text-success d-block mb-2"><FaCheckCircle className="me-1" size={10} />{t('aiModels.keySaved')}</small>
                         )}
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          className="w-100"
+                        <button
+                          type="button"
+                          className="ap-btn-primary ap-btn-sm w-100"
                           onClick={() => handleLlmSaveKey(provider.name)}
                           disabled={!llmApiKeys[provider.name] || llmSaving === provider.name}
                         >
                           {llmSaving === provider.name ? <Spinner animation="border" size="sm" /> : t('aiModels.saveKey')}
-                        </Button>
+                        </button>
                         <div className="text-center mt-2">
                           <small className="text-muted">{provider.is_openai_compatible ? t('aiModels.openaiCompatible') : t('aiModels.nativeApi')}</small>
                         </div>
-                      </Card.Body>
-                    </Card>
+                      </div>
+                    </article>
                   </Col>
                 ))}
               </Row>

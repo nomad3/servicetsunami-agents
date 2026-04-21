@@ -1,182 +1,121 @@
+/* Integrations page — consumes design tokens from tokens.css.
+   Shared header, chips, buttons, and cards come from components.css (.ap-*).
+   Styles below compose on top. */
+
 .integrations-page {
   padding: 0;
-}
-
-.integrations-page .page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 2rem;
-}
-
-.integrations-page .page-title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--color-foreground);
-  display: flex;
-  align-items: center;
-  margin-bottom: 0.25rem;
-}
-
-.integrations-page .page-subtitle {
-  margin-bottom: 0;
-}
-
-/* Tab Navigation */
-.integrations-tabs .nav-link {
-  display: flex;
-  align-items: center;
-  color: var(--color-muted);
-  border-color: transparent;
-  font-weight: 500;
-  padding: 0.75rem 1.25rem;
-}
-
-.integrations-tabs .nav-link:hover {
-  color: var(--color-foreground);
-  border-color: var(--color-border) var(--color-border) transparent;
-}
-
-.integrations-tabs .nav-link.active {
-  color: var(--color-foreground);
-  background: var(--surface-elevated);
-  border-color: var(--color-border) var(--color-border) var(--surface-elevated);
 }
 
 .tab-content-inner {
   min-height: 300px;
 }
 
-/* Stats Cards */
-.stat-card {
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: var(--surface-elevated);
-  transition: transform 0.2s, box-shadow 0.2s;
-  overflow: hidden;
-}
+/* ==========================================================================
+   Stat Cards — composed on top of .ap-card
+   ========================================================================== */
 
-.stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(100, 130, 170, 0.12);
-  border-color: var(--color-border-strong);
-}
-
-.stat-card .card-body {
+.stat-card .stat-card-body {
   display: flex;
   align-items: center;
   padding: 1.25rem;
+  gap: var(--ap-space-4);
 }
 
 .stat-card .stat-icon {
   width: 50px;
   height: 50px;
-  border-radius: 12px;
+  border-radius: var(--ap-radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-right: 1rem;
 }
 
 .stat-card .stat-value {
-  font-size: 1.75rem;
+  font-size: var(--ap-fs-xl);
   font-weight: 700;
-  color: var(--color-foreground);
+  color: var(--ap-text);
   line-height: 1;
 }
 
 .stat-card .stat-label {
-  font-size: 0.85rem;
-  color: var(--color-muted);
+  font-size: var(--ap-fs-sm);
+  color: var(--ap-text-muted);
 }
 
+/* Categorical accents for each stat — kept for quick visual scanning */
 .stat-total .stat-icon {
-  background: linear-gradient(135deg, #2b7de9, #8b5cf6);
-  color: white;
+  background: var(--ap-primary-tint);
+  color: var(--ap-primary);
 }
 
 .stat-active .stat-icon {
-  background: linear-gradient(135deg, #2d9d78, #5ec5b0);
-  color: white;
+  background: var(--ap-success-tint);
+  color: var(--ap-success);
 }
 
 .stat-syncs .stat-icon {
-  background: linear-gradient(135deg, #3b82f6, #60a5fa);
-  color: white;
+  background: var(--ap-primary-tint);
+  color: var(--ap-primary);
 }
 
 .stat-error .stat-icon {
-  background: linear-gradient(135deg, #f59e0b, #fbbf24);
-  color: white;
+  background: var(--ap-warning-tint);
+  color: var(--ap-warning);
 }
 
-/* Activity Card */
-.activity-card {
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: var(--surface-elevated);
-  box-shadow: 0 2px 15px rgba(100, 130, 170, 0.08);
+/* ==========================================================================
+   Activity / Syncs Cards — composed on top of .ap-card
+   ========================================================================== */
+
+.activity-card,
+.syncs-card {
+  height: 100%;
 }
 
-.activity-card .card-header {
+.activity-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   background: transparent;
-  border-bottom: 1px solid var(--color-border);
-  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--ap-border);
+  padding: var(--ap-space-4) 1.25rem;
 }
 
-.activity-card .card-header h5 {
+.activity-card-header h5 {
   display: flex;
   align-items: center;
-  color: var(--color-foreground);
+  color: var(--ap-text);
+  margin: 0;
+  font-size: var(--ap-fs-md);
 }
 
 /* Connectors Table */
 .connectors-table thead th {
   font-weight: 600;
-  font-size: 0.75rem;
+  font-size: var(--ap-fs-xs);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--color-muted);
-  border-bottom: 1px solid var(--color-border);
-  padding: 1rem 1.25rem;
+  letter-spacing: 0.05em;
+  color: var(--ap-text-muted);
+  border-bottom: 1px solid var(--ap-border);
+  padding: var(--ap-space-4) 1.25rem;
 }
 
 .connectors-table tbody td {
-  padding: 1rem 1.25rem;
+  padding: var(--ap-space-4) 1.25rem;
   vertical-align: middle;
-  color: var(--color-soft);
-  border-bottom: 1px solid var(--color-border);
+  color: var(--ap-text);
+  border-bottom: 1px solid var(--ap-border);
 }
 
 .connectors-table tbody tr:hover {
-  background: var(--surface-contrast);
+  background: var(--ap-primary-tint);
 }
 
 .connector-icon {
   font-size: 1.5rem;
 }
 
-/* Syncs Card */
-.syncs-card {
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: var(--surface-elevated);
-  box-shadow: 0 2px 15px rgba(100, 130, 170, 0.08);
-  height: 100%;
-}
-
-.syncs-card .card-header {
-  background: transparent;
-  border-bottom: 1px solid var(--color-border);
-  padding: 1rem 1.25rem;
-}
-
-.syncs-card .card-header h5 {
-  display: flex;
-  align-items: center;
-  color: var(--color-foreground);
-}
-
+/* Syncs list */
 .syncs-list {
   padding: 0;
 }
@@ -186,7 +125,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 0.875rem 1.25rem;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--ap-border);
 }
 
 .sync-item:last-child {
@@ -194,13 +133,13 @@
 }
 
 .sync-item:hover {
-  background: var(--surface-contrast);
+  background: var(--ap-primary-tint);
 }
 
 .sync-name {
   font-weight: 500;
-  font-size: 0.9rem;
-  color: var(--color-foreground);
+  font-size: var(--ap-fs-base);
+  color: var(--ap-text);
 }
 
 .sync-info small {
@@ -208,48 +147,33 @@
   margin-top: 0.125rem;
 }
 
-/* Data Sources Cards */
-.datasource-card {
-  border: 1px solid var(--color-border);
-  background: var(--surface-elevated);
-  box-shadow: 0 2px 4px rgba(100, 130, 170, 0.08);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.datasource-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(100, 130, 170, 0.12);
-  border-color: var(--color-border-strong);
-}
+/* ==========================================================================
+   Data Source Cards — composed on top of .ap-card
+   ========================================================================== */
 
 .datasource-icon-wrapper {
   width: 48px;
   height: 48px;
-  border-radius: 12px;
-  background: var(--surface-contrast);
+  border-radius: var(--ap-radius-lg);
+  background: var(--ap-primary-tint);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .config-section {
-  border: 1px solid var(--color-border);
-  background: var(--surface-contrast);
+  border: 1px solid var(--ap-border);
+  background: var(--ap-primary-tint);
 }
 
 /* Button styles */
 .header-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--ap-space-2);
 }
 
 /* Responsive */
 @media (max-width: 768px) {
-  .integrations-page .page-header {
-    flex-direction: column;
-    gap: 1rem;
-  }
-
   .header-actions {
     width: 100%;
   }
