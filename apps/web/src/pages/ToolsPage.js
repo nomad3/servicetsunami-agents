@@ -1,14 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Card,
-  Button,
   Table,
   Badge,
   Modal,
   Form,
   Row,
   Col,
-  InputGroup,
 } from 'react-bootstrap';
 import { useTranslation } from 'react-i18next';
 import {
@@ -176,43 +173,33 @@ const ToolsPage = () => {
 
   return (
     <Layout>
-      <div className="page-header mb-4">
+      <header className="ap-page-header">
         <div>
-          <h2 className="page-title">
-            <FaTools className="me-2" size={32} />
-            {t('title')}
-          </h2>
-          <p className="page-subtitle">
-            {t('subtitle')}
-          </p>
+          <h1 className="ap-page-title">{t('title')}</h1>
+          <p className="ap-page-subtitle">{t('subtitle')}</p>
         </div>
-        <Button
-          variant="primary"
-          size="lg"
-          onClick={() => setShowCreateModal(true)}
-          className="d-flex align-items-center gap-2"
-        >
-          <FaPlus size={20} />
-          {t('createTool')}
-        </Button>
-      </div>
+        <div className="ap-page-actions">
+          <button
+            type="button"
+            className="ap-btn-primary"
+            onClick={() => setShowCreateModal(true)}
+          >
+            <FaPlus size={12} />
+            {t('createTool')}
+          </button>
+        </div>
+      </header>
 
-      <Card className="data-card mb-4">
-        <Card.Body>
-          <InputGroup>
-            <InputGroup.Text className="search-icon-wrapper">
-              <FaSearch />
-            </InputGroup.Text>
-            <Form.Control
-              type="text"
-              placeholder={t('searchPlaceholder')}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="search-input"
-            />
-          </InputGroup>
-        </Card.Body>
-      </Card>
+      <div className="ap-search-wrap mb-4" style={{ maxWidth: 'none' }}>
+        <FaSearch size={14} />
+        <input
+          type="text"
+          className="ap-search-input"
+          placeholder={t('searchPlaceholder')}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
 
       {loading ? (
         <LoadingSpinner text={t('loading')} />
@@ -227,19 +214,20 @@ const ToolsPage = () => {
           }
           action={
             !searchTerm && (
-              <Button
-                variant="primary"
+              <button
+                type="button"
+                className="ap-btn-primary"
                 onClick={() => setShowCreateModal(true)}
               >
-                <FaPlus className="me-2" />
+                <FaPlus size={12} />
                 {t('createFirst')}
-              </Button>
+              </button>
             )
           }
         />
       ) : (
-        <Card className="data-card">
-          <Table hover responsive className="agents-table mb-0">
+        <article className="ap-card">
+          <Table hover responsive className="ap-table mb-0">
             <thead>
               <tr>
                 <th>{t('table.name')}</th>
@@ -255,9 +243,7 @@ const ToolsPage = () => {
                 <tr key={tool.id}>
                   <td>
                     <div className="d-flex align-items-center gap-2">
-                      <div className="agent-icon">
-                        <FaTools size={20} />
-                      </div>
+                      <FaTools size={14} aria-hidden="true" />
                       <strong>{tool.name}</strong>
                     </div>
                   </td>
@@ -277,35 +263,35 @@ const ToolsPage = () => {
                   </td>
                   <td>
                     <div className="d-flex justify-content-end gap-2">
-                      <Button
-                        variant="outline-success"
-                        size="sm"
+                      <button
+                        type="button"
+                        className="ap-btn-ghost ap-btn-sm"
                         onClick={() => handleTestTool(tool)}
                         title="Test tool"
                       >
                         <FaPlayCircle size={14} />
-                      </Button>
-                      <Button
-                        variant="outline-primary"
-                        size="sm"
+                      </button>
+                      <button
+                        type="button"
+                        className="ap-btn-ghost ap-btn-sm"
                         onClick={() => openEditModal(tool)}
                       >
                         <FaPen size={14} />
-                      </Button>
-                      <Button
-                        variant="outline-danger"
-                        size="sm"
+                      </button>
+                      <button
+                        type="button"
+                        className="ap-btn-danger ap-btn-sm"
                         onClick={() => openDeleteModal(tool)}
                       >
                         <FaTrash size={14} />
-                      </Button>
+                      </button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </Table>
-        </Card>
+        </article>
       )}
 
       {/* Create/Edit Modal */}
@@ -383,7 +369,7 @@ const ToolsPage = () => {
                 onChange={(e) =>
                   setFormData({ ...formData, configuration: e.target.value })
                 }
-                style={{ fontFamily: 'monospace', fontSize: '0.875rem' }}
+                style={{ fontFamily: 'var(--ap-font-mono)', fontSize: 'var(--ap-fs-sm)' }}
               />
               <Form.Text className="text-muted">
                 {t('modal.configurationHelp')}
@@ -405,8 +391,9 @@ const ToolsPage = () => {
             </Form.Group>
           </Modal.Body>
           <Modal.Footer>
-            <Button
-              variant="outline-secondary"
+            <button
+              type="button"
+              className="ap-btn-secondary"
               onClick={() => {
                 setShowCreateModal(false);
                 setShowEditModal(false);
@@ -414,14 +401,14 @@ const ToolsPage = () => {
               }}
             >
               {t('modal.cancel')}
-            </Button>
-            <Button variant="primary" type="submit" disabled={submitting}>
+            </button>
+            <button type="submit" className="ap-btn-primary" disabled={submitting}>
               {submitting
                 ? t('modal.saving')
                 : showCreateModal
                 ? t('modal.createTool')
                 : t('modal.saveChanges')}
-            </Button>
+            </button>
           </Modal.Footer>
         </Form>
       </Modal>
