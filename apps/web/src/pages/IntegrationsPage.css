@@ -166,19 +166,3 @@
   background: var(--ap-primary-tint);
 }
 
-/* Button styles */
-.header-actions {
-  display: flex;
-  gap: var(--ap-space-2);
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-  .header-actions {
-    width: 100%;
-  }
-
-  .header-actions .btn {
-    flex: 1;
-  }
-}

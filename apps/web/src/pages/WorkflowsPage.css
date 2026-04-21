@@ -239,47 +239,6 @@
   border-top: 5px solid var(--ap-border);
 }
 
-/* Loop label */
-.wf-loop-label {
-  font-size: 0.62rem;
-  color: var(--ap-text-muted);
-  text-align: center;
-  font-style: italic;
-  padding: 0.1rem 0;
-}
-
-/* Branch container for side-by-side paths */
-.wf-branch-paths {
-  display: flex;
-  gap: var(--ap-space-2);
-  align-items: flex-start;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-
-.wf-branch-path {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-  padding: 0.3rem;
-  border-radius: var(--ap-radius-sm);
-  border: 1px dashed var(--ap-border);
-  min-width: 120px;
-}
-
-.wf-branch-label {
-  font-size: 0.62rem;
-  font-weight: 600;
-  color: var(--ap-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.15rem 0.4rem;
-  background: var(--ap-card-bg);
-  border-radius: 3px;
-  margin-bottom: 0.2rem;
-}
-
 /* Retry badge — semantic warning color stays */
 .wf-retry-badge {
   font-size: 0.58rem;
@@ -383,15 +342,6 @@
 
 .runs-table tbody tr:hover {
   background: var(--ap-primary-tint);
-}
-
-.runs-empty {
-  color: var(--ap-text-muted);
-}
-
-.template-empty,
-.runs-empty {
-  color: var(--ap-text-muted);
 }
 
 /* Responsive */

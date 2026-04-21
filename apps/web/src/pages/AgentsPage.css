@@ -1,47 +1,7 @@
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--ap-space-4);
-}
-
-.page-title {
-  display: flex;
-  align-items: center;
-  color: var(--ap-text);
-  font-weight: 700;
-  font-size: var(--ap-fs-xl);
-  margin: 0;
-  letter-spacing: -0.02em;
-}
-
-.page-subtitle {
-  color: var(--ap-text-muted);
-  font-size: var(--ap-fs-md);
-  margin: var(--ap-space-2) 0 0 0;
-}
-
-.data-card {
-  /* TODO: no exact token — keeping hardcoded gradient */
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.9) 100%);
-  border: 1px solid var(--ap-border);
-  border-radius: 14px;
-  box-shadow: var(--ap-shadow-card);
-  transition: all 0.3s ease;
-}
-
-.data-card:hover {
-  border-color: var(--ap-primary-ring);
-  box-shadow: var(--ap-shadow-card-hover);
-}
-
-.search-icon-wrapper {
-  background: var(--ap-primary-tint);
-  border: 1px solid var(--ap-primary-tint-hi);
-  border-right: none;
-  color: var(--ap-text-subtle);
-}
+/* AgentsPage — page-specific overrides on top of tokens + shared components.
+   AgentsPage itself has been migrated to .ap-* classes. What remains below is
+   the .agent-modal skin (consumed by ToolsPage, which imports this file) plus
+   the bare .search-input rule still consumed by MemoryPage. */
 
 .search-input {
   background: transparent;
@@ -60,49 +20,6 @@
   border-color: var(--ap-border-strong);
   color: var(--ap-text);
   box-shadow: none;
-}
-
-.agents-table {
-  color: var(--ap-text);
-}
-
-.agents-table thead th {
-  background: var(--ap-primary-tint);
-  border-bottom: 2px solid var(--ap-primary-ring);
-  color: var(--ap-text-muted);
-  font-weight: 600;
-  font-size: var(--ap-fs-sm);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: var(--ap-space-4);
-}
-
-.agents-table tbody tr {
-  border-bottom: 1px solid var(--ap-border);
-  transition: all 0.2s ease;
-}
-
-.agents-table tbody tr:hover {
-  /* TODO: no exact token — keeping hardcoded (slightly lower opacity than --ap-primary-tint) */
-  background: rgba(43, 125, 233, 0.04);
-}
-
-.agents-table tbody td {
-  padding: var(--ap-space-4);
-  vertical-align: middle;
-}
-
-.agent-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  /* TODO: no exact token — keeping hardcoded gradient (brand accent blend) */
-  background: linear-gradient(135deg, rgba(43, 125, 233, 0.15), rgba(94, 197, 176, 0.12));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ap-primary);
-  border: 1px solid var(--ap-primary-ring);
 }
 
 .agent-modal .modal-content {
@@ -178,49 +95,4 @@
 
 .agent-modal .btn-close:hover {
   opacity: 1;
-}
-
-@media (max-width: 768px) {
-  .page-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .page-title {
-    font-size: 1.5rem;
-  }
-
-  .page-subtitle {
-    font-size: var(--ap-fs-md);
-  }
-
-  .agents-table {
-    font-size: var(--ap-fs-sm);
-  }
-
-  .agents-table thead {
-    display: none;
-  }
-
-  .agents-table tbody tr {
-    display: block;
-    margin-bottom: var(--ap-space-4);
-    border: 1px solid var(--ap-border);
-    border-radius: 10px;
-    padding: var(--ap-space-4);
-  }
-
-  .agents-table tbody td {
-    display: block;
-    text-align: right;
-    padding: var(--ap-space-2) 0;
-    border: none;
-  }
-
-  .agents-table tbody td::before {
-    content: attr(data-label);
-    float: left;
-    font-weight: 600;
-    color: var(--ap-text-subtle);
-  }
 }
