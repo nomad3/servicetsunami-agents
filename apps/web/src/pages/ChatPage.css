@@ -2,39 +2,64 @@
    Shared layout/components (.ap-page-header, .ap-btn-*) live in components.css.
    Everything below is chat-specific composition. */
 
-/* The entire chat page fills the viewport with no page-level scroll.
-   Sessions list and chat messages scroll independently. */
+/* Vertical chrome above the chat layout inside .content-wrapper:
+   content-wrapper padding-top (~32px)
+   + ap-page-header (~54px) + ap-page-header margin-bottom (~24px)
+   + content-wrapper padding-bottom (~32px) + small buffer.
+   Combined: ~160px. Tune via --chat-header-offset if the layout shifts. */
 .chat-page-container {
-  height: calc(100vh - 60px); /* subtract navbar/header height */
+  height: calc(100vh - var(--chat-header-offset, 160px));
   overflow: hidden;
   display: flex;
+  padding-left: 0;
+  padding-right: 0;
 }
 
-.chat-page-container .row {
+.chat-page-container > .row {
   height: 100%;
   flex-wrap: nowrap;
+  width: 100%;
+  margin: 0;
 }
 
 /* Sessions sidebar — scrolls independently */
 .chat-sessions-col {
   height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Chat area — fills remaining height */
+.chat-sessions-col .list-group {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Chat area — fills remaining height, input pinned at bottom */
 .chat-main-col {
   height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
+}
+
+.chat-main-col > .alert {
+  flex: 0 0 auto;
 }
 
 .chat-main-col .card {
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
+}
+
+/* The Card.Body holds messages (scroll) + input (sticky). */
+.chat-main-col .card > .card-body {
+  min-height: 0;
 }
 
 /* Sessions list hover + active states use design tokens */
@@ -126,19 +151,18 @@
 @media (max-width: 768px) {
   .chat-page-container {
     flex-direction: column;
-    height: 100vh;
+    height: calc(100vh - var(--chat-header-offset, 160px));
   }
-  .chat-page-container .row {
+  .chat-page-container > .row {
     flex-direction: column;
     flex-wrap: nowrap;
   }
   /* Sessions become a horizontal scrollable strip at the top */
   .chat-sessions-col {
-    max-height: 120px;
+    max-height: 140px;
     flex: 0 0 auto !important;
     width: 100% !important;
     max-width: 100% !important;
-    overflow-y: auto;
     border-bottom: 1px solid var(--ap-border);
   }
   .chat-sessions-col h3 {

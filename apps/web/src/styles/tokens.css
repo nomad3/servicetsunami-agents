@@ -89,17 +89,20 @@
   --ap-danger-tint:      rgba(248, 113, 113, 0.15);
 
   --ap-page-bg:          #0f1923;
-  --ap-card-bg:          #162231;
-  --ap-card-bg-hover:    #1a2938;
-  --ap-code-bg:          rgba(226, 232, 240, 0.06);
+  --ap-card-bg:          #17273a;          /* was #162231 — slightly lighter so cards separate from page bg */
+  --ap-card-bg-hover:    #1d3149;
+  --ap-code-bg:          rgba(241, 245, 249, 0.08);
 
-  --ap-text:             #e2e8f0;
-  --ap-text-muted:       rgba(226, 232, 240, 0.72);
-  --ap-text-subtle:      rgba(226, 232, 240, 0.52);
-  --ap-text-disabled:    rgba(226, 232, 240, 0.35);
+  /* Dark-mode text had WCAG-AA-pass but too compressed — all four tokens sat
+     within 52-100% of the same grey, so headings/titles/muted/subtle all read
+     as the same weight. Bumped brightness + widened the range. */
+  --ap-text:             #f1f5f9;          /* primary — was #e2e8f0 */
+  --ap-text-muted:       rgba(241, 245, 249, 0.82);  /* was 0.72 */
+  --ap-text-subtle:      rgba(241, 245, 249, 0.62);  /* was 0.52 */
+  --ap-text-disabled:    rgba(241, 245, 249, 0.40);
 
-  --ap-border:           rgba(60, 90, 130, 0.4);
-  --ap-border-strong:    rgba(74, 148, 240, 0.45);
+  --ap-border:           rgba(120, 150, 190, 0.28);  /* was rgba(60,90,130,0.4) — brighter, so edges actually read on #0f1923 */
+  --ap-border-strong:    rgba(98, 165, 244, 0.55);
 
   --ap-shadow-card:       0 1px 2px rgba(0, 0, 0, 0.2),
                           0 8px 20px rgba(0, 0, 0, 0.25);

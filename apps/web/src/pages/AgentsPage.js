@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Alert, Badge, Button, Col, Form, Modal, Row, Spinner } from 'react-bootstrap';
+import { FaFileImport, FaPlus, FaUserPlus } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
@@ -203,85 +204,44 @@ const AgentsPage = () => {
     return [...new Set([...configSkills, ...agentSkills])];
   };
 
-  const statusColor = (s) => s === 'active' ? '#22c55e' : s === 'error' ? '#ef4444' : '#94a3b8';
+  const statusColor = (s) => {
+    if (s === 'active') return 'var(--ap-success)';
+    if (s === 'error') return 'var(--ap-danger)';
+    return 'var(--ap-text-subtle)';
+  };
 
   const externalStatusDot = (s) => {
-    if (s === 'online') return '#22c55e';
-    if (s === 'busy') return '#f59e0b';
-    if (s === 'error') return '#ef4444';
-    return '#94a3b8';
+    if (s === 'online') return 'var(--ap-success)';
+    if (s === 'busy') return 'var(--ap-warning)';
+    if (s === 'error') return 'var(--ap-danger)';
+    return 'var(--ap-text-subtle)';
   };
 
-  const lifecycleBadge = (ls) => {
-    const status = (ls || 'draft').toLowerCase();
-    if (status === 'production') return { bg: '#166534', color: '#86efac', label: 'Production' };
-    if (status === 'staging') return { bg: '#78350f', color: '#fde68a', label: 'Staging' };
-    if (status === 'deprecated') return { bg: '#7f1d1d', color: '#fca5a5', label: 'Deprecated' };
-    return { bg: 'rgba(255,255,255,0.08)', color: '#94a3b8', label: 'Draft' };
-  };
-
-  const ROLE_COLORS = { analyst: '#6f42c1', manager: '#0d6efd', specialist: '#fd7e14' };
   const AUTONOMY_LABELS = { full: 'Full Auto', supervised: 'Supervised', approval_required: 'Approval Req.' };
-
-  const cardStyle = {
-    background: 'var(--surface-elevated)',
-    border: '1px solid var(--color-border)',
-    borderRadius: 8,
-    padding: '20px 24px',
-    cursor: 'pointer',
-    transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-  };
-
-  const sectionHeadingStyle = {
-    fontSize: '0.75rem',
-    fontWeight: 600,
-    letterSpacing: '0.06em',
-    textTransform: 'uppercase',
-    color: 'var(--color-muted)',
-    marginBottom: 12,
-    marginTop: 28,
-  };
 
   return (
     <Layout>
       <div style={{ maxWidth: 1100 }}>
         {/* Header */}
-        <div className="d-flex justify-content-between align-items-start mb-4">
+        <header className="ap-page-header">
           <div>
-            <h4 style={{ fontWeight: 600, marginBottom: 4, color: 'var(--color-foreground)' }}>
-              {t('title')}
-            </h4>
-            <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', margin: 0 }}>
+            <h1 className="ap-page-title">{t('title')}</h1>
+            <p className="ap-page-subtitle">
               {agents.length} agents · {externalAgents.length} external
             </p>
           </div>
-          <div className="d-flex gap-2 align-items-center">
-            <Button
-              variant="outline-secondary"
-              size="sm"
-              onClick={() => setImportModalOpen(true)}
-              style={{ fontSize: '0.78rem' }}
-            >
-              + Import Agent
-            </Button>
-            <Button
-              variant="outline-secondary"
-              size="sm"
-              onClick={() => setHireModalOpen(true)}
-              style={{ fontSize: '0.82rem' }}
-            >
-              + Hire External Agent
-            </Button>
-            <Button
-              variant="outline-secondary"
-              size="sm"
-              onClick={() => navigate('/agents/wizard')}
-              style={{ fontSize: '0.82rem' }}
-            >
-              + {t('agentWizard')}
-            </Button>
+          <div className="ap-page-actions">
+            <button type="button" className="ap-btn-secondary" onClick={() => setImportModalOpen(true)}>
+              <FaFileImport size={12} /> {t('importAgent', 'Import Agent')}
+            </button>
+            <button type="button" className="ap-btn-secondary" onClick={() => setHireModalOpen(true)}>
+              <FaUserPlus size={12} /> {t('hireExternal', 'Hire External Agent')}
+            </button>
+            <button type="button" className="ap-btn-primary" onClick={() => navigate('/agents/wizard')}>
+              <FaPlus size={12} /> {t('agentWizard')}
+            </button>
           </div>
-        </div>
+        </header>
 
         {error && <Alert variant="danger" dismissible onClose={() => setError('')} style={{ fontSize: '0.82rem' }}>{error}</Alert>}
         {success && <Alert variant="success" dismissible onClose={() => setSuccess('')} style={{ fontSize: '0.82rem' }}>{success}</Alert>}
@@ -294,7 +254,7 @@ const AgentsPage = () => {
         ) : (
           <>
             {/* ── Agents ── */}
-            <p style={{ ...sectionHeadingStyle, marginTop: 0 }}>Agents</p>
+            <div className="ap-section-label">{t('agents', 'Agents')}</div>
 
             {/* Search + lifecycle filter */}
             <div className="d-flex gap-2 align-items-center mb-3 flex-wrap">
@@ -304,22 +264,16 @@ const AgentsPage = () => {
                 placeholder={t('searchPlaceholder')}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                style={{ maxWidth: 260, fontSize: '0.82rem' }}
+                style={{ maxWidth: 260, fontSize: 'var(--ap-fs-sm)' }}
               />
-              <div className="d-flex gap-1">
+              <div className="d-flex gap-2 flex-wrap" role="group" aria-label="Lifecycle filter">
                 {LIFECYCLE_STATUSES.map(status => (
                   <button
                     key={status}
+                    type="button"
+                    aria-pressed={lifecycleFilter === status}
+                    className={`ap-chip-filter ${lifecycleFilter === status ? 'active' : ''}`}
                     onClick={() => setLifecycleFilter(status)}
-                    style={{
-                      background: lifecycleFilter === status ? 'rgba(255,255,255,0.12)' : 'transparent',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 4,
-                      padding: '3px 10px',
-                      fontSize: '0.72rem',
-                      color: lifecycleFilter === status ? 'var(--color-foreground)' : 'var(--color-muted)',
-                      cursor: 'pointer',
-                    }}
                   >
                     {status}
                   </button>
@@ -328,17 +282,17 @@ const AgentsPage = () => {
             </div>
 
             {filteredAgents.length === 0 ? (
-              <div style={{ ...cardStyle, textAlign: 'center', padding: '48px 24px', cursor: 'default' }}>
-                <p style={{ fontSize: '0.88rem', color: 'var(--color-foreground)', fontWeight: 500, marginBottom: 4 }}>
+              <div className="ap-empty">
+                <div className="ap-empty-title">
                   {searchTerm || lifecycleFilter !== 'All' ? t('noAgentsMatch') : t('noAgentsYet')}
-                </p>
-                <p style={{ fontSize: '0.78rem', color: 'var(--color-muted)', marginBottom: 16 }}>
+                </div>
+                <p className="ap-empty-text">
                   {searchTerm || lifecycleFilter !== 'All' ? t('tryDifferent') : t('createFirst')}
                 </p>
                 {!searchTerm && lifecycleFilter === 'All' && (
-                  <Button variant="primary" size="sm" onClick={() => navigate('/agents/wizard')}>
+                  <button type="button" className="ap-btn-primary" onClick={() => navigate('/agents/wizard')}>
                     {t('createAgent')}
-                  </Button>
+                  </button>
                 )}
               </div>
             ) : (
@@ -348,135 +302,164 @@ const AgentsPage = () => {
                   const stats = tasksByAgent[agent.id] || { active: 0, completed: 0, total: 0 };
                   const successRate = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
                   const ls = agent.status || 'draft';
-                  const lsBadge = lifecycleBadge(ls);
-                  const isDeprecated = ls.toLowerCase() === 'deprecated';
-                  const canPromote = ['draft', 'staging'].includes(ls.toLowerCase());
-                  const canDeprecate = ls.toLowerCase() === 'production';
+                  const lsKey = ls.toLowerCase();
+                  const isDeprecated = lsKey === 'deprecated';
+                  const canPromote = ['draft', 'staging'].includes(lsKey);
+                  const canDeprecate = lsKey === 'production';
 
                   return (
                     <Col key={agent.id} md={6} xl={4}>
-                      <div
-                        style={cardStyle}
+                      <article
+                        className="ap-card"
                         onClick={() => navigate(`/agents/${agent.id}`)}
-                        onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; }}
+                        style={{ cursor: 'pointer' }}
                       >
-                        <div className="d-flex align-items-center justify-content-between mb-2">
-                          <div className="d-flex align-items-center gap-2">
-                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor(agent.status), flexShrink: 0 }} />
-                            <span style={{
-                              fontSize: '0.95rem', fontWeight: 600, color: 'var(--color-foreground)',
-                              textDecoration: isDeprecated ? 'line-through' : 'none',
-                            }}>
-                              {agent.name}
-                            </span>
-                          </div>
-                          <div className="d-flex align-items-center gap-1">
-                            <span style={{
-                              fontSize: '0.63rem', padding: '2px 7px', borderRadius: 4,
-                              background: lsBadge.bg, color: lsBadge.color, fontWeight: 600,
-                            }}>
-                              {lsBadge.label}
-                            </span>
-                            <span style={{
-                              fontSize: '0.68rem', padding: '2px 8px', borderRadius: 4,
-                              background: 'var(--surface-contrast, rgba(255,255,255,0.06))',
-                              color: 'var(--color-muted)', fontWeight: 500,
-                            }} title="Model tier — actual model is selected by the tenant's routed CLI platform">
-                              {agent.default_model_tier || 'full'} tier
-                            </span>
-                          </div>
-                        </div>
-
-                        <p style={{
-                          fontSize: '0.78rem', color: 'var(--color-muted)', margin: '0 0 10px 0',
-                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                        }}>
-                          {agent.description || 'No description'}
-                        </p>
-
-                        <div className="d-flex gap-1 mb-2 flex-wrap">
-                          {agent.role && (
-                            <Badge bg="none" style={{ fontSize: '0.65rem', backgroundColor: ROLE_COLORS[agent.role] || '#6c757d' }}>
-                              {agent.role}
-                            </Badge>
-                          )}
-                          <Badge bg="none" style={{ fontSize: '0.65rem', backgroundColor: 'rgba(255,255,255,0.1)', color: 'var(--color-muted)' }}>
-                            {AUTONOMY_LABELS[agent.autonomy_level] || agent.autonomy_level || 'supervised'}
-                          </Badge>
-                          <span style={{ fontSize: '0.65rem', color: 'var(--color-muted)', marginLeft: 'auto' }}>
-                            {agent.owner_user_id ? 'Owned' : 'Unowned'}
-                          </span>
-                        </div>
-
-                        {skills.length > 0 && (
-                          <div className="d-flex gap-1 mb-2 flex-wrap">
-                            {skills.slice(0, 4).map(s => (
-                              <span key={s} style={{
-                                fontSize: '0.65rem', padding: '1px 6px', borderRadius: 3,
-                                background: 'rgba(77,171,247,0.12)', color: '#4dabf7',
-                              }}>
-                                {s.replace(/_/g, ' ')}
+                        <div className="ap-card-body">
+                          <div className="d-flex align-items-start justify-content-between mb-2">
+                            <div className="d-flex align-items-center gap-2" style={{ minWidth: 0, flex: 1 }}>
+                              <span className="ap-status-dot" style={{ color: statusColor(agent.status), flexShrink: 0 }} />
+                              <h3
+                                className="ap-card-title"
+                                style={{
+                                  margin: 0,
+                                  textDecoration: isDeprecated ? 'line-through' : 'none',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {agent.name}
+                              </h3>
+                            </div>
+                            <div className="d-flex align-items-center gap-1" style={{ flexShrink: 0 }}>
+                              <span className={`ap-status ap-status-${lsKey}`}>
+                                {ls}
                               </span>
-                            ))}
-                            {skills.length > 4 && (
-                              <span style={{ fontSize: '0.65rem', color: 'var(--color-muted)' }}>
-                                +{skills.length - 4} more
+                              <span
+                                className="ap-badge-outline"
+                                title="Model tier — actual model is selected by the tenant's routed CLI platform"
+                              >
+                                {agent.default_model_tier || 'full'} tier
+                              </span>
+                            </div>
+                          </div>
+
+                          <p
+                            className="ap-card-text mb-2"
+                            style={{
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              minHeight: 40,
+                            }}
+                          >
+                            {agent.description || t('noDescription', 'No description')}
+                          </p>
+
+                          <div className="d-flex gap-2 mb-2 flex-wrap align-items-center">
+                            {agent.role && (
+                              <span
+                                className="ap-badge-solid"
+                                style={{
+                                  background: 'var(--ap-primary-tint)',
+                                  color: 'var(--ap-primary)',
+                                }}
+                              >
+                                {agent.role}
                               </span>
                             )}
+                            <span className="ap-badge-outline">
+                              {AUTONOMY_LABELS[agent.autonomy_level] || agent.autonomy_level || 'supervised'}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 'var(--ap-fs-xs)',
+                                color: 'var(--ap-text-subtle)',
+                                marginLeft: 'auto',
+                              }}
+                            >
+                              {agent.owner_user_id ? 'Owned' : 'Unowned'}
+                            </span>
                           </div>
-                        )}
 
-                        <div className="d-flex align-items-center gap-3" style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
-                          <span>{stats.active} active</span>
-                          <span>{stats.completed} completed</span>
-                          {stats.total > 0 && (
-                            <div className="d-flex align-items-center gap-1">
-                              <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.1)' }}>
-                                <div style={{ width: `${successRate}%`, height: '100%', borderRadius: 2, background: '#22c55e' }} />
-                              </div>
-                              <span>{successRate}%</span>
+                          {skills.length > 0 && (
+                            <div className="d-flex gap-1 mb-2 flex-wrap">
+                              {skills.slice(0, 4).map(s => (
+                                <span key={s} className="ap-badge-outline" style={{ textTransform: 'none' }}>
+                                  {s.replace(/_/g, ' ')}
+                                </span>
+                              ))}
+                              {skills.length > 4 && (
+                                <span style={{ fontSize: 'var(--ap-fs-xs)', color: 'var(--ap-text-subtle)' }}>
+                                  +{skills.length - 4} more
+                                </span>
+                              )}
                             </div>
                           )}
+
+                          <div
+                            className="d-flex align-items-center gap-3"
+                            style={{ fontSize: 'var(--ap-fs-xs)', color: 'var(--ap-text-subtle)' }}
+                          >
+                            <span>{stats.active} active</span>
+                            <span>{stats.completed} completed</span>
+                            {stats.total > 0 && (
+                              <div className="d-flex align-items-center gap-1">
+                                <div
+                                  style={{
+                                    width: 40,
+                                    height: 4,
+                                    borderRadius: 2,
+                                    background: 'var(--ap-primary-tint-hi)',
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      width: `${successRate}%`,
+                                      height: '100%',
+                                      borderRadius: 2,
+                                      background: 'var(--ap-success)',
+                                    }}
+                                  />
+                                </div>
+                                <span>{successRate}%</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
 
-                        <div className="d-flex justify-content-end gap-1 mt-2">
+                        <footer
+                          className="d-flex align-items-center gap-2 px-3 pb-3"
+                          style={{ justifyContent: 'flex-end' }}
+                        >
                           {canPromote && (
                             <button
+                              type="button"
+                              className="ap-btn-ghost ap-btn-sm"
                               onClick={(e) => handlePromote(e, agent)}
-                              style={{
-                                background: 'none', border: '1px solid var(--color-border)',
-                                borderRadius: 4, padding: '2px 8px', fontSize: '0.68rem',
-                                color: '#4dabf7', cursor: 'pointer',
-                              }}
                             >
                               Promote
                             </button>
                           )}
                           {canDeprecate && (
                             <button
+                              type="button"
+                              className="ap-btn-ghost ap-btn-sm"
                               onClick={(e) => handleDeprecate(e, agent)}
-                              style={{
-                                background: 'none', border: '1px solid var(--color-border)',
-                                borderRadius: 4, padding: '2px 8px', fontSize: '0.68rem',
-                                color: '#f59e0b', cursor: 'pointer',
-                              }}
                             >
                               Deprecate
                             </button>
                           )}
                           <button
+                            type="button"
+                            className="ap-btn-danger ap-btn-sm"
                             onClick={(e) => { e.stopPropagation(); setDeleteConfirm(agent); }}
-                            style={{
-                              background: 'none', border: '1px solid var(--color-border)',
-                              borderRadius: 4, padding: '2px 8px', fontSize: '0.68rem',
-                              color: '#ef4444', cursor: 'pointer',
-                            }}
                           >
                             Delete
                           </button>
-                        </div>
-                      </div>
+                        </footer>
+                      </article>
                     </Col>
                   );
                 })}
@@ -484,17 +467,19 @@ const AgentsPage = () => {
             )}
 
             {/* ── Section 3: External Agents ── */}
-            <p style={sectionHeadingStyle}>External Agents</p>
+            <div className="ap-section-label" style={{ marginTop: 'var(--ap-space-6)' }}>
+              {t('externalAgents', 'External Agents')}
+            </div>
             {externalAgents.length === 0 ? (
-              <div style={{ ...cardStyle, textAlign: 'center', padding: '32px 24px', cursor: 'default' }}>
-                <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', margin: 0 }}>
-                  No external agents hired yet.{' '}
+              <div className="ap-empty">
+                <p className="ap-empty-text" style={{ marginBottom: 0 }}>
+                  {t('noExternalYet', 'No external agents hired yet.')}{' '}
                   <button
                     type="button"
                     onClick={() => setHireModalOpen(true)}
                     className="ap-inline-link"
                   >
-                    Hire one now.
+                    {t('hireOneNow', 'Hire one now.')}
                   </button>
                 </p>
               </div>
@@ -502,65 +487,70 @@ const AgentsPage = () => {
               <Row className="g-3">
                 {externalAgents.map(ext => (
                   <Col key={ext.id} md={6} xl={4}>
-                    <div style={{ ...cardStyle, borderLeft: '4px solid #22c55e', cursor: 'default' }}>
-                      <div className="d-flex align-items-center justify-content-between mb-2">
-                        <div className="d-flex align-items-center gap-2">
-                          <span style={{
-                            width: 8, height: 8, borderRadius: '50%',
-                            background: externalStatusDot(ext.status), flexShrink: 0,
-                          }} />
-                          <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--color-foreground)' }}>
-                            {ext.name}
-                          </span>
+                    <article className="ap-card" style={{ borderLeft: '4px solid var(--ap-success)' }}>
+                      <div className="ap-card-body">
+                        <div className="d-flex align-items-start justify-content-between mb-2">
+                          <div className="d-flex align-items-center gap-2" style={{ minWidth: 0, flex: 1 }}>
+                            <span className="ap-status-dot" style={{ color: externalStatusDot(ext.status), flexShrink: 0 }} />
+                            <h3 className="ap-card-title" style={{ margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {ext.name}
+                            </h3>
+                          </div>
+                          {ext.protocol && (
+                            <span
+                              className="ap-badge-solid"
+                              style={{
+                                background: 'var(--ap-success-tint)',
+                                color: 'var(--ap-success)',
+                              }}
+                            >
+                              {ext.protocol}
+                            </span>
+                          )}
                         </div>
-                        {ext.protocol && (
-                          <span style={{
-                            fontSize: '0.65rem', padding: '2px 8px', borderRadius: 4,
-                            background: 'rgba(34,197,94,0.12)', color: '#86efac', fontWeight: 600,
-                          }}>
-                            {ext.protocol}
-                          </span>
-                        )}
-                      </div>
 
-                      <p style={{
-                        fontSize: '0.78rem', color: 'var(--color-muted)', margin: '0 0 10px 0',
-                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                      }}>
-                        {ext.description || 'No description'}
-                      </p>
-
-                      <div className="d-flex gap-3 mb-2" style={{ fontSize: '0.72rem', color: 'var(--color-muted)' }}>
-                        {ext.task_count != null && <span>{ext.task_count} tasks</span>}
-                        {ext.success_count != null && <span>{ext.success_count} success</span>}
-                        {ext.last_seen && (
-                          <span>last seen {new Date(ext.last_seen).toLocaleDateString()}</span>
-                        )}
-                      </div>
-
-                      <div className="d-flex justify-content-end gap-1 mt-1">
-                        <button
-                          onClick={(e) => handleHealthCheck(e, ext)}
+                        <p
+                          className="ap-card-text mb-2"
                           style={{
-                            background: 'none', border: '1px solid var(--color-border)',
-                            borderRadius: 4, padding: '2px 8px', fontSize: '0.68rem',
-                            color: '#4dabf7', cursor: 'pointer',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                            minHeight: 40,
                           }}
+                        >
+                          {ext.description || t('noDescription', 'No description')}
+                        </p>
+
+                        <div className="d-flex gap-3 mb-2" style={{ fontSize: 'var(--ap-fs-xs)', color: 'var(--ap-text-subtle)' }}>
+                          {ext.task_count != null && <span>{ext.task_count} tasks</span>}
+                          {ext.success_count != null && <span>{ext.success_count} success</span>}
+                          {ext.last_seen && (
+                            <span>last seen {new Date(ext.last_seen).toLocaleDateString()}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <footer
+                        className="d-flex align-items-center gap-2 px-3 pb-3"
+                        style={{ justifyContent: 'flex-end' }}
+                      >
+                        <button
+                          type="button"
+                          className="ap-btn-ghost ap-btn-sm"
+                          onClick={(e) => handleHealthCheck(e, ext)}
                         >
                           Health Check
                         </button>
                         <button
+                          type="button"
+                          className="ap-btn-danger ap-btn-sm"
                           onClick={(e) => handleFireExternal(e, ext)}
-                          style={{
-                            background: 'none', border: '1px solid var(--color-border)',
-                            borderRadius: 4, padding: '2px 8px', fontSize: '0.68rem',
-                            color: '#ef4444', cursor: 'pointer',
-                          }}
                         >
                           Fire
                         </button>
-                      </div>
-                    </div>
+                      </footer>
+                    </article>
                   </Col>
                 ))}
               </Row>
