@@ -548,14 +548,14 @@ const SkillsPage = () => {
         {/* Tabs — native <button> gives us baseline keyboard handling (Enter/Space),
             tab-stop ordering, and screen-reader semantics for free. Bootstrap's
             .nav-link.active classes are avoided so they can't override our palette. */}
-        <div className="skills-tabs" role="tablist">
+        <div className="ap-chip-row" role="tablist">
           {['native', 'my', 'community'].map(tab => (
             <button
               key={tab}
               type="button"
               role="tab"
               aria-selected={activeTab === tab}
-              className={`skills-tab ${activeTab === tab ? 'active' : ''}`}
+              className={`ap-chip-filter ${activeTab === tab ? 'active' : ''}`}
               onClick={() => setActiveTab(tab)}
             >
               {tab === 'my' ? t('tabs.mySkills') : t(`tabs.${tab}`)}
@@ -566,13 +566,13 @@ const SkillsPage = () => {
         {/* Category chips — real buttons, not Badge, so Bootstrap's .badge (bg-primary
             default) can't override the tinted inactive state, and keyboard users can
             activate them with Enter/Space. */}
-        <div className="skills-category-chips" role="group" aria-label={t('categories.all')}>
+        <div className="ap-chip-row" role="group" aria-label={t('categories.all')}>
           {CATEGORIES.map(cat => (
             <button
               key={cat}
               type="button"
               aria-pressed={activeCategory === cat}
-              className={`skills-chip ${activeCategory === cat ? 'active' : ''}`}
+              className={`ap-chip-filter ${activeCategory === cat ? 'active' : ''}`}
               onClick={() => setActiveCategory(cat)}
             >
               {t(`categories.${cat}`)}

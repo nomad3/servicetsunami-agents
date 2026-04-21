@@ -387,3 +387,14 @@
   color: var(--ap-text-muted);
   margin: 0 0 var(--ap-space-4);
 }
+
+/* ==========================================================================
+   Chip row — horizontal scrolling group of filter chips
+   ========================================================================== */
+
+.ap-chip-row {
+  display: flex;
+  gap: var(--ap-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--ap-space-4);
+}
