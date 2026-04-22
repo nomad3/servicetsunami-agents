@@ -51,6 +51,9 @@ class AgentImportRequest(BaseModel):
 
 class AgentPromoteRequest(BaseModel):
     notes: Optional[str] = None
+    # Opt-out for teams that haven't written tests yet. Default False keeps the
+    # gate enabled — callers must explicitly bypass the regression check.
+    skip_tests: bool = False
 
 
 class AgentDeprecateRequest(BaseModel):

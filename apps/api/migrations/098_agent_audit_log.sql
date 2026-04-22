@@ -25,4 +25,4 @@ CREATE INDEX IF NOT EXISTS idx_agent_audit_logs_agent_id ON agent_audit_logs(age
 CREATE INDEX IF NOT EXISTS idx_agent_audit_logs_created_at ON agent_audit_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_audit_logs_user ON agent_audit_logs(invoked_by_user_id);
 
-INSERT INTO _migrations(name) VALUES ('098_agent_audit_log') ON CONFLICT DO NOTHING;
+INSERT INTO _migrations(filename) VALUES ('098_agent_audit_log') ON CONFLICT DO NOTHING;

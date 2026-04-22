@@ -3,6 +3,8 @@ import { Badge, Col, Modal, Nav, Row, Spinner } from 'react-bootstrap';
 import { useNavigate, useParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import agentService from '../services/agent';
+import TestsTabSection from '../components/agent/TestsTabSection';
+import api from '../services/api';
 import './AgentDetailPage.css';
 
 // Semantic/categorical status colors — kept as meaningful data viz values
@@ -26,6 +28,16 @@ const AgentDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishForm, setPublishForm] = useState({
+    protocol: 'openai_chat',
+    endpoint_url: '',
+    pricing_model: 'free',
+    price_per_call_usd: '',
+    public: true,
+  });
+  const [publishBusy, setPublishBusy] = useState(false);
+  const [publishError, setPublishError] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
   const [performanceData, setPerformanceData] = useState(null);
@@ -257,6 +269,11 @@ const AgentDetailPage = () => {
               </div>
             </div>
             <div className="ap-page-actions">
+              {agent.status === 'production' && (
+                <button type="button" className="ap-btn-secondary ap-btn-sm" onClick={() => setPublishOpen(true)}>
+                  Publish
+                </button>
+              )}
               <button type="button" className="ap-btn-danger ap-btn-sm" onClick={() => setDeleteConfirm(true)}>
                 Delete
               </button>
@@ -266,7 +283,7 @@ const AgentDetailPage = () => {
 
         {/* Tabs */}
         <Nav className="tab-nav" as="ul">
-          {['overview', 'relations', 'tasks', 'config', 'performance', 'audit', 'versions', 'integrations'].map(tab => (
+          {['overview', 'relations', 'tasks', 'config', 'performance', 'audit', 'versions', 'integrations', 'tests'].map(tab => (
             <Nav.Item as="li" key={tab}>
               <Nav.Link
                 className={activeTab === tab ? 'active' : ''}
@@ -711,6 +728,9 @@ const AgentDetailPage = () => {
             )}
           </div>
         )}
+
+        {/* Tests Tab — ALM Pillar 10 */}
+        {activeTab === 'tests' && <TestsTabSection agentId={id} />}
       </div>
 
       {/* Delete Modal */}
@@ -729,6 +749,81 @@ const AgentDetailPage = () => {
             </button>
           </div>
         </Modal.Body>
+      </Modal>
+
+      {/* Publish to Marketplace Modal (ALM Pillar 9) */}
+      <Modal show={publishOpen} onHide={() => setPublishOpen(false)} centered>
+        <Modal.Header>
+          <Modal.Title style={{ fontSize: 'var(--ap-fs-md)', fontWeight: 600 }}>Publish "{agent.name}" to marketplace</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <p style={{ fontSize: 'var(--ap-fs-sm)', color: 'var(--ap-text-muted)', marginBottom: 16 }}>
+            Other tenants will be able to discover and subscribe to this agent. Only production agents can be published.
+          </p>
+          {publishError && (
+            <div className="ap-card" style={{ padding: 12, marginBottom: 12, color: 'var(--ap-danger)' }}>
+              {String(publishError)}
+            </div>
+          )}
+          <div className="row g-2">
+            <div className="col-md-6">
+              <label style={{ fontSize: 'var(--ap-fs-xs)', color: 'var(--ap-text-muted)' }}>Protocol</label>
+              <select className="form-select form-select-sm" value={publishForm.protocol} onChange={(e) => setPublishForm({ ...publishForm, protocol: e.target.value })}>
+                <option value="openai_chat">OpenAI-compatible</option>
+                <option value="mcp_sse">MCP SSE</option>
+                <option value="webhook">Webhook</option>
+                <option value="a2a">A2A</option>
+              </select>
+            </div>
+            <div className="col-md-6">
+              <label style={{ fontSize: 'var(--ap-fs-xs)', color: 'var(--ap-text-muted)' }}>Pricing</label>
+              <select className="form-select form-select-sm" value={publishForm.pricing_model} onChange={(e) => setPublishForm({ ...publishForm, pricing_model: e.target.value })}>
+                <option value="free">Free</option>
+                <option value="per_call">Per-call</option>
+                <option value="subscription">Subscription</option>
+              </select>
+            </div>
+            <div className="col-12">
+              <label style={{ fontSize: 'var(--ap-fs-xs)', color: 'var(--ap-text-muted)' }}>Endpoint URL *</label>
+              <input className="form-control form-control-sm" required value={publishForm.endpoint_url} onChange={(e) => setPublishForm({ ...publishForm, endpoint_url: e.target.value })} placeholder="https://agentprovision.com/api/v1/agents/…/invoke" />
+            </div>
+            {publishForm.pricing_model !== 'free' && (
+              <div className="col-md-6">
+                <label style={{ fontSize: 'var(--ap-fs-xs)', color: 'var(--ap-text-muted)' }}>Price per call (USD)</label>
+                <input type="number" step="0.01" className="form-control form-control-sm" value={publishForm.price_per_call_usd} onChange={(e) => setPublishForm({ ...publishForm, price_per_call_usd: e.target.value })} />
+              </div>
+            )}
+          </div>
+        </Modal.Body>
+        <Modal.Footer>
+          <button type="button" className="ap-btn-secondary ap-btn-sm" onClick={() => setPublishOpen(false)}>Cancel</button>
+          <button
+            type="button"
+            className="ap-btn-primary ap-btn-sm"
+            disabled={publishBusy || !publishForm.endpoint_url.trim()}
+            onClick={async () => {
+              setPublishBusy(true);
+              setPublishError(null);
+              try {
+                await api.post('/marketplace/listings', {
+                  agent_id: id,
+                  protocol: publishForm.protocol,
+                  endpoint_url: publishForm.endpoint_url || null,
+                  pricing_model: publishForm.pricing_model,
+                  price_per_call_usd: publishForm.price_per_call_usd ? Number(publishForm.price_per_call_usd) : null,
+                  public: true,
+                });
+                setPublishOpen(false);
+              } catch (e) {
+                setPublishError(e?.response?.data?.detail || 'Publish failed');
+              } finally {
+                setPublishBusy(false);
+              }
+            }}
+          >
+            {publishBusy ? 'Publishing…' : 'Publish'}
+          </button>
+        </Modal.Footer>
       </Modal>
     </Layout>
   );

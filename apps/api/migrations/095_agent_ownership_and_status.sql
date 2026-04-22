@@ -9,4 +9,4 @@ CREATE INDEX IF NOT EXISTS idx_agents_owner_user_id ON agents(owner_user_id);
 CREATE INDEX IF NOT EXISTS idx_agents_team_id ON agents(team_id);
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 
-INSERT INTO _migrations(name) VALUES ('095_agent_ownership_and_status') ON CONFLICT DO NOTHING;
+INSERT INTO _migrations(filename) VALUES ('095_agent_ownership_and_status') ON CONFLICT DO NOTHING;

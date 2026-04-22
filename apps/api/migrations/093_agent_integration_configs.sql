@@ -10,4 +10,4 @@ CREATE TABLE IF NOT EXISTS agent_integration_configs (
 CREATE INDEX IF NOT EXISTS idx_agent_integration_configs_agent_id ON agent_integration_configs(agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_integration_configs_tenant_id ON agent_integration_configs(tenant_id);
 
-INSERT INTO _migrations(name) VALUES ('093_agent_integration_configs') ON CONFLICT DO NOTHING;
+INSERT INTO _migrations(filename) VALUES ('093_agent_integration_configs') ON CONFLICT DO NOTHING;

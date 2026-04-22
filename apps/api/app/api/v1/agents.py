@@ -168,6 +168,51 @@ def promote_agent(
             detail=f"Cannot promote agent with status '{agent.status}'",
         )
 
+    # Promotion gate: if the agent has enabled test cases, they must pass before
+    # we transition the lifecycle state. Running the suite against an empty set
+    # short-circuits (no regression gate to enforce).
+    if body.skip_tests:
+        # Auditable bypass — governance needs to see who skipped the regression gate.
+        write_audit_log(
+            agent_id=agent.id,
+            tenant_id=agent.tenant_id,
+            invoked_by_user_id=current_user.id,
+            invocation_type="lifecycle",
+            status="promote_bypass_gate",
+        )
+    else:
+        from app.models.agent_test_suite import AgentTestCase
+        from app.services import agent_test_runner
+
+        has_cases = (
+            db.query(AgentTestCase)
+            .filter(
+                AgentTestCase.agent_id == agent.id,
+                AgentTestCase.tenant_id == agent.tenant_id,
+                AgentTestCase.enabled.is_(True),
+            )
+            .count()
+        )
+        if has_cases > 0:
+            test_run = agent_test_runner.run_test_suite(
+                db,
+                agent_id=agent.id,
+                tenant_id=agent.tenant_id,
+                triggered_by_user_id=current_user.id,
+                run_type="promotion_gate",
+            )
+            if test_run.status != "passed":
+                raise HTTPException(
+                    status_code=status.HTTP_412_PRECONDITION_FAILED,
+                    detail={
+                        "message": "Promotion blocked by failing test cases",
+                        "test_run_id": str(test_run.id),
+                        "passed": test_run.passed_count,
+                        "failed": test_run.failed_count,
+                        "results": test_run.results,
+                    },
+                )
+
     # Snapshot current config before transitioning
     config_snapshot = {
         "name": agent.name,

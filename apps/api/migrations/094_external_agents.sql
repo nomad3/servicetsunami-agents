@@ -24,4 +24,4 @@ CREATE TABLE IF NOT EXISTS external_agents (
 CREATE INDEX IF NOT EXISTS idx_external_agents_tenant_id ON external_agents(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_external_agents_status ON external_agents(status);
 
-INSERT INTO _migrations(name) VALUES ('094_external_agents') ON CONFLICT DO NOTHING;
+INSERT INTO _migrations(filename) VALUES ('094_external_agents') ON CONFLICT DO NOTHING;

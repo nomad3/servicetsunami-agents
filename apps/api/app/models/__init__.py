@@ -75,6 +75,8 @@ from .agent_policy import AgentPolicy
 from .agent_audit_log import AgentAuditLog
 from .agent_integration_config import AgentIntegrationConfig
 from .external_agent import ExternalAgent
+from .agent_marketplace_listing import AgentMarketplaceListing, AgentMarketplaceSubscription
+from .agent_test_suite import AgentTestCase, AgentTestRun
 
 __all__ = [
     "Tenant", "User",
@@ -118,4 +120,6 @@ __all__ = [
     "BehavioralSignal",
     "AgentIntegrationConfig",
     "ExternalAgent",
+    "AgentMarketplaceListing", "AgentMarketplaceSubscription",
+    "AgentTestCase", "AgentTestRun",
 ]

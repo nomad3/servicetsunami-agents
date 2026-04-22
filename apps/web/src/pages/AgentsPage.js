@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import agentService from '../services/agent';
+import MarketplaceSection from '../components/agent/MarketplaceSection';
 import api from '../services/api';
 
 const AgentsPage = () => {
@@ -555,6 +556,9 @@ const AgentsPage = () => {
                 ))}
               </Row>
             )}
+
+            {/* ── Section 4: Marketplace (ALM Pillar 9) ── */}
+            <MarketplaceSection />
           </>
         )}
       </div>

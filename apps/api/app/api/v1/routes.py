@@ -60,6 +60,8 @@ from app.api.v1 import (
     branding_domain,
     media,
     external_agents,
+    agent_marketplace,
+    agent_tests,
 )
 
 _logger = logging.getLogger(__name__)
@@ -142,6 +144,8 @@ router.include_router(branding_domain.router, tags=["domain-branding"])
 router.include_router(media.router, prefix="/media", tags=["media"])
 router.include_router(audit.router, prefix="/audit", tags=["audit"])
 router.include_router(external_agents.router, prefix="/external-agents", tags=["external-agents"])
+router.include_router(agent_marketplace.router, prefix="/marketplace", tags=["marketplace"])
+router.include_router(agent_tests.router, prefix="/agents", tags=["agent-tests"])
 
 # Register optional modules that loaded successfully
 _optional_routes = {

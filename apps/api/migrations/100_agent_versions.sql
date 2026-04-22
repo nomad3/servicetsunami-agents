@@ -17,4 +17,4 @@ CREATE TABLE IF NOT EXISTS agent_versions (
 CREATE INDEX IF NOT EXISTS idx_agent_versions_agent_id ON agent_versions(agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_versions_tenant_id ON agent_versions(tenant_id);
 
-INSERT INTO _migrations(name) VALUES ('100_agent_versions') ON CONFLICT DO NOTHING;
+INSERT INTO _migrations(filename) VALUES ('100_agent_versions') ON CONFLICT DO NOTHING;

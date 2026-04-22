@@ -90,7 +90,10 @@ def generate_cli_instructions(
     lines.append(f"When calling ANY MCP tool, ALWAYS pass tenant_id=\"{tenant_name}\".")
     lines.append("MCP tool names in skill descriptions may omit the server prefix for readability.")
     lines.append("Always call tools using their FULL registered name as shown in your tools list.")
-    lines.append("If a tool described as 'foo_bar' fails with 'not found', use 'mcp_agentprovision_foo_bar' instead.")
+    lines.append("Prefix rules (pick whichever matches your runtime — check your tool list on startup):")
+    lines.append("- Gemini CLI exposes MCP tools as `agentprovision__<tool_name>` (double underscore, no leading `mcp_`).")
+    lines.append("- Claude Code exposes them as `mcp__agentprovision__<tool_name>`.")
+    lines.append("If a tool described as `foo_bar` fails with `not found`, retry with `agentprovision__foo_bar` then `mcp__agentprovision__foo_bar` before giving up.")
     lines.append(f"Session: tenant={tenant_name} user={user_name} channel={channel}")
     lines.append("")
     # Identity section: use identity profile if available, otherwise default to Luna

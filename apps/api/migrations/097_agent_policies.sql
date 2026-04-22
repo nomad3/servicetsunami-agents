@@ -13,4 +13,4 @@ CREATE INDEX IF NOT EXISTS idx_agent_policies_agent_id ON agent_policies(agent_i
 CREATE INDEX IF NOT EXISTS idx_agent_policies_tenant_id ON agent_policies(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_agent_policies_type ON agent_policies(policy_type);
 
-INSERT INTO _migrations(name) VALUES ('097_agent_policies') ON CONFLICT DO NOTHING;
+INSERT INTO _migrations(filename) VALUES ('097_agent_policies') ON CONFLICT DO NOTHING;

@@ -13,4 +13,4 @@ CREATE INDEX IF NOT EXISTS idx_agent_permissions_agent_id ON agent_permissions(a
 CREATE INDEX IF NOT EXISTS idx_agent_permissions_tenant_id ON agent_permissions(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_agent_permissions_principal ON agent_permissions(principal_type, principal_id);
 
-INSERT INTO _migrations(name) VALUES ('096_agent_permissions') ON CONFLICT DO NOTHING;
+INSERT INTO _migrations(filename) VALUES ('096_agent_permissions') ON CONFLICT DO NOTHING;
