@@ -103,15 +103,22 @@ def extract_knowledge(
     Triggered by the Memory > Entities "Run Knowledge Extraction" button.
     """
     from app.services.knowledge_extraction import knowledge_extraction_service
-    from app.models.chat import ChatSession
+    from app.models.chat import ChatSession, ChatMessage
+    from sqlalchemy import func
 
     if payload.session_id:
         target_ids = [payload.session_id]
     else:
+        # Sort by last message activity (not session creation) so a freshly-created
+        # empty session doesn't outrank an older session with real history.
+        # extract_from_session early-returns on empty sessions, so ordering by
+        # creation could waste the whole batch on blank tabs.
         recent = (
             db.query(ChatSession.id)
+            .join(ChatMessage, ChatMessage.session_id == ChatSession.id)
             .filter(ChatSession.tenant_id == current_user.tenant_id)
-            .order_by(ChatSession.created_at.desc())
+            .group_by(ChatSession.id)
+            .order_by(func.max(ChatMessage.created_at).desc())
             .limit(max(1, min(payload.max_sessions, 20)))
             .all()
         )
