@@ -212,13 +212,29 @@ def create_user_with_tenant(db: Session, *, user_in: UserCreate, tenant_in: Tena
 
     # Seed a starter knowledge entity so Memory > Entities is never blank.
     company_name = tenant_in.name if tenant_in.name else "My Organization"
+    seed_description = f"{company_name} — primary organization for this workspace."
+
+    # Embed the seed entity so semantic recall (pgvector) can surface it.
+    # embed_text() routes to Rust gRPC first and falls back to local Python;
+    # failures here must not block registration, so we swallow and log.
+    seed_embedding = None
+    try:
+        from app.services.embedding_service import embed_text
+        seed_embedding = embed_text(f"{company_name}. {seed_description}")
+    except Exception as exc:  # pragma: no cover - embedding is best-effort
+        import logging
+        logging.getLogger(__name__).warning(
+            "Seed entity embedding failed for tenant %s: %s", tenant.id, exc
+        )
+
     seed_entity = KnowledgeEntity(
         name=company_name,
         entity_type="organization",
         category="company",
-        description=f"{company_name} — primary organization for this workspace.",
+        description=seed_description,
         tenant_id=tenant.id,
         confidence=1.0,
+        embedding=seed_embedding,
     )
     db.add(seed_entity)
 
