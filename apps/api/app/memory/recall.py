@@ -34,7 +34,10 @@ from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
 from app.db.safe_ops import safe_rollback
-from app.memory import _query
+# Direct-submodule import — `from app.memory import _query` would re-enter
+# the package __init__ which in turn imports this module (recall), creating
+# a load-time cycle. `import app.memory._query as _query` bypasses __init__.
+import app.memory._query as _query
 from app.memory.types import (
     CommitmentSummary,
     ContradictionSummary,
