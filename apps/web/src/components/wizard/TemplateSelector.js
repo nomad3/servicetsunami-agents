@@ -425,7 +425,7 @@ const TemplateSelector = ({ onSelect, selectedTemplate }) => {
 
       <div className="mt-4 text-center">
         <small className="text-muted">
-          Or <a href="#agent-kits">start from one of your saved agent kits →</a>
+          Or <a href="/agents">start from one of your existing agents →</a>
         </small>
       </div>
     </div>

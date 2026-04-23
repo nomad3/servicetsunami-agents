@@ -514,7 +514,7 @@ const ChatPage = () => {
   };
 
   const getSessionSubtitle = (session) => {
-    const agentName = (agentById[session.agent_id] && agentById[session.agent_id].name) || t('agentKit');
+    const agentName = (agentById[session.agent_id] && agentById[session.agent_id].name) || t('agent');
     return agentName;
   };
 
@@ -844,9 +844,9 @@ const ChatPage = () => {
             </Form.Group>
 
             <Form.Group className="mb-3">
-              <Form.Label>{t('createModal.agentKit')}</Form.Label>
+              <Form.Label>{t('createModal.agent')}</Form.Label>
               <Form.Select name="agentId" value={sessionForm.agentId} onChange={handleCreateSessionChange}>
-                <option value="">{t('createModal.agentKitPlaceholder')}</option>
+                <option value="">{t('createModal.agentPlaceholder')}</option>
                 {agents.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
