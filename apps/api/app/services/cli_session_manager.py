@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.db.safe_ops import safe_rollback
 from app.models.integration_config import IntegrationConfig
 from app.models.mcp_server_connector import MCPServerConnector
 from app.services.memory_recall import build_memory_context_with_git
@@ -444,10 +445,7 @@ def generate_mcp_config(tenant_id: str, internal_key: str, db: Session = None) -
                 config["mcpServers"][server_key] = server_entry
                 logger.info("Injected external MCP server '%s' (%s) for tenant %s", conn.name, conn.server_url, str(tenant_id)[:8])
         except Exception as e:
-            try:
-                db.rollback()
-            except Exception:
-                pass
+            safe_rollback(db)
             logger.warning("Failed to load tenant MCP connectors: %s", e, exc_info=True)
 
     return config
@@ -742,10 +740,7 @@ def run_agent_session(
         logger.debug("Temporal context injection failed: %s", exc)
 
     # Clear any poisoned DB state before we start querying
-    try:
-        db.rollback()
-    except Exception:
-        pass
+    safe_rollback(db)
 
     tenant_name = str(tenant_id)
     # Resolve actual user name from DB instead of passing a UUID
@@ -756,10 +751,7 @@ def run_agent_session(
             user_obj = db.query(User).filter(User.id == user_id).first()
             user_name = (user_obj.full_name if user_obj and user_obj.full_name else None) or str(user_id)
         except Exception:
-            try:
-                db.rollback()
-            except Exception:
-                pass
+            safe_rollback(db)
             user_name = str(user_id)
     instruction_md_content = generate_cli_instructions(
         skill_body=skill_body,

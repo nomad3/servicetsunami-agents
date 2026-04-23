@@ -33,6 +33,7 @@ from typing import Optional
 from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
+from app.db.safe_ops import safe_rollback
 from app.memory import _query
 from app.memory.types import (
     CommitmentSummary,
@@ -297,8 +298,7 @@ def recall(db: Session, request: RecallRequest) -> RecallResponse:
             if user:
                 user_name = user.full_name
         except Exception:
-            try: db.rollback()
-            except Exception: pass
+            safe_rollback(db)
     elif request.chat_session_id:
         # Fallback for sessions where user_id wasn't passed but we might find it 
         # (Though chat_sessions doesn't have user_id, some implementations might have it in metadata)

@@ -2,6 +2,7 @@
 import logging
 import uuid
 from sqlalchemy.orm import Session
+from app.db.safe_ops import safe_rollback
 from app.models.tenant_branding import TenantBranding
 
 logger = logging.getLogger(__name__)
@@ -13,6 +14,5 @@ def resolve_primary_agent_slug(db: Session, tenant_id: uuid.UUID) -> str:
         if branding and branding.ai_assistant_name and branding.ai_assistant_name != "AI Assistant":
             return branding.ai_assistant_name.lower().replace(" ", "-")
     except Exception:
-        try: db.rollback()
-        except Exception: pass
+        safe_rollback(db)
     return "luna"

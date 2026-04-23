@@ -8,6 +8,7 @@ import uuid
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.db.safe_ops import safe_rollback
 from app.models.agent import Agent
 from app.services._agent_ordering import agent_status_rank
 from app.models.chat import ChatSession as ChatSessionModel, ChatMessage
@@ -274,10 +275,7 @@ def _generate_agentic_response(
 ) -> ChatMessage:
     """Route user message through the CLI orchestrator (Claude Code CLI)."""
     # Ensure clean DB session — previous requests may have left a poisoned transaction
-    try:
-        db.rollback()
-    except Exception:
-        pass
+    safe_rollback(db)
     from app.services.agent_router import route_and_execute
     from app.services.skill_manager import skill_manager
 

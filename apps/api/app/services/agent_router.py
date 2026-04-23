@@ -12,6 +12,7 @@ from typing import Optional, Tuple, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
+from app.db.safe_ops import safe_rollback
 from app.models.tenant_features import TenantFeatures
 from app.models.tenant_branding import TenantBranding
 from app.models.agent import Agent as AgentModel
@@ -62,10 +63,7 @@ def _build_memory_context(
         )
     except Exception as e:
         logger.warning("Memory context build failed: %s", e)
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        safe_rollback(db)
         return None
 
 
@@ -230,10 +228,7 @@ def get_platform_performance(db: Session, tenant_id: uuid.UUID) -> List[Dict[str
             for r in rows
         ]
     except Exception:
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        safe_rollback(db)
         return []
 
 
@@ -294,10 +289,7 @@ def route_and_execute(
             TenantFeatures.tenant_id == tenant_id
         ).first()
     except Exception:
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        safe_rollback(db)
         features = None
 
     # Default platform is gemini_cli
@@ -319,10 +311,7 @@ def route_and_execute(
             auto_create=True,
         )
     except Exception:
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        safe_rollback(db)
         trust_profile = None
 
     inferred_type = _infer_task_type(message)
@@ -381,10 +370,7 @@ def route_and_execute(
                 agent_memory_domains = responding_agent.memory_domains
         except Exception as e:
             logger.warning("Agent selection by tool_groups failed: %s", e)
-            try:
-                db.rollback()
-            except Exception:
-                pass
+            safe_rollback(db)
 
     # 5. RL exploration & routing
     exploration_mode = os.environ.get("EXPLORATION_MODE", "off")
@@ -406,10 +392,7 @@ def route_and_execute(
             if dp_config.exploration_rate is not None:
                 exploration_rate = float(dp_config.exploration_rate)
     except Exception:
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        safe_rollback(db)
 
     if exploration_mode != "off" and random.random() < exploration_rate:
         if exploration_mode == "codex":
@@ -427,10 +410,7 @@ def route_and_execute(
                         platform = least["platform"]
                         routing_source = "exploration_balanced"
             except Exception:
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
+                safe_rollback(db)
     else:
         try:
             from app.services.rl_routing import get_routing_recommendation
@@ -446,10 +426,7 @@ def route_and_execute(
                 routing_source = "rl_platform"
         except Exception as e:
             logger.debug("RL routing lookup failed: %s", e)
-            try:
-                db.rollback()
-            except Exception:
-                pass
+            safe_rollback(db)
 
     # 6. Policy rollout
     rollout_experiment_id = None
@@ -466,10 +443,7 @@ def route_and_execute(
                 if "agent_slug" in proposed: agent_slug = proposed["agent_slug"]
     except Exception as e:
         logger.debug("Policy rollout check failed: %s", e)
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        safe_rollback(db)
 
     # 7. Build memory context
     pre_built_memory_context = None
@@ -493,10 +467,7 @@ def route_and_execute(
             recalled_entities = pre_built_memory_context["relevant_entities"]
     except Exception:
         logger.debug("Memory context build failed — routing without entity context")
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        safe_rollback(db)
 
     # 8. Short-message local path
     if _should_use_local_path(intent, message, _pin_to_claude):
@@ -507,8 +478,7 @@ def route_and_execute(
             if user:
                 user_name = user.full_name
         except Exception:
-            try: db.rollback()
-            except Exception: pass
+            safe_rollback(db)
 
         _memory_summary = _format_memory_for_local(pre_built_memory_context)
         _local_response = generate_agent_response_sync(
@@ -521,8 +491,7 @@ def route_and_execute(
         if _local_response:
             _tier_trajectory_id = uuid.uuid4()
             try:
-                try: db.rollback() 
-                except Exception: pass
+                safe_rollback(db)
                 rl_experience_service.log_experience(
                     db, tenant_id=tenant_id, trajectory_id=_tier_trajectory_id,
                     step_index=0, decision_point="tier_selection",
@@ -531,8 +500,7 @@ def route_and_execute(
                     state_text=f"task_type: {inferred_type}, message_len: {len(message)}",
                 )
             except Exception:
-                try: db.rollback() 
-                except Exception: pass
+                safe_rollback(db)
             
             _local_meta = {
                 "platform": "local_inference", 
@@ -544,8 +512,7 @@ def route_and_execute(
     # 9. Log RL experience for agent_routing decision
     trajectory_id = uuid.uuid4()
     try:
-        try: db.rollback() 
-        except Exception: pass
+        safe_rollback(db)
         rl_experience_service.log_experience(
             db, tenant_id=tenant_id, trajectory_id=trajectory_id,
             step_index=0, decision_point="agent_routing",
@@ -554,8 +521,7 @@ def route_and_execute(
             state_text=f"task_type: {inferred_type}, channel: {channel}",
         )
     except Exception:
-        try: db.rollback() 
-        except Exception: pass
+        safe_rollback(db)
 
     # 10. Presence update
     try:
