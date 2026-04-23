@@ -1,7 +1,6 @@
 """LLM service for generating intelligent responses using Claude."""
 from __future__ import annotations
 
-import json
 from typing import List, Dict, Any
 import anthropic
 
