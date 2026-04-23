@@ -19,6 +19,7 @@ import LoginPage from './pages/LoginPage';
 import MemoryPage from './pages/MemoryPage';
 import NotebooksPage from './pages/NotebooksPage';
 import RegisterPage from './pages/RegisterPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import SettingsPage from './pages/SettingsPage';
 import TeamsPage from './pages/TeamsPage';
 import TenantsPage from './pages/TenantsPage';
@@ -72,6 +73,8 @@ function App() {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/auth/login" element={<LoginPage />} />
                 <Route path="/register" element={<RegisterPage />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
+                <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
                 <Route path="/home" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
                 <Route path="/data-sources" element={<Navigate to="/integrations?tab=data-sources" replace />} />

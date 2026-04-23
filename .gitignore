@@ -57,5 +57,8 @@ apps/api/storage/
 .claude/worktrees/
 opencode.json
 apps/api/app/**/__pycache__
+**/__pycache__/
+*.pyc
+*.pyo
 cloudflared/cert.pem
 cloudflared/credentials.json

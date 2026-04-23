@@ -78,7 +78,8 @@ USER appuser
 # Environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8000
+    PORT=8000 \
+    IN_DOCKER=1
 
 # Expose port
 EXPOSE 8000

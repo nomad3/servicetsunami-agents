@@ -191,12 +191,22 @@ class SkillManager:
         native_dir.mkdir(parents=True, exist_ok=True)
         self._community_dir().mkdir(parents=True, exist_ok=True)
 
-        # Seed bundled skills into native dir
+        # Seed bundled skills into native dir. Only copy entries that are
+        # actual skill directories (contain skill.md) — skip tier/layout
+        # directories like `native/`, `community/`, `tenant_*/`, `agents/`
+        # that would otherwise mirror themselves into native/ recursively.
         if BUNDLED_SKILLS_DIR.is_dir() and BUNDLED_SKILLS_DIR.resolve() != native_dir.resolve():
             for entry in BUNDLED_SKILLS_DIR.iterdir():
-                if entry.is_dir() and not (native_dir / entry.name).exists():
-                    shutil.copytree(entry, native_dir / entry.name)
-                    logger.info("Seeded bundled skill: %s", entry.name)
+                if not entry.is_dir():
+                    continue
+                if entry.name in ("native", "community") or entry.name.startswith("tenant_"):
+                    continue
+                if not (entry / "skill.md").exists():
+                    continue
+                if (native_dir / entry.name).exists():
+                    continue
+                shutil.copytree(entry, native_dir / entry.name)
+                logger.info("Seeded bundled skill: %s", entry.name)
 
         loaded: List[FileSkill] = []
 

@@ -12,7 +12,11 @@ class LLMConfig(Base):
     __tablename__ = "llm_configs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
+    tenant_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", name="fk_llm_config_tenant_id", use_alter=True),
+        nullable=False
+    )
 
     name = Column(String, nullable=False)
     is_tenant_default = Column(Boolean, default=False)
