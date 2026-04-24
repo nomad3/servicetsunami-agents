@@ -321,13 +321,12 @@ def route_and_execute(
     _presence_sid = str((db_session_memory or {}).get("chat_session_id", ""))
 
     # 3. Intent matching
+    # Coalition auto-trigger was removed 2026-04-24: it double-spawned the Gemini
+    # CLI on every data/reports/github/shell intent match, doubling user-perceived
+    # latency for a response that was never shown to the user. @coalition prefix
+    # and POST /collaborations/dispatch remain the explicit entry points.
     try:
         intent = match_intent(message)
-        # 3b. Coalition triggering for complex tasks
-        if intent and any(tag in (intent.get("tools") or []) for tag in ["github", "shell", "data", "reports"]):
-            if _presence_sid:
-                logger.info("Triggering CoalitionWorkflow for complex task: %s", intent["name"])
-                dispatch_coalition(tenant_id, _presence_sid, message)
     except Exception as e:
         logger.debug("match_intent failed: %s — defaulting to full tier", e)
         intent = None
