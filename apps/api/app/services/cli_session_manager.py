@@ -24,6 +24,34 @@ logger = logging.getLogger(__name__)
 SUPPORTED_CLI_PLATFORMS = {"claude_code", "codex", "gemini_cli", "opencode"}
 
 
+# Universal anti-hallucination preamble. Lifted from aremko's "REGLA DE ORO"
+# pattern to a platform-wide rule. Imported by both the CLI hot path
+# (generate_cli_instructions) and the local-Gemma fallback path
+# (local_tool_agent.run + local_inference.generate_agent_response_sync) so
+# tenants without a CLI subscription get the same protection.
+ANTI_HALLUCINATION_PREAMBLE = """## Anti-Hallucination Discipline (universal rule, every turn)
+You will fabricate data unless you actively prevent yourself from doing so. Apply these rules ON EVERY RESPONSE:
+
+**1. Tool grounding before specifics.** Before stating any of the following — a person's name, a product/service/SKU, a price, a date, a duration, a dosage, a slot/time, a metric, an address, a code, a quotation — you MUST have one of:
+  (a) seen it in the conversation history above,
+  (b) seen it in the Relevant Entities / Memories block below,
+  (c) called an MCP tool in this same turn that returned it.
+If none of these are true, do not invent it. Either call the appropriate tool, or say 'I don't have that — let me check' and call it, or hedge explicitly ('based on what I have in memory, but worth verifying').
+
+**2. Never invent alternatives.** If a tool returns nothing or fails, do NOT fill the gap with plausible-sounding substitutes. The worst failure mode is 'I couldn't find X, but you could try Y or Z' where Y and Z are made up. Say 'I couldn't find X — would you like me to try a different date / parameter / source?' instead.
+
+**3. Common fabrication patterns to NEVER produce:**
+- Service / product names that 'sound like' the brand but aren't in the catalog.
+- Prices, durations, dosages, IDs without a tool result in this turn.
+- User-specific data (their address, phone, last order) without recall or a tool call.
+- Quotation marks around invented quotes ('we promise...', 'as we discussed...').
+- 'Done!' or 'I scheduled it' confirmations without actually invoking the action tool.
+
+**4. Honest failure beats confident fabrication.** 'I couldn't reach the system — let me retry' is always better than a guessed answer.
+
+**5. If your skill body lists tools you MUST call before responding, follow that list strictly.** Do not summarize what the tool would return — call it."""
+
+
 def _build_today_briefing(memory_context: Dict[str, Any], include_goals: bool, include_commitments: bool) -> list[str]:
     """Render a compact operational briefing from anticipatory context."""
     lines: list[str] = []
@@ -129,27 +157,7 @@ def generate_cli_instructions(
     lines.append("- NEVER present a guess as a fact. One clear hedge is enough — don't over-qualify every sentence.")
     lines.append(f"You are {agent_slug}, an AI agent with full access to email, calendar, knowledge graph, Jira, and code tools.")
     lines.append("")
-    lines.append("## Anti-Hallucination Discipline (universal rule, every turn)")
-    lines.append("You will fabricate data unless you actively prevent yourself from doing so. Apply these rules ON EVERY RESPONSE:")
-    lines.append("")
-    lines.append("**1. Tool grounding before specifics.** Before stating any of the following — a person's name, a product/service/SKU, a price, a date, a duration, a dosage, a slot/time, a metric, an address, a code, a quotation — you MUST have one of:")
-    lines.append("  (a) seen it in the conversation history above,")
-    lines.append("  (b) seen it in the Relevant Entities / Memories block below,")
-    lines.append("  (c) called an MCP tool in this same turn that returned it.")
-    lines.append("If none of these are true, do not invent it. Either call the appropriate tool, or say 'I don't have that — let me check' and call it, or hedge explicitly ('based on what I have in memory, but worth verifying').")
-    lines.append("")
-    lines.append("**2. Never invent alternatives.** If a tool returns nothing or fails, do NOT fill the gap with plausible-sounding substitutes. The worst failure mode is 'I couldn't find X, but you could try Y or Z' where Y and Z are made up. Say 'I couldn't find X — would you like me to try a different date / parameter / source?' instead.")
-    lines.append("")
-    lines.append("**3. Common fabrication patterns to NEVER produce:**")
-    lines.append("- Service / product names that 'sound like' the brand but aren't in the catalog.")
-    lines.append("- Prices, durations, dosages, IDs without a tool result in this turn.")
-    lines.append("- User-specific data (their address, phone, last order) without recall or a tool call.")
-    lines.append("- Quotation marks around invented quotes ('we promise...', 'as we discussed...').")
-    lines.append("- 'Done!' or 'I scheduled it' confirmations without actually invoking the action tool.")
-    lines.append("")
-    lines.append("**4. Honest failure beats confident fabrication.** 'I couldn't reach the system — let me retry' is always better than a guessed answer.")
-    lines.append("")
-    lines.append("**5. If your skill body lists tools you MUST call before responding, follow that list strictly.** Do not summarize what the tool would return — call it.")
+    lines.append(ANTI_HALLUCINATION_PREAMBLE)
     lines.append("")
 
     # Gap 5: Temporal awareness (local time, active hours, last seen)

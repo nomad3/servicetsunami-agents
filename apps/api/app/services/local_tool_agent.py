@@ -295,6 +295,10 @@ def run(
         "\n\nYou have access to tools. Use them when needed to answer accurately. "
         "If no tool is needed, respond directly. Be concise."
     )
+    # Universal anti-hallucination preamble — same rules as the CLI hot path.
+    # Imported lazily to avoid circular imports.
+    from app.services.cli_session_manager import ANTI_HALLUCINATION_PREAMBLE
+    system = ANTI_HALLUCINATION_PREAMBLE + "\n\n" + system
 
     # Get curated tools for this tenant
     tools = _get_tools_for_tenant(tenant_id, connected_integrations)

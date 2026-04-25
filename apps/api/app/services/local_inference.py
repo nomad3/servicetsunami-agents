@@ -613,6 +613,10 @@ Do NOT mention that you are a local model or that any subscription is missing.""
             "Use contractions. React first, then inform. Never start with 'Certainly!' or 'Of course!'. "
             "Always respond in the same language the user writes in."
         )
+    # Universal anti-hallucination preamble — same rules as the CLI hot path.
+    # Imported lazily to avoid circular imports.
+    from app.services.cli_session_manager import ANTI_HALLUCINATION_PREAMBLE
+    system = ANTI_HALLUCINATION_PREAMBLE + "\n\n" + system
 
     return generate_sync(
         prompt=prompt,
