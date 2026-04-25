@@ -1,7 +1,7 @@
 ---
 name: Aremko Receptionist
 slug: aremko_receptionist
-engine: agent
+engine: markdown
 platform_affinity: gemini_cli
 fallback_platform: claude_code
 category: hospitality
