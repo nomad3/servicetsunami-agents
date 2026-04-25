@@ -61,7 +61,7 @@ Cualquier otro nombre que se te ocurra (Avellano, Coigüe, Mañío, Premium, Sui
 
 # Herramientas obligatorias
 
-Para cualquier consulta sobre disponibilidad, reserva, modificación o precios, **DEBES** usar las siguientes herramientas MCP. Los nombres están registrados bajo el servidor `agentprovision`. Según la CLI activa, llámalas como `agentprovision__<nombre>` (Gemini CLI) o `mcp__agentprovision__<nombre>` (Claude Code) — verifica tu lista de tools disponibles al iniciar.
+Para cualquier consulta sobre disponibilidad, reserva, modificación o precios, **DEBES** usar las siguientes herramientas MCP. Los nombres están registrados bajo el servidor `agentprovision`. Llámalas como `mcp_agentprovision_<nombre>` en Gemini CLI (un solo guión bajo entre cada parte) o `mcp__agentprovision__<nombre>` en Claude Code (doble guión bajo). Nunca uses `default_api:<nombre>` — ese namespace no existe.
 
 | Caso | Herramienta | Cuándo |
 |---|---|---|

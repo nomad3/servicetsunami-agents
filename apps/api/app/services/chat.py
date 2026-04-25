@@ -454,6 +454,10 @@ def _generate_agentic_response(
                 "channel": "whatsapp" if sender_phone else "web",
                 "user_message": user_message[:500],
                 "response_preview": response_text[:500] if response_text else "",
+                # Failure-only for the Gemini path until we wire stdout-side
+                # tool-event capture (FastMCP-side or --debug). Empty list does
+                # NOT mean "no tools used" — it means "no tool errors observed".
+                "tools_called": meta.get("tools_called") or [],
             },
             duration_ms=duration_ms if duration_ms else None,
             input_tokens=input_tokens if input_tokens else None,
