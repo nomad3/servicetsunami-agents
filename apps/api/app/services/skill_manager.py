@@ -5,10 +5,9 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import httpx
 import yaml
@@ -254,17 +253,19 @@ class SkillManager:
         logger.info("SkillManager: %d skill(s) loaded", len(self._skills))
 
     def list_skills(self, tenant_id: str = None) -> List[FileSkill]:
-        """Return skills visible to a tenant: native + community + their custom."""
+        """Return skills visible to a tenant: native + community + their custom.
+
+        Custom skills live at ``_tenant/<uuid>/<slug>/``. The legacy
+        ``tenant_<uuid>/`` layout was removed in PR7; any pre-migration data
+        was already moved before its callers were dropped.
+        """
         if not tenant_id:
             return [s for s in self._skills if s.tier in ("native", "community")]
-        # New layout: _tenant/<uuid>/<slug>/   ->  match by exact uuid segment.
-        # Old layout: tenant_<uuid>/<slug>/    ->  legacy fallback.
-        tenant_seg_new = f"_tenant/{tenant_id}/"
-        tenant_seg_old = f"tenant_{tenant_id}/"
+        tenant_seg = f"_tenant/{tenant_id}/"
         return [
             s for s in self._skills
             if s.tier in ("native", "community")
-            or (s.tier == "custom" and (tenant_seg_new in s.skill_dir or tenant_seg_old in s.skill_dir))
+            or (s.tier == "custom" and tenant_seg in s.skill_dir)
         ]
 
     def get_skill_by_name(self, name: str, tenant_id: str = None) -> Optional[FileSkill]:
@@ -345,7 +346,7 @@ class SkillManager:
             return {"error": f"Skill '{slug}' not found."}
         if skill.tier != "custom":
             return {"error": "Only custom skills can be edited. Fork it first."}
-        if f"_tenant/{tenant_id}/" not in skill.skill_dir and f"tenant_{tenant_id}/" not in skill.skill_dir:
+        if f"_tenant/{tenant_id}/" not in skill.skill_dir:
             return {"error": "Not authorized to edit this skill."}
 
         skill_dir = Path(skill.skill_dir)
@@ -439,7 +440,7 @@ class SkillManager:
             return {"error": "Skill not found."}
         if skill.tier != "custom":
             return {"error": "Only custom skills can be deleted."}
-        if f"_tenant/{tenant_id}/" not in skill.skill_dir and f"tenant_{tenant_id}/" not in skill.skill_dir:
+        if f"_tenant/{tenant_id}/" not in skill.skill_dir:
             return {"error": "Not authorized."}
 
         shutil.rmtree(skill.skill_dir, ignore_errors=True)
@@ -671,82 +672,17 @@ print(json.dumps(mod.execute(inputs)))
             logger.exception("GitHub import failed: %s", e)
             return {"error": f"Import failed: {str(e)}"}
 
-    def _import_single_skill(self, client, headers, owner, repo, branch, path, contents) -> dict:
-        """Download skill files into community directory."""
-        files: Dict[str, str] = {}
-        for f in contents:
-            if f["type"] != "file":
-                continue
-            raw_resp = client.get(f["download_url"])
-            if raw_resp.status_code == 200:
-                files[f["name"]] = raw_resp.text
-
-        # Find skill.md case-insensitively (supports SKILL.md from GWS etc.)
-        skill_md_key = None
-        for key in files:
-            if key.lower() == "skill.md":
-                skill_md_key = key
-                break
-        if not skill_md_key:
-            return {"error": f"No skill.md in {path}"}
-
-        # Normalize filename to lowercase for our system
-        content = files[skill_md_key]
-        if skill_md_key != "skill.md":
-            files["skill.md"] = content
-            del files[skill_md_key]
-        if not content.startswith("---"):
-            return {"error": f"skill.md in {path} has no YAML frontmatter"}
-        parts = content.split("---", 2)
-        if len(parts) < 3:
-            return {"error": f"Malformed skill.md in {path}"}
-
-        metadata = yaml.safe_load(parts[1].strip())
-        # Normalize external formats (GWS, etc.) to our schema
-        metadata = _normalize_external_metadata(metadata)
-        skill_name = metadata.get("name", "")
-        if not skill_name:
-            return {"error": f"No name in {path}"}
-
-        slug = re.sub(r'[^a-z0-9]+', '_', skill_name.lower()).strip('_')
-        # The legacy `community/` global pool is gone in the new layout
-        # (apps/api/app/skills/_archive/community/ holds the historical
-        # imports, frozen). PR4 reshapes the GitHub-import path to land
-        # imports as TENANT skills (per-tenant scope) — until then the
-        # endpoint is disabled to avoid writing to a half-thought-through
-        # location.
-        return {"error": "GitHub skill import is temporarily disabled while the community pool is being reshaped into per-tenant scope. See docs/plans/2026-04-26-skills-fleet-alignment-plan.md (PR4)."}
-        # NOTE: dead code below preserved so PR4 can reactivate the path.
-        skill_dir = SKILLS_BASE / "_archive" / "community" / slug
-        if skill_dir.exists():
-            return {"error": f"Community skill '{slug}' already exists."}
-
-        try:
-            skill_dir.mkdir(parents=True, exist_ok=True)
-            for filename, file_content in files.items():
-                (skill_dir / filename).write_text(file_content, encoding="utf-8")
-
-            # Inject source_repo into frontmatter
-            metadata["source_repo"] = f"https://github.com/{owner}/{repo}"
-            body = parts[2].strip() if len(parts) > 2 else ""
-            md_content = "---\n" + yaml.dump(metadata, default_flow_style=False) + "---\n\n" + body + "\n"
-            (skill_dir / "skill.md").write_text(md_content, encoding="utf-8")
-
-            if metadata.get("engine") == "shell":
-                script_path = metadata.get("script_path", "script.sh")
-                script_file = skill_dir / script_path
-                if script_file.exists():
-                    os.chmod(script_file, 0o755)
-
-            self.scan()
-            created = self.get_skill_by_slug(slug)
-            if created:
-                return {"skill": created}
-            return {"error": "Files downloaded but skill failed to load."}
-        except Exception as e:
-            if skill_dir.exists():
-                shutil.rmtree(skill_dir, ignore_errors=True)
-            return {"error": f"Failed to write skill files: {str(e)}"}
+    def _import_single_skill(self, *_args, **_kwargs) -> dict:
+        """Disabled in PR7 — community pool removed; use the per-tenant
+        import-claude-code path instead.
+        """
+        return {
+            "error": (
+                "GitHub skill import is disabled. Use POST "
+                "/api/v1/skills/library/import-claude-code with a single "
+                "SKILL.md instead."
+            )
+        }
 
     @staticmethod
     def _parse_github_url(url: str):

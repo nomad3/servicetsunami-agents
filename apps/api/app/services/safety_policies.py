@@ -173,7 +173,7 @@ _SAFE_GENERATORS = {
     "forecast",
     "calculate",
     "compare_periods",
-    "match_skills_to_context",
+    "read_library_skill",
 }
 
 _FALLBACK_MCP_TOOL_CATEGORIES: Dict[str, str] = {
@@ -271,7 +271,10 @@ _FALLBACK_MCP_TOOL_CATEGORIES: Dict[str, str] = {
     "deploy_changes": "shell",
     "list_skills": "skills",
     "run_skill": "skills",
-    "match_skills_to_context": "skills",
+    "read_library_skill": "skills",
+    "update_skill_definition": "skills",
+    "update_agent_definition": "skills",
+    "list_library_revisions": "skills",
     "recall_memory": "skills",
     "register_webhook": "webhooks",
     "list_webhooks": "webhooks",

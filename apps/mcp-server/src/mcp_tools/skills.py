@@ -136,51 +136,6 @@ async def run_skill(
 
 
 @mcp.tool()
-async def match_skills_to_context(
-    user_message: str,
-    tenant_id: str = "",
-    ctx: Context = None,
-) -> dict:
-    """Find skills that semantically match a user's message.
-
-    Use this to check if there's a relevant skill before responding.
-    Returns matched skills with similarity scores.
-
-    Args:
-        user_message: The user's message to match against skill descriptions. Required.
-        tenant_id: Tenant UUID (resolved from session if omitted).
-        ctx: MCP request context (injected automatically).
-
-    Returns:
-        Dict with matched skills and their similarity scores.
-    """
-    tid = resolve_tenant_id(ctx) or tenant_id
-    if not user_message:
-        return {"error": "user_message is required."}
-
-    api_base_url = _get_api_base_url()
-    internal_key = _get_internal_key()
-
-    try:
-        params: dict = {"q": user_message, "limit": 3}
-        if tid:
-            params["tenant_id"] = tid
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{api_base_url}/api/v1/skills/library/match",
-                params=params,
-                headers={"X-Internal-Key": internal_key},
-            )
-            if resp.status_code == 200:
-                return {"status": "success", **resp.json()}
-            return {"matches": [], "error": f"HTTP {resp.status_code}"}
-    except Exception as e:
-        logger.warning("match_skills_to_context failed: %s", e)
-        return {"matches": []}
-
-
-@mcp.tool()
 async def read_library_skill(
     slug: str,
     tenant_id: str = "",

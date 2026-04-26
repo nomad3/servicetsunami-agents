@@ -133,7 +133,10 @@ TOOL_GROUPS: dict[str, list[str]] = {
     "skills": [
         "list_skills",
         "run_skill",
-        "match_skills_to_context",
+        "read_library_skill",
+        "update_skill_definition",
+        "update_agent_definition",
+        "list_library_revisions",
         "get_skill_gaps",
     ],
     "webhooks": [

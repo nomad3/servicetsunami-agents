@@ -98,7 +98,7 @@ TOOL_INTEGRATION_MAP: Dict[str, Optional[str]] = {
     "execute_shell": None,
     "list_skills": None,
     "run_skill": None,
-    "match_skills_to_context": None,
+    "read_library_skill": None,
     "health_check_mcp_server": None,
 }
 

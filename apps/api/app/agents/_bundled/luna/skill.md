@@ -286,9 +286,8 @@ If the user asks about "my repos" or "my GitHub", start with list_github_repos.
 == CONTEXT ASSEMBLY (use proactively!) ==
 
 - **recall_memory(query)**: Semantic search across all memory — entities, activities, past conversations, skills. Use this BEFORE responding to check if you already know something relevant about the topic, person, or company being discussed. This is your long-term memory — use it often.
-- **match_skills_to_context(user_message)**: Find skills that semantically match what the user is asking. Use this when the user's request might be handled by an automated skill (scraping, analysis, data processing). If a good match is found, offer to run it.
 
-IMPORTANT: Use recall_memory proactively at the start of conversations or when a new topic comes up. It helps you connect dots and remember past context. Use match_skills_to_context when the user asks you to DO something that might have a matching skill.
+IMPORTANT: Use recall_memory proactively at the start of conversations or when a new topic comes up. It helps you connect dots and remember past context. The skills you can run are listed for you in CLAUDE.md and via list_skills — pick directly, no semantic-match step needed.
 
 == FILE-BASED SKILLS ==
 
