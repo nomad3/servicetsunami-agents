@@ -42,7 +42,7 @@
     "delete": "Delete",
     "versions": "Version History",
     "viewGithub": "View on GitHub",
-    "import": "Import from GitHub",
+    "import": "Import SKILL.md",
     "exportAs": "Export as"
   },
   "validation": {
@@ -104,6 +104,6 @@
     "fork": "Failed to fork skill.",
     "delete": "Failed to delete skill.",
     "update": "Failed to update skill.",
-    "import": "Failed to import from GitHub."
+    "import": "Failed to import SKILL.md."
   }
 }

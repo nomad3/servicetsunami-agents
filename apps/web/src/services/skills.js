@@ -79,6 +79,11 @@ export const getSkillVersions = (slug) =>
 export const importFromGithub = (repoUrl) =>
   api.post('/skills/library/import-github', { repo_url: repoUrl });
 
+// Import a single Claude Code-format SKILL.md into the tenant's library.
+// Backed by PR4's POST /library/import-claude-code endpoint.
+export const importClaudeCodeSkill = (content, overwrite = false) =>
+  api.post('/skills/library/import-claude-code', { content, overwrite });
+
 // Returns MCP manifest (server_url, tenant_id, list of tool definitions) so
 // external agents — Claude Code, Gemini CLI, VS Code Copilot — can connect.
 export const getMcpManifest = () => api.get('/skills/mcp-manifest');

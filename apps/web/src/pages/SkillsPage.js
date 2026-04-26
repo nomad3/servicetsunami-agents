@@ -5,7 +5,7 @@ import {
 } from 'react-bootstrap';
 import {
   FaCode, FaCodeBranch, FaChevronDown, FaChevronUp, FaCopy, FaDownload,
-  FaEdit, FaEllipsisV, FaExclamationTriangle, FaFileAlt, FaGithub,
+  FaEdit, FaEllipsisV, FaExclamationTriangle, FaFileAlt, FaFileImport, FaGithub,
   FaHistory, FaPlay, FaPlug, FaPlus, FaRocket, FaSearch, FaTerminal,
   FaTimes, FaTrash,
 } from 'react-icons/fa';
@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 import Layout from '../components/Layout';
 import {
   getFileSkills, createFileSkill, updateFileSkill, forkFileSkill,
-  deleteFileSkill, executeFileSkill, getSkillVersions, importFromGithub,
+  deleteFileSkill, executeFileSkill, getSkillVersions, importClaudeCodeSkill,
   getMcpManifest, exportSkill,
 } from '../services/skills';
 import './SkillsPage.css';
@@ -84,8 +84,10 @@ const SkillsPage = () => {
   const [editSkill, setEditSkill] = useState(null);
   const [expandedSkill, setExpandedSkill] = useState(null);
   const [creating, setCreating] = useState(false);
-  const [importUrl, setImportUrl] = useState('');
+  const [importContent, setImportContent] = useState('');
+  const [importOverwrite, setImportOverwrite] = useState(false);
   const [importing, setImporting] = useState(false);
+  const importFileInputRef = useRef(null);
   const [newSkill, setNewSkill] = useState({ ...EMPTY_SKILL });
   const [showMcpConnect, setShowMcpConnect] = useState(false);
   const [mcpManifest, setMcpManifest] = useState(null);
@@ -253,21 +255,32 @@ const SkillsPage = () => {
     }
   };
 
-  // --- Import ---
-  const handleImportGithub = async () => {
-    if (!importUrl.trim()) return;
+  // --- Import (Claude Code SKILL.md) ---
+  const handleImportClaudeCode = async () => {
+    if (!importContent.trim()) return;
     try {
       setImporting(true);
-      await importFromGithub(importUrl.trim());
+      await importClaudeCodeSkill(importContent, importOverwrite);
       flash(setSuccess, t('imported'));
       setShowImport(false);
-      setImportUrl('');
+      setImportContent('');
+      setImportOverwrite(false);
       await fetchSkills();
     } catch (err) {
       flash(setError, err.response?.data?.detail || t('errors.import'), 5000);
     } finally {
       setImporting(false);
     }
+  };
+
+  const handleImportFilePicked = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => setImportContent(String(evt.target?.result || ''));
+    reader.readAsText(file);
+    // Reset the input so picking the same file twice still triggers onChange.
+    if (importFileInputRef.current) importFileInputRef.current.value = '';
   };
 
   // --- MCP connect modal ---
@@ -521,7 +534,7 @@ const SkillsPage = () => {
               <FaPlug size={13} />{t('mcp.connectExternal')}
             </button>
             <button type="button" className="ap-btn-secondary" onClick={() => setShowImport(true)}>
-              <FaGithub size={14} />{t('actions.import')}
+              <FaFileImport size={14} />{t('actions.import')}
             </button>
             <button type="button" className="ap-btn-primary" onClick={openCreate}>
               <FaPlus size={12} />{t('createSkill')}
@@ -859,23 +872,52 @@ const SkillsPage = () => {
           </Modal.Footer>
         </Modal>
 
-        {/* ── GitHub Import Modal ── */}
-        <Modal show={showImport} onHide={() => setShowImport(false)} centered>
+        {/* ── Claude Code SKILL.md Import Modal ── */}
+        <Modal show={showImport} onHide={() => setShowImport(false)} centered size="lg">
           <Modal.Header closeButton style={{ ...modalSectionStyle, borderBottom: '1px solid var(--color-border)' }}>
-            <Modal.Title style={{ fontSize: '1.1rem' }}><FaGithub className="me-2" size={18} />{t('actions.import')}</Modal.Title>
+            <Modal.Title style={{ fontSize: '1.1rem' }}><FaFileImport className="me-2" size={18} />{t('actions.import')}</Modal.Title>
           </Modal.Header>
           <Modal.Body style={modalSectionStyle}>
-            <p className="text-muted small mb-3">Paste a GitHub repo URL containing skill directories (each with a <code>skill.md</code> file).</p>
-            <Form.Group>
-              <Form.Label style={{ fontSize: '0.85rem', color: 'var(--color-foreground)' }}>Repository URL</Form.Label>
-              <Form.Control type="text" placeholder="https://github.com/owner/repo or owner/repo/path/to/skills" value={importUrl} onChange={e => setImportUrl(e.target.value)} style={inputStyle} />
-              <Form.Text className="text-muted" style={{ fontSize: '0.75rem' }}>Supports: full URLs, <code>owner/repo</code>, or <code>owner/repo/path/to/skill</code></Form.Text>
+            <p className="text-muted small mb-3">
+              Paste a Claude Code-format <code>SKILL.md</code> below, or pick a file. Frontmatter must include <code>name</code> and <code>description</code>;
+              <code>allowed-tools</code> is optional. Anything else is rejected.
+            </p>
+            <div className="d-flex gap-2 mb-2">
+              <Button variant="outline-secondary" size="sm" onClick={() => importFileInputRef.current?.click()} style={{ borderRadius: 8 }}>
+                <FaFileImport className="me-2" size={12} />Pick SKILL.md…
+              </Button>
+              <input
+                ref={importFileInputRef}
+                type="file"
+                accept=".md,text/markdown"
+                style={{ display: 'none' }}
+                onChange={handleImportFilePicked}
+              />
+            </div>
+            <Form.Group className="mb-3">
+              <Form.Label style={{ fontSize: '0.85rem', color: 'var(--color-foreground)' }}>SKILL.md content</Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={14}
+                placeholder={'---\nname: My Skill\ndescription: Short summary the agent uses to decide when to call you.\n---\n\n# My Skill\n\nFull instructions go here…'}
+                value={importContent}
+                onChange={e => setImportContent(e.target.value)}
+                style={{ ...inputStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8rem' }}
+              />
             </Form.Group>
+            <Form.Check
+              type="checkbox"
+              id="import-overwrite"
+              label="Overwrite if a skill with the same name already exists"
+              checked={importOverwrite}
+              onChange={e => setImportOverwrite(e.target.checked)}
+              style={{ fontSize: '0.85rem' }}
+            />
           </Modal.Body>
           <Modal.Footer style={{ ...modalSectionStyle, borderTop: '1px solid var(--color-border)' }}>
             <Button variant="outline-secondary" onClick={() => setShowImport(false)} style={{ borderRadius: 8 }}>{t('cancel')}</Button>
-            <Button variant="primary" onClick={handleImportGithub} disabled={importing || !importUrl.trim()} style={{ borderRadius: 8 }}>
-              {importing ? <><Spinner animation="border" size="sm" className="me-2" style={{ width: 14, height: 14, borderWidth: 1.5 }} />Importing...</> : <><FaGithub className="me-2" size={14} />Import</>}
+            <Button variant="primary" onClick={handleImportClaudeCode} disabled={importing || !importContent.trim()} style={{ borderRadius: 8 }}>
+              {importing ? <><Spinner animation="border" size="sm" className="me-2" style={{ width: 14, height: 14, borderWidth: 1.5 }} />Importing...</> : <><FaFileImport className="me-2" size={14} />Import</>}
             </Button>
           </Modal.Footer>
         </Modal>
