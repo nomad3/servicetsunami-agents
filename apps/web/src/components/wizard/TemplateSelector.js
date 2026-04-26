@@ -234,7 +234,6 @@ RULES:
       memory_domains: ['dataset', 'metric', 'insight'],
     },
   },
-  },
   {
     id: 'marketing_intelligence',
     name: 'Marketing Intelligence Agent',
