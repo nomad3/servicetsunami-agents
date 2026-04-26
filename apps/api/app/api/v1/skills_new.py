@@ -573,6 +573,12 @@ def read_skill_source_internal(
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill '{slug}' not found.")
 
+    # For engines with a separate script file (python/shell/markdown
+    # prompt), prefer that source. For engines where the skill.md body
+    # *is* the prompt (agent identity skills), fall back to description —
+    # the parser already strips frontmatter into ``description`` for us.
+    body = _read_skill_source(skill) or (skill.description or "")
+
     return {
         "slug": skill.slug,
         "name": skill.name,
@@ -582,7 +588,7 @@ def read_skill_source_internal(
         "category": skill.category,
         "tags": skill.tags,
         "auto_trigger": skill.auto_trigger,
-        "body": _read_skill_source(skill),
+        "body": body,
     }
 
 
