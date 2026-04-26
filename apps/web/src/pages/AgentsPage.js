@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import agentService from '../services/agent';
 import MarketplaceSection from '../components/agent/MarketplaceSection';
+import HireAgentWizard from '../components/HireAgentWizard';
 import api from '../services/api';
 
 const AgentsPage = () => {
@@ -583,73 +584,25 @@ const AgentsPage = () => {
         </Modal.Body>
       </Modal>
 
-      {/* Hire External Agent Modal */}
-      <Modal show={hireModalOpen} onHide={closeHireModal} centered>
-        <Modal.Header style={{ background: 'var(--surface-elevated)', borderBottom: '1px solid var(--color-border)' }}>
-          <Modal.Title style={{ fontSize: '0.95rem', fontWeight: 600 }}>Hire External Agent</Modal.Title>
+      {/* Hire Agent Wizard (PR-D) — replaces the previous form-only
+          modal. Three-step flow: capability search → source picker →
+          preview + hire. Reuses /agents/discover, /external-agents,
+          /agents/import, and /agent-marketplace endpoints. */}
+      <Modal show={hireModalOpen} onHide={closeHireModal} size="lg" centered>
+        <Modal.Header closeButton style={{ background: 'var(--surface-elevated)', borderBottom: '1px solid var(--color-border)' }}>
+          <Modal.Title style={{ fontSize: '0.95rem', fontWeight: 600 }}>Hire Agent</Modal.Title>
         </Modal.Header>
         <Modal.Body style={{ background: 'var(--surface-elevated)' }}>
-          <p style={{ fontSize: '0.78rem', color: 'var(--color-muted)', marginBottom: 16 }}>
-            Register an external agent (OpenAI-compatible API, webhook, or A2A endpoint) so this platform can route tasks to it.
-          </p>
-          <Form.Group className="mb-3">
-            <Form.Label style={{ fontSize: '0.82rem' }}>Name *</Form.Label>
-            <Form.Control size="sm" value={hireForm.name} onChange={e => setHireForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Billing Agent" />
-          </Form.Group>
-          <Form.Group className="mb-3">
-            <Form.Label style={{ fontSize: '0.82rem' }}>Description</Form.Label>
-            <Form.Control size="sm" value={hireForm.description} onChange={e => setHireForm(f => ({ ...f, description: e.target.value }))} placeholder="What does this agent do?" />
-          </Form.Group>
-          <Form.Group className="mb-3">
-            <Form.Label style={{ fontSize: '0.82rem' }}>Endpoint URL *</Form.Label>
-            <Form.Control size="sm" value={hireForm.endpoint_url} onChange={e => setHireForm(f => ({ ...f, endpoint_url: e.target.value }))} placeholder="https://agent.example.com/v1/chat" />
-            <Form.Text className="text-muted" style={{ fontSize: '0.72rem' }}>Must be a public HTTPS URL. Private IPs are blocked.</Form.Text>
-          </Form.Group>
-          <Row className="mb-3">
-            <Col>
-              <Form.Label style={{ fontSize: '0.82rem' }}>Protocol</Form.Label>
-              <Form.Select size="sm" value={hireForm.protocol} onChange={e => setHireForm(f => ({ ...f, protocol: e.target.value }))}>
-                <option value="openai_chat">OpenAI Chat</option>
-                <option value="webhook">Webhook</option>
-                <option value="mcp_sse">MCP (SSE)</option>
-                <option value="a2a">A2A</option>
-                <option value="copilot_extension">Copilot Extension</option>
-              </Form.Select>
-            </Col>
-            <Col>
-              <Form.Label style={{ fontSize: '0.82rem' }}>Auth Type</Form.Label>
-              <Form.Select size="sm" value={hireForm.auth_type} onChange={e => setHireForm(f => ({ ...f, auth_type: e.target.value }))}>
-                <option value="none">None</option>
-                <option value="bearer">Bearer Token</option>
-                <option value="api_key">API Key</option>
-                <option value="hmac">HMAC</option>
-              </Form.Select>
-            </Col>
-          </Row>
-          <Form.Group className="mb-3">
-            <Form.Label style={{ fontSize: '0.82rem' }}>Credential ID (optional)</Form.Label>
-            <Form.Control size="sm" value={hireForm.credential_id} onChange={e => setHireForm(f => ({ ...f, credential_id: e.target.value }))} placeholder="UUID of a stored credential" />
-            <Form.Text className="text-muted" style={{ fontSize: '0.72rem' }}>
-              Create credentials via the Integrations page. Leave empty if auth type is "none".
-            </Form.Text>
-          </Form.Group>
-          {hireForm.auth_type !== 'none' && !hireForm.credential_id && (
-            <Alert variant="warning" style={{ fontSize: '0.75rem', padding: '8px 12px' }}>
-              Auth type is <b>{hireForm.auth_type}</b> but no credential is attached — dispatches will fail until you link one.
-            </Alert>
+          {hireModalOpen && (
+            <HireAgentWizard
+              onClose={closeHireModal}
+              onHired={() => {
+                // Refresh the fleet list so the new agent shows up.
+                loadAgents();
+              }}
+            />
           )}
-          <Form.Group className="mb-3">
-            <Form.Label style={{ fontSize: '0.82rem' }}>Capabilities (comma-separated)</Form.Label>
-            <Form.Control size="sm" value={hireForm.capabilities} onChange={e => setHireForm(f => ({ ...f, capabilities: e.target.value }))} placeholder="sql_query, data_summary, report_generation" />
-            <Form.Text className="text-muted" style={{ fontSize: '0.72rem' }}>Skills this agent can handle. Used for auto-routing.</Form.Text>
-          </Form.Group>
         </Modal.Body>
-        <Modal.Footer style={{ background: 'var(--surface-elevated)', borderTop: '1px solid var(--color-border)' }}>
-          <Button variant="outline-secondary" size="sm" onClick={closeHireModal}>Cancel</Button>
-          <Button variant="primary" size="sm" onClick={handleHire} disabled={hiring || !hireForm.name.trim() || !hireForm.endpoint_url.trim()}>
-            {hiring ? 'Hiring...' : 'Hire Agent'}
-          </Button>
-        </Modal.Footer>
       </Modal>
 
       {/* Import Agent Modal */}
