@@ -57,11 +57,15 @@ class AgentRegistry:
 
         # Postgres JSONB containment: capabilities @> ["<cap>"]. Falls back
         # to a no-op when the dialect can't run it (sqlite test cases).
+        # Healthy external agents only — offline / error / breaker_open
+        # would just fail downstream and shouldn't be returned to the
+        # discovery surface.
         try:
             external = (
                 db.query(ExternalAgent)
                 .filter(
                     ExternalAgent.tenant_id == tenant_id,
+                    ExternalAgent.status.in_(["online", "busy"]),
                     ExternalAgent.capabilities.cast(JSONB).contains([capability]),
                 )
                 .all()

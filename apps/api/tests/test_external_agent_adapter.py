@@ -172,6 +172,104 @@ def test_dispatch_mcp_sse_passes_runtime_errors_through_unwrapped():
             adapter._dispatch_mcp_sse(agent, "t", {}, db=None)
 
 
+def test_dispatch_mcp_sse_skips_bearer_for_non_bearer_auth_types():
+    """MCP-SSE only knows how to ship Bearer auth; for api_key / hmac /
+    github_app we mustn't send the credential as Bearer (wrong header
+    leaks the secret into a header the remote interprets differently).
+    """
+    adapter = ExternalAgentAdapter()
+    captured = {}
+
+    async def fake(*, endpoint, bearer, tool_name, arguments, timeout_s):
+        captured["bearer"] = bearer
+        return ""
+
+    agent = _agent(metadata_={"tool_name": "x"}, auth_type="api_key")
+    # Even though _get_credential would return a token, dispatch must
+    # not forward it as Bearer for non-bearer auth_type agents.
+    with patch.object(ExternalAgentAdapter, "_get_credential", lambda self, agent, db: "secret-key"):
+        with patch.object(ExternalAgentAdapter, "_mcp_sse_call", staticmethod(fake)):
+            adapter._dispatch_mcp_sse(agent, "t", {}, db=None)
+    assert captured["bearer"] == ""
+
+
+def test_dispatch_mcp_sse_sends_bearer_when_auth_type_is_bearer():
+    adapter = ExternalAgentAdapter()
+    captured = {}
+
+    async def fake(*, endpoint, bearer, tool_name, arguments, timeout_s):
+        captured["bearer"] = bearer
+        return ""
+
+    agent = _agent(metadata_={"tool_name": "x"}, auth_type="bearer")
+    with patch.object(ExternalAgentAdapter, "_get_credential", lambda self, agent, db: "real-token"):
+        with patch.object(ExternalAgentAdapter, "_mcp_sse_call", staticmethod(fake)):
+            adapter._dispatch_mcp_sse(agent, "t", {}, db=None)
+    assert captured["bearer"] == "real-token"
+
+
+def test_mcp_sse_call_raises_on_multi_tool_with_no_explicit_selection(monkeypatch):
+    """When list_tools returns >1 and neither context nor metadata picks
+    one, dispatch must error loudly — silent first-tool guess would hide
+    the wrong action firing.
+    """
+    import asyncio
+    import contextlib
+
+    @contextlib.asynccontextmanager
+    async def _fake_sse(url, headers=None):
+        yield (object(), object())
+
+    class _FakeSession:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def initialize(self): return None
+        async def list_tools(self):
+            tools = [SimpleNamespace(name="lookup"), SimpleNamespace(name="write")]
+            return SimpleNamespace(tools=tools)
+        async def call_tool(self, *a, **k):
+            raise AssertionError("call_tool should not run when selection is ambiguous")
+
+    import sys, types
+    fake_mcp = types.ModuleType("mcp")
+    fake_mcp.ClientSession = _FakeSession
+    fake_client = types.ModuleType("mcp.client")
+    fake_sse_mod = types.ModuleType("mcp.client.sse")
+    fake_sse_mod.sse_client = _fake_sse
+    monkeypatch.setitem(sys.modules, "mcp", fake_mcp)
+    monkeypatch.setitem(sys.modules, "mcp.client", fake_client)
+    monkeypatch.setitem(sys.modules, "mcp.client.sse", fake_sse_mod)
+
+    with pytest.raises(RuntimeError, match="multiple tools"):
+        asyncio.run(
+            ExternalAgentAdapter._mcp_sse_call(
+                endpoint="https://example.test/sse",
+                bearer="",
+                tool_name=None,
+                arguments={"input": "x"},
+                timeout_s=5,
+            )
+        )
+
+
+def test_run_async_works_inside_running_event_loop():
+    """The bug code review caught: asyncio.run() raises if a loop is already
+    running. _run_async must thread-pool around that.
+    """
+    import asyncio
+    from app.services.external_agent_adapter import _run_async
+
+    async def child():
+        return "child-result"
+
+    async def outer():
+        # Inside a running loop — _run_async would crash with raw asyncio.run.
+        return _run_async(child())
+
+    assert asyncio.run(outer()) == "child-result"
+
+
 def test_dispatch_routes_mcp_sse_to_handler():
     """Top-level dispatch() routes mcp_sse protocol to the new handler."""
     adapter = ExternalAgentAdapter()

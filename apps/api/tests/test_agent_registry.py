@@ -83,6 +83,37 @@ def test_find_by_capability_filters_native_by_capability_membership():
     assert names == ["matched"]
 
 
+def _external(name, capabilities, status="online"):
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        name=name,
+        description=f"external {name}",
+        status=status,
+        capabilities=capabilities,
+    )
+
+
+class _DBWithExternal:
+    """Returns native rows on first query, external rows on second."""
+    def __init__(self, native_rows, external_rows):
+        self.native_rows = native_rows
+        self.external_rows = external_rows
+        self._calls = 0
+    def query(self, _model):
+        self._calls += 1
+        return _Query(self.native_rows if self._calls == 1 else self.external_rows)
+
+
+def test_find_by_capability_returns_external_with_kind_tag():
+    """Locks the (kind, agent) tuple shape across both branches."""
+    n = _native("native-a", ["scoring"])
+    e = _external("ext-a", ["scoring"])
+    db = _DBWithExternal([n], [e])
+    out = AgentRegistry().find_by_capability("scoring", n.tenant_id, db)
+    kinds = sorted(k for k, _ in out)
+    assert kinds == ["external", "native"]
+
+
 def test_find_by_capability_skips_native_with_non_list_capabilities():
     """Defensive: agents with mis-shaped capabilities (None / dict) shouldn't
     crash the loop.

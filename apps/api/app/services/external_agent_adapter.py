@@ -125,11 +125,18 @@ class ExternalAgentAdapter:
         if not isinstance(arguments, dict):
             arguments = {"input": task}
 
+        # Only Bearer-style auth is supported for MCP-SSE today; other
+        # auth_types (api_key / hmac / github_app) would need request-level
+        # signing the SDK doesn't expose. Skip the Authorization header
+        # rather than send the wrong one — the remote will surface the
+        # auth failure clearly.
+        bearer = token if (token and getattr(agent, "auth_type", "bearer") == "bearer") else ""
+
         try:
-            return asyncio.run(
+            return _run_async(
                 self._mcp_sse_call(
                     endpoint=agent.endpoint_url,
-                    bearer=token,
+                    bearer=bearer,
                     tool_name=tool_name,
                     arguments=arguments,
                     timeout_s=timeout_s,
@@ -202,6 +209,26 @@ class ExternalAgentAdapter:
         except Exception as e:
             logger.warning("Could not load credential %s for agent %s: %s", agent.credential_id, agent.id, e)
             return ""
+
+
+def _run_async(coro):
+    """Drive an async coroutine from a sync caller, even when an event
+    loop is already running (e.g. an async FastAPI handler calling the
+    sync adapter). ``asyncio.run`` raises ``RuntimeError`` in that case;
+    we detect the active loop and run the coroutine in a thread instead.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop — the common case from sync chat / Temporal
+        # activities. Use the simple path.
+        return asyncio.run(coro)
+
+    # We're inside a running event loop. Push the coroutine onto a fresh
+    # loop in a worker thread so we don't deadlock.
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 def _stringify_mcp_result(result: Any) -> str:
