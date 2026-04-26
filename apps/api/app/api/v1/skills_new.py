@@ -75,6 +75,25 @@ class GitHubImportRequest(BaseModel):
     repo_url: str
 
 
+class ClaudeCodeImportRequest(BaseModel):
+    """Single Claude Code SKILL.md text bundle.
+
+    Claude Code's SKILL.md restricts frontmatter to ``name``, ``description``,
+    and optional ``allowed-tools``. Anything else is rejected so a malicious
+    or malformed import can't smuggle ``script_path`` / ``engine`` overrides
+    into the tenant's library.
+    """
+
+    content: str
+    overwrite: bool = False
+
+
+# Frontmatter keys we accept on import. Anything outside this set is rejected
+# so import payloads can't override engine / script_path / chain_to and slip
+# the skill into a different execution path than the user intended.
+_CLAUDE_CODE_ALLOWED_KEYS = {"name", "description", "allowed-tools", "allowed_tools"}
+
+
 # ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
@@ -243,6 +262,49 @@ def _skill_to_gws_md(skill: FileSkill) -> str:
     yaml_block = yaml.safe_dump(frontmatter, default_flow_style=False, sort_keys=False).rstrip()
     body = f"# {skill.name}\n\n{skill.description or ''}\n"
     return f"---\n{yaml_block}\n---\n\n{body}"
+
+
+def _parse_claude_code_skill_md(content: str) -> tuple[dict, str]:
+    """Parse a Claude Code-format SKILL.md into (frontmatter_dict, body_str).
+
+    Raises HTTPException(400) on missing/malformed frontmatter or on any key
+    outside the Claude Code subset — that strict allowlist is what keeps an
+    imported file from quietly redirecting execution to a different engine.
+    """
+    if not content.startswith("---"):
+        raise HTTPException(status_code=400, detail="SKILL.md must start with YAML frontmatter delimited by '---'.")
+
+    parts = content.split("---", 2)
+    if len(parts) < 3:
+        raise HTTPException(status_code=400, detail="SKILL.md frontmatter is not properly closed with '---'.")
+
+    try:
+        meta = yaml.safe_load(parts[1].strip()) or {}
+    except yaml.YAMLError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML frontmatter: {e}")
+
+    if not isinstance(meta, dict):
+        raise HTTPException(status_code=400, detail="Frontmatter must be a YAML mapping.")
+
+    unknown = set(meta.keys()) - _CLAUDE_CODE_ALLOWED_KEYS
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Frontmatter contains keys outside the Claude Code subset: {sorted(unknown)}. "
+                "Allowed: name, description, allowed-tools."
+            ),
+        )
+
+    name = (meta.get("name") or "").strip()
+    description = (meta.get("description") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Frontmatter is missing required field: name.")
+    if not description:
+        raise HTTPException(status_code=400, detail="Frontmatter is missing required field: description.")
+
+    body = parts[2].lstrip("\n").rstrip()
+    return meta, body
 
 
 def _skill_to_openai_function(skill: FileSkill) -> dict:
@@ -541,6 +603,71 @@ def export_skill(
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
     raise HTTPException(status_code=400, detail=f"Unknown format '{format}'. Use superpowers, gws, or openai.")
+
+
+@router.post("/library/import-claude-code", response_model=FileSkill, status_code=201)
+def import_claude_code_skill(
+    payload: ClaudeCodeImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Import a Claude Code-format ``SKILL.md`` into the tenant's library.
+
+    The body of the markdown file becomes the skill prompt (``markdown`` engine).
+    This is the inverse of ``GET /library/{slug}/export?format=superpowers``
+    minus engine-specific source — Claude Code skills are prompts, not scripts.
+    """
+    tenant_id = str(current_user.tenant_id)
+    meta, body = _parse_claude_code_skill_md(payload.content)
+    name = meta["name"].strip()
+    description = meta["description"].strip()
+
+    # If a tenant skill with that name already exists, require explicit overwrite
+    # so an accidental re-import doesn't replace local edits without the user
+    # actively saying so.
+    existing = skill_manager.get_skill_by_name(name, tenant_id)
+    if existing and existing.tier == "custom":
+        if not payload.overwrite:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Skill '{name}' already exists. Re-send with overwrite=true to replace it.",
+            )
+        delete_result = skill_manager.delete_skill(tenant_id, existing.slug)
+        if "error" in delete_result:
+            raise HTTPException(status_code=400, detail=delete_result["error"])
+    elif existing and existing.tier != "custom":
+        raise HTTPException(
+            status_code=400,
+            detail=f"A native/community skill named '{name}' already exists. Rename your import.",
+        )
+
+    # Markdown engine: the body IS the skill. No template variables expected
+    # from a freshly-imported Claude Code skill, so inputs is empty.
+    script = body or description
+
+    result = skill_manager.create_skill(
+        tenant_id=tenant_id,
+        name=name,
+        description=description,
+        engine="markdown",
+        script=script,
+        inputs=[],
+        category="general",
+    )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    sync_skills_to_db(db)
+
+    log_activity(
+        db,
+        tenant_id=current_user.tenant_id,
+        event_type="action_triggered",
+        description=f"Skill imported (Claude Code format): {name}",
+        source="skills",
+        event_metadata={"skill_name": name, "format": "claude-code", "action": "skill_imported"},
+    )
+    return result["skill"]
 
 
 @router.get("/library/{slug}/versions")
