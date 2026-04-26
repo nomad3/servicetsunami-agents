@@ -588,10 +588,21 @@ def run_agent_session(
     # Compose additional skill bodies (PR2). The identity slug already
     # provided `skill_body`; append the rest of the declared list with a
     # clear section header so the model can tell them apart.
+    #
+    # Dedup against the identity slug AND any earlier appearance — a
+    # config like `skills: [luna, calculator, calculator]` composes
+    # calculator exactly once.
     composed_slugs = list(agent_skill_slugs) if agent_skill_slugs else [agent_slug]
-    extra_slugs = [s for s in composed_slugs[1:] if s and s != agent_slug]
+    seen: set[str] = {agent_slug}
+    extra_slugs: list[str] = []
+    for s in composed_slugs[1:]:
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        extra_slugs.append(s)
     if extra_slugs:
-        appended: list[str] = []
+        appended_bodies: list[str] = []
+        appended_slugs: list[str] = []
         for extra_slug in extra_slugs:
             extra_skill = skill_manager.get_skill_by_slug(extra_slug, str(tenant_id))
             if not extra_skill or not extra_skill.description:
@@ -600,14 +611,15 @@ def run_agent_session(
                     extra_slug, str(tenant_id)[:8],
                 )
                 continue
-            appended.append(
+            appended_bodies.append(
                 f"\n\n## Additional Skill: {extra_skill.name}\n\n{extra_skill.description.strip()}"
             )
-        if appended:
-            skill_body = (skill_body or "").rstrip() + "".join(appended)
+            appended_slugs.append(extra_slug)
+        if appended_bodies:
+            skill_body = (skill_body or "").rstrip() + "".join(appended_bodies)
             logger.info(
                 "Composed %d additional skills onto identity %s: %s",
-                len(appended), agent_slug, ", ".join(extra_slugs[: len(appended)]),
+                len(appended_bodies), agent_slug, ", ".join(appended_slugs),
             )
     metadata["composed_skills"] = composed_slugs
 
