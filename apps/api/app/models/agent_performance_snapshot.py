@@ -11,7 +11,12 @@ class AgentPerformanceSnapshot(Base):
     __tablename__ = "agent_performance_snapshots"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Exactly one of agent_id / external_agent_id is set per row — enforced
+    # by the agent_performance_snapshots_target_exclusive CHECK constraint
+    # in migration 111. Native and external rollups share this table so the
+    # AgentDetailPage performance tab works uniformly for both kinds.
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=True, index=True)
+    external_agent_id = Column(UUID(as_uuid=True), ForeignKey("external_agents.id", ondelete="CASCADE"), nullable=True, index=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     window_start = Column(DateTime, nullable=False, index=True)
     window_hours = Column(Integer, nullable=False, default=24)
@@ -37,4 +42,5 @@ class AgentPerformanceSnapshot(Base):
 
     # Relationships
     agent = relationship("Agent", foreign_keys=[agent_id])
+    external_agent = relationship("ExternalAgent", foreign_keys=[external_agent_id])
     tenant = relationship("Tenant", foreign_keys=[tenant_id])

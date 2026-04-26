@@ -28,6 +28,7 @@ from .knowledge_entity_history import KnowledgeEntityHistory
 from .knowledge_observation import KnowledgeObservation
 from .knowledge_relation import KnowledgeRelation
 from .library_revision import LibraryRevision
+from .external_agent_call_log import ExternalAgentCallLog
 from .llm_config import LLMConfig
 from .llm_model import LLMModel
 from .llm_provider import LLMProvider
