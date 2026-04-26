@@ -164,11 +164,15 @@ def external_agent_call(
     """Reliable wrapper around ExternalAgentAdapter.dispatch.
 
     Honors retry, circuit breaker, and optional fallback. Updates
-    ``agent.status`` so the discovery surface reflects current health.
+    ``agent.status`` so the discovery surface reflects current health,
+    and writes an ExternalAgentCallLog row at the end of dispatch
+    (success or failure) so the AgentPerformanceRollupWorkflow can
+    aggregate metrics for external agents.
     """
     # Avoid a circular import — adapter pulls credential vault which
     # pulls Session; this module also uses Session.
     from app.services.external_agent_adapter import adapter
+    import time as _time
 
     if _depth > 1:
         raise RuntimeError("fallback recursion exceeded")
@@ -177,6 +181,7 @@ def external_agent_call(
         agent.status = "breaker_open"
         db.add(agent)
         db.flush()
+        _record_call_log(db, agent, latency_ms=0, status="breaker_open", error="breaker open")
         fallback = _resolve_fallback(agent, db)
         if fallback is not None:
             logger.info(
@@ -190,11 +195,17 @@ def external_agent_call(
 
     last_exc: Optional[Exception] = None
     delay = BACKOFF_INITIAL_S
+    started = _time.monotonic()
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             result = adapter.dispatch(agent, task, context, db)
             _mark_online(agent, db)
             _record_success(agent.id)
+            _record_call_log(
+                db, agent,
+                latency_ms=int((_time.monotonic() - started) * 1000),
+                status="success",
+            )
             return result
         except NonRetryableExternalError as exc:
             # Auth failure / schema validation / missing tool — retrying
@@ -219,6 +230,12 @@ def external_agent_call(
     # All attempts failed — record a hard failure and consider fallback.
     _record_failure(agent.id)
     _mark_error(agent, db)
+    _record_call_log(
+        db, agent,
+        latency_ms=int((_time.monotonic() - started) * 1000),
+        status="non_retryable" if isinstance(last_exc, NonRetryableExternalError) else "error",
+        error=str(last_exc) if last_exc else None,
+    )
     fallback = _resolve_fallback(agent, db)
     if fallback is not None:
         logger.info(
@@ -248,6 +265,36 @@ def _resolve_fallback(agent: ExternalAgent, db: Session) -> Optional[ExternalAge
         )
     except Exception:
         return None
+
+
+def _record_call_log(
+    db: Session,
+    agent: ExternalAgent,
+    *,
+    latency_ms: int,
+    status: str,
+    error: Optional[str] = None,
+) -> None:
+    """Append an ExternalAgentCallLog row.
+
+    Best-effort: any failure here is logged and swallowed — call-log
+    writes mustn't break the dispatch contract. Token / cost fields are
+    left at zero for v1; PR-D / Hire wizard wires the OpenAI token
+    extraction and webhook cost_per_call_usd metadata.
+    """
+    try:
+        from app.models.external_agent_call_log import ExternalAgentCallLog
+        row = ExternalAgentCallLog(
+            tenant_id=agent.tenant_id,
+            external_agent_id=agent.id,
+            latency_ms=latency_ms,
+            status=status,
+            error_message=(error or None),
+        )
+        db.add(row)
+        db.flush()
+    except Exception as exc:
+        logger.warning("external_agent_reliability: call-log write failed: %s", exc)
 
 
 def _mark_online(agent: ExternalAgent, db: Session) -> None:
