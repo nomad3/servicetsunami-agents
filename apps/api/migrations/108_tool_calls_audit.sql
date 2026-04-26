@@ -34,8 +34,11 @@ CREATE INDEX IF NOT EXISTS ix_tool_calls_tenant_started
 CREATE INDEX IF NOT EXISTS ix_tool_calls_tool_name
     ON tool_calls (tool_name);
 
-CREATE INDEX IF NOT EXISTS ix_tool_calls_status
-    ON tool_calls (result_status)
+-- Tenant-scoped error feed: "show errors for tenant X in time window Y".
+-- Combines the tenant_id + time predicate with the error filter so a
+-- single index serves the canonical operational query.
+CREATE INDEX IF NOT EXISTS ix_tool_calls_tenant_errors
+    ON tool_calls (tenant_id, started_at DESC)
     WHERE result_status = 'error';
 
 -- No FK to tenants(id): the FastMCP server might log calls for tenant ids

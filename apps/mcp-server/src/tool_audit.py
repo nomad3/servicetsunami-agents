@@ -18,9 +18,11 @@ path stateless.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from typing import Any
@@ -33,6 +35,41 @@ from src.mcp_auth import resolve_tenant_id
 logger = logging.getLogger(__name__)
 
 _engine: Engine | None = None
+
+# Tools whose arguments are inherently sensitive (auth tokens, raw PII bodies,
+# user-provided long text). Their args are reduced to a key-list-only summary
+# before persistence. Add to this set conservatively; it's safer to redact than
+# to leak.
+_SENSITIVE_ARG_TOOLS: frozenset[str] = frozenset({
+    "connect_mcp_server",       # custom_headers may carry bearer tokens
+    "register_webhook",         # headers may carry bearer tokens
+    "send_email",               # body / html
+    "reply_to_email",           # body / html
+    "send_email_attachment",    # body
+    "create_drive_file",        # content
+    "create_calendar_event",    # description
+    "record_observation",       # raw observation text (PII-ish)
+    "create_entity",            # description / attributes free-form
+    "update_entity",
+})
+
+# Compiled patterns for value-side credential detection.
+_CREDENTIAL_VALUE_PATTERNS = (
+    re.compile(r"\bBearer\s+\S{12,}", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{20,}"),       # OpenAI/Anthropic-style
+    re.compile(r"\bxox[baprs]-\S{10,}", re.IGNORECASE),  # Slack
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"),   # GitHub PAT
+    re.compile(r"\beyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"),  # JWT
+)
+
+
+def _redact_value(v: Any) -> Any:
+    """If a value is a string containing a credential-shaped substring, redact."""
+    if isinstance(v, str):
+        for pat in _CREDENTIAL_VALUE_PATTERNS:
+            if pat.search(v):
+                return "[redacted-credential]"
+    return v
 
 
 def _get_engine() -> Engine | None:
@@ -49,7 +86,11 @@ def _get_engine() -> Engine | None:
         # which is incompatible with our sync execute() pattern.
         if dsn.startswith("postgresql://"):
             dsn = dsn.replace("postgresql://", "postgresql+psycopg2://", 1)
-        _engine = create_engine(dsn, pool_pre_ping=True, pool_size=2, max_overflow=2)
+        # Pool sized for bursty parallel tool fan-out (e.g. coalition turns
+        # firing 5+ tools at once). Audit writes are fire-and-forget on a
+        # background task in the same event loop, but the connection is
+        # still held briefly per insert.
+        _engine = create_engine(dsn, pool_pre_ping=True, pool_size=10, max_overflow=20)
         logger.info("tool_audit: engine initialized")
         return _engine
     except Exception as e:
@@ -80,13 +121,23 @@ def _log_call(
     if eng is None or not tenant_id:
         return
     try:
-        # Minimal sanitization — strip oauth-shaped fields just in case.
-        safe_args = {}
-        for k, v in (arguments or {}).items():
-            if any(t in k.lower() for t in ("token", "secret", "password", "api_key")):
-                safe_args[k] = "[redacted]"
-            else:
-                safe_args[k] = v
+        # Three-layer redaction:
+        #   1. Tools known to carry credentials/PII collapse to a key-list only.
+        #   2. Argument keys that look credential-shaped redact the value.
+        #   3. Argument values that look credential-shaped (Bearer/JWT/sk-/xoxb-/gh*_)
+        #      redact, even when keyed under an innocuous name.
+        if tool_name in _SENSITIVE_ARG_TOOLS:
+            safe_args: dict[str, Any] = {
+                "_redacted": True,
+                "keys": list((arguments or {}).keys())[:20],
+            }
+        else:
+            safe_args = {}
+            for k, v in (arguments or {}).items():
+                if any(t in k.lower() for t in ("token", "secret", "password", "api_key")):
+                    safe_args[k] = "[redacted]"
+                else:
+                    safe_args[k] = _redact_value(v)
         with eng.begin() as conn:
             conn.execute(
                 text("""
@@ -179,21 +230,26 @@ def install_audit(mcp_server) -> None:
             error_msg = f"{type(exc).__name__}: {exc}"
             raise
         finally:
+            # Fire-and-forget the DB write so pool waits never block the
+            # tool path. Wrapped in try/except so even task scheduling
+            # failures cannot propagate.
             try:
                 duration_ms = int((time.monotonic() - started) * 1000)
                 summary = ""
                 if status == "ok":
                     summary = _truncate(repr(result), 800)
-                _log_call(
-                    tenant_id=tenant_id,
-                    tool_name=tool_name,
-                    arguments=arguments,
-                    result_status=status,
-                    result_summary=summary,
-                    error=error_msg,
-                    duration_ms=duration_ms,
-                    started_at_unix=started_unix,
-                )
+                payload = {
+                    "tenant_id": tenant_id,
+                    "tool_name": tool_name,
+                    "arguments": dict(arguments) if arguments else {},
+                    "result_status": status,
+                    "result_summary": summary,
+                    "error": error_msg,
+                    "duration_ms": duration_ms,
+                    "started_at_unix": started_unix,
+                }
+                loop = asyncio.get_running_loop()
+                loop.run_in_executor(None, lambda p=payload: _log_call(**p))
             except Exception:
                 pass
 
