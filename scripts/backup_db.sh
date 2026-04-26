@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# Daily PostgreSQL backup for AgentProvision local database
+# Daily PostgreSQL backup for AgentProvision local database.
 # Usage: ./scripts/backup_db.sh
-# Cron:  0 3 * * * /Users/nomade/Documents/GitHub/agentprovision-agents/scripts/backup_db.sh
+# Cron:  0 3 * * * /Users/nomade/Documents/GitHub/servicetsunami-agents/scripts/backup_db.sh
 
 set -euo pipefail
 
-BACKUP_DIR="/Users/nomade/Documents/GitHub/agentprovision-agents/backups"
-CONTAINER="agentprovision-agents-db-1"
-DB_NAME="agentprovision"
-DB_USER="postgres"
-KEEP_DAYS=7
+# Resolve repo root from the script location so the cron entry works no
+# matter where the repo is cloned, and survives the agentprovision ->
+# servicetsunami-agents repo rename.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+BACKUP_DIR="${REPO_ROOT}/backups"
+CONTAINER="${BACKUP_CONTAINER:-servicetsunami-agents-db-1}"
+DB_NAME="${BACKUP_DB_NAME:-agentprovision}"
+DB_USER="${BACKUP_DB_USER:-postgres}"
+KEEP_DAYS="${BACKUP_KEEP_DAYS:-7}"
 TIMESTAMP=$(date +%Y-%m-%d_%H%M%S)
 BACKUP_FILE="${BACKUP_DIR}/agentprovision_${TIMESTAMP}.sql.gz"
 
