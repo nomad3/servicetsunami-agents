@@ -157,13 +157,23 @@ def create_user_with_tenant(db: Session, *, user_in: UserCreate, tenant_in: Tena
     )
     db.add(features)
     db.flush()
+    # Persona prompt — leave high-level guidance only. The actual tool
+    # surface (find_entities, search_knowledge, calendar, gmail, etc.)
+    # comes from the MCP server registration; the CLI runtime exposes
+    # them automatically and the universal anti-hallucination preamble
+    # in cli_session_manager already tells the model when to call them.
     luna_persona_prompt = (
         "You are Luna, an intelligent AI co-pilot. Route requests to the right specialized agent or tool, "
         "maintain context across conversations, and deliver helpful, actionable responses. "
-        "Use entity_extraction to capture who/what/when from user messages, knowledge_search to recall prior context, "
-        "and calculator for any numeric work. Be concise and conversational."
+        "Be concise and conversational."
     )
-    luna_capabilities = ["entity_extraction", "knowledge_search", "lead_scoring", "calculator", "data_summary"]
+    # New tenants start with a single skill: the bundled `luna` agent persona.
+    # Tenants compose additional skills (receptionist, booking, vet-cardio,
+    # etc.) per agent via the AgentDetailPage Config tab. The deprecated
+    # tool-class wrappers (calculator, data_summary, entity_extraction,
+    # knowledge_search, sql_query, report_generation) were removed 2026-04-26
+    # — CLIs already cover those operations natively.
+    luna_skills = ["luna"]
 
     luna_agent = Agent(
         name="Luna",
@@ -171,7 +181,7 @@ def create_user_with_tenant(db: Session, *, user_in: UserCreate, tenant_in: Tena
         tenant_id=tenant.id,
         status="production",
         persona_prompt=luna_persona_prompt,
-        capabilities=luna_capabilities,
+        capabilities=luna_skills,
         tool_groups=["knowledge", "email"],
         default_model_tier="light",
         memory_domains=["conversation", "user"],
@@ -181,7 +191,7 @@ def create_user_with_tenant(db: Session, *, user_in: UserCreate, tenant_in: Tena
             "temperature": 0.7,
             "max_tokens": 2000,
             "system_prompt": luna_persona_prompt,
-            "skills": luna_capabilities,
+            "skills": luna_skills,
             "personality_preset": "friendly",
             "template_used": "luna_default",
             "avatar": "🌙",

@@ -28,7 +28,7 @@ RULES:
 - Keep responses short and conversational — this is a chat/WhatsApp context.
 - Apologize for inconvenience before giving solutions.
 - If the customer is upset, validate their feelings first.`,
-      skills: ['knowledge_search', 'entity_extraction'],
+      skills: [],
       suggestDatasets: false,
       tool_groups: ['knowledge', 'email', 'jira'],
       default_model_tier: 'light',
@@ -63,7 +63,7 @@ RULES:
 - Round numbers to 2 decimal places. Use K/M/B for large numbers.
 - Always interpret the numbers — don't just show a table.
 - If a query returns 0 rows, explain why (filter too strict, empty table, wrong date range).`,
-      skills: ['sql_query', 'data_summary', 'report_generation'],
+      skills: [],
       suggestDatasets: true,
       tool_groups: ['data', 'reports', 'knowledge'],
       default_model_tier: 'full',
@@ -99,7 +99,7 @@ RULES:
 - Personalize every outreach with at least one specific detail from the knowledge graph.
 - Flag any lead scoring below 40 as low priority.
 - Never fabricate contact details — only use what's in the knowledge graph or provided by the user.`,
-      skills: ['entity_extraction', 'knowledge_search', 'lead_scoring', 'calculator', 'ai_lead_rubric'],
+      skills: ['lead_scoring'],
       suggestDatasets: false,
       tool_groups: ['sales', 'email', 'knowledge', 'reports'],
       default_model_tier: 'full',
@@ -131,7 +131,7 @@ RULES:
 - Be concise. One clear paragraph is better than five bullet points for simple questions.
 - Say "I'm not sure, let me check" and use a tool rather than guessing.
 - If a question is outside your scope, say so and suggest who might know.`,
-      skills: ['calculator', 'data_summary', 'knowledge_search'],
+      skills: [],
       suggestDatasets: false,
       tool_groups: null,
       default_model_tier: 'full',
@@ -165,7 +165,7 @@ RULES:
 - Avoid jargon unless the audience is clearly technical.
 - Always end with a clear call to action unless told otherwise.
 - Never plagiarize — always write original content.`,
-      skills: ['knowledge_search', 'entity_extraction', 'data_summary'],
+      skills: [],
       suggestDatasets: false,
       tool_groups: ['email', 'knowledge'],
       default_model_tier: 'full',
@@ -201,7 +201,7 @@ RULES:
 - Always deduplicate against knowledge_search results before reporting new entities.
 - Tag every entity with a confidence score (high/medium/low).
 - If source is ambiguous, record the source document reference.`,
-      skills: ['entity_extraction', 'knowledge_search', 'data_summary', 'lead_scoring', 'ai_lead_rubric'],
+      skills: ['lead_scoring'],
       suggestDatasets: false,
       tool_groups: ['knowledge', 'data', 'reports'],
       default_model_tier: 'full',
@@ -237,7 +237,7 @@ RULES:
 - Flag leads with score ≥ 70 as "Hot", 40-69 as "Warm", <40 as "Cold".
 - Always suggest a specific next action: call, email, demo invite, nurture.
 - Capture the source of each lead (how they came in).`,
-      skills: ['entity_extraction', 'knowledge_search', 'lead_scoring', 'ai_lead_rubric', 'calculator'],
+      skills: ['lead_scoring'],
       suggestDatasets: false,
       entity_schema: {
         fields: ['name', 'email', 'company', 'role', 'interest', 'pain_point', 'next_step'],
@@ -275,7 +275,7 @@ RULES:
 - When merging duplicate entities, keep the more complete record and note the merge.
 - Mark entities as "unverified" when their source is unclear.
 - Prioritize accuracy over completeness — a small verified graph is better than a large noisy one.`,
-      skills: ['entity_extraction', 'knowledge_search', 'data_summary', 'sql_query'],
+      skills: [],
       suggestDatasets: false,
       tool_groups: ['knowledge', 'data', 'reports'],
       default_model_tier: 'full',
@@ -314,7 +314,7 @@ RULES:
 - Flag any data gaps that could affect scoring accuracy.
 - Never speculate about insider information. Only use publicly available or provided data.
 - Recommended actions: Engage Now | Monitor | Low Priority | Pass.`,
-      skills: ['entity_extraction', 'knowledge_search', 'lead_scoring', 'hca_deal_rubric', 'data_summary', 'report_generation'],
+      skills: ['lead_scoring'],
       suggestDatasets: false,
       tool_groups: ['sales', 'email', 'knowledge', 'reports'],
       default_model_tier: 'full',
@@ -349,7 +349,7 @@ RULES:
 - Distinguish between high-intent signals (demo request, pricing page visit) and low-intent (blog read).
 - Always recommend a marketing action: retarget, nurture sequence, sales handoff, or disqualify.
 - Show marketing score separately from sales fit score.`,
-      skills: ['entity_extraction', 'knowledge_search', 'lead_scoring', 'marketing_signal_rubric', 'data_summary', 'report_generation'],
+      skills: ['lead_scoring'],
       suggestDatasets: false,
       tool_groups: ['ads', 'competitor', 'reports', 'email', 'knowledge'],
       default_model_tier: 'full',
