@@ -95,6 +95,7 @@ async def compute_agent_performance_snapshot() -> dict:
                 logs = (
                     db.query(ExternalAgentCallLog)
                     .filter(
+                        ExternalAgentCallLog.tenant_id == ext.tenant_id,
                         ExternalAgentCallLog.external_agent_id == ext.id,
                         ExternalAgentCallLog.started_at >= since,
                     )

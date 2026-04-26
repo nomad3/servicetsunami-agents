@@ -194,11 +194,24 @@ async def _call_mcp_tool(step: dict, context: dict, tenant_id: str, run_id: str)
 
 
 async def _call_agent(step: dict, context: dict, tenant_id: str) -> dict:
-    """Call an agent via the internal chat API."""
-    agent_slug = step.get("agent", "luna")
+    """Dispatch the workflow's `agent` step to the resolved target.
+
+    The target is template-resolved against the run context first, then
+    routed by kind:
+      * If it parses as a UUID, look up native Agent → ExternalAgent in
+        order. Native goes through ``route_and_execute`` (chat path);
+        external goes through ``external_agent_call`` (reliability shim).
+      * Otherwise treat as a native agent slug — the legacy contract.
+
+    Templating + external dispatch were missing before PR-F's fix. The
+    PR-F ``Delegate To Agent`` template and PR-G coalition patterns rely
+    on this resolution for both placeholders (``{{input.recipient_agent_id}}``)
+    and external-agent ids.
+    """
+    raw_agent_ref = _resolve_template(step.get("agent", "luna"), context) or "luna"
     prompt = _resolve_template(step.get("prompt", ""), context)
 
-    activity.heartbeat(f"Running agent: {agent_slug}")
+    activity.heartbeat(f"Running agent: {raw_agent_ref}")
 
     from app.db.session import SessionLocal
     from app.schemas.safety_policy import ActionType, PolicyDecision, SafetyEnforcementRequest
@@ -207,6 +220,45 @@ async def _call_agent(step: dict, context: dict, tenant_id: str) -> dict:
 
     db = SessionLocal()
     try:
+        # Detect UUID vs slug. UUIDs route through the registry → can be
+        # native or external. Slugs go straight to the native chat path.
+        target_agent_id = None
+        target_external = None
+        is_uuid = False
+        try:
+            uuid.UUID(str(raw_agent_ref))
+            is_uuid = True
+        except (ValueError, TypeError):
+            is_uuid = False
+
+        if is_uuid:
+            from app.models.agent import Agent
+            from app.models.external_agent import ExternalAgent
+            target_agent_id = uuid.UUID(str(raw_agent_ref))
+            native = (
+                db.query(Agent)
+                .filter(Agent.id == target_agent_id, Agent.tenant_id == uuid.UUID(tenant_id))
+                .first()
+            )
+            if native is not None:
+                agent_slug_for_dispatch = (native.name or "").lower().replace(" ", "_") or "luna"
+            else:
+                target_external = (
+                    db.query(ExternalAgent)
+                    .filter(
+                        ExternalAgent.id == target_agent_id,
+                        ExternalAgent.tenant_id == uuid.UUID(tenant_id),
+                    )
+                    .first()
+                )
+                if target_external is None:
+                    raise RuntimeError(
+                        f"Agent {raw_agent_ref} not found in tenant {tenant_id}."
+                    )
+                agent_slug_for_dispatch = f"external:{target_external.id}"
+        else:
+            agent_slug_for_dispatch = raw_agent_ref
+
         enforcement = safety_enforcement.enforce_action(
             db,
             tenant_id=uuid.UUID(tenant_id),
@@ -214,15 +266,15 @@ async def _call_agent(step: dict, context: dict, tenant_id: str) -> dict:
                 action_type=ActionType.WORKFLOW_ACTION,
                 action_name="agent",
                 channel="workflow",
-                proposed_action={"prompt": prompt[:500], "agent_slug": agent_slug},
+                proposed_action={"prompt": prompt[:500], "agent_slug": agent_slug_for_dispatch},
                 world_state_facts=[],
                 recent_observations=[],
                 assumptions=["This agent step is running inside an automated workflow."],
                 uncertainty_notes=["No inline human confirmation is available during workflow execution."],
                 context_summary=f"Dynamic workflow agent step '{step.get('id', 'unknown')}'.",
-                context_ref={"step_id": step.get("id", "unknown"), "agent_slug": agent_slug},
-                expected_downside=f"Workflow agent '{agent_slug}' may trigger downstream tools or external side effects.",
-                agent_slug=agent_slug,
+                context_ref={"step_id": step.get("id", "unknown"), "agent_slug": agent_slug_for_dispatch},
+                expected_downside=f"Workflow agent '{agent_slug_for_dispatch}' may trigger downstream tools or external side effects.",
+                agent_slug=agent_slug_for_dispatch,
             ),
         )
         if enforcement.decision == PolicyDecision.BLOCK:
@@ -231,12 +283,25 @@ async def _call_agent(step: dict, context: dict, tenant_id: str) -> dict:
                 f"evidence_pack_id={enforcement.evidence_pack_id}"
             )
 
+        if target_external is not None:
+            # External path — reliability shim handles retry / breaker / fallback.
+            from app.services.external_agent_reliability import external_agent_call
+            response_text = external_agent_call(target_external, prompt, {}, db)
+            return {
+                "response": response_text or "",
+                "metadata": {"platform": "external", "external_agent_id": str(target_external.id)},
+                "tokens_used": 0,
+                "cost_usd": 0.0,
+                "platform": "external",
+            }
+
+        # Native path — slug or resolved-from-UUID slug.
         response_text, metadata = route_and_execute(
             db,
             tenant_id=uuid.UUID(tenant_id),
             user_id=uuid.UUID(tenant_id),
             message=prompt,
-            agent_slug=agent_slug,
+            agent_slug=agent_slug_for_dispatch,
             channel="workflow",
         )
         return {

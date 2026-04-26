@@ -277,22 +277,34 @@ def _record_call_log(
 ) -> None:
     """Append an ExternalAgentCallLog row.
 
-    Best-effort: any failure here is logged and swallowed — call-log
-    writes mustn't break the dispatch contract. Token / cost fields are
-    left at zero for v1; PR-D / Hire wizard wires the OpenAI token
-    extraction and webhook cost_per_call_usd metadata.
+    Uses a dedicated short-lived session so a caller's downstream
+    rollback (e.g. chat handler errors after dispatch succeeds) can't
+    lose the metric. Best-effort: any failure here is logged and
+    swallowed — call-log writes mustn't break the dispatch contract.
+    Token / cost fields are left at zero for v1; PR-D / Hire wizard
+    wires the OpenAI token extraction and webhook cost_per_call_usd
+    metadata.
+
+    The ``db`` parameter is kept in the signature so callers don't
+    have to thread a separate session in, but the helper opens its
+    own SessionLocal under the hood — see plan §"metric integrity".
     """
     try:
+        from app.db.session import SessionLocal
         from app.models.external_agent_call_log import ExternalAgentCallLog
-        row = ExternalAgentCallLog(
-            tenant_id=agent.tenant_id,
-            external_agent_id=agent.id,
-            latency_ms=latency_ms,
-            status=status,
-            error_message=(error or None),
-        )
-        db.add(row)
-        db.flush()
+        own = SessionLocal()
+        try:
+            row = ExternalAgentCallLog(
+                tenant_id=agent.tenant_id,
+                external_agent_id=agent.id,
+                latency_ms=latency_ms,
+                status=status,
+                error_message=(error or None),
+            )
+            own.add(row)
+            own.commit()
+        finally:
+            own.close()
     except Exception as exc:
         logger.warning("external_agent_reliability: call-log write failed: %s", exc)
 
