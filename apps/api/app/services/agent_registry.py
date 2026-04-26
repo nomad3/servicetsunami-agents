@@ -1,12 +1,13 @@
 import json
 import logging
 import uuid
-from typing import Optional
 
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.core.config import settings
 from app.models.agent import Agent
+from app.models.external_agent import ExternalAgent
 
 try:
     import redis as redis_lib
@@ -36,12 +37,41 @@ class AgentRegistry:
         return self._redis
 
     def find_by_capability(self, capability: str, tenant_id, db: Session, max_error_rate: float = 0.1) -> list:
-        agents = (
+        """Find native + external agents that declared ``capability``.
+
+        Returns a list of `(kind, agent)` tuples where ``kind`` is
+        ``"native"`` or ``"external"``. Callers that only want one kind
+        filter on the tuple's first element. Earlier callers expected a
+        bare list of native agents — we keep the new shape and update the
+        single call site (`/agents/discover`) atomically.
+        """
+        native = (
             db.query(Agent)
             .filter(Agent.status == "production", Agent.tenant_id == tenant_id)
             .all()
         )
-        return [a for a in agents if isinstance(a.capabilities, list) and capability in a.capabilities]
+        native_matches = [
+            ("native", a) for a in native
+            if isinstance(a.capabilities, list) and capability in a.capabilities
+        ]
+
+        # Postgres JSONB containment: capabilities @> ["<cap>"]. Falls back
+        # to a no-op when the dialect can't run it (sqlite test cases).
+        try:
+            external = (
+                db.query(ExternalAgent)
+                .filter(
+                    ExternalAgent.tenant_id == tenant_id,
+                    ExternalAgent.capabilities.cast(JSONB).contains([capability]),
+                )
+                .all()
+            )
+        except Exception as exc:
+            logger.warning("AgentRegistry: external capability query failed: %s", exc)
+            external = []
+        external_matches = [("external", a) for a in external]
+
+        return native_matches + external_matches
 
     def find_available(self, tenant_id, db: Session) -> list:
         r = self._get_redis()

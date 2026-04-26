@@ -205,19 +205,29 @@ def create_agent(
 def discover_agents(
     capability: str,
     max_latency_ms: Optional[int] = None,
+    kind: Optional[str] = None,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ):
-    agents = registry.find_by_capability(capability, current_user.tenant_id, db)
+    """Discover native + external agents that declared ``capability``.
+
+    The response includes a ``kind`` discriminator (``"native"`` or
+    ``"external"``) so callers can route through the right dispatch path.
+    Optional ``kind`` query param filters to one side.
+    """
+    matches = registry.find_by_capability(capability, current_user.tenant_id, db)
+    if kind in ("native", "external"):
+        matches = [(k, a) for k, a in matches if k == kind]
     return [
         {
+            "kind": k,
             "id": str(a.id),
             "name": a.name,
             "description": a.description,
             "status": a.status,
             "capabilities": a.capabilities,
         }
-        for a in agents
+        for k, a in matches
     ]
 
 
