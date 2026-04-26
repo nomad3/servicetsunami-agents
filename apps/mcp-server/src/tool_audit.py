@@ -118,7 +118,12 @@ def _log_call(
 ) -> None:
     """Persist one audit row. Never raises."""
     eng = _get_engine()
-    if eng is None or not tenant_id:
+    if eng is None:
+        return
+    if not tenant_id:
+        # Visible-but-rate-limited so we can spot tools whose tenant resolution
+        # fails. Don't blow up the log with one entry per call.
+        logger.debug("tool_audit: skip %s — no tenant_id resolved", tool_name)
         return
     try:
         # Three-layer redaction:
@@ -214,11 +219,19 @@ def install_audit(mcp_server) -> None:
         )
         started = time.monotonic()
         started_unix = time.time()
+        # Resolve tenant_id from request context first, fall back to the
+        # `tenant_id` argument that most agentprovision MCP tools accept
+        # explicitly. Without the fallback, audit drops every call where
+        # context resolution races the request lifecycle.
         try:
             ctx = mcp_server.get_context()
             tenant_id = resolve_tenant_id(ctx)
         except Exception:
             tenant_id = None
+        if not tenant_id:
+            arg_tid = (arguments or {}).get("tenant_id")
+            if isinstance(arg_tid, str) and len(arg_tid) >= 32:
+                tenant_id = arg_tid
         result = None
         error_msg = None
         status = "ok"
