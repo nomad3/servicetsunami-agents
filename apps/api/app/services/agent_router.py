@@ -273,6 +273,7 @@ def route_and_execute(
     channel: str = "web",
     sender_phone: str = None,
     agent_slug: str = None,
+    agent_skill_slugs: list = None,
     conversation_summary: str = "",
     image_b64: str = "",
     image_mime: str = "",
@@ -282,6 +283,11 @@ def route_and_execute(
     # Apply channel-based agent default if not explicitly specified
     if not agent_slug:
         agent_slug = resolve_primary_agent_slug(db, tenant_id)
+    # Default the skill list to a single-entry of the identity slug — keeps
+    # legacy callers (workflows / dynamic_step / simulation) working without
+    # signature-level changes.
+    if not agent_skill_slugs:
+        agent_skill_slugs = [agent_slug]
 
     # 1. Load tenant features
     try:
@@ -536,6 +542,7 @@ def route_and_execute(
         response_text, metadata = run_agent_session(
             db, tenant_id=tenant_id, user_id=user_id,
             platform=platform, agent_slug=agent_slug,
+            agent_skill_slugs=agent_skill_slugs,
             message=message, channel=channel,
             sender_phone=sender_phone, conversation_summary=conversation_summary,
             image_b64=image_b64, image_mime=image_mime,

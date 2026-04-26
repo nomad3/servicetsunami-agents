@@ -279,23 +279,36 @@ def _generate_agentic_response(
     from app.services.agent_router import route_and_execute
     from app.services.skill_manager import skill_manager
 
-    # Derive agent_slug from session's bound Agent or primary skill lookup
-    agent_slug = None
+    # Derive ordered list of skill slugs that should compose this turn's
+    # CLAUDE.md. The first entry is the agent's identity skill; the rest
+    # (if any) are additional capability bundles concatenated after it.
+    #
+    # Frontmatter shape we accept on agent.config:
+    #   skills: [primary, capability_a, capability_b]   # preferred (PR2+)
+    #   skill_slug: "primary"                           # legacy single-slot
+    # If neither is set, we fall back to the tenant's primary agent slug.
+    agent_skill_slugs: list[str] = []
     primary_slug = resolve_primary_agent_slug(db, session.tenant_id)
     if session.agent:
         agent_config = session.agent.config or {}
-        # Check if agent config specifies a skill slug directly
-        agent_slug = agent_config.get("skill_slug")
-        if not agent_slug:
-            # Try to find a matching skill by agent name (case-insensitive)
+        skills_list = agent_config.get("skills")
+        if isinstance(skills_list, list) and skills_list:
+            agent_skill_slugs = [str(s) for s in skills_list if s]
+        elif agent_config.get("skill_slug"):
+            agent_skill_slugs = [str(agent_config["skill_slug"])]
+        else:
+            # Try to find a matching skill by agent name (case-insensitive).
+            # Existing fallback for agents created before either field was set.
             agent_name_lower = (session.agent.name or "").lower()
             for skill in skill_manager.list_skills():
                 if skill.slug == agent_name_lower or agent_name_lower.startswith(skill.slug):
-                    agent_slug = skill.slug
+                    agent_skill_slugs = [skill.slug]
                     break
 
-    if not agent_slug:
-        agent_slug = primary_slug
+    if not agent_skill_slugs:
+        agent_skill_slugs = [primary_slug]
+
+    agent_slug = agent_skill_slugs[0]  # identity = first skill in the list
 
     # Strategy: fit as many recent messages as possible into a 65KB budget
     recent_msgs = (
@@ -366,6 +379,7 @@ def _generate_agentic_response(
                 channel="whatsapp" if sender_phone else "web",
                 sender_phone=sender_phone,
                 agent_slug=agent_slug,
+                agent_skill_slugs=agent_skill_slugs,
                 conversation_summary=summary,
                 image_b64=image_b64,
                 image_mime=image_mime,
