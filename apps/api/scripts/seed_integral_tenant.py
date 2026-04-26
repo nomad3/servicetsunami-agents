@@ -81,7 +81,7 @@ def seed():
             tenant_id=tenant.id,
             role="specialist",
             capabilities=["infrastructure", "monitoring", "alerts", "ssh", "troubleshooting"],
-            config={"skill_slug": "integral-sre"},
+            config={"skill_slug": "sre"},
         )
         devops_agent = Agent(
             id=uuid.uuid4(),
@@ -90,7 +90,7 @@ def seed():
             tenant_id=tenant.id,
             role="specialist",
             capabilities=["cicd", "jenkins", "nexus", "deployment", "releases"],
-            config={"skill_slug": "integral-devops"},
+            config={"skill_slug": "devops"},
         )
         biz_agent = Agent(
             id=uuid.uuid4(),
@@ -99,7 +99,7 @@ def seed():
             tenant_id=tenant.id,
             role="specialist",
             capabilities=["transactions", "business_support", "forex", "troubleshooting"],
-            config={"skill_slug": "integral-business-support"},
+            config={"skill_slug": "business-support"},
         )
         db.add_all([sre_agent, devops_agent, biz_agent])
         db.flush()
@@ -118,9 +118,9 @@ def seed():
             config={
                 "skill_slug": "luna",
                 "workers": [
-                    {"slug": "integral-sre", "agent_id": str(sre_agent.id)},
-                    {"slug": "integral-devops", "agent_id": str(devops_agent.id)},
-                    {"slug": "integral-business-support", "agent_id": str(biz_agent.id)},
+                    {"slug": "sre", "agent_id": str(sre_agent.id)},
+                    {"slug": "devops", "agent_id": str(devops_agent.id)},
+                    {"slug": "business-support", "agent_id": str(biz_agent.id)},
                 ],
             },
         )
@@ -133,7 +133,7 @@ def seed():
         connector = MCPServerConnector(
             id=uuid.uuid4(),
             tenant_id=tenant.id,
-            name="integral-sre",
+            name="sre",
             description="Integral SRE Control Plane — 65 MCP tools for infrastructure, Jenkins, Nexus",
             server_url=sre_mcp_url,
             transport="streamable-http",
