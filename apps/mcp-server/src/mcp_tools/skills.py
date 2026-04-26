@@ -11,7 +11,7 @@ import httpx
 from mcp.server.fastmcp import Context
 
 from src.mcp_app import mcp
-from src.mcp_auth import resolve_tenant_id
+from src.mcp_auth import resolve_tenant_id, resolve_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +178,188 @@ async def match_skills_to_context(
     except Exception as e:
         logger.warning("match_skills_to_context failed: %s", e)
         return {"matches": []}
+
+
+@mcp.tool()
+async def update_skill_definition(
+    skill_slug: str,
+    new_prompt: str,
+    reason: str = "",
+    tenant_id: str = "",
+    ctx: Context = None,
+) -> dict:
+    """Rewrite a custom (forked) skill's markdown prompt body.
+
+    Use this when the user asks to change *how* a skill behaves — e.g.,
+    "make the receptionist always greet in Spanish" — and you want the
+    edit persisted to the library, not just applied to one turn. The
+    skill must already be a ``custom`` (forked) markdown skill; native
+    bundled skills must be forked first via the UI.
+
+    Args:
+        skill_slug: Slug of the skill to update (e.g. "aremko_receptionist").
+        new_prompt: Full replacement prompt body (markdown).
+        reason: Short rationale — appears in the audit log.
+        tenant_id: Tenant UUID (resolved from session if omitted).
+        ctx: MCP request context (injected automatically).
+
+    Returns:
+        Dict with the updated skill or an error.
+    """
+    tid = resolve_tenant_id(ctx) or tenant_id
+    uid = resolve_user_id(ctx)
+    if not skill_slug:
+        return {"error": "skill_slug is required."}
+    if not new_prompt or not new_prompt.strip():
+        return {"error": "new_prompt is required and must be non-empty."}
+    if not tid:
+        return {"error": "tenant_id is required (or X-Tenant-Id header)."}
+
+    api_base_url = _get_api_base_url()
+    internal_key = _get_internal_key()
+
+    body = {
+        "slug": skill_slug,
+        "new_prompt": new_prompt,
+        "reason": reason or None,
+        "tenant_id": tid,
+        "actor_user_id": uid,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{api_base_url}/api/v1/skills/library/internal/update-prompt",
+                headers={"X-Internal-Key": internal_key},
+                json=body,
+            )
+            if resp.status_code in (200, 201):
+                return {"status": "success", "skill": resp.json()}
+            return {
+                "error": f"Update failed: HTTP {resp.status_code}",
+                "detail": resp.text[:500],
+            }
+    except Exception as e:
+        logger.exception("update_skill_definition failed")
+        return {"error": f"Failed to update skill: {str(e)}"}
+
+
+@mcp.tool()
+async def update_agent_definition(
+    agent_id: str,
+    updates_json: str,
+    reason: str = "",
+    tenant_id: str = "",
+    ctx: Context = None,
+) -> dict:
+    """Patch a subset of an agent's config from chat.
+
+    Allowed top-level keys: ``description``, ``persona_prompt``,
+    ``tool_groups``, ``default_model_tier``, ``autonomy_level``.
+    Allowed nested ``config`` keys: ``system_prompt``, ``temperature``,
+    ``max_tokens``, ``skills``. Anything else is rejected by the API.
+
+    Args:
+        agent_id: UUID of the agent to update.
+        updates_json: JSON string with the patch, e.g.
+            '{"config": {"temperature": 0.3, "system_prompt": "..."}}'.
+        reason: Short rationale — appears in the audit log.
+        tenant_id: Tenant UUID (resolved from session if omitted).
+        ctx: MCP request context (injected automatically).
+
+    Returns:
+        Dict with the updated agent or an error.
+    """
+    tid = resolve_tenant_id(ctx) or tenant_id
+    uid = resolve_user_id(ctx)
+    if not agent_id:
+        return {"error": "agent_id is required."}
+    if not updates_json:
+        return {"error": "updates_json is required (JSON string)."}
+    if not tid:
+        return {"error": "tenant_id is required (or X-Tenant-Id header)."}
+
+    try:
+        updates = json.loads(updates_json)
+    except json.JSONDecodeError:
+        return {"error": f"Invalid JSON in updates_json: {updates_json[:200]}"}
+    if not isinstance(updates, dict) or not updates:
+        return {"error": "updates_json must decode to a non-empty object."}
+
+    api_base_url = _get_api_base_url()
+    internal_key = _get_internal_key()
+
+    body = {
+        "tenant_id": tid,
+        "actor_user_id": uid,
+        "reason": reason or None,
+        "updates": updates,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{api_base_url}/api/v1/agents/internal/{agent_id}/update-config",
+                headers={"X-Internal-Key": internal_key},
+                json=body,
+            )
+            if resp.status_code in (200, 201):
+                return {"status": "success", "agent": resp.json()}
+            return {
+                "error": f"Update failed: HTTP {resp.status_code}",
+                "detail": resp.text[:500],
+            }
+    except Exception as e:
+        logger.exception("update_agent_definition failed")
+        return {"error": f"Failed to update agent: {str(e)}"}
+
+
+@mcp.tool()
+async def list_library_revisions(
+    target_type: str = "",
+    target_ref: str = "",
+    limit: int = 20,
+    tenant_id: str = "",
+    ctx: Context = None,
+) -> dict:
+    """Show the recent change history for skills/agents in this tenant.
+
+    Args:
+        target_type: 'skill' or 'agent' to filter; empty = both.
+        target_ref: Specific skill slug or agent UUID; empty = all.
+        limit: Max revisions to return (default 20, max 500).
+        tenant_id: Tenant UUID (resolved from session if omitted).
+        ctx: MCP request context (injected automatically).
+    """
+    tid = resolve_tenant_id(ctx) or tenant_id
+    if not tid:
+        return {"error": "tenant_id is required (or X-Tenant-Id header)."}
+
+    api_base_url = _get_api_base_url()
+    internal_key = _get_internal_key()
+
+    params: dict = {"tenant_id": tid, "limit": max(1, min(int(limit or 20), 500))}
+    if target_type:
+        params["target_type"] = target_type
+    if target_ref:
+        params["target_ref"] = target_ref
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{api_base_url}/api/v1/skills/library/revisions/internal",
+                headers={"X-Internal-Key": internal_key},
+                params=params,
+            )
+            if resp.status_code == 200:
+                return {"status": "success", "revisions": resp.json()}
+            return {
+                "error": f"List failed: HTTP {resp.status_code}",
+                "detail": resp.text[:500],
+            }
+    except Exception as e:
+        logger.exception("list_library_revisions failed")
+        return {"error": f"Failed to list revisions: {str(e)}"}
 
 
 @mcp.tool()

@@ -54,6 +54,16 @@ def resolve_tenant_id(ctx) -> Optional[str]:
     return _get_header(ctx, "X-Tenant-Id") or _get_header(ctx, "tenant_id")
 
 
+def resolve_user_id(ctx) -> Optional[str]:
+    """Extract the calling user's UUID from MCP request context headers.
+
+    Set by ``cli_session_manager.generate_mcp_config`` so chat-side mutating
+    tools (update_skill_definition / update_agent_definition) can attribute
+    a revision to the user actually driving the chat session.
+    """
+    return _get_header(ctx, "X-User-Id") or _get_header(ctx, "user_id")
+
+
 def verify_internal_key(ctx) -> bool:
     """Verify the X-Internal-Key header matches the configured key."""
     key = _get_header(ctx, "X-Internal-Key") or _get_header(ctx, "internal_key")

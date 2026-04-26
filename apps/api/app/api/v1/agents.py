@@ -3,7 +3,8 @@ import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import schemas
@@ -31,6 +32,142 @@ _PROMOTE_TRANSITIONS = {
     "draft": "staging",
     "staging": "production",
 }
+
+
+def _verify_internal_key_dep(
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+):
+    """Internal key gate for MCP-driven endpoints."""
+    valid = (settings.API_INTERNAL_KEY, settings.MCP_API_KEY)
+    if x_internal_key not in valid:
+        raise HTTPException(status_code=401, detail="Invalid internal key")
+
+
+# Top-level Agent fields safe to patch from chat. Anything else is rejected
+# so a chat-side edit can't reassign owner_user_id, status, version, etc.
+_AGENT_TOPLEVEL_PATCHABLE = {
+    "description",
+    "persona_prompt",
+    "tool_groups",
+    "default_model_tier",
+    "autonomy_level",
+}
+
+# Inside agent.config, only these keys can be rewritten from chat. Keeps
+# accidental schema drift from getting baked in.
+_AGENT_CONFIG_PATCHABLE = {
+    "system_prompt",
+    "temperature",
+    "max_tokens",
+    "skills",
+}
+
+
+class InternalAgentConfigPatch(BaseModel):
+    """Chat-side patch payload for an Agent.
+
+    ``actor_user_id`` and ``tenant_id`` are passed in the body — the MCP
+    layer reads them from request headers (``X-User-Id`` / ``X-Tenant-Id``)
+    and forwards them. The internal-key dep guards against unauthorized
+    callers; tenant scoping is enforced below.
+    """
+
+    tenant_id: str
+    actor_user_id: Optional[str] = None
+    reason: Optional[str] = None
+    updates: dict
+
+
+@router.post("/internal/{agent_id}/update-config", response_model=schemas.agent.Agent)
+def update_agent_config_internal(
+    agent_id: uuid.UUID,
+    payload: InternalAgentConfigPatch,
+    db: Session = Depends(deps.get_db),
+    _auth: None = Depends(_verify_internal_key_dep),
+):
+    """Patch a subset of an agent's config from chat-side MCP tools.
+
+    Mutates only the allowlisted top-level + config keys, records a
+    library_revisions row, and returns the updated agent. Caller is
+    responsible for validating that ``actor_user_id`` actually maps to a
+    user with edit rights on this agent — for now we trust the MCP shim
+    because it's behind the internal-key boundary.
+    """
+    from app.services.library_revisions import record_revision
+
+    agent = agent_service.get_agent(db, agent_id=agent_id)
+    if not agent or str(agent.tenant_id) != payload.tenant_id:
+        raise HTTPException(status_code=404, detail="Agent not found in tenant.")
+
+    rejected = set(payload.updates.keys()) - (_AGENT_TOPLEVEL_PATCHABLE | {"config"})
+    if rejected:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot patch keys from chat: {sorted(rejected)}. "
+                f"Allowed top-level: {sorted(_AGENT_TOPLEVEL_PATCHABLE)}; "
+                f"config subset: {sorted(_AGENT_CONFIG_PATCHABLE)}."
+            ),
+        )
+
+    config_updates = payload.updates.get("config") or {}
+    if config_updates:
+        rejected_cfg = set(config_updates.keys()) - _AGENT_CONFIG_PATCHABLE
+        if rejected_cfg:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot patch config keys from chat: {sorted(rejected_cfg)}.",
+            )
+
+    before_value = {
+        "description": agent.description,
+        "persona_prompt": agent.persona_prompt,
+        "tool_groups": agent.tool_groups,
+        "default_model_tier": agent.default_model_tier,
+        "autonomy_level": agent.autonomy_level,
+        "config": dict(agent.config or {}),
+    }
+
+    for key in _AGENT_TOPLEVEL_PATCHABLE:
+        if key in payload.updates:
+            setattr(agent, key, payload.updates[key])
+
+    if config_updates:
+        merged = dict(agent.config or {})
+        merged.update(config_updates)
+        agent.config = merged
+
+    db.add(agent)
+    db.commit()
+    db.refresh(agent)
+
+    after_value = {
+        "description": agent.description,
+        "persona_prompt": agent.persona_prompt,
+        "tool_groups": agent.tool_groups,
+        "default_model_tier": agent.default_model_tier,
+        "autonomy_level": agent.autonomy_level,
+        "config": dict(agent.config or {}),
+    }
+
+    actor_uuid = None
+    if payload.actor_user_id:
+        try:
+            actor_uuid = uuid.UUID(payload.actor_user_id)
+        except (ValueError, TypeError):
+            actor_uuid = None
+
+    record_revision(
+        db,
+        tenant_id=uuid.UUID(payload.tenant_id),
+        target_type="agent",
+        target_ref=str(agent.id),
+        actor_user_id=actor_uuid,
+        reason=payload.reason,
+        before_value=before_value,
+        after_value=after_value,
+    )
+    return agent
 
 @router.get("", response_model=List[schemas.agent.Agent])
 def read_agents(

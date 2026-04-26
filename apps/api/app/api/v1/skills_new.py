@@ -468,6 +468,129 @@ def execute_file_skill(
     return result
 
 
+class InternalUpdatePromptRequest(BaseModel):
+    """Chat-side request to rewrite a skill's prompt body.
+
+    ``actor_user_id`` and ``tenant_id`` come from MCP request headers
+    (``X-User-Id`` / ``X-Tenant-Id``); they're not trusted from the body and
+    are validated by the caller before invoking this endpoint.
+    """
+
+    slug: str
+    new_prompt: str
+    reason: Optional[str] = None
+    tenant_id: str
+    actor_user_id: Optional[str] = None
+
+
+@router.post("/library/internal/update-prompt", response_model=FileSkill)
+def update_skill_prompt_internal(
+    payload: InternalUpdatePromptRequest,
+    db: Session = Depends(get_db),
+    _auth: None = Depends(_verify_internal_key),
+):
+    """Rewrite a custom skill's markdown prompt and append a revision row.
+
+    Markdown engine only — chat-driven edits don't touch python/shell
+    skills (those are sandboxed and need code review). Native skills must
+    be forked first; the caller gets a 400 instead of a silent fork so the
+    UX surfaces "you're editing the bundled version" loudly.
+    """
+    from app.services.library_revisions import record_revision
+
+    tenant_id = payload.tenant_id
+    skill = skill_manager.get_skill_by_slug(payload.slug, tenant_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill '{payload.slug}' not found for tenant.")
+    if skill.tier != "custom":
+        raise HTTPException(
+            status_code=400,
+            detail="Only custom (forked) skills can be edited from chat. Fork it first.",
+        )
+    if skill.engine != "markdown":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Skill engine is '{skill.engine}'; only markdown skills can be edited from chat.",
+        )
+
+    before_prompt = _read_skill_source(skill)
+    result = skill_manager.update_skill(
+        tenant_id,
+        payload.slug,
+        {"script": payload.new_prompt},
+    )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    sync_skills_to_db(db)
+
+    actor_uuid = None
+    if payload.actor_user_id:
+        try:
+            actor_uuid = uuid.UUID(payload.actor_user_id)
+        except (ValueError, TypeError):
+            actor_uuid = None
+
+    record_revision(
+        db,
+        tenant_id=uuid.UUID(tenant_id),
+        target_type="skill",
+        target_ref=payload.slug,
+        actor_user_id=actor_uuid,
+        reason=payload.reason,
+        before_value={"prompt": before_prompt},
+        after_value={"prompt": payload.new_prompt},
+    )
+
+    log_activity(
+        db,
+        tenant_id=uuid.UUID(tenant_id),
+        event_type="action_triggered",
+        description=f"Skill prompt updated via chat: {payload.slug}",
+        source="skills",
+        event_metadata={
+            "slug": payload.slug,
+            "reason": payload.reason,
+            "action": "skill_prompt_updated_chat",
+        },
+    )
+    return result["skill"]
+
+
+@router.get("/library/revisions/internal")
+def list_skill_revisions_internal(
+    target_type: Optional[str] = Query(None, description="'skill' or 'agent'"),
+    target_ref: Optional[str] = Query(None, description="Slug or agent UUID"),
+    tenant_id: str = Query(...),
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _auth: None = Depends(_verify_internal_key),
+):
+    """List recent library revisions for a tenant (audit history for chat)."""
+    from app.services.library_revisions import list_revisions
+
+    rows = list_revisions(
+        db,
+        tenant_id=uuid.UUID(tenant_id),
+        target_type=target_type,
+        target_ref=target_ref,
+        limit=limit,
+    )
+    return [
+        {
+            "id": str(r.id),
+            "target_type": r.target_type,
+            "target_ref": r.target_ref,
+            "actor_user_id": str(r.actor_user_id) if r.actor_user_id else None,
+            "reason": r.reason,
+            "before_value": r.before_value,
+            "after_value": r.after_value,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+
+
 @router.post("/library/internal/execute")
 def execute_file_skill_internal(
     skill_name: str = Body(...),

@@ -404,14 +404,28 @@ def generate_cli_instructions(
     return "\n".join(lines)
 
 
-def generate_mcp_config(tenant_id: str, internal_key: str, db: Session = None) -> dict:
+def generate_mcp_config(
+    tenant_id: str,
+    internal_key: str,
+    db: Session = None,
+    user_id: Optional[str] = None,
+) -> dict:
     """Generate MCP config JSON for a CLI session.
 
     Includes the built-in AgentProvision MCP server plus any external MCP servers
-    connected to this tenant via MCPServerConnector.
+    connected to this tenant via MCPServerConnector. ``user_id`` is forwarded
+    as ``X-User-Id`` so chat-side tools that mutate skills/agents can attribute
+    the change to the actor.
     """
     mcp_tools_url = os.environ.get("MCP_TOOLS_URL", "http://mcp-tools:8086")
     mcp_url = f"{mcp_tools_url}/sse"
+
+    headers = {
+        "X-Internal-Key": internal_key,
+        "X-Tenant-Id": str(tenant_id),
+    }
+    if user_id:
+        headers["X-User-Id"] = str(user_id)
 
     config = {
         "mcpServers": {
@@ -421,10 +435,7 @@ def generate_mcp_config(tenant_id: str, internal_key: str, db: Session = None) -
                 # streamable-http Accept header correctly.
                 "type": "sse",
                 "url": mcp_url,
-                "headers": {
-                    "X-Internal-Key": internal_key,
-                    "X-Tenant-Id": str(tenant_id),
-                },
+                "headers": headers,
             }
         }
     }
@@ -841,7 +852,7 @@ def run_agent_session(
     )
 
     internal_key = settings.MCP_API_KEY or "dev_mcp_key"
-    mcp_config = generate_mcp_config(str(tenant_id), internal_key, db=db)
+    mcp_config = generate_mcp_config(str(tenant_id), internal_key, db=db, user_id=str(user_id))
 
     logger.info(
         "Dispatching ChatCliWorkflow: platform=%s skill=%s tenant=%s channel=%s",
