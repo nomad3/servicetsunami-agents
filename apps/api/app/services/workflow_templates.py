@@ -1536,6 +1536,222 @@ NATIVE_TEMPLATES = [
             ],
         },
     },
+
+    # ── A2A coalition patterns (PR-G of the external-agents + A2A plan).
+    # These are the lighter-loop alternatives to CoalitionWorkflow's
+    # 5 hardcoded patterns. They compose existing step types only —
+    # no new code in collaboration_service.py / _PHASE_TO_* dicts.
+
+    {
+        "name": "Peer Review",
+        "description": "Two agents in parallel review a proposal; a third revises based on the union of feedback.",
+        "tier": "native",
+        "public": True,
+        "tags": ["a2a", "review", "collaboration"],
+        "trigger_config": {"type": "manual"},
+        "definition": {
+            "steps": [
+                {
+                    "id": "propose",
+                    "type": "agent",
+                    "agent": "{{input.proposer_agent}}",
+                    "prompt": "{{input.proposal_prompt}}",
+                    "output": "proposal",
+                },
+                {
+                    "id": "parallel_review",
+                    "type": "parallel",
+                    "branches": [
+                        {
+                            "id": "reviewer_a",
+                            "type": "agent",
+                            "agent": "{{input.reviewer_a_agent}}",
+                            "prompt": "Review this proposal critically. Flag risks, missing context, weak assumptions.\n\nProposal:\n{{proposal}}",
+                            "output": "review_a",
+                        },
+                        {
+                            "id": "reviewer_b",
+                            "type": "agent",
+                            "agent": "{{input.reviewer_b_agent}}",
+                            "prompt": "Review this proposal critically. Flag risks, missing context, weak assumptions.\n\nProposal:\n{{proposal}}",
+                            "output": "review_b",
+                        },
+                    ],
+                },
+                {
+                    "id": "revise",
+                    "type": "agent",
+                    "agent": "{{input.proposer_agent}}",
+                    "prompt": (
+                        "Revise the proposal taking both reviews into account. Keep the strongest parts; "
+                        "address the concerns explicitly.\n\n"
+                        "Original proposal:\n{{proposal}}\n\n"
+                        "Review A:\n{{review_a}}\n\n"
+                        "Review B:\n{{review_b}}"
+                    ),
+                    "output": "final_proposal",
+                },
+            ],
+        },
+    },
+
+    {
+        "name": "Sales Handoff",
+        "description": "Qualifies a lead, enriches it, hands off to a closer agent, and confirms acknowledgement.",
+        "tier": "native",
+        "public": True,
+        "tags": ["a2a", "sales", "handoff"],
+        "trigger_config": {"type": "event", "event_type": "entity_created"},
+        "definition": {
+            "steps": [
+                {
+                    "id": "qualify",
+                    "type": "mcp_tool",
+                    "tool": "qualify_lead",
+                    "params": {"entity_id": "{{trigger.entity_id}}"},
+                    "output": "qualification",
+                },
+                {
+                    "id": "is_qualified",
+                    "type": "condition",
+                    "expression": "qualification.score >= 70",
+                    "then": "enrich",
+                    "else": "end_unqualified",
+                },
+                {
+                    "id": "enrich",
+                    "type": "agent",
+                    "agent": "{{input.enrichment_agent}}",
+                    "prompt": "Enrich this lead with public-source signal (firmographic, recent news, hiring patterns).\n\nLead:\n{{qualification}}",
+                    "output": "enriched",
+                },
+                {
+                    "id": "handoff",
+                    "type": "agent",
+                    "agent": "{{input.closer_agent}}",
+                    "prompt": (
+                        "You're receiving a qualified, enriched lead. Acknowledge receipt, "
+                        "set the next-touch reminder, and reply with the planned outreach approach.\n\n"
+                        "Qualification:\n{{qualification}}\n\nEnrichment:\n{{enriched}}"
+                    ),
+                    "output": "handoff_ack",
+                },
+                {
+                    "id": "end_unqualified",
+                    "type": "transform",
+                    "expression": "{ status: 'unqualified', reason: qualification.reason }",
+                    "output": "result",
+                },
+            ],
+        },
+    },
+
+    {
+        "name": "Escalation Chain",
+        "description": "Triage → investigate → human approval gate → resolve. Used for incidents that need a human signoff.",
+        "tier": "native",
+        "public": True,
+        "tags": ["a2a", "incident", "escalation"],
+        "trigger_config": {"type": "manual"},
+        "definition": {
+            "steps": [
+                {
+                    "id": "triage",
+                    "type": "agent",
+                    "agent": "{{input.triage_agent}}",
+                    "prompt": "Classify severity and scope of: {{input.incident_summary}}",
+                    "output": "triage_result",
+                },
+                {
+                    "id": "investigate",
+                    "type": "agent",
+                    "agent": "{{input.investigator_agent}}",
+                    "prompt": (
+                        "Investigate the root cause given the triage classification.\n\n"
+                        "Triage:\n{{triage_result}}\n\nIncident:\n{{input.incident_summary}}"
+                    ),
+                    "output": "investigation",
+                },
+                {
+                    "id": "approve",
+                    "type": "human_approval",
+                    "title": "Approve remediation plan",
+                    "description": "Triage + investigation complete. Approve to execute remediation.",
+                    "summary_template": "{{investigation}}",
+                },
+                {
+                    "id": "resolve",
+                    "type": "agent",
+                    "agent": "{{input.resolver_agent}}",
+                    "prompt": (
+                        "Execute the approved remediation. Report final status.\n\n"
+                        "Investigation:\n{{investigation}}"
+                    ),
+                    "output": "resolution",
+                },
+            ],
+        },
+    },
+
+    {
+        "name": "Red Team / Blue Team",
+        "description": "Proposer drafts a change; red team attacks it; blue team defends; synthesizer produces the final call.",
+        "tier": "native",
+        "public": True,
+        "tags": ["a2a", "review", "validation"],
+        "trigger_config": {"type": "manual"},
+        "definition": {
+            "steps": [
+                {
+                    "id": "propose",
+                    "type": "agent",
+                    "agent": "{{input.proposer_agent}}",
+                    "prompt": "{{input.proposal_prompt}}",
+                    "output": "proposal",
+                },
+                {
+                    "id": "adversarial_pass",
+                    "type": "parallel",
+                    "branches": [
+                        {
+                            "id": "red_team",
+                            "type": "agent",
+                            "agent": "{{input.red_team_agent}}",
+                            "prompt": (
+                                "You are red team. Find every way this could fail or be exploited.\n\n"
+                                "Proposal:\n{{proposal}}"
+                            ),
+                            "output": "red_team_findings",
+                        },
+                        {
+                            "id": "blue_team",
+                            "type": "agent",
+                            "agent": "{{input.blue_team_agent}}",
+                            "prompt": (
+                                "You are blue team. Defend the proposal — explain why each red-team concern "
+                                "is mitigated or acceptable.\n\n"
+                                "Proposal:\n{{proposal}}"
+                            ),
+                            "output": "blue_team_defense",
+                        },
+                    ],
+                },
+                {
+                    "id": "synthesize",
+                    "type": "agent",
+                    "agent": "{{input.synthesizer_agent}}",
+                    "prompt": (
+                        "Synthesize the red-team / blue-team exchange into a final go / no-go recommendation. "
+                        "Keep it short and decisive.\n\n"
+                        "Proposal:\n{{proposal}}\n\n"
+                        "Red team:\n{{red_team_findings}}\n\n"
+                        "Blue team:\n{{blue_team_defense}}"
+                    ),
+                    "output": "final_recommendation",
+                },
+            ],
+        },
+    },
 ]
 
 
