@@ -17,10 +17,15 @@ from app.schemas.file_skill import FileSkill, SkillInput
 
 logger = logging.getLogger(__name__)
 
-# Bundled skills ship with the container image (read-only)
-BUNDLED_SKILLS_DIR = Path(__file__).parent.parent / "skills"
-# Base writable skills directory
-SKILLS_BASE = Path(os.environ.get("DATA_STORAGE_PATH", str(BUNDLED_SKILLS_DIR.parent))) / "skills"
+# Skill / agent file roots. Match Claude Code's split:
+#   apps/api/app/agents/   -> AGENT.md files (frontmatter has `engine: agent`)
+#   apps/api/app/skills/   -> SKILL.md files (everything else)
+# Each root has _bundled/ (read-only, ships with image) and _tenant/<uuid>/.
+_APP_DIR = Path(__file__).parent.parent
+SKILLS_BASE = Path(os.environ.get("DATA_STORAGE_PATH", str(_APP_DIR))) / "skills"
+AGENTS_BASE = Path(os.environ.get("DATA_STORAGE_PATH", str(_APP_DIR))) / "agents"
+# Backward-compat alias — some other modules import this constant
+BUNDLED_SKILLS_DIR = _APP_DIR / "skills"
 
 VALID_CATEGORIES = {"sales", "marketing", "data", "coding", "communication", "automation", "general", "productivity", "infrastructure", "devops", "support"}
 
@@ -175,68 +180,75 @@ class SkillManager:
             cls._instance = cls()
         return cls._instance
 
-    def _native_dir(self) -> Path:
-        return SKILLS_BASE / "native"
+    def _bundled_skills_dir(self) -> Path:
+        return SKILLS_BASE / "_bundled"
 
-    def _community_dir(self) -> Path:
-        return SKILLS_BASE / "community"
+    def _tenant_skills_dir(self, tenant_id: str) -> Path:
+        return SKILLS_BASE / "_tenant" / tenant_id
 
-    def _tenant_dir(self, tenant_id: str) -> Path:
-        return SKILLS_BASE / f"tenant_{tenant_id}"
+    def _bundled_agents_dir(self) -> Path:
+        return AGENTS_BASE / "_bundled"
+
+    def _tenant_agents_dir(self, tenant_id: str) -> Path:
+        return AGENTS_BASE / "_tenant" / tenant_id
 
     def scan(self) -> None:
-        """Scan all skill directories and load definitions."""
-        SKILLS_BASE.mkdir(parents=True, exist_ok=True)
-        native_dir = self._native_dir()
-        native_dir.mkdir(parents=True, exist_ok=True)
-        self._community_dir().mkdir(parents=True, exist_ok=True)
+        """Scan agents/ and skills/ directories and load all definitions.
 
-        # Seed bundled skills into native dir. Only copy entries that are
-        # actual skill directories (contain skill.md) — skip tier/layout
-        # directories like `native/`, `community/`, `tenant_*/`, `agents/`
-        # that would otherwise mirror themselves into native/ recursively.
-        if BUNDLED_SKILLS_DIR.is_dir() and BUNDLED_SKILLS_DIR.resolve() != native_dir.resolve():
-            for entry in BUNDLED_SKILLS_DIR.iterdir():
-                if not entry.is_dir():
-                    continue
-                if entry.name in ("native", "community") or entry.name.startswith("tenant_"):
-                    continue
-                if not (entry / "skill.md").exists():
-                    continue
-                if (native_dir / entry.name).exists():
-                    continue
-                shutil.copytree(entry, native_dir / entry.name)
-                logger.info("Seeded bundled skill: %s", entry.name)
+        Layout (Claude Code-compatible):
+          apps/api/app/agents/_bundled/<slug>/skill.md      (engine: agent)
+          apps/api/app/agents/_tenant/<uuid>/<slug>/skill.md
+          apps/api/app/skills/_bundled/<slug>/skill.md
+          apps/api/app/skills/_tenant/<uuid>/<slug>/skill.md
+        """
+        SKILLS_BASE.mkdir(parents=True, exist_ok=True)
+        AGENTS_BASE.mkdir(parents=True, exist_ok=True)
+        self._bundled_skills_dir().mkdir(parents=True, exist_ok=True)
+        (SKILLS_BASE / "_tenant").mkdir(parents=True, exist_ok=True)
+        self._bundled_agents_dir().mkdir(parents=True, exist_ok=True)
+        (AGENTS_BASE / "_tenant").mkdir(parents=True, exist_ok=True)
 
         loaded: List[FileSkill] = []
 
-        # Scan native
-        if native_dir.is_dir():
-            for entry in sorted(native_dir.iterdir()):
-                if entry.is_dir():
-                    skill = _parse_skill_md(entry, tier="native")
-                    if skill:
-                        loaded.append(skill)
+        # Bundled agents — tier "native" preserved for UI compat
+        for entry in sorted(self._bundled_agents_dir().iterdir()) if self._bundled_agents_dir().is_dir() else []:
+            if entry.is_dir():
+                skill = _parse_skill_md(entry, tier="native")
+                if skill:
+                    loaded.append(skill)
 
-        # Scan community
-        community_dir = self._community_dir()
-        if community_dir.is_dir():
-            for entry in sorted(community_dir.iterdir()):
-                if entry.is_dir():
-                    skill = _parse_skill_md(entry, tier="community")
-                    if skill:
-                        loaded.append(skill)
+        # Bundled skills
+        for entry in sorted(self._bundled_skills_dir().iterdir()) if self._bundled_skills_dir().is_dir() else []:
+            if entry.is_dir():
+                skill = _parse_skill_md(entry, tier="native")
+                if skill:
+                    loaded.append(skill)
 
-        # Scan all tenant dirs
-        if SKILLS_BASE.is_dir():
-            for tenant_dir in sorted(SKILLS_BASE.iterdir()):
-                if tenant_dir.is_dir() and tenant_dir.name.startswith("tenant_"):
-                    tid = tenant_dir.name[len("tenant_"):]
-                    for entry in sorted(tenant_dir.iterdir()):
-                        if entry.is_dir():
-                            skill = _parse_skill_md(entry, tier="custom", tenant_id=tid)
-                            if skill:
-                                loaded.append(skill)
+        # Tenant agents — _tenant/<uuid>/<slug>/
+        tenant_agents_root = AGENTS_BASE / "_tenant"
+        if tenant_agents_root.is_dir():
+            for tenant_dir in sorted(tenant_agents_root.iterdir()):
+                if not tenant_dir.is_dir():
+                    continue
+                tid = tenant_dir.name
+                for entry in sorted(tenant_dir.iterdir()):
+                    if entry.is_dir():
+                        skill = _parse_skill_md(entry, tier="custom", tenant_id=tid)
+                        if skill:
+                            loaded.append(skill)
+
+        # Tenant skills — _tenant/<uuid>/<slug>/
+        tenant_skills_root = SKILLS_BASE / "_tenant"
+        if tenant_skills_root.is_dir():
+            for tenant_dir in sorted(tenant_skills_root.iterdir()):
+                if not tenant_dir.is_dir():
+                    continue
+                tid = tenant_dir.name
+                for entry in sorted(tenant_dir.iterdir()):
+                    if entry.is_dir():
+                        skill = _parse_skill_md(entry, tier="custom", tenant_id=tid)
+                        if skill:
+                            loaded.append(skill)
 
         self._skills = loaded
         logger.info("SkillManager: %d skill(s) loaded", len(self._skills))
@@ -245,11 +257,14 @@ class SkillManager:
         """Return skills visible to a tenant: native + community + their custom."""
         if not tenant_id:
             return [s for s in self._skills if s.tier in ("native", "community")]
-        tenant_dir_name = f"tenant_{tenant_id}"
+        # New layout: _tenant/<uuid>/<slug>/   ->  match by exact uuid segment.
+        # Old layout: tenant_<uuid>/<slug>/    ->  legacy fallback.
+        tenant_seg_new = f"_tenant/{tenant_id}/"
+        tenant_seg_old = f"tenant_{tenant_id}/"
         return [
             s for s in self._skills
             if s.tier in ("native", "community")
-            or (s.tier == "custom" and tenant_dir_name in s.skill_dir)
+            or (s.tier == "custom" and (tenant_seg_new in s.skill_dir or tenant_seg_old in s.skill_dir))
         ]
 
     def get_skill_by_name(self, name: str, tenant_id: str = None) -> Optional[FileSkill]:
@@ -330,7 +345,7 @@ class SkillManager:
             return {"error": f"Skill '{slug}' not found."}
         if skill.tier != "custom":
             return {"error": "Only custom skills can be edited. Fork it first."}
-        if f"tenant_{tenant_id}" not in skill.skill_dir:
+        if f"_tenant/{tenant_id}/" not in skill.skill_dir and f"tenant_{tenant_id}/" not in skill.skill_dir:
             return {"error": "Not authorized to edit this skill."}
 
         skill_dir = Path(skill.skill_dir)
@@ -424,7 +439,7 @@ class SkillManager:
             return {"error": "Skill not found."}
         if skill.tier != "custom":
             return {"error": "Only custom skills can be deleted."}
-        if f"tenant_{tenant_id}" not in skill.skill_dir:
+        if f"_tenant/{tenant_id}/" not in skill.skill_dir and f"tenant_{tenant_id}/" not in skill.skill_dir:
             return {"error": "Not authorized."}
 
         shutil.rmtree(skill.skill_dir, ignore_errors=True)
