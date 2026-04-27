@@ -1551,6 +1551,7 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
         "-p",
         prompt,
         "-y",
+        "--skip-trust",
         "--output-format",
         "json",
     ]
@@ -1558,6 +1559,12 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
     env = os.environ.copy()
     env["HOME"] = session_dir  # Tell Gemini CLI where to find .gemini/
     env["GEMINI_TELEMETRY"] = "0"
+    # Bypass gemini-cli's "trusted folders" gate. The CLI added it as a
+    # safety check for interactive use; in our headless code-worker the
+    # session dir is sandboxed and short-lived per task, so the trust
+    # check has no defensive value but does break dispatch with
+    # exit code 55. Both --skip-trust and the env var are honored.
+    env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
 
     # Strip every Google/GCP env that would push gemini-cli into Cloud Code
     # Assist enterprise mode (which probes 553113309640 / Cloud Code Private API).
