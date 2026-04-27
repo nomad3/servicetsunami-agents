@@ -1,3 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-config
+  namespace: agentprovision
+data:
+  config.yml: |
+    tunnel: a6b55a7a-dccd-42bc-b1ef-3ca8014560b5
+    credentials-file: /etc/cloudflared/credentials.json
+
+    ingress:
+      # Block /api/v1/*/internal/* from the public internet — those
+      # routes are gated only by X-Internal-Key (shared with code-worker,
+      # mcp-tools, and the orchestration worker). In-cluster callers go
+      # directly to http://api:8000 and bypass cloudflared, so they're
+      # unaffected.
+      - hostname: agentprovision.com
+        path: ^/api/.+/internal($|/.*)$
+        service: http_status:404
+      - hostname: luna.agentprovision.com
+        path: ^/api/.+/internal($|/.*)$
+        service: http_status:404
+
+      - hostname: agentprovision.com
+        path: /api/*
+        service: http://api:8000
+      - hostname: luna.agentprovision.com
+        path: /api/*
+        service: http://api:8000
+      - hostname: luna.agentprovision.com
+        service: http://luna-client:80
+      - hostname: agentprovision.com
+        service: http://web:80
+      - service: http_status:404
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

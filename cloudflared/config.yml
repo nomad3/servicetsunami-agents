@@ -2,6 +2,22 @@ tunnel: a6b55a7a-dccd-42bc-b1ef-3ca8014560b5
 credentials-file: /etc/cloudflared/credentials.json
 
 ingress:
+  # ── Block internal service-to-service routes from the public internet.
+  # Endpoints under /api/v1/*/internal/* are gated only by X-Internal-Key,
+  # which is shared with code-worker, mcp-tools, and the orchestration
+  # worker. If that key ever leaked, the entire admin surface (delegate
+  # to agent, update skills, library revisions audit, agent config patch)
+  # would be reachable from anywhere. Cloudflare returns 404 before the
+  # request hits the api container; legitimate in-cluster callers go
+  # directly to http://api:8000 and bypass cloudflared, so they're
+  # unaffected.
+  - hostname: agentprovision.com
+    path: ^/api/.+/internal($|/.*)$
+    service: http_status:404
+  - hostname: luna.agentprovision.com
+    path: ^/api/.+/internal($|/.*)$
+    service: http_status:404
+
   # API routes
   - hostname: agentprovision.com
     path: /api/*
