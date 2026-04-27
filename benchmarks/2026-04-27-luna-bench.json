@@ -1,0 +1,217 @@
+{
+  "started_at": "2026-04-27T13:06:05.133327+00:00",
+  "finished_at": "2026-04-27T13:14:42.239596+00:00",
+  "base_url": "http://localhost:8000",
+  "tenant_id": "09f9f6f0-0c12-40fb-9fef-b5eb1cd9ad68",
+  "runs_per_cell": 2,
+  "warmup": 1,
+  "rows": [
+    {
+      "cell": "greeting",
+      "prompt": "hola luna",
+      "run_idx": 1,
+      "cold": true,
+      "wall_ms": 28044,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 246,
+      "success": true,
+      "error": null,
+      "response_preview": "Hola! I'm here and ready to help coordinate everything with AgentProvision.\n\nWhat can I assist you with today? Are we reviewing any specific projects, looking into some technical documentation, or do "
+    },
+    {
+      "cell": "greeting",
+      "prompt": "hola luna",
+      "run_idx": 2,
+      "cold": false,
+      "wall_ms": 32644,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 200,
+      "success": true,
+      "error": null,
+      "response_preview": "Hola. I'm here and ready to assist you!\n\nIs there anything specific I can help you with today? Whether it's reviewing documents, prepping for a meeting, or digging into project data, just let me know."
+    },
+    {
+      "cell": "light_recall",
+      "prompt": "qu\u00e9 te dije la \u00faltima vez?",
+      "run_idx": 1,
+      "cold": true,
+      "wall_ms": 36308,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 199,
+      "success": true,
+      "error": null,
+      "response_preview": "I'm sorry, but the search tool did not return any specific content regarding what you mentioned last.\n\nCould you perhaps remind me of the topic, or tell me a keyword so I can search my records again?"
+    },
+    {
+      "cell": "light_recall",
+      "prompt": "qu\u00e9 te dije la \u00faltima vez?",
+      "run_idx": 2,
+      "cold": false,
+      "wall_ms": 34837,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 307,
+      "success": true,
+      "error": null,
+      "response_preview": "No tengo registro espec\u00edfico de lo que nos dijimos la \u00faltima vez con la b\u00fasqueda de memoria. El resultado de la consulta no arroj\u00f3 contexto reciente.\n\nPara poder ayudarte mejor, \u00bfpodr\u00edas recordarme el"
+    },
+    {
+      "cell": "entity_recall",
+      "prompt": "qu\u00e9 sabes de mi negocio?",
+      "run_idx": 1,
+      "cold": true,
+      "wall_ms": 39011,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 553,
+      "success": true,
+      "error": null,
+      "response_preview": "I checked both my general entity database and our conversation knowledge base for information regarding \"your business,\" but I couldn't find any specific details or context associated with that genera"
+    },
+    {
+      "cell": "entity_recall",
+      "prompt": "qu\u00e9 sabes de mi negocio?",
+      "run_idx": 2,
+      "cold": false,
+      "wall_ms": 36742,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 486,
+      "success": true,
+      "error": null,
+      "response_preview": "Based on the memory and knowledge search, I don't have any specific details regarding \"your business\" at this moment.\n\nTo help you best, could you provide me with more information? For example:\n\n*   D"
+    },
+    {
+      "cell": "tool_read",
+      "prompt": "lista mis workflows recientes",
+      "run_idx": 1,
+      "cold": true,
+      "wall_ms": 32161,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 315,
+      "success": true,
+      "error": null,
+      "response_preview": "Based on the memory checks I just performed, I couldn't retrieve a list of your recent workflows.\n\nI can check for specific information if you know a workflow name, project, or type, or if there's a p"
+    },
+    {
+      "cell": "tool_read",
+      "prompt": "lista mis workflows recientes",
+      "run_idx": 2,
+      "cold": false,
+      "wall_ms": 35115,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 479,
+      "success": true,
+      "error": null,
+      "response_preview": "I attempted to retrieve your recent workflows using our knowledge base, but I couldn't find a specific list or history associated with that general query.\n\nTo help me find what you need, could you spe"
+    },
+    {
+      "cell": "multi_step",
+      "prompt": "dame un resumen r\u00e1pido de qu\u00e9 pas\u00f3 hoy",
+      "run_idx": 1,
+      "cold": true,
+      "wall_ms": 41529,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 468,
+      "success": true,
+      "error": null,
+      "response_preview": "He realizado una revisi\u00f3n de mi memoria y de la base de conocimientos sobre eventos de hoy, pero no he podido recuperar un resumen general de lo que ha pasado.\n\nPara darte un resumen \u00fatil, \u00bfpodr\u00edas es"
+    },
+    {
+      "cell": "multi_step",
+      "prompt": "dame un resumen r\u00e1pido de qu\u00e9 pas\u00f3 hoy",
+      "run_idx": 2,
+      "cold": false,
+      "wall_ms": 34143,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 413,
+      "success": true,
+      "error": null,
+      "response_preview": "No he encontrado un resumen espec\u00edfico de lo que pas\u00f3 hoy en mi memoria o en los registros recientes.\n\nPara poder darte un resumen r\u00e1pido, \u00bfpodr\u00edas especificar el \u00e1rea que te interesa? Por ejemplo, \u00bfq"
+    }
+  ],
+  "summary": {
+    "greeting": {
+      "n_ok": 2,
+      "n_fail": 0,
+      "wall_p50_ms": 28044,
+      "wall_p95_ms": 32644,
+      "wall_min_ms": 28044,
+      "wall_max_ms": 32644,
+      "wall_avg_ms": 30344,
+      "server_p50_ms": 0,
+      "platforms": [
+        "local_gemma_tools"
+      ]
+    },
+    "light_recall": {
+      "n_ok": 2,
+      "n_fail": 0,
+      "wall_p50_ms": 34837,
+      "wall_p95_ms": 36308,
+      "wall_min_ms": 34837,
+      "wall_max_ms": 36308,
+      "wall_avg_ms": 35572,
+      "server_p50_ms": 0,
+      "platforms": [
+        "local_gemma_tools"
+      ]
+    },
+    "entity_recall": {
+      "n_ok": 2,
+      "n_fail": 0,
+      "wall_p50_ms": 36742,
+      "wall_p95_ms": 39011,
+      "wall_min_ms": 36742,
+      "wall_max_ms": 39011,
+      "wall_avg_ms": 37876,
+      "server_p50_ms": 0,
+      "platforms": [
+        "local_gemma_tools"
+      ]
+    },
+    "tool_read": {
+      "n_ok": 2,
+      "n_fail": 0,
+      "wall_p50_ms": 32161,
+      "wall_p95_ms": 35115,
+      "wall_min_ms": 32161,
+      "wall_max_ms": 35115,
+      "wall_avg_ms": 33638,
+      "server_p50_ms": 0,
+      "platforms": [
+        "local_gemma_tools"
+      ]
+    },
+    "multi_step": {
+      "n_ok": 2,
+      "n_fail": 0,
+      "wall_p50_ms": 34143,
+      "wall_p95_ms": 41529,
+      "wall_min_ms": 34143,
+      "wall_max_ms": 41529,
+      "wall_avg_ms": 37836,
+      "server_p50_ms": 0,
+      "platforms": [
+        "local_gemma_tools"
+      ]
+    }
+  }
+}
