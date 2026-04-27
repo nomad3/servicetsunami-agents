@@ -245,8 +245,20 @@ async def validate_aremko_reservation(
                 headers=LUNA_HEADERS,
                 json={"servicios": servicios},
             )
+            # raise_for_status BEFORE json(): a 5xx body might still parse
+            # as JSON, and the caller (Luna) reads `success` from the dict
+            # — a missing `success: true` lets Luna fabricate a "done" reply.
+            resp.raise_for_status()
             data = resp.json()
             return data
+        except httpx.HTTPStatusError as e:
+            logger.error("validate_aremko_reservation HTTP %s: %s", e.response.status_code, e.response.text[:500])
+            return {
+                "success": False,
+                "error": f"HTTP {e.response.status_code} from Aremko backend",
+                "status_code": e.response.status_code,
+                "fallback": f"Contactar directamente: WhatsApp {CONTACT_WHATSAPP}",
+            }
         except Exception as e:
             logger.error("validate_aremko_reservation error: %s", e)
             return {
@@ -336,6 +348,9 @@ async def create_aremko_reservation(
                 headers=LUNA_HEADERS,
                 json=payload,
             )
+            # raise_for_status BEFORE json() — see comment in
+            # validate_aremko_reservation.
+            resp.raise_for_status()
             data = resp.json()
 
             # Enrich successful response with contact/arrival info
@@ -362,6 +377,14 @@ async def create_aremko_reservation(
 
             return data
 
+        except httpx.HTTPStatusError as e:
+            logger.error("create_aremko_reservation HTTP %s: %s", e.response.status_code, e.response.text[:500])
+            return {
+                "success": False,
+                "error": f"HTTP {e.response.status_code} from Aremko backend",
+                "status_code": e.response.status_code,
+                "fallback": f"Contactar directamente: WhatsApp {CONTACT_WHATSAPP}",
+            }
         except Exception as e:
             logger.error("create_aremko_reservation error: %s", e)
             return {
@@ -425,8 +448,31 @@ async def add_services_to_aremko_reservation(
                 headers=LUNA_HEADERS,
                 json={"servicios": servicios},
             )
+            # The bug that let Luna fabricate "done" replies on 2026-04-26:
+            # this used to call resp.json() unconditionally. A 500 from
+            # Aremko returned a JSON body with no `success: true`, which
+            # the persona then read ambiguously. raise_for_status fails
+            # cleanly so the returned dict carries `success: false` +
+            # status_code, and the persona's "tool failed → don't claim
+            # it worked" rule fires.
+            resp.raise_for_status()
             data = resp.json()
+            # Defensive: ensure caller can read a clear success bit even
+            # if the upstream JSON shape varies.
+            if "success" not in data:
+                data = {**data, "success": True}
             return data
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                "add_services_to_aremko_reservation HTTP %s for reserva %s: %s",
+                e.response.status_code, reserva_id, e.response.text[:500],
+            )
+            return {
+                "success": False,
+                "error": f"HTTP {e.response.status_code} from Aremko backend al agregar servicio a reserva {reserva_id}",
+                "status_code": e.response.status_code,
+                "fallback": f"Contactar directamente: WhatsApp {CONTACT_WHATSAPP}",
+            }
         except Exception as e:
             logger.error("add_services_to_aremko_reservation error: %s", e)
             return {
