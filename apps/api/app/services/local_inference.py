@@ -122,6 +122,9 @@ async def _do_generate(prompt, model, system, temperature, max_tokens, timeout, 
                     "temperature": temperature,
                     "num_predict": max_tokens,
                 },
+                # Tier-1 #3: pin the model in Ollama memory between calls
+                # so quiet 10-15 min periods don't trigger a cold-load.
+                "keep_alive": "30m",
             }
             if response_format:
                 payload["format"] = response_format
@@ -316,6 +319,7 @@ def generate_sync(
                         "temperature": temperature,
                         "num_predict": max_tokens,
                     },
+                    "keep_alive": "30m",  # Tier-1 #3 — pin model between calls
                 }
                 if response_format:
                     payload["format"] = response_format

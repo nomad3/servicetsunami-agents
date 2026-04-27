@@ -271,6 +271,15 @@ def _ollama_chat(
         "messages": messages,
         "stream": False,
         "options": {"num_ctx": 4096},  # keep context small for speed
+        # Tier-1 #3: pin the model in Ollama memory between requests so
+        # we don't re-pay the 30-60s model load after every quiet period.
+        # Default is 5 minutes; we extend so a chat session that pauses
+        # for 10-15 min between turns doesn't get cold-loaded again.
+        # Model is ~14GB and this Mac M4 has 45GB unified memory, so
+        # holding it indefinitely is fine. Bench observation: first
+        # request after the api restart hit 70s warmup with no other
+        # explanation; pinning the model here addresses that.
+        "keep_alive": "30m",
     }
     if tools:
         body["tools"] = tools
