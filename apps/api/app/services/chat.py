@@ -472,6 +472,9 @@ def _generate_agentic_response(
                 # tool-event capture (FastMCP-side or --debug). Empty list does
                 # NOT mean "no tools used" — it means "no tool errors observed".
                 "tools_called": meta.get("tools_called") or [],
+                # Phase A.1 stage breakdown — populated by cli_session_manager
+                # via metadata['timings']. Each value is ms-since-prev-mark.
+                "timings": meta.get("timings") or {},
             },
             duration_ms=duration_ms if duration_ms else None,
             input_tokens=input_tokens if input_tokens else None,

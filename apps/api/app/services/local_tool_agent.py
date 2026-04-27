@@ -305,6 +305,14 @@ def run(
     Returns (response_text, metadata) or (None, metadata) on failure.
     Preserves agent_slug and skill_body — not hardcoded to any persona.
     """
+    # Phase A.1 sub-instrumentation. Wall time inside this function is the
+    # bulk of every chat-turn latency on the local-Gemma path; we want to
+    # know how it splits between Ollama inference and MCP tool calls.
+    _llm_ms_total = 0
+    _tool_ms_total = 0
+    _round_count = 0
+    _bench_t0 = time.monotonic()
+
     metadata: Dict[str, Any] = {
         "platform": "local_gemma_tools",
         "model": LOCAL_TOOL_MODEL,
@@ -312,7 +320,21 @@ def run(
         "agent_slug": agent_slug,
         "tools_used": [],
         "tool_rounds": 0,
+        # populated at every return so the caller's `metadata['timings']`
+        # gains a `local_*` family of stages.
+        "timings": {},
     }
+
+    def _emit_timings(extra: Optional[Dict[str, int]] = None) -> None:
+        elapsed = int((time.monotonic() - _bench_t0) * 1000)
+        metadata["timings"] = {
+            "local_total_ms": elapsed,
+            "local_llm_ms": _llm_ms_total,
+            "local_tool_ms": _tool_ms_total,
+            "local_overhead_ms": max(0, elapsed - _llm_ms_total - _tool_ms_total),
+            "local_rounds": _round_count,
+            **(extra or {}),
+        }
 
     # Build system prompt from skill_body
     system = skill_body.strip()[:2000] if skill_body else ""
@@ -350,8 +372,12 @@ def run(
     # Agent loop — max rounds
     try:
         for round_num in range(MAX_TOOL_ROUNDS):
+            _round_count = round_num + 1
+            _llm_t0 = time.monotonic()
             resp = _ollama_chat(messages, tools)
+            _llm_ms_total += int((time.monotonic() - _llm_t0) * 1000)
             if not resp:
+                _emit_timings()
                 return None, metadata
 
             msg = resp.get("message", {})
@@ -362,7 +388,9 @@ def run(
                 text = _clean_response(msg.get("content", ""))
                 if text:
                     metadata["tool_rounds"] = round_num
+                    _emit_timings()
                     return text, metadata
+                _emit_timings()
                 return None, metadata
 
             # Enforce per-turn tool limit
@@ -428,7 +456,9 @@ def run(
                     continue
 
                 logger.info("Local tool agent calling: %s(%s)", tool_name, json.dumps(arguments)[:200])
+                _tool_t0 = time.monotonic()
                 result = _call_mcp_tool(tool_name, arguments, str(tenant_id))
+                _tool_ms_total += int((time.monotonic() - _tool_t0) * 1000)
                 metadata["tools_used"].append(tool_name)
 
                 messages.append({
@@ -443,12 +473,16 @@ def run(
             "role": "user",
             "content": "Now summarize the tool results above and give a final answer to the user. Do not call any more tools.",
         })
+        _llm_t0 = time.monotonic()
         resp = _ollama_chat(messages, tools=[])
+        _llm_ms_total += int((time.monotonic() - _llm_t0) * 1000)
         if resp:
             text = _clean_response(resp.get("message", {}).get("content", ""))
             if text:
+                _emit_timings({"local_summary_call": 1})
                 return text, metadata
 
+        _emit_timings({"local_summary_call": 1, "local_summary_empty": 1})
         return None, metadata
     finally:
         policy_db.close()
