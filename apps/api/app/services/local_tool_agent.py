@@ -391,9 +391,19 @@ def run(
         })
     messages.append({"role": "user", "content": message})
 
+    # Tier-1 #4: cap tool-calling rounds for short messages. The persona
+    # forces proactive find_entities + search_knowledge on every turn,
+    # which adds a full LLM round even when the user just said "ok 👍"
+    # or "gracias". For ≤4-word messages we cap at 1 round — the LLM
+    # either calls a single tool and the summary call wraps up, or
+    # answers directly. Bench v6 showed each round at ~10 s of Gemma
+    # prefill, so the saving is significant for tiny messages.
+    word_count = len((message or "").split())
+    max_rounds = 1 if word_count <= 4 else MAX_TOOL_ROUNDS
+
     # Agent loop — max rounds
     try:
-        for round_num in range(MAX_TOOL_ROUNDS):
+        for round_num in range(max_rounds):
             _round_count = round_num + 1
             _llm_t0 = time.monotonic()
             resp = _ollama_chat(messages, tools)
