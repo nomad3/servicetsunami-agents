@@ -1,0 +1,346 @@
+{
+  "started_at": "2026-04-27T14:30:16.770060+00:00",
+  "finished_at": "2026-04-27T14:35:27.895487+00:00",
+  "base_url": "http://localhost:8000",
+  "tenant_id": "09f9f6f0-0c12-40fb-9fef-b5eb1cd9ad68",
+  "runs_per_cell": 2,
+  "warmup": 1,
+  "rows": [
+    {
+      "cell": "greeting",
+      "prompt": "hola luna",
+      "run_idx": 1,
+      "cold": true,
+      "wall_ms": 55,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "template",
+      "response_len": 41,
+      "success": true,
+      "error": null,
+      "response_preview": "\u00a1Hola! Soy Luna. \u00bfEn qu\u00e9 te puedo ayudar?",
+      "timings": {
+        "template_match_ms": 0
+      }
+    },
+    {
+      "cell": "greeting",
+      "prompt": "hola luna",
+      "run_idx": 2,
+      "cold": false,
+      "wall_ms": 82,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "template",
+      "response_len": 41,
+      "success": true,
+      "error": null,
+      "response_preview": "\u00a1Hola! Soy Luna. \u00bfEn qu\u00e9 te puedo ayudar?",
+      "timings": {
+        "template_match_ms": 0
+      }
+    },
+    {
+      "cell": "light_recall",
+      "prompt": "qu\u00e9 te dije la \u00faltima vez?",
+      "run_idx": 1,
+      "cold": true,
+      "wall_ms": 15616,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 187,
+      "success": true,
+      "error": null,
+      "response_preview": "En nuestra \u00faltima interacci\u00f3n, me preguntaste: \"\u00bfqu\u00e9 te dije la \u00faltima vez?\".\n\n\u00bfTe refieres a un tema espec\u00edfico que discutimos antes de eso? Si me das m\u00e1s contexto, puedo ayudarte mejor.",
+      "timings": {
+        "setup": 0,
+        "cli_credentials_missing": 1,
+        "local_tool_agent": 15455,
+        "local_total_ms": 15454,
+        "local_llm_ms": 15454,
+        "local_tool_ms": 0,
+        "local_overhead_ms": 0,
+        "local_rounds": 1
+      }
+    },
+    {
+      "cell": "light_recall",
+      "prompt": "qu\u00e9 te dije la \u00faltima vez?",
+      "run_idx": 2,
+      "cold": false,
+      "wall_ms": 20814,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 199,
+      "success": true,
+      "error": null,
+      "response_preview": "No tengo acceso a un historial de conversaciones m\u00e1s all\u00e1 de lo que est\u00e1 en nuestra sesi\u00f3n actual. \u00bfPodr\u00edas recordarme el tema o el contexto sobre el que necesitas que recuerde lo \u00faltimo que dijiste?",
+      "timings": {
+        "setup": 0,
+        "cli_credentials_missing": 1,
+        "local_tool_agent": 20691,
+        "local_total_ms": 20690,
+        "local_llm_ms": 20690,
+        "local_tool_ms": 0,
+        "local_overhead_ms": 0,
+        "local_rounds": 1
+      }
+    },
+    {
+      "cell": "entity_recall",
+      "prompt": "qu\u00e9 sabes de mi negocio?",
+      "run_idx": 1,
+      "cold": true,
+      "wall_ms": 34660,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 505,
+      "success": true,
+      "error": null,
+      "response_preview": "Seg\u00fan la b\u00fasqueda, \"mi negocio\" ha sido identificado como un concepto general que se refiere a tu propio negocio, sirviendo como el tema central de nuestra consulta.\n\nPara poder ayudarte de manera m\u00e1s",
+      "timings": {
+        "setup": 0,
+        "cli_credentials_missing": 1,
+        "local_tool_agent": 34504,
+        "local_total_ms": 34503,
+        "local_llm_ms": 34459,
+        "local_tool_ms": 38,
+        "local_overhead_ms": 6,
+        "local_rounds": 2
+      }
+    },
+    {
+      "cell": "entity_recall",
+      "prompt": "qu\u00e9 sabes de mi negocio?",
+      "run_idx": 2,
+      "cold": false,
+      "wall_ms": 30814,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 507,
+      "success": true,
+      "error": null,
+      "response_preview": "Seg\u00fan la conocimiento grafo, registro \"mi negocio\" como un concepto relacionado con su propia empresa.\n\nSin embargo, el sistema no tiene detalles operativos o informaci\u00f3n espec\u00edfica sobre la naturalez",
+      "timings": {
+        "setup": 0,
+        "cli_credentials_missing": 1,
+        "local_tool_agent": 30560,
+        "local_total_ms": 30559,
+        "local_llm_ms": 30512,
+        "local_tool_ms": 41,
+        "local_overhead_ms": 6,
+        "local_rounds": 2
+      }
+    },
+    {
+      "cell": "tool_read",
+      "prompt": "lista mis workflows recientes",
+      "run_idx": 1,
+      "cold": true,
+      "wall_ms": 20010,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 566,
+      "success": true,
+      "error": null,
+      "response_preview": "Para poder ayudarte a listar tus flujos de trabajo recientes, \u00bfpodr\u00edas especificar a qu\u00e9 te refieres exactamente?\n\nMis herramientas est\u00e1n dise\u00f1adas principalmente para buscar informaci\u00f3n en la base de",
+      "timings": {
+        "setup": 0,
+        "cli_credentials_missing": 1,
+        "local_tool_agent": 19796,
+        "local_total_ms": 19796,
+        "local_llm_ms": 19796,
+        "local_tool_ms": 0,
+        "local_overhead_ms": 0,
+        "local_rounds": 1
+      }
+    },
+    {
+      "cell": "tool_read",
+      "prompt": "lista mis workflows recientes",
+      "run_idx": 2,
+      "cold": false,
+      "wall_ms": 15260,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 393,
+      "success": true,
+      "error": null,
+      "response_preview": "I apologize, but I don't have a specific tool or function available to list your recent workflows. My current capabilities are focused on searching and retrieving structured information like contacts,",
+      "timings": {
+        "setup": 0,
+        "cli_credentials_missing": 1,
+        "local_tool_agent": 15124,
+        "local_total_ms": 15124,
+        "local_llm_ms": 15124,
+        "local_tool_ms": 0,
+        "local_overhead_ms": 0,
+        "local_rounds": 1
+      }
+    },
+    {
+      "cell": "multi_step",
+      "prompt": "dame un resumen r\u00e1pido de qu\u00e9 pas\u00f3 hoy",
+      "run_idx": 1,
+      "cold": true,
+      "wall_ms": 17852,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 346,
+      "success": true,
+      "error": null,
+      "response_preview": "Para darte un resumen r\u00e1pido, necesito un poco de contexto. \u00bfPodr\u00edas especificar sobre qu\u00e9 \u00e1rea quieres el resumen? Por ejemplo:\n\n*   \u00bfDe nuestras reuniones de hoy?\n*   \u00bfDe los movimientos de alg\u00fan pr",
+      "timings": {
+        "setup": 0,
+        "cli_credentials_missing": 1,
+        "local_tool_agent": 17684,
+        "local_total_ms": 17683,
+        "local_llm_ms": 17683,
+        "local_tool_ms": 0,
+        "local_overhead_ms": 0,
+        "local_rounds": 1
+      }
+    },
+    {
+      "cell": "multi_step",
+      "prompt": "dame un resumen r\u00e1pido de qu\u00e9 pas\u00f3 hoy",
+      "run_idx": 2,
+      "cold": false,
+      "wall_ms": 17164,
+      "server_duration_ms": null,
+      "tokens": null,
+      "platform": "local_gemma_tools",
+      "response_len": 282,
+      "success": true,
+      "error": null,
+      "response_preview": "Para darte un resumen, necesito saber a qu\u00e9 te refieres con \"hoy\". \u00bfTe refieres a:\n\n1.  Nuestras reuniones de hoy?\n2.  Las actualizaciones de alg\u00fan proyecto en particular?\n3.  Alg\u00fan evento espec\u00edfico ",
+      "timings": {
+        "setup": 0,
+        "cli_credentials_missing": 1,
+        "local_tool_agent": 17016,
+        "local_total_ms": 17016,
+        "local_llm_ms": 17016,
+        "local_tool_ms": 0,
+        "local_overhead_ms": 0,
+        "local_rounds": 1
+      }
+    }
+  ],
+  "summary": {
+    "greeting": {
+      "n_ok": 2,
+      "n_fail": 0,
+      "wall_p50_ms": 55,
+      "wall_p95_ms": 82,
+      "wall_min_ms": 55,
+      "wall_max_ms": 82,
+      "wall_avg_ms": 68,
+      "server_p50_ms": 0,
+      "platforms": [
+        "template"
+      ],
+      "stage_avg_ms": {
+        "template_match_ms": 0
+      }
+    },
+    "light_recall": {
+      "n_ok": 2,
+      "n_fail": 0,
+      "wall_p50_ms": 15616,
+      "wall_p95_ms": 20814,
+      "wall_min_ms": 15616,
+      "wall_max_ms": 20814,
+      "wall_avg_ms": 18215,
+      "server_p50_ms": 0,
+      "platforms": [
+        "local_gemma_tools"
+      ],
+      "stage_avg_ms": {
+        "local_total_ms": 18072,
+        "local_tool_ms": 0,
+        "setup": 0,
+        "local_tool_agent": 18073,
+        "local_rounds": 1,
+        "local_overhead_ms": 0,
+        "local_llm_ms": 18072,
+        "cli_credentials_missing": 1
+      }
+    },
+    "entity_recall": {
+      "n_ok": 2,
+      "n_fail": 0,
+      "wall_p50_ms": 30814,
+      "wall_p95_ms": 34660,
+      "wall_min_ms": 30814,
+      "wall_max_ms": 34660,
+      "wall_avg_ms": 32737,
+      "server_p50_ms": 0,
+      "platforms": [
+        "local_gemma_tools"
+      ],
+      "stage_avg_ms": {
+        "local_total_ms": 32531,
+        "local_tool_ms": 39,
+        "setup": 0,
+        "local_tool_agent": 32532,
+        "local_rounds": 2,
+        "local_overhead_ms": 6,
+        "local_llm_ms": 32485,
+        "cli_credentials_missing": 1
+      }
+    },
+    "tool_read": {
+      "n_ok": 2,
+      "n_fail": 0,
+      "wall_p50_ms": 15260,
+      "wall_p95_ms": 20010,
+      "wall_min_ms": 15260,
+      "wall_max_ms": 20010,
+      "wall_avg_ms": 17635,
+      "server_p50_ms": 0,
+      "platforms": [
+        "local_gemma_tools"
+      ],
+      "stage_avg_ms": {
+        "local_total_ms": 17460,
+        "local_tool_ms": 0,
+        "setup": 0,
+        "local_tool_agent": 17460,
+        "local_rounds": 1,
+        "local_overhead_ms": 0,
+        "local_llm_ms": 17460,
+        "cli_credentials_missing": 1
+      }
+    },
+    "multi_step": {
+      "n_ok": 2,
+      "n_fail": 0,
+      "wall_p50_ms": 17164,
+      "wall_p95_ms": 17852,
+      "wall_min_ms": 17164,
+      "wall_max_ms": 17852,
+      "wall_avg_ms": 17508,
+      "server_p50_ms": 0,
+      "platforms": [
+        "local_gemma_tools"
+      ],
+      "stage_avg_ms": {
+        "local_total_ms": 17349,
+        "local_tool_ms": 0,
+        "setup": 0,
+        "local_tool_agent": 17350,
+        "local_rounds": 1,
+        "local_overhead_ms": 0,
+        "local_llm_ms": 17349,
+        "cli_credentials_missing": 1
+      }
+    }
+  }
+}
