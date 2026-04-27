@@ -40,8 +40,19 @@ def test_template_skips_when_intent_is_not_greeting():
     assert _greeting_template(CAL, "hola", "luna") is None
 
 
-def test_template_skips_when_intent_missing():
-    assert _greeting_template(None, "hola", "luna") is None
+def test_template_keyword_fallback_when_intent_missing():
+    """Intent classifier has a cold-start race (plan §A.3); without this
+    fallback the fast-path is 0% effective for ~60 s after every deploy.
+    """
+    out = _greeting_template(None, "hola", "luna")
+    assert out is not None
+    assert out.startswith("¡Hola!")
+
+
+def test_template_keyword_fallback_skips_non_greeting():
+    """Intent missing AND not a known greeting → don't fire."""
+    assert _greeting_template(None, "tengo una pregunta", "luna") is None
+    assert _greeting_template(None, "que pasa con mi reserva", "luna") is None
 
 
 def test_template_skips_on_question_mark():

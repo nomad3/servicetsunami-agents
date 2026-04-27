@@ -177,11 +177,57 @@ _LOCAL_PATH_MAX_CHARS = 100
 _GREETING_FAST_PATH_MAX_CHARS = 30
 
 
+# Keyword fallback for when the embedding-service intent classifier
+# couldn't initialize (cold-start race — see plan §A.3). Without this
+# fallback the greeting fast-path was firing at 0% in production after
+# every api restart that beat embedding-service to readiness.
+_GREETING_KEYWORDS_ES = (
+    "hola", "buenas", "buenos días", "buen día",
+    "buenas tardes", "buenas noches", "qué tal", "que tal",
+    "saludos", "ola", "ey",
+)
+_GREETING_KEYWORDS_EN = (
+    "hi", "hello", "hey", "good morning", "good afternoon",
+    "good evening", "howdy",
+)
+
+
+def _looks_like_greeting(message: str) -> bool:
+    """Cheap keyword check: starts with one of the known greetings.
+
+    Used both as the keyword fallback when intent is None AND as a
+    confirming gate when intent is set — defends against intent
+    misclassifications.
+    """
+    lower = (message or "").strip().lower()
+    if not lower:
+        return False
+    for kw in _GREETING_KEYWORDS_ES + _GREETING_KEYWORDS_EN:
+        if lower == kw or lower.startswith(kw + " ") or lower.startswith(kw + ",") or lower.startswith(kw + "!"):
+            return True
+    return False
+
+
 def _greeting_template(intent: dict | None, message: str, agent_slug: str) -> str | None:
     """Return a templated greeting reply, or None if the message
     doesn't qualify for the fast-path.
+
+    Fires when EITHER:
+      - The intent classifier matched "greeting or small talk", OR
+      - The classifier wasn't available (intent is None) and the
+        message keyword-matches a known greeting.
+
+    The keyword path is critical — embedding-service has a cold-start
+    race that empties _intent_cache after every api restart (plan §A.3),
+    so without this fallback the fast-path would be 0% effective in
+    practice for ~60s after every deploy.
     """
-    if not intent or intent.get("name") != "greeting or small talk":
+    intent_name = (intent or {}).get("name") if intent else None
+    if intent_name == "greeting or small talk":
+        pass  # ok, intent matched
+    elif intent_name is None and _looks_like_greeting(message):
+        pass  # keyword fallback fired
+    else:
         return None
     msg = (message or "").strip()
     if not msg or len(msg) > _GREETING_FAST_PATH_MAX_CHARS:
