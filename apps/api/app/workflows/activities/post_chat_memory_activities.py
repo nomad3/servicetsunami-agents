@@ -109,15 +109,23 @@ async def update_world_state(
             activity_source='chat',
         )
         
-        # Convert raw extraction to MemoryEvents for ingest.
         # `extract_from_content` returns persisted KnowledgeEntity instances under
         # "entities", but `ingest_events` expects dicts. Re-shape so name/category/
-        # description survive — `upsert_entity_by_name` will dedupe on the round-trip.
+        # description survive — `upsert_entity_by_name` returns the existing row
+        # without overwriting it, so the round-trip is a safe dedup that lets
+        # relations link via entity_lookup.
+        # NB: this comprehension MUST stay inside the `db = SessionLocal()` block
+        # — accessing `e.name` etc. on detached instances would raise.
         proposed_entity_dicts = [
             {"name": e.name, "category": e.category, "description": e.description}
             for e in raw_result.get("entities", [])
             if getattr(e, "name", None)
         ]
+        # NB: `extract_from_content` does not return an "observations" key (only
+        # entities/relations/memories/action_triggers). `memories` is semantically
+        # standalone facts, not entity observations, so we don't wire it here.
+        # Observation ingest from chat is therefore deliberately empty until
+        # `KnowledgeExtractionService` grows an observations channel.
         now = datetime.utcnow()
         event = MemoryEvent(
             tenant_id=UUID(tenant_id),
@@ -128,7 +136,7 @@ async def update_world_state(
             kind="text",
             text=content,
             proposed_entities=proposed_entity_dicts,
-            proposed_observations=raw_result.get("observations", []),
+            proposed_observations=[],
             proposed_relations=raw_result.get("relations", []),
             proposed_commitments=[],
             confidence=0.9,

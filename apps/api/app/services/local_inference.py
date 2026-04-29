@@ -423,14 +423,15 @@ Return ONLY a JSON object (no markdown fences):
 If no entities found, return: {{"entities": [], "relations": [], "memories": [], "action_triggers": []}}"""
 
     # 4096 tokens (~16KB JSON) — chat transcripts with many entities were
-    # truncating mid-string at the previous 1200-token cap.
+    # truncating mid-string at the previous 1200-token cap. Timeout bumped
+    # to 90s to match: at ~57 tok/s on M4 GPU, 4096 tokens is ~72s worst case.
     result = generate_sync(
         prompt=prompt,
         model=QUALITY_MODEL,
         system="You are a knowledge extraction agent. Output valid JSON only.",
         temperature=0.0,
         max_tokens=4096,
-        timeout=60.0,
+        timeout=90.0,
         response_format="json",
     )
 
@@ -457,14 +458,15 @@ def extract_knowledge_with_prompt_sync(prompt: str) -> Optional[dict]:
     import json
 
     # 4096 tokens (~16KB JSON) — chat transcripts with many entities were
-    # truncating mid-string at the previous 1200-token cap.
+    # truncating mid-string at the previous 1200-token cap. Timeout bumped
+    # to 90s to match: at ~57 tok/s on M4 GPU, 4096 tokens is ~72s worst case.
     result = generate_sync(
         prompt=prompt,
         model=QUALITY_MODEL,
         system="You are a knowledge extraction agent. Output valid JSON only.",
         temperature=0.0,
         max_tokens=4096,
-        timeout=60.0,
+        timeout=90.0,
         response_format="json",
     )
 

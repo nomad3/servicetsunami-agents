@@ -68,6 +68,14 @@ def ingest_events(
                     category = prop.get("category")
                     description = prop.get("description")
                 else:
+                    # Contract is dicts; flag non-dicts loudly so future
+                    # producer-side regressions don't go silent the way the
+                    # KnowledgeEntity-instance bug did.
+                    logger.warning(
+                        "ingest_events: non-dict in proposed_entities (got %s); "
+                        "falling back to attribute access. Caller should send dicts.",
+                        type(prop).__name__,
+                    )
                     name = getattr(prop, "name", None)
                     category = getattr(prop, "category", None)
                     description = getattr(prop, "description", None)
