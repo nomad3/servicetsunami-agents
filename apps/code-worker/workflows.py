@@ -188,6 +188,79 @@ def _run_long_command(
     return result
 
 
+def _run_cli_with_heartbeat(
+    cmd: list[str],
+    *,
+    label: str,
+    timeout: int = 1500,
+    env: dict | None = None,
+    cwd: str | None = None,
+    heartbeat_interval: int = 30,
+) -> subprocess.CompletedProcess:
+    """Run a chat-CLI subprocess while heartbeating Temporal from the activity thread.
+
+    Why: Temporal's sync-activity context lives in thread-local storage tied to
+    the activity-execution thread. A bare ``threading.Thread`` does not inherit
+    it, so ``activity.heartbeat()`` calls from a spawned heartbeat thread raise
+    a "not in an activity context" error. With ``except Exception: pass``
+    swallowing the failure, Temporal sees zero heartbeats and cancels the
+    activity at ``heartbeat_timeout`` even when the subprocess is alive — which
+    surfaces to callers as ``WorkflowFailureError: Workflow execution failed``.
+
+    Fix: launch the subprocess via ``Popen``, drain it on a worker thread
+    (``communicate`` reads stdout/stderr concurrently — no PIPE deadlock even
+    on multi-MB CLI output), and heartbeat from the main activity thread while
+    polling the future. On any exception path (Temporal cancellation,
+    subprocess timeout) the subprocess is killed before re-raising, so a
+    cancelled activity never leaves a live ``gemini``/``claude``/``codex``
+    process behind.
+    """
+    import concurrent.futures
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=cwd,
+    )
+
+    def _wait_and_drain() -> tuple[str, str]:
+        try:
+            return proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.communicate()
+            except Exception:
+                pass
+            raise
+
+    activity.heartbeat(f"{label} starting...")
+    start = time.monotonic()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_wait_and_drain)
+            while True:
+                try:
+                    stdout, stderr = future.result(timeout=heartbeat_interval)
+                    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+                except concurrent.futures.TimeoutError:
+                    elapsed = int(time.monotonic() - start)
+                    activity.heartbeat(f"{label} running... ({elapsed}s elapsed)")
+    except BaseException:
+        # Cancellation, subprocess timeout, or any other exit — don't let the
+        # CLI subprocess outlive this activity. Kill it before the
+        # ThreadPoolExecutor's __exit__ blocks on shutdown(wait=True).
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        raise
+
+
 def _extract_goal(task_description: str) -> str:
     """Extract a clean one-line goal from a structured task brief."""
     # Look for ## Goal section and grab the line after it
@@ -1160,35 +1233,13 @@ def _execute_claude_chat(task_input: ChatCliInput, session_dir: str) -> ChatCliR
     env = os.environ.copy()
     env["CLAUDE_CODE_OAUTH_TOKEN"] = token
 
-    import threading as _threading
-    _stop_hb = _threading.Event()
-    def _heartbeat_loop():
-        elapsed = 0
-        try:
-            activity.heartbeat("Claude Code starting...")
-        except Exception:
-            pass
-        while not _stop_hb.wait(30):
-            elapsed += 30
-            try:
-                activity.heartbeat(f"Claude Code running... ({elapsed}s elapsed)")
-            except Exception:
-                pass
-    _hb_thread = _threading.Thread(target=_heartbeat_loop, daemon=True)
-    _hb_thread.start()
-
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=1500,
-            env=env,
-            cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
-        )
-    finally:
-        _stop_hb.set()
-        _hb_thread.join(timeout=5)
+    result = _run_cli_with_heartbeat(
+        cmd,
+        label="Claude Code",
+        timeout=1500,
+        env=env,
+        cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+    )
     if result.returncode != 0:
         err = (result.stderr or result.stdout or "")[:1000]
         return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
@@ -1265,35 +1316,13 @@ def _execute_codex_chat(task_input: ChatCliInput, session_dir: str, image_path: 
     env = os.environ.copy()
     env["CODEX_HOME"] = codex_home
 
-    import threading as _threading
-    _stop_hb = _threading.Event()
-    def _heartbeat_loop():
-        elapsed = 0
-        try:
-            activity.heartbeat("Codex starting...")
-        except Exception:
-            pass
-        while not _stop_hb.wait(30):
-            elapsed += 30
-            try:
-                activity.heartbeat(f"Codex running... ({elapsed}s elapsed)")
-            except Exception:
-                pass
-    _hb_thread = _threading.Thread(target=_heartbeat_loop, daemon=True)
-    _hb_thread.start()
-
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=1500,
-            env=env,
-            cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
-        )
-    finally:
-        _stop_hb.set()
-        _hb_thread.join(timeout=5)
+    result = _run_cli_with_heartbeat(
+        cmd,
+        label="Codex",
+        timeout=1500,
+        env=env,
+        cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+    )
     if result.returncode != 0:
         err = (result.stderr or result.stdout or "")[:2000]
         return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
@@ -1587,38 +1616,13 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
         p = os.path.join(gemini_home, f)
         logger.info("Gemini home file %s present=%s", f, os.path.exists(p))
 
-    # Run subprocess in the calling thread (which is a thread-pool thread, not the
-    # event loop).  A background heartbeat thread keeps Temporal from timing out
-    # the activity while Gemini CLI is thinking.
-    import threading as _threading
-    _stop_hb = _threading.Event()
-    def _heartbeat_loop():
-        elapsed = 0
-        # Heartbeat immediately to signal we've started
-        try:
-            activity.heartbeat("Gemini CLI starting...")
-        except Exception:
-            pass
-        while not _stop_hb.wait(30):
-            elapsed += 30
-            try:
-                activity.heartbeat(f"Gemini CLI running... ({elapsed}s elapsed)")
-            except Exception:
-                pass
-    _hb_thread = _threading.Thread(target=_heartbeat_loop, daemon=True)
-    _hb_thread.start()
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=1500,
-            env=env,
-            cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
-        )
-    finally:
-        _stop_hb.set()
-        _hb_thread.join(timeout=5)
+    result = _run_cli_with_heartbeat(
+        cmd,
+        label="Gemini CLI",
+        timeout=1500,
+        env=env,
+        cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+    )
     logger.info("Gemini CLI exit code: %s", result.returncode)
     if result.stdout:
         logger.info("Gemini CLI stdout: %s", result.stdout[:500])
@@ -1826,35 +1830,13 @@ def _execute_copilot_chat(task_input: ChatCliInput, session_dir: str) -> ChatCli
     env["COPILOT_GITHUB_TOKEN"] = token
     env["HOME"] = session_dir  # Copilot reads ~/.copilot/
 
-    import threading as _threading
-    _stop_hb = _threading.Event()
-    def _heartbeat_loop():
-        elapsed = 0
-        try:
-            activity.heartbeat("Copilot CLI starting...")
-        except Exception:
-            pass
-        while not _stop_hb.wait(30):
-            elapsed += 30
-            try:
-                activity.heartbeat(f"Copilot CLI running... ({elapsed}s elapsed)")
-            except Exception:
-                pass
-    _hb_thread = _threading.Thread(target=_heartbeat_loop, daemon=True)
-    _hb_thread.start()
-
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=1500,
-            env=env,
-            cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
-        )
-    finally:
-        _stop_hb.set()
-        _hb_thread.join(timeout=5)
+    result = _run_cli_with_heartbeat(
+        cmd,
+        label="Copilot CLI",
+        timeout=1500,
+        env=env,
+        cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
+    )
 
     if result.returncode != 0:
         err = (result.stderr or result.stdout or "")[:1000]
