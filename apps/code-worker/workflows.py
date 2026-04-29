@@ -207,32 +207,58 @@ def _run_cli_with_heartbeat(
     activity at ``heartbeat_timeout`` even when the subprocess is alive — which
     surfaces to callers as ``WorkflowFailureError: Workflow execution failed``.
 
-    Fix: keep ``subprocess.run`` (which drains stdout/stderr internally and
-    avoids PIPE-deadlocks) but run it on a worker thread, and heartbeat from
-    the main activity thread while waiting on the future.
+    Fix: launch the subprocess via ``Popen``, drain it on a worker thread
+    (``communicate`` reads stdout/stderr concurrently — no PIPE deadlock even
+    on multi-MB CLI output), and heartbeat from the main activity thread while
+    polling the future. On any exception path (Temporal cancellation,
+    subprocess timeout) the subprocess is killed before re-raising, so a
+    cancelled activity never leaves a live ``gemini``/``claude``/``codex``
+    process behind.
     """
     import concurrent.futures
 
-    def _do_run() -> subprocess.CompletedProcess:
-        return subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-            cwd=cwd,
-        )
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=cwd,
+    )
+
+    def _wait_and_drain() -> tuple[str, str]:
+        try:
+            return proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.communicate()
+            except Exception:
+                pass
+            raise
 
     activity.heartbeat(f"{label} starting...")
     start = time.monotonic()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(_do_run)
-        while True:
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_wait_and_drain)
+            while True:
+                try:
+                    stdout, stderr = future.result(timeout=heartbeat_interval)
+                    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+                except concurrent.futures.TimeoutError:
+                    elapsed = int(time.monotonic() - start)
+                    activity.heartbeat(f"{label} running... ({elapsed}s elapsed)")
+    except BaseException:
+        # Cancellation, subprocess timeout, or any other exit — don't let the
+        # CLI subprocess outlive this activity. Kill it before the
+        # ThreadPoolExecutor's __exit__ blocks on shutdown(wait=True).
+        if proc.poll() is None:
             try:
-                return future.result(timeout=heartbeat_interval)
-            except concurrent.futures.TimeoutError:
-                elapsed = int(time.monotonic() - start)
-                activity.heartbeat(f"{label} running... ({elapsed}s elapsed)")
+                proc.kill()
+            except Exception:
+                pass
+        raise
 
 
 def _extract_goal(task_description: str) -> str:
