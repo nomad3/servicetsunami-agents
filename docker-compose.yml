@@ -135,6 +135,13 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+    # Override the api Dockerfile's HEALTHCHECK (curl /api/v1/) — this is a
+    # Temporal worker, not an HTTP server, so the inherited check always failed
+    # and the container has been flagged unhealthy since startup. Helm already
+    # disables the probes for this service (helm/values/agentprovision-
+    # orchestration-worker.yaml). `restart: unless-stopped` covers actual crashes.
+    healthcheck:
+      disable: true
 
   mcp-tools:
     build:
@@ -151,6 +158,17 @@ services:
     depends_on:
       - db
     restart: unless-stopped
+    # FastMCP only exposes streaming endpoints (`/sse`, etc.) — the upstream
+    # `curl -sf http://localhost:8086/sse` healthcheck times out on the long-
+    # poll connection and reports unhealthy. Replace with a TCP liveness probe
+    # against the listening port. Helm already disables the probes here too
+    # (helm/values/agentprovision-mcp-local.yaml).
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket,sys; s=socket.socket(); s.settimeout(2); s.connect(('localhost', 8086)); s.close()\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   code-worker:
     build:
