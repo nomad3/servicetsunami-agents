@@ -132,24 +132,47 @@ def ingest_events(
                 )
                 result.commitments_created += 1
 
-            # 5. Insert relations
+            # 5. Insert relations.
+            # Two shapes flow into here, the producer side hasn't unified:
+            #   - Shape A from `KnowledgeExtractionService.extract_from_content`
+            #     prompt: {"from", "to", "type", "confidence", "evidence"}
+            #     (knowledge_extraction.py:364-368)
+            #   - Shape B from the gRPC `MemoryEvent` schema and the
+            #     `local_inference.extract_knowledge_sync` prompt:
+            #     {"from_entity", "to_entity", "relation_type"}
+            #     (local_inference.py:416)
+            # The crash before this fix was `KeyError: 'from_entity'` on a
+            # Shape A dict. Tolerate both — entities/observations/commitments
+            # already in this event would otherwise be lost too.
             for rel_dict in ev.proposed_relations:
-                from_ent = entity_lookup.get(rel_dict["from_entity"])
-                to_ent = entity_lookup.get(rel_dict["to_entity"])
-                
+                if not isinstance(rel_dict, dict):
+                    logger.warning(
+                        "ingest_events: non-dict in proposed_relations (got %s); skipping.",
+                        type(rel_dict).__name__,
+                    )
+                    continue
+                from_name = rel_dict.get("from_entity") or rel_dict.get("from")
+                to_name = rel_dict.get("to_entity") or rel_dict.get("to")
+                rel_type = rel_dict.get("relation_type") or rel_dict.get("type") or "related_to"
+                if not from_name or not to_name:
+                    continue
+
+                from_ent = entity_lookup.get(from_name)
+                to_ent = entity_lookup.get(to_name)
+
                 if not from_ent or not to_ent:
                     # Try lookup if not in local cache
                     if not from_ent:
-                        from_ent = knowledge_service.get_entity_by_name(db, tenant_id, rel_dict["from_entity"])
+                        from_ent = knowledge_service.get_entity_by_name(db, tenant_id, from_name)
                     if not to_ent:
-                        to_ent = knowledge_service.get_entity_by_name(db, tenant_id, rel_dict["to_entity"])
-                
+                        to_ent = knowledge_service.get_entity_by_name(db, tenant_id, to_name)
+
                 if from_ent and to_ent:
                     knowledge_service._find_or_create_relation(
                         db, tenant_id=tenant_id,
                         from_entity_id=from_ent.id,
                         to_entity_id=to_ent.id,
-                        relation_type=rel_dict["relation_type"],
+                        relation_type=rel_type,
                     )
                     result.relations_created += 1
                 else:
