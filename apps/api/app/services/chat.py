@@ -216,6 +216,16 @@ def post_user_message(
     media_parts: list | None = None,
     attachment_meta: dict | None = None,
 ) -> Tuple[ChatMessage, ChatMessage]:
+    # [chat-trace] start a wall-clock anchor used by checkpoints downstream.
+    # Goal: surface where the hot path stalls when Luna goes silent without
+    # raising. Without this, the gap between WhatsApp `Inbound DM` and
+    # `Dispatching ChatCliWorkflow` is opaque and the only fix is restart.
+    _trace_t0 = time.perf_counter()
+    logger.info(
+        "[chat-trace] enter post_user_message: tenant=%s session=%s sender=%s",
+        str(session.tenant_id)[:8], str(session.id)[:8], sender_phone or "web",
+    )
+
     # Gap 2: Detect if user is acting on a previous suggestion (non-blocking).
     # Gap 3: Detect if user message resolves an open commitment (non-blocking).
     # Capture primitives before thread — ORM objects are not safe to access
@@ -370,6 +380,10 @@ def _generate_agentic_response(
         context = {"agent_tier": "coalition", "coalition_dispatched": True}
     else:
         # Routing and execution
+        logger.info(
+            "[chat-trace] route_and_execute: enter session=%s elapsed=%.0fms",
+            str(session.id)[:8], (time.perf_counter() - _trace_t0) * 1000,
+        )
         try:
             response_text, context = route_and_execute(
                 db,
@@ -388,8 +402,17 @@ def _generate_agentic_response(
                     "chat_session_id": str(session.id),
                 },
             )
+            logger.info(
+                "[chat-trace] route_and_execute: return session=%s elapsed=%.0fms response=%s",
+                str(session.id)[:8], (time.perf_counter() - _trace_t0) * 1000,
+                "ok" if response_text else "none",
+            )
         except Exception as e:
-            logger.error("Routing failed: %s", e, exc_info=True)
+            logger.error(
+                "[chat-trace] route_and_execute: raised session=%s elapsed=%.0fms err=%s",
+                str(session.id)[:8], (time.perf_counter() - _trace_t0) * 1000, e,
+                exc_info=True,
+            )
             response_text = None
             context = {"error": str(e)}
 

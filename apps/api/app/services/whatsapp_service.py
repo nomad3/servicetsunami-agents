@@ -8,6 +8,7 @@ import io
 import inspect
 import logging
 import socket
+import time
 import uuid
 from datetime import datetime
 from typing import Dict, Optional
@@ -989,7 +990,22 @@ class WhatsAppService:
             # This calls agent selection → LLM → tools → audit
             # Wrapper captures content string eagerly in the thread (avoids
             # SQLAlchemy lazy-loading issues when crossing the thread boundary)
+            # [chat-trace] anchor the WhatsApp → API thread-pool boundary. The
+            # 21:12→23:09 silent hang from 2026-04-28 lost ~2h between the
+            # `Inbound DM` log and the next visible log line; without these
+            # bookends a hang inside `to_thread` (or pre-handler DB session
+            # setup) is opaque from the api logs alone.
+            _trace_t0 = time.perf_counter()
+            logger.info(
+                "[chat-trace] handoff: to_thread session=%s sender=%s",
+                str(session.id)[:8], sender_id,
+            )
+
             def _run_chat():
+                logger.info(
+                    "[chat-trace] enter _run_chat: session=%s elapsed=%.0fms",
+                    str(session.id)[:8], (time.perf_counter() - _trace_t0) * 1000,
+                )
                 _user_msg, assistant_msg = chat_service.post_user_message(
                     db,
                     session=session,
@@ -1002,6 +1018,11 @@ class WhatsAppService:
                 return assistant_msg.content if assistant_msg else None
 
             response = await asyncio.to_thread(_run_chat)
+            logger.info(
+                "[chat-trace] handoff: returned session=%s elapsed=%.0fms response=%s",
+                str(session.id)[:8], (time.perf_counter() - _trace_t0) * 1000,
+                "ok" if response else "none",
+            )
             logger.info(f"Agent response for {sender_id}: len={len(response) if response else 0}")
             return response
         except Exception:

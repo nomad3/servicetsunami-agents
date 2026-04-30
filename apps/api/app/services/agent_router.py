@@ -5,6 +5,7 @@ Phase 3: RL-driven routing added on top.
 """
 import logging
 import os
+import time
 import uuid
 import random
 from typing import Optional, Tuple, Dict, Any, List
@@ -558,7 +559,16 @@ def route_and_execute(
     pre_built_memory_context = None
     session_entity_names = (db_session_memory or {}).get("recalled_entity_names")
     limits = TIER_LIMITS.get(agent_tier, TIER_LIMITS["full"])
-    
+
+    # [chat-trace] recall is the most likely silent-hang point on the chat hot
+    # path: it issues blocking gRPC + DB queries with internal deadlines, but
+    # the outer call has no wall-clock guard. Bracket it with a timing log so
+    # a future hang is observable instead of opaque.
+    _recall_t0 = time.perf_counter()
+    logger.info(
+        "[chat-trace] recall: enter tenant=%s agent=%s",
+        str(tenant_id)[:8], agent_slug or "luna",
+    )
     try:
         pre_built_memory_context = _build_memory_context(
             db, tenant_id, message,
@@ -574,8 +584,16 @@ def route_and_execute(
         )
         if pre_built_memory_context and pre_built_memory_context.get("relevant_entities"):
             recalled_entities = pre_built_memory_context["relevant_entities"]
+        logger.info(
+            "[chat-trace] recall: return tenant=%s elapsed=%.0fms entities=%d",
+            str(tenant_id)[:8], (time.perf_counter() - _recall_t0) * 1000,
+            len((pre_built_memory_context or {}).get("relevant_entities") or []),
+        )
     except Exception:
-        logger.debug("Memory context build failed — routing without entity context")
+        logger.warning(
+            "[chat-trace] recall: failed tenant=%s elapsed=%.0fms — routing without entity context",
+            str(tenant_id)[:8], (time.perf_counter() - _recall_t0) * 1000,
+        )
         safe_rollback(db)
 
     # 8. Short-message local path
