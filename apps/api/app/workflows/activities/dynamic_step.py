@@ -172,34 +172,40 @@ async def _call_mcp_tool(step: dict, context: dict, tenant_id: str, run_id: str)
             f"evidence_pack_id={enforcement.evidence_pack_id}"
         )
 
-    async with httpx.AsyncClient(timeout=_http_timeout_for_step(step, default_seconds=60.0)) as client:
-        resp = await client.post(
-            f"{MCP_TOOLS_URL}/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {"name": tool_name, "arguments": params},
-                "id": str(uuid.uuid4()),
-            },
-            headers={
-                "X-Internal-Key": API_INTERNAL_KEY,
-                "X-Tenant-Id": tenant_id,
-            },
-        )
-        data = resp.json()
-        if "result" in data:
-            content = data["result"].get("content", [])
-            if content and isinstance(content, list):
-                text = content[0].get("text", "") if content[0].get("type") == "text" else str(content)
-                try:
-                    import json
-                    return json.loads(text)
-                except (json.JSONDecodeError, TypeError):
-                    return {"result": text}
-            return {"result": content}
-        if "error" in data:
-            return {"error": data["error"].get("message", str(data["error"]))}
-        return data
+    # FastMCP only exposes the SSE transport at /sse — the previous code
+    # POSTed JSON-RPC to /mcp which returns 404 (no such endpoint). Use the
+    # MCP Python SDK's SSE client to do a proper JSON-RPC handshake over SSE.
+    from mcp.client.sse import sse_client
+    from mcp.client.session import ClientSession
+
+    sse_url = f"{MCP_TOOLS_URL.rstrip('/')}/sse"
+    timeout_s = _http_timeout_for_step(step, default_seconds=60.0)
+
+    async with sse_client(
+        sse_url,
+        headers={"X-Internal-Key": API_INTERNAL_KEY, "X-Tenant-Id": tenant_id},
+        timeout=timeout_s,
+    ) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            result = await session.call_tool(tool_name, arguments=params)
+
+    # CallToolResult.content is a list of TextContent / ImageContent / etc.
+    # Mirror the prior return shape: parse JSON text content if possible.
+    if result.isError:
+        err_text = result.content[0].text if result.content else "tool error"
+        return {"error": err_text}
+
+    if result.content:
+        first = result.content[0]
+        if hasattr(first, "text"):
+            try:
+                import json as _json
+                return _json.loads(first.text)
+            except (ValueError, TypeError):
+                return {"result": first.text}
+        return {"result": str(first)}
+    return {"result": ""}
 
 
 async def _call_agent(step: dict, context: dict, tenant_id: str) -> dict:
