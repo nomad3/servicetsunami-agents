@@ -83,6 +83,37 @@ def _escalate_decision(
     return result
 
 
+def _agent_declared_floor(db: Session, tenant_id: uuid.UUID, agent_slug: str) -> Optional[AutonomyTier]:
+    """Look up the agent's admin-declared autonomy_level from the agents table.
+
+    Returns the AutonomyTier the admin asserted (e.g. 'supervised' →
+    SUPERVISED_EXECUTION). Used as a *floor* on the auto-derived trust-profile
+    autonomy_tier — fresh agents start at OBSERVE_ONLY in the trust profile
+    until they accumulate reward evidence, which silently blocks workflows the
+    admin has explicitly authorized via `autonomy_level='supervised'`.
+    """
+    try:
+        from app.models.agent import Agent
+        # agent_slug is derived from name as `name.lower().replace(' ', '_')`
+        agent = (
+            db.query(Agent)
+            .filter(Agent.tenant_id == tenant_id)
+            .all()
+        )
+        for a in agent:
+            slug = (a.name or "").lower().replace(" ", "_")
+            if slug == agent_slug:
+                level = (a.autonomy_level or "").lower()
+                if level in ("supervised", "approval_required"):
+                    return AutonomyTier.SUPERVISED_EXECUTION
+                if level == "full":
+                    return AutonomyTier.BOUNDED_AUTONOMOUS_EXECUTION
+                return None
+    except Exception:
+        pass
+    return None
+
+
 def _apply_agent_autonomy_restrictions(
     result: SafetyEnforcementResult,
     request: SafetyEnforcementRequest,
@@ -102,6 +133,25 @@ def _apply_agent_autonomy_restrictions(
     result.autonomy_tier = AutonomyTier(profile.autonomy_tier)
     result.trust_confidence = round(float(profile.confidence or 0.0), 3)
     result.trust_source = "agent_trust_profile"
+
+    # Apply the admin-declared autonomy floor: if the agent's `autonomy_level`
+    # in the agents table declares e.g. 'supervised', don't drop below
+    # SUPERVISED_EXECUTION just because the trust profile hasn't accumulated
+    # reward evidence yet. Without this, every newly-created Luna agent
+    # silently blocks any workflow that uses the `agent` step type — even
+    # though the admin explicitly declared the autonomy level.
+    floor = _agent_declared_floor(db, tenant_id, request.agent_slug)
+    if floor is not None:
+        # Use enum-ordering: BOUNDED > SUPERVISED > RECOMMEND > OBSERVE
+        tier_rank = {
+            AutonomyTier.OBSERVE_ONLY: 0,
+            AutonomyTier.RECOMMEND_ONLY: 1,
+            AutonomyTier.SUPERVISED_EXECUTION: 2,
+            AutonomyTier.BOUNDED_AUTONOMOUS_EXECUTION: 3,
+        }
+        if tier_rank.get(floor, 0) > tier_rank.get(result.autonomy_tier, 0):
+            result.autonomy_tier = floor
+            result.trust_source = "agent_autonomy_level_floor"
 
     # bounded_autonomous: full access — override any prior BLOCK/REVIEW.
     # High/critical risk actions are logged but not blocked; the agent has
