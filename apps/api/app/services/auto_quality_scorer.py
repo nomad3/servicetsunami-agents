@@ -464,11 +464,11 @@ def _maybe_trigger_provider_council(
                 )
                 logger.info("Provider council workflow dispatched for experience %s", experience_id[:8])
 
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(_do_dispatch())
-            finally:
-                loop.close()
+            # `asyncio.run` (vs manual new_event_loop/close) drains pending
+            # tasks before closing — manual close was leaving httpx aclose()
+            # tasks orphaned, surfacing later as
+            # `RuntimeError: Event loop is closed` on GC.
+            asyncio.run(_do_dispatch())
         except Exception as e:
             logger.warning("Failed to dispatch provider council: %s", e)
 

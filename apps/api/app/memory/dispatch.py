@@ -41,14 +41,10 @@ def dispatch_post_chat_memory(
                 e,
             )
 
-    def _run_in_new_loop():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(_dispatch())
-        finally:
-            loop.close()
-
-    # Fire and forget via background thread to avoid blocking the request thread
-    # or interfering with any existing event loop.
-    threading.Thread(target=_run_in_new_loop, daemon=True).start()
+    # Fire and forget via background thread to avoid blocking the request
+    # thread or interfering with any existing event loop. `asyncio.run`
+    # (vs. manual new_event_loop/run_until_complete/close) drains pending
+    # tasks before closing — manual close was leaving httpx aclose() tasks
+    # orphaned, surfacing later as `RuntimeError: Event loop is closed`
+    # when the GC tried to run them.
+    threading.Thread(target=lambda: asyncio.run(_dispatch()), daemon=True).start()
