@@ -19,7 +19,16 @@ logger = logging.getLogger(__name__)
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://api:8000")
 API_INTERNAL_KEY = os.environ.get("API_INTERNAL_KEY", "")
-MCP_TOOLS_URL = os.environ.get("MCP_TOOLS_URL", "http://mcp-tools:8000")
+# Default port is 8086 (the FastMCP listening port). Earlier this defaulted
+# to :8000 which silently broke every dynamic-workflow MCP-tool step (inbox
+# monitor, competitor monitor, autonomous learning) with `httpx.ConnectError`
+# when MCP_TOOLS_URL was unset (which is the docker-compose default — only
+# MCP_SERVER_URL is set there). Helm sets MCP_TOOLS_URL explicitly so the env
+# var precedence is preserved; only the fallback default is corrected.
+MCP_TOOLS_URL = os.environ.get(
+    "MCP_TOOLS_URL",
+    os.environ.get("MCP_SERVER_URL", "http://mcp-tools:8086"),
+)
 
 
 def _http_timeout_for_step(step: dict, default_seconds: float) -> httpx.Timeout:
