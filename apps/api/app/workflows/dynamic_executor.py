@@ -42,11 +42,19 @@ class DynamicWorkflowResult:
 
 
 def _timeout_for(step: dict) -> timedelta:
-    """Per-step-type timeout. Agents get 10min, tools get 60s, waits get days."""
+    """Per-step-type timeout. Agents and CLI work get 30min, tools get 60s, waits get days.
+
+    `agent` steps dispatch through `route_and_execute` which runs a CLI turn
+    (Gemini/Claude/etc.) — the same magnitude of work as `cli_execute`. The
+    earlier 10-min default was too tight for real chat tasks (e.g. scanning
+    two repos takes ~12 min) and caused Temporal to kill the activity
+    mid-flight, then retry from scratch indefinitely. Per-step override
+    via `step.timeout_seconds` is honored for both bumps and reductions.
+    """
     if step.get("timeout_seconds"):
         return timedelta(seconds=step["timeout_seconds"])
     timeouts = {
-        "agent": timedelta(minutes=10),
+        "agent": timedelta(minutes=30),
         "mcp_tool": timedelta(seconds=60),
         "condition": timedelta(seconds=10),
         "transform": timedelta(seconds=10),
