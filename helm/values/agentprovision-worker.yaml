@@ -94,8 +94,15 @@ externalSecret:
 env:
   - name: TEMPORAL_ADDRESS
     value: "temporal:7233"
+  # See orchestration-worker.yaml for the rationale on why both URLs
+  # point at agentprovision-mcp (the live FastMCP service) and the
+  # deprecated mcp-server:8000 reference is gone.
   - name: MCP_SERVER_URL
-    value: "http://mcp-server:8000"
+    value: "http://agentprovision-mcp:80"
+  - name: MCP_TOOLS_URL
+    value: "http://agentprovision-mcp:80"
+  - name: API_BASE_URL
+    value: "http://agentprovision-api"
 
 # No autoscaling - single instance
 autoscaling:

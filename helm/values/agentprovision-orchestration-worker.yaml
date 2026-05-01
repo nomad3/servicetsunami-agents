@@ -105,8 +105,19 @@ externalSecret:
 env:
   - name: TEMPORAL_ADDRESS
     value: "temporal:7233"
+  # MCP_SERVER_URL: was pointing at the deprecated `mcp-server:8000` (the
+  # old Databricks/Playwright server, removed per CLAUDE.md). Point it at
+  # the live FastMCP service so any legacy fallback (e.g.
+  # CompetitorMonitor's `settings.MCP_SERVER_URL`) reaches the right
+  # place.
   - name: MCP_SERVER_URL
-    value: "http://mcp-server:8000"
+    value: "http://agentprovision-mcp:80"
+  # MCP_TOOLS_URL is the canonical env var the dispatcher prefers
+  # (apps/api/app/workflows/activities/dynamic_step.py).
+  - name: MCP_TOOLS_URL
+    value: "http://agentprovision-mcp:80"
+  - name: API_BASE_URL
+    value: "http://agentprovision-api"
 
 # No autoscaling - single instance
 autoscaling:
