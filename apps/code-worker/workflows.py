@@ -1993,14 +1993,6 @@ def _execute_opencode_chat_cli(task_input: ChatCliInput, session_dir: str) -> Ch
         return ChatCliResult(response_text="", success=False, error=str(e))
 
 
-@activity.defn
-async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
-    """Activity to execute a code task via Claude Code CLI."""
-    logger.info("Executing code task for tenant %s", task_input.tenant_id)
-    # ... (rest of implementation)
-    return CodeTaskResult(success=True, message="Task completed")
-
-
 @workflow.defn
 class ChatCliWorkflow:
     """Temporal workflow for chat CLI sessions."""

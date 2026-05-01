@@ -130,8 +130,10 @@ class DynamicWorkflowExecutor:
                     await workflow.sleep(timedelta(seconds=duration_s))
                     result = {"waited": step.get("duration"), "seconds": duration_s}
                 elif step_type == "cli_execute":
-                    # Dispatch to code-worker queue via child workflow
-                    import os as _os
+                    # Dispatch CodeTaskWorkflow as a child workflow on the
+                    # code-worker queue. Use workflow.execute_child_workflow
+                    # — Temporal forbids creating a fresh Client or reading
+                    # os.environ from inside workflow code (non-deterministic).
                     params = step.get("params", {})
                     task_desc = params.get("task", step.get("task", ""))
                     # Resolve simple {{var}} references from context
@@ -147,11 +149,7 @@ class DynamicWorkflowExecutor:
                         return str(val)
                     task_desc = _re.sub(r'\{\{(.+?)\}\}', _resolve, task_desc)
 
-                    from temporalio.client import Client as _TClient
-                    _tc = await _TClient.connect(
-                        _os.environ.get("TEMPORAL_ADDRESS", "temporal:7233")
-                    )
-                    code_handle = await _tc.start_workflow(
+                    code_result = await workflow.execute_child_workflow(
                         "CodeTaskWorkflow",
                         {
                             "task_description": task_desc,
@@ -162,7 +160,6 @@ class DynamicWorkflowExecutor:
                         task_queue="agentprovision-code",
                         execution_timeout=timedelta(minutes=60),
                     )
-                    code_result = await code_handle.result()
                     result = code_result if isinstance(code_result, dict) else {"output": str(code_result)}
                 elif step_type == "continue_as_new":
                     # Handled after the loop, skip as a step
