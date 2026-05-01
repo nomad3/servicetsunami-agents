@@ -1872,11 +1872,13 @@ def _execute_copilot_chat(task_input: ChatCliInput, session_dir: str) -> ChatCli
     if not raw:
         return ChatCliResult(response_text="", success=False, error="Copilot produced no output")
 
-    # Parse JSONL: collect the LAST `assistant.message` (final response)
-    # and the trailing `result` event (usage stats).
+    # Parse JSONL: collect assistant messages, sum output tokens, and the
+    # trailing `result` event for session-level usage stats.
     response_pieces: list[str] = []
+    final_answer_text = ""        # last assistant.message with NO tool calls (= the answer)
+    last_message_text = ""        # last non-empty assistant.message (any kind, fallback)
+    output_tokens_total = 0
     usage: dict = {}
-    final_text = ""
     for line in raw.splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -1887,15 +1889,25 @@ def _execute_copilot_chat(task_input: ChatCliInput, session_dir: str) -> ChatCli
             continue
         et = ev.get("type")
         if et == "assistant.message":
-            content = (ev.get("data") or {}).get("content")
+            data = ev.get("data") or {}
+            content = data.get("content")
+            tool_requests = data.get("toolRequests") or []
+            try:
+                output_tokens_total += int(data.get("outputTokens") or 0)
+            except (TypeError, ValueError):
+                pass
             if isinstance(content, str) and content:
-                # Keep only the latest non-empty assistant message — this
-                # is the final answer (reasoning + intermediate tool calls
-                # show up via other event types).
-                final_text = content
+                last_message_text = content
+                # Prefer messages that aren't issuing tool calls — those
+                # are the final-answer turns. Intermediate tool-call turns
+                # also have content (sometimes empty, sometimes prose
+                # explaining what the model is about to do).
+                if not tool_requests:
+                    final_answer_text = content
         elif et == "assistant.message_delta":
-            # Streaming chunks; in -p mode these usually duplicate the
-            # eventual `assistant.message` but accumulate as a fallback.
+            # Streaming chunks. In -p mode these usually duplicate the
+            # eventual `assistant.message` but accumulate as a fallback
+            # for sessions that interrupt before the final message.
             delta = (ev.get("data") or {}).get("deltaContent") or ""
             if delta:
                 response_pieces.append(delta)
@@ -1904,17 +1916,52 @@ def _execute_copilot_chat(task_input: ChatCliInput, session_dir: str) -> ChatCli
             usage["sessionId"] = ev.get("sessionId")
             usage["exitCode"] = ev.get("exitCode", 0)
 
-    response_text = final_text or "".join(response_pieces) or raw
+    # Pick the response: prefer a final no-tool-call message, fall back to
+    # the last assistant.message (could be a tool-call turn that included
+    # explanatory prose), then to streamed deltas.
+    response_text = final_answer_text or last_message_text or "".join(response_pieces)
 
-    # Premium requests is Copilot's billing unit; surface it for RL/cost
-    # tracking. Other callers can still treat the result as plain text.
-    metadata: dict = {"platform": "copilot_cli"}
+    # Don't leak the raw JSONL stream as the response if NOTHING parsed —
+    # treat that as a hard failure so callers can degrade gracefully
+    # rather than ship JSONL to a user-facing channel.
+    if not response_text:
+        snippet = raw[:300].replace("\n", " ")
+        return ChatCliResult(
+            response_text="",
+            success=False,
+            error=f"Copilot returned no parseable assistant message (raw start: {snippet!r})",
+        )
+
+    # Build metadata using the field names the chat path's downstream
+    # aggregator already reads (`output_tokens`, optionally `cost_usd`)
+    # — see cli_session_manager.run_agent_session, which sums
+    # input_tokens + output_tokens into `tokens_used`. Without these
+    # field names, RL/cost telemetry would silently be zero per turn.
+    metadata: dict = {
+        "platform": "copilot_cli",
+        # input_tokens is not reported per-message by Copilot CLI in -p
+        # mode (only output_tokens are emitted on assistant.message). Set
+        # to 0 explicitly so `tokens_used = input + output` is correct.
+        "input_tokens": 0,
+        "output_tokens": output_tokens_total,
+    }
     if usage:
+        # Copilot-specific telemetry — useful for per-tenant cost
+        # tracking and RL reward shaping. NOT consumed by the existing
+        # tokens_used aggregator (it reads input/output_tokens above).
+        # cost_usd is intentionally not synthesized: GitHub publishes
+        # premium-request quotas per plan but no fixed $/request rate,
+        # so any multiplier would be wrong. Track premium_requests as
+        # the billing unit and let downstream apply the tenant's plan
+        # rate if needed.
         metadata["premium_requests"] = usage.get("premiumRequests")
         metadata["api_duration_ms"] = usage.get("totalApiDurationMs")
         metadata["session_duration_ms"] = usage.get("sessionDurationMs")
         metadata["session_id"] = usage.get("sessionId")
-        metadata["code_changes"] = usage.get("codeChanges")
+        # code_changes is a nested dict ({linesAdded, linesRemoved,
+        # filesModified}); keep it nested under a clearly-namespaced key
+        # to avoid clashes with any other metric called "linesAdded".
+        metadata["copilot_code_changes"] = usage.get("codeChanges")
 
     return ChatCliResult(
         response_text=response_text,
