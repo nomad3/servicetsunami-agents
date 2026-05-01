@@ -958,11 +958,11 @@ def run_agent_session(
                 # Increased timeout to 600s (10 min) to allow for complex tasks like PDF ingestion
                 result = pool.submit(lambda: asyncio.run(_run_workflow())).result(timeout=600)
         else:
-            loop = asyncio.new_event_loop()
-            try:
-                result = loop.run_until_complete(_run_workflow())
-            finally:
-                loop.close()
+            # `asyncio.run` (vs manual new_event_loop/close) drains pending
+            # tasks before closing — manual close was leaving httpx aclose()
+            # tasks orphaned, surfacing later as
+            # `RuntimeError: Event loop is closed` on GC.
+            result = asyncio.run(_run_workflow())
 
         if isinstance(result, dict):
             success = result.get("success", False)
