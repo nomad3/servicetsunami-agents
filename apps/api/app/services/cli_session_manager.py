@@ -417,7 +417,12 @@ def generate_mcp_config(
     as ``X-User-Id`` so chat-side tools that mutate skills/agents can attribute
     the change to the actor.
     """
-    mcp_tools_url = os.environ.get("MCP_TOOLS_URL", "http://mcp-tools:8086")
+    # Helm sets MCP_TOOLS_URL explicitly; docker-compose only sets
+    # MCP_SERVER_URL — fall back to that so the default works in both.
+    mcp_tools_url = os.environ.get(
+        "MCP_TOOLS_URL",
+        os.environ.get("MCP_SERVER_URL", "http://mcp-tools:8086"),
+    )
     mcp_url = f"{mcp_tools_url}/sse"
 
     headers = {
