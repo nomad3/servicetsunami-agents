@@ -1791,7 +1791,20 @@ def _prepare_gemini_home(session_dir: str, auth_payload: dict, mcp_config_json: 
 
 
 def _execute_copilot_chat(task_input: ChatCliInput, session_dir: str) -> ChatCliResult:
-    """Execute a chat turn via GitHub Copilot CLI."""
+    """Execute a chat turn via GitHub Copilot CLI.
+
+    Uses --output-format json (JSONL stream) so we can extract the actual
+    assistant response and per-call usage data (premium requests, token
+    counts, session duration, files modified) — surfaced back as
+    metadata on the ChatCliResult so the chat path can RL-log it.
+
+    Auth precedence (per `copilot help environment`):
+      COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN
+
+    We set the highest-precedence one with the tenant's OAuth token so
+    that any GITHUB_TOKEN baked into the container image (used for git
+    operations) doesn't override per-tenant Copilot subscription routing.
+    """
     token = _fetch_github_token(task_input.tenant_id)
     if not token:
         return ChatCliResult(response_text="", success=False, error="GitHub not connected")
@@ -1808,27 +1821,40 @@ def _execute_copilot_chat(task_input: ChatCliInput, session_dir: str) -> ChatCli
             }
         })
 
-    _prepare_copilot_home(session_dir, mcp_config_json)
-    
+    copilot_home = _prepare_copilot_home(session_dir, mcp_config_json)
+
     prompt = task_input.message
     if task_input.instruction_md_content.strip():
         prompt = f"{task_input.instruction_md_content.strip()}\n\n# User Request\n\n{task_input.message}"
 
-    # copilot -p "prompt" -s --no-ask-user --allow-all --add-dir <session_dir>
     cmd = [
         "copilot",
         "-p", prompt,
-        "-s",                # silent mode
-        "--no-ask-user",     # autonomous
-        "--allow-all",       # full permissions
-        "--add-dir", session_dir
+        # JSONL output: one JSON object per line. Lets us parse usage data
+        # and pluck the final assistant.message reliably (vs trying to
+        # parse free-form text). `-s` (silent) is unnecessary in JSON mode.
+        "--output-format", "json",
+        "--no-ask-user",       # autonomous — disable the ask_user tool
+        "--allow-all",         # = --allow-all-tools --allow-all-paths --allow-all-urls
+        "--no-auto-update",    # never download CLI updates mid-run
+        "--add-dir", session_dir,
     ]
     if os.path.isdir(WORKSPACE):
         cmd.extend(["--add-dir", WORKSPACE])
 
     env = os.environ.copy()
+    # Highest-precedence auth env var (per `copilot help environment`).
+    # Setting only COPILOT_GITHUB_TOKEN means a tenant-OAuth value here
+    # always wins over the container's GITHUB_TOKEN (which is the platform
+    # PAT used for git remote ops).
     env["COPILOT_GITHUB_TOKEN"] = token
-    env["HOME"] = session_dir  # Copilot reads ~/.copilot/
+    # `COPILOT_HOME` is the documented way to redirect Copilot's
+    # state/config directory without nuking $HOME for child processes.
+    env["COPILOT_HOME"] = copilot_home
+    # Belt-and-suspenders for CI mode (auto-update is also auto-detected
+    # via $CI/$BUILD_NUMBER/$RUN_ID, but explicit is cheaper than relying
+    # on detection).
+    env.setdefault("CI", "1")
 
     result = _run_cli_with_heartbeat(
         cmd,
@@ -1842,20 +1868,71 @@ def _execute_copilot_chat(task_input: ChatCliInput, session_dir: str) -> ChatCli
         err = (result.stderr or result.stdout or "")[:1000]
         return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
 
-    raw = result.stdout.strip()
+    raw = (result.stdout or "").strip()
     if not raw:
         return ChatCliResult(response_text="", success=False, error="Copilot produced no output")
 
-    # Copilot CLI silent mode returns plain text.
+    # Parse JSONL: collect the LAST `assistant.message` (final response)
+    # and the trailing `result` event (usage stats).
+    response_pieces: list[str] = []
+    usage: dict = {}
+    final_text = ""
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        et = ev.get("type")
+        if et == "assistant.message":
+            content = (ev.get("data") or {}).get("content")
+            if isinstance(content, str) and content:
+                # Keep only the latest non-empty assistant message — this
+                # is the final answer (reasoning + intermediate tool calls
+                # show up via other event types).
+                final_text = content
+        elif et == "assistant.message_delta":
+            # Streaming chunks; in -p mode these usually duplicate the
+            # eventual `assistant.message` but accumulate as a fallback.
+            delta = (ev.get("data") or {}).get("deltaContent") or ""
+            if delta:
+                response_pieces.append(delta)
+        elif et == "result":
+            usage = ev.get("usage") or {}
+            usage["sessionId"] = ev.get("sessionId")
+            usage["exitCode"] = ev.get("exitCode", 0)
+
+    response_text = final_text or "".join(response_pieces) or raw
+
+    # Premium requests is Copilot's billing unit; surface it for RL/cost
+    # tracking. Other callers can still treat the result as plain text.
+    metadata: dict = {"platform": "copilot_cli"}
+    if usage:
+        metadata["premium_requests"] = usage.get("premiumRequests")
+        metadata["api_duration_ms"] = usage.get("totalApiDurationMs")
+        metadata["session_duration_ms"] = usage.get("sessionDurationMs")
+        metadata["session_id"] = usage.get("sessionId")
+        metadata["code_changes"] = usage.get("codeChanges")
+
     return ChatCliResult(
-        response_text=raw,
+        response_text=response_text,
         success=True,
-        metadata={"platform": "copilot_cli"}
+        metadata=metadata,
     )
 
 
 def _prepare_copilot_home(session_dir: str, mcp_config_json: str) -> str:
-    """Prepare ~/.copilot/mcp-config.json for Copilot CLI."""
+    """Prepare a Copilot config dir (writes mcp-config.json) and return its path.
+
+    The returned path is meant to be exported as ``COPILOT_HOME`` so the
+    CLI reads its configuration from this isolated per-session directory
+    instead of the user's real $HOME/.copilot. Per the official docs:
+
+      COPILOT_HOME: override the directory where configuration and state
+                    files are stored; defaults to $HOME/.copilot.
+    """
     copilot_dir = os.path.join(session_dir, ".copilot")
     os.makedirs(copilot_dir, exist_ok=True)
 
@@ -1870,7 +1947,7 @@ def _prepare_copilot_home(session_dir: str, mcp_config_json: str) -> str:
     with open(os.path.join(copilot_dir, "mcp-config.json"), "w") as f:
         json.dump(config, f, indent=2)
 
-    return session_dir
+    return copilot_dir
 
 
 def _prepare_gemini_home_apikey(session_dir: str, mcp_config_json: str) -> str:
