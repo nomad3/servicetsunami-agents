@@ -122,6 +122,7 @@ services:
       - embedding-service
       - memory-core
     environment:
+      - API_BASE_URL=http://api:8000
       - MCP_SERVER_URL=http://mcp-tools:8086
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - HF_HUB_ENABLE_HF_TRANSFER=0

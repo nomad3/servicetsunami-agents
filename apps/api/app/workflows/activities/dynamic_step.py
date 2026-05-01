@@ -333,7 +333,11 @@ async def _call_internal_api(step: dict, context: dict, tenant_id: str) -> dict:
 
     activity.heartbeat(f"Calling internal API: {path}")
 
-    api_base = os.environ.get("API_BASE_URL", "http://localhost:8000")
+    # Default `http://api:8000` (Docker compose service name) — was previously
+    # `localhost:8000` which is wrong from any non-api container. The
+    # orchestration-worker hits this code path and has no HTTP server on
+    # localhost. See module-level API_BASE_URL above for the same default.
+    api_base = os.environ.get("API_BASE_URL", "http://api:8000")
     api_key = os.environ.get("API_INTERNAL_KEY", "")
 
     kwargs = {
