@@ -664,7 +664,17 @@ class KnowledgeExtractionService:
         created_count = 0
         for rel in relations_data:
             if not isinstance(rel, dict):
+                logger.debug(
+                    "_persist_relations: skipping non-dict entry (got %s)",
+                    type(rel).__name__,
+                )
                 continue
+            # Intentional falsy-fallback (`or` rather than `.get(k, default)`):
+            # during rollover the LLM may mix keys, e.g. emit
+            # {"from_entity": "", "from": "Alice"} mid-cache. Falsy on the
+            # canonical key falls through to the legacy key and still
+            # ingests. Don't "clean up" to `.get("from_entity", rel.get("from", ""))`
+            # — that breaks rollover.
             from_name = (rel.get("from_entity") or rel.get("from") or "").strip()
             to_name = (rel.get("to_entity") or rel.get("to") or "").strip()
             rel_type = rel.get("relation_type") or rel.get("type") or "related_to"
