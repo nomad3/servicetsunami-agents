@@ -178,13 +178,15 @@ async def _call_mcp_tool(step: dict, context: dict, tenant_id: str, run_id: str)
     from mcp.client.sse import sse_client
     from mcp.client.session import ClientSession
 
+    # Note: don't pass `timeout=` here — MCP SDK 1.27 internally constructs
+    # `httpx.Timeout(timeout, read=sse_read_timeout)` which breaks on httpx
+    # >= 0.28 (the "default + read=" combo trips an internal assertion).
+    # SDK defaults (5s connect, 300s sse-read) are fine for the MCP handshake.
     sse_url = f"{MCP_TOOLS_URL.rstrip('/')}/sse"
-    timeout_s = _http_timeout_for_step(step, default_seconds=60.0)
 
     async with sse_client(
         sse_url,
         headers={"X-Internal-Key": API_INTERNAL_KEY, "X-Tenant-Id": tenant_id},
-        timeout=timeout_s,
     ) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
