@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from typing import Dict
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, require_superuser
 from app.models.user import User
 from app.schemas.tenant_features import TenantFeatures, TenantFeaturesUpdate
 from app.services import features as service
@@ -25,9 +25,15 @@ def get_features(
 def update_features(
     features_in: TenantFeaturesUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_superuser),
 ):
-    """Update current tenant's feature flags (admin only in production)."""
+    """Update current tenant's feature flags.
+
+    Admin-only — these are tenant-global settings (default CLI platform,
+    GitHub primary account, plan limits) that affect every member's
+    experience. Was previously gated by ``get_current_user`` with a
+    docstring claim of "admin only in production"; the gate is now real.
+    """
     # Ensure features exist
     service.get_or_create_features(db, current_user.tenant_id)
     features = service.update_features(db, current_user.tenant_id, features_in)

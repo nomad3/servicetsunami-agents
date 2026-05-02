@@ -1401,17 +1401,66 @@ def _execute_codex_code_task(task_input: CodeTaskInput, prompt: str, session_dir
 
 
 def _fetch_github_token(tenant_id: str) -> Optional[str]:
-    """Fetch GitHub OAuth token from API credential vault."""
+    """Fetch GitHub OAuth token from API credential vault.
+
+    Honors the tenant's ``github_primary_account`` pin (migration 113)
+    so code-worker git push / gh PR creation use the same canonical
+    repo-ops account that the MCP github tools use. Without this,
+    a tenant with multiple github accounts could see code-worker pick
+    a non-repo account (e.g. EMU) and have ``git push`` fail with
+    "Repository not found" even though the MCP tool successfully
+    fetched the same repo via the pinned personal account.
+
+    Resolution:
+      1. Look up the pin via ``/internal/connected-accounts/github``.
+      2. If a pin exists, fetch the token for that specific account_email.
+      3. Otherwise fall back to the legacy ``query.first()`` behavior.
+    """
+    headers = {"X-Internal-Key": API_INTERNAL_KEY or "dev_mcp_key"}
+    primary_account: Optional[str] = None
+    try:
+        accts_resp = httpx.get(
+            f"{API_BASE_URL}/api/v1/oauth/internal/connected-accounts/github",
+            params={"tenant_id": tenant_id},
+            headers=headers,
+            timeout=10,
+        )
+        if accts_resp.status_code == 200:
+            primary_account = (accts_resp.json() or {}).get("primary_account")
+    except Exception as e:
+        # Non-fatal — fall through to legacy fetch.
+        logger.debug("github primary-account lookup failed: %s", e)
+
+    params = {"tenant_id": tenant_id}
+    if primary_account:
+        params["account_email"] = primary_account
+
     try:
         resp = httpx.get(
             f"{API_BASE_URL}/api/v1/oauth/internal/token/github",
-            params={"tenant_id": tenant_id},
-            headers={"X-Internal-Key": API_INTERNAL_KEY or "dev_mcp_key"},
+            params=params,
+            headers=headers,
             timeout=10,
         )
         if resp.status_code == 200:
             data = resp.json()
             return data.get("oauth_token") or data.get("session_token")
+        # If the pinned account no longer has credentials (admin
+        # disconnected after pinning), fall back to the unpinned fetch.
+        if primary_account and resp.status_code == 404:
+            logger.warning(
+                "github primary_account=%s has no token; falling back to first connected",
+                primary_account,
+            )
+            resp = httpx.get(
+                f"{API_BASE_URL}/api/v1/oauth/internal/token/github",
+                params={"tenant_id": tenant_id},
+                headers=headers,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("oauth_token") or data.get("session_token")
     except Exception as e:
         logger.warning("Failed to fetch github token: %s", e)
     return None

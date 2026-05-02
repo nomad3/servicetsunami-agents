@@ -846,7 +846,29 @@ def get_connected_accounts(
             "enabled": c.enabled,
         })
 
-    return {"accounts": accounts, "count": len(accounts)}
+    # Per-integration tenant-level preferences. Today: only github has
+    # a `primary_account` pin (see migration 113) so the MCP tools know
+    # which account to use as the default for repo operations when the
+    # caller doesn't pass an explicit account_email.
+    primary_account: Optional[str] = None
+    if integration_name == "github":
+        try:
+            from app.models.tenant_features import TenantFeatures
+            features = (
+                db.query(TenantFeatures)
+                .filter(TenantFeatures.tenant_id == tid)
+                .first()
+            )
+            if features:
+                primary_account = getattr(features, "github_primary_account", None)
+        except Exception as e:
+            logger.warning("github primary-account lookup failed for tenant=%s: %s", str(tid)[:8], e)
+
+    return {
+        "accounts": accounts,
+        "count": len(accounts),
+        "primary_account": primary_account,
+    }
 
 
 @router.get("/internal/token/{integration_name}")

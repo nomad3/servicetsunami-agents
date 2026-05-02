@@ -60,6 +60,15 @@ class TenantFeatures(Base):
     cli_orchestrator_enabled = Column(Boolean, default=False)
     default_cli_platform = Column(String(50), default="claude_code")
 
+    # GitHub primary account for repo operations.
+    # Pins which connected GitHub account the MCP github tools use as
+    # default when the caller doesn't pass an explicit account_email.
+    # Useful when a tenant has multiple GitHub accounts wired but only
+    # one is intended for repo access (e.g. employer EMU accounts that
+    # only have Copilot CLI license, no repo visibility under enterprise
+    # policy). Null = fall back to the multi-account fan-out behavior.
+    github_primary_account = Column(String(255), nullable=True)
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

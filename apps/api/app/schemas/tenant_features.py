@@ -30,6 +30,8 @@ class TenantFeaturesBase(BaseModel):
     # CLI Orchestrator
     cli_orchestrator_enabled: Optional[bool] = False
     default_cli_platform: Optional[str] = "claude_code"
+    # Pinned GitHub account for MCP repo operations (null = autodetect across all)
+    github_primary_account: Optional[str] = None
     # Reinforcement Learning
     rl_enabled: bool = False
     rl_settings: Optional[Dict[str, Any]] = None
@@ -58,6 +60,7 @@ class TenantFeaturesUpdate(BaseModel):
     active_llm_provider: Optional[str] = None
     cli_orchestrator_enabled: Optional[bool] = None
     default_cli_platform: Optional[str] = None
+    github_primary_account: Optional[str] = None
     rl_enabled: Optional[bool] = None
     rl_settings: Optional[Dict[str, Any]] = None
 
