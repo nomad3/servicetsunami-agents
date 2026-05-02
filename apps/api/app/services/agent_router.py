@@ -393,9 +393,19 @@ def route_and_execute(
         safe_rollback(db)
         features = None
 
-    # Default platform is gemini_cli
-    platform = "gemini_cli"
-    if features and hasattr(features, 'default_cli_platform') and features.default_cli_platform:
+    # Initial platform — let the resolver autodetect when no explicit
+    # default_cli_platform is set. Was previously hardcoded to
+    # ``"gemini_cli"`` as a floor; the resolver chain (PR #245) now
+    # picks the right CLI based on which integrations the tenant has
+    # actually wired, with `opencode` as the universal local fallback.
+    # Holding `platform=None` here lets `_resolve_cli_chain` build a
+    # purely autodetect-driven chain instead of artificially leading
+    # with gemini_cli on every request — which used to cause a wasted
+    # gemini attempt + chain skip on tenants who connected GitHub
+    # Copilot but never set a default. (See smoke #3 in the PR #245
+    # post-merge verification.)
+    platform: Optional[str] = None
+    if features and getattr(features, "default_cli_platform", None):
         platform = features.default_cli_platform
 
     # Per-agent CLI override. Imported agents from Microsoft Copilot Studio
@@ -447,7 +457,20 @@ def route_and_execute(
     # copilot_cli), always route through it — don't fall back to local Gemma 4
     # for short messages. Local inference is for free-tier tenants with no
     # subscription.
-    _pin_to_cli = platform in {"gemini_cli", "claude_code", "codex", "copilot_cli"}
+    #
+    # With the gemini_cli floor removed (PR #245+ autodetect), `platform`
+    # may be None when no explicit default is set. Resolve the chain
+    # via the resolver (cheap — same call we'd make below for dispatch)
+    # and pin-to-cli when the chain leads with anything other than the
+    # local opencode floor.
+    if platform in {"gemini_cli", "claude_code", "codex", "copilot_cli"}:
+        _pin_to_cli = True
+    else:
+        try:
+            _probe_chain = _resolve_cli_chain(db, tenant_id, explicit_platform=platform)
+            _pin_to_cli = bool(_probe_chain) and _probe_chain[0] != "opencode"
+        except Exception:
+            _pin_to_cli = False
 
     # 2. Get trust profile
     try:

@@ -41,6 +41,7 @@ import skillService from '../services/skillService';
 import { notificationService } from '../services/notifications';
 
 import DefaultCliSelector from './DefaultCliSelector';
+import GithubPrimaryAccountSelector from './GithubPrimaryAccountSelector';
 import WhatsAppChannelCard from './WhatsAppChannelCard';
 
 // Map icon name strings from the registry to actual React icon components
@@ -1537,6 +1538,17 @@ const IntegrationsPanel = () => {
           autodetect handles routing without a choice to make).
         */}
         <DefaultCliSelector
+          configs={configs}
+          credentialStatuses={credentialStatuses}
+        />
+
+        {/*
+          GitHub primary account selector — only renders when ≥2
+          GitHub accounts are connected. Pins which account is used
+          by default for MCP repo operations (list_repos, get_repo,
+          read_file, etc). Leave on Auto for fan-out behavior.
+        */}
+        <GithubPrimaryAccountSelector
           configs={configs}
           credentialStatuses={credentialStatuses}
         />
