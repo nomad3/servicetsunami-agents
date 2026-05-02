@@ -189,9 +189,19 @@ _AUTH_PATTERNS = re.compile(
 # stretch a 1-second config issue (revoked OAuth) into 10 minutes of
 # degraded replies. So we classify them as ``"missing_credential"``,
 # which fires a chain skip without setting cooldown.
+#
+# The regex is deliberately defensive — code-worker historically
+# returned both long form ("X subscription is not connected. Please
+# connect ...") AND short form ("X not connected"). The 2026-05-02
+# holistic review caught that the short form silently bypassed
+# classification and broke chain fallback. The two alternations below
+# cover both forms; the first three terms catch the long form, the
+# trailing ``\bnot connected\b`` catches the short form anchored on a
+# word boundary so we don't false-positive on user prompts.
 _MISSING_CRED_PATTERNS = re.compile(
     r"(subscription is not connected|not connected\.?\s*integration|"
-    r"not connected\..*Please connect|is not connected\..*subscription)",
+    r"not connected\..*Please connect|is not connected\..*subscription|"
+    r"(?:Claude Code|Codex|Gemini CLI|GitHub|Copilot CLI|GitHub Copilot CLI) not connected\b)",
     re.IGNORECASE,
 )
 

@@ -148,11 +148,19 @@ def seed_shared_cli_credentials_for_tenant(
 def create_user_with_tenant(db: Session, *, user_in: UserCreate, tenant_in: TenantCreate) -> User:
     tenant = tenant_service.create_tenant(db, tenant_in=tenant_in)
 
-    # Create tenant features with CLI orchestrator enabled by default
+    # Create tenant features with CLI orchestrator enabled by default.
+    #
+    # ``default_cli_platform`` is left as None so the resolver-driven
+    # autodetect in ``cli_platform_resolver`` is the source of truth on
+    # day 1 — it picks whichever CLI subscription the tenant connects
+    # first. Was previously hardcoded to "gemini_cli" which contradicted
+    # PR #252's goal of removing the gemini floor and confused tenants
+    # who connected Copilot first then wondered why their `/features`
+    # response said gemini was the default.
     features = TenantFeatures(
         tenant_id=tenant.id,
         cli_orchestrator_enabled=True,
-        default_cli_platform="gemini_cli",
+        default_cli_platform=None,
         rl_enabled=True,
     )
     db.add(features)

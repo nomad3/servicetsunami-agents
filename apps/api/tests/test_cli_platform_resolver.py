@@ -58,6 +58,43 @@ def test_classify_missing_credential_does_not_match_auth():
         assert r.classify_error(s) == "missing_credential", s
 
 
+def test_classify_short_form_not_connected():
+    """Code-worker historically returned both long form ("X subscription
+    is not connected. Please connect ...") AND short form ("X not
+    connected"). The 2026-05-02 holistic review caught that the short
+    form silently bypassed missing_credential classification, breaking
+    chain fallback for tenants with a partially-wired CLI.
+
+    PR-A standardized code-worker on the long form via
+    ``_INTEGRATION_NOT_CONNECTED_MESSAGES``, but the regex was widened
+    defensively to match the short form too — so this test pins both.
+    """
+    for s in [
+        "Claude Code not connected",
+        "Codex not connected",
+        "Gemini CLI not connected",
+        "GitHub not connected",
+        "Copilot CLI not connected",
+        "GitHub Copilot CLI not connected",
+    ]:
+        assert r.classify_error(s) == "missing_credential", s
+
+
+def test_classify_does_not_falsely_match_user_phrases_about_not_connected():
+    """The short-form regex anchors on a CLI-name word boundary, so
+    a user message that happens to contain "not connected" doesn't
+    classify as missing_credential. Keeps the false-positive rate
+    near zero — a chat about "the database is not connected" or "my
+    monitor is not connected" must NOT trigger chain skip."""
+    for s in [
+        "the database is not connected",
+        "my monitor is not connected",
+        "I am not connected to the VPN",
+        "wifi was not connected when I tried",
+    ]:
+        assert r.classify_error(s) is None, s
+
+
 def test_classify_returns_none_for_user_errors():
     """Don't burn another CLI's quota on a bug in the prompt or a tool
     misuse. The resolver must NOT classify these as retryable."""

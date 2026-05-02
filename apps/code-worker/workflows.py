@@ -1095,7 +1095,18 @@ def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
 def _execute_claude_chat(task_input: ChatCliInput, session_dir: str) -> ChatCliResult:
     token = _fetch_claude_token(task_input.tenant_id)
     if not token:
-        return ChatCliResult(response_text="", success=False, error="Claude Code not connected")
+        # Canonical not-connected message — must match
+        # `cli_platform_resolver._MISSING_CRED_PATTERNS` so the
+        # resolver chain classifies this as `missing_credential`
+        # (skip without cooldown). The short form "Claude Code not
+        # connected" did NOT match the regex (only the long
+        # "subscription is not connected" did) — that broke chain
+        # fallback for tenants who hit a credential-missing CLI.
+        return ChatCliResult(
+            response_text="",
+            success=False,
+            error=_INTEGRATION_NOT_CONNECTED_MESSAGES["claude_code"],
+        )
 
     if task_input.instruction_md_content:
         with open(os.path.join(session_dir, "CLAUDE.md"), "w") as f:
@@ -1191,7 +1202,11 @@ def _execute_codex_chat(task_input: ChatCliInput, session_dir: str, image_path: 
 
     raw_auth = creds.get("auth_json") or creds.get("session_token")
     if not raw_auth:
-        return ChatCliResult(response_text="", success=False, error="Codex not connected")
+        return ChatCliResult(
+            response_text="",
+            success=False,
+            error=_INTEGRATION_NOT_CONNECTED_MESSAGES["codex"],
+        )
 
     try:
         auth_payload = raw_auth if isinstance(raw_auth, dict) else json.loads(raw_auth)
@@ -1272,7 +1287,7 @@ def _execute_codex_code_task(task_input: CodeTaskInput, prompt: str, session_dir
 
     raw_auth = creds.get("auth_json") or creds.get("session_token")
     if not raw_auth:
-        raise RuntimeError("Codex not connected")
+        raise RuntimeError(_INTEGRATION_NOT_CONNECTED_MESSAGES["codex"])
 
     try:
         auth_payload = raw_auth if isinstance(raw_auth, dict) else json.loads(raw_auth)
@@ -1517,7 +1532,11 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
 
         if not oauth_creds_blob and not oauth_token:
             logger.error("No oauth_creds, oauth_token or session_token found in creds: %s", list(creds.keys()))
-            return ChatCliResult(response_text="", success=False, error="Gemini CLI not connected. Set GEMINI_API_KEY or connect via OAuth.")
+            return ChatCliResult(
+                response_text="",
+                success=False,
+                error=_INTEGRATION_NOT_CONNECTED_MESSAGES["gemini_cli"],
+            )
 
         logger.info("Gemini creds: oauth_creds blob=%s, oauth_token=%s, refresh_token=%s",
                     bool(oauth_creds_blob), bool(oauth_token), bool(refresh_token))
@@ -1771,7 +1790,11 @@ def _execute_copilot_chat(task_input: ChatCliInput, session_dir: str) -> ChatCli
     """
     token = _fetch_github_token(task_input.tenant_id)
     if not token:
-        return ChatCliResult(response_text="", success=False, error="GitHub not connected")
+        return ChatCliResult(
+            response_text="",
+            success=False,
+            error=_INTEGRATION_NOT_CONNECTED_MESSAGES["copilot_cli"],
+        )
 
     mcp_config_json = task_input.mcp_config
     if not mcp_config_json:
