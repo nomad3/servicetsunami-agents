@@ -40,6 +40,7 @@ import integrationConfigService from '../services/integrationConfigService';
 import skillService from '../services/skillService';
 import { notificationService } from '../services/notifications';
 
+import DefaultCliSelector from './DefaultCliSelector';
 import WhatsAppChannelCard from './WhatsAppChannelCard';
 
 // Map icon name strings from the registry to actual React icon components
@@ -1527,6 +1528,16 @@ const IntegrationsPanel = () => {
             {success}
           </Alert>
         )}
+
+        {/*
+          Default CLI selector — only renders when ≥2 CLIs are
+          connected. Single-CLI tenants don't see it (the backend
+          autodetect handles routing without a choice to make).
+        */}
+        <DefaultCliSelector
+          configs={configs}
+          credentialStatuses={credentialStatuses}
+        />
 
         {loading ? (
           <div className="text-center py-4">
