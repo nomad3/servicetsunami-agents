@@ -85,7 +85,7 @@ INTEGRATION_DISPLAY: Dict[str, Dict[str, str]] = {
     "gmail": {"name": "Gmail", "icon": "FaEnvelope"},
     "google_calendar": {"name": "Google Calendar", "icon": "FaCalendar"},
     "google_drive": {"name": "Google Drive", "icon": "FaGoogleDrive"},
-    "github": {"name": "GitHub", "icon": "FaGithub"},
+    "github": {"name": "GitHub Copilot CLI", "icon": "FaGithub"},
     "jira": {"name": "Jira", "icon": "FaTasks"},
     "meta_ads": {"name": "Meta Ads", "icon": "FaFacebook"},
     "google_ads": {"name": "Google Ads", "icon": "FaGoogle"},
@@ -93,14 +93,11 @@ INTEGRATION_DISPLAY: Dict[str, Dict[str, str]] = {
     "slack": {"name": "Slack", "icon": "FaSlack"},
     "whatsapp": {"name": "WhatsApp", "icon": "FaWhatsapp"},
     "notion": {"name": "Notion", "icon": "FaBook"},
-    "linear": {"name": "Linear", "icon": "FaProjectDiagram"},
     "outlook": {"name": "Outlook", "icon": "FaMicrosoft"},
     "linkedin": {"name": "LinkedIn", "icon": "FaLinkedin"},
     "claude_code": {"name": "Claude Code", "icon": "FaTerminal"},
-    "codex": {"name": "Codex", "icon": "FaTerminal"},
+    "codex": {"name": "Codex CLI", "icon": "FaTerminal"},
     "gemini_cli": {"name": "Gemini CLI", "icon": "FaGoogle"},
-    "anthropic_llm": {"name": "Anthropic (Claude)", "icon": "FaRobot"},
-    "gemini_llm": {"name": "Google Gemini", "icon": "FaGoogle"},
 }
 
 

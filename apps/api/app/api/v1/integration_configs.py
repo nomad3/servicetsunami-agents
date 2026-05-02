@@ -51,20 +51,18 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
         "oauth_provider": "microsoft",
     },
     "github": {
-        "display_name": "GitHub",
-        "description": "Manage repositories, issues, pull requests",
-        "icon": "FaGithub",
-        "credentials": [],
-        "auth_type": "oauth",
-        "oauth_provider": "github",
-    },
-    "copilot_cli": {
+        # Single GitHub OAuth covers two use cases for the platform:
+        #   1. Repo / issue / PR management (code-worker, code agents).
+        #   2. GitHub Copilot CLI runtime (chat agents — see
+        #      `cli_platform_resolver.py`'s copilot_cli → github mapping).
+        # Customers think of the card as "Copilot CLI" once connected, so
+        # that's the lead label; description explicitly mentions both.
         "display_name": "GitHub Copilot CLI",
-        "description": "AI coding agent powered by GitHub Copilot subscription",
+        "description": "Run chat agents on the GitHub Copilot subscription, plus manage repos, issues, and pull requests",
         "icon": "FaGithub",
+        "credentials": [],
         "auth_type": "oauth",
         "oauth_provider": "github",
-        "credentials": [],
     },
     "linkedin": {
         "display_name": "LinkedIn",
@@ -107,14 +105,6 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
             {"key": "domain", "label": "Jira Domain", "type": "text", "required": True},
         ],
     },
-    "linear": {
-        "display_name": "Linear",
-        "description": "Manage Linear issues and projects",
-        "icon": "FaProjectDiagram",
-        "credentials": [
-            {"key": "api_key", "label": "API Key", "type": "password", "required": True},
-        ],
-    },
     "claude_code": {
         "display_name": "Claude Code",
         "description": "Connect your Claude Pro/Max subscription for coding agent and AI chat",
@@ -126,7 +116,7 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
         ],
     },
     "codex": {
-        "display_name": "Codex",
+        "display_name": "Codex CLI",
         "description": "Connect your ChatGPT / Codex subscription for AI agent chat",
         "icon": "FaTerminal",
         "auth_type": "device_auth",
@@ -178,30 +168,11 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
              "help": "Found in TikTok Ads Manager > Account Info"},
         ],
     },
-    "anthropic_llm": {
-        "display_name": "Anthropic (Claude)",
-        "description": "Use Claude models for agent chat",
-        "icon": "FaRobot",
-        "credentials": [
-            {"key": "api_key", "label": "API Key", "type": "password", "required": True,
-             "help": "Get your key at console.anthropic.com"},
-            {"key": "model", "label": "Model ID", "type": "text", "required": True,
-             "help": "e.g. claude-sonnet-4-5, claude-haiku-4-5"}
-        ],
-        "auth_type": "manual"
-    },
-    "gemini_llm": {
-        "display_name": "Google Gemini",
-        "description": "Use Gemini models for agent chat (default)",
-        "icon": "FaGoogle",
-        "credentials": [
-            {"key": "api_key", "label": "API Key", "type": "password", "required": True,
-             "help": "Get your key at aistudio.google.com"},
-            {"key": "model", "label": "Model ID", "type": "text", "required": True,
-             "help": "e.g. gemini-2.5-pro, gemini-2.5-flash"}
-        ],
-        "auth_type": "manual"
-    },
+    # NOTE: Direct-API LLM cards (`anthropic_llm`, `gemini_llm`) were
+    # removed. The platform routes chat agents through CLI OAuth
+    # subscriptions only — Claude Code, Gemini CLI, GitHub Copilot CLI,
+    # Codex CLI — not raw API keys. The AI Models tab in the UI handles
+    # any remaining provider-key flows.
 }
 
 

@@ -40,6 +40,7 @@ import integrationConfigService from '../services/integrationConfigService';
 import skillService from '../services/skillService';
 import { notificationService } from '../services/notifications';
 
+import DefaultCliSelector from './DefaultCliSelector';
 import WhatsAppChannelCard from './WhatsAppChannelCard';
 
 // Map icon name strings from the registry to actual React icon components
@@ -67,7 +68,6 @@ const SKILL_COLORS = {
   jira: '#0052CC',
   google_calendar: '#4285F4',
   outlook: '#0078D4',
-  linear: '#5E6AD2',
   linkedin: '#0A66C2',
   claude_code: '#D97706',
   codex: '#111827',
@@ -76,21 +76,24 @@ const SKILL_COLORS = {
 
 // Pinned order for the integration card grid. Anything not listed gets pushed
 // to the end and sorted alphabetically.
+//
+// Layout intent: WhatsApp first (primary tenant channel for Luna), then the
+// CLI cluster grouped together (Gemini, Claude Code, GitHub Copilot CLI,
+// Codex CLI), then productivity / OAuth-suite integrations.
 const INTEGRATION_ORDER = [
+  'whatsapp',
   'gemini_cli',
-  'codex',
   'claude_code',
+  'github',
+  'codex',
   'gmail',
   'google_calendar',
   'google_drive',
   'outlook',
-  'github',
   'linkedin',
-  'whatsapp',
   'slack',
   'notion',
   'jira',
-  'linear',
 ];
 
 const sortIntegrations = (a, b) => {
@@ -1527,6 +1530,16 @@ const IntegrationsPanel = () => {
             {success}
           </Alert>
         )}
+
+        {/*
+          Default CLI selector — only renders when ≥2 CLIs are
+          connected. Single-CLI tenants don't see it (the backend
+          autodetect handles routing without a choice to make).
+        */}
+        <DefaultCliSelector
+          configs={configs}
+          credentialStatuses={credentialStatuses}
+        />
 
         {loading ? (
           <div className="text-center py-4">
