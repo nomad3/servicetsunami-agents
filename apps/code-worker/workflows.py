@@ -1046,125 +1046,40 @@ def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
             with open(image_path, "wb") as f:
                 f.write(b64.b64decode(task_input.image_b64))
 
+        # Per-platform dispatch — single-attempt, no internal cascade.
+        #
+        # The previous implementation of execute_chat_cli had its own
+        # gemini→claude→codex / claude→codex→copilot fallback chain
+        # that duplicated the higher-level resolver chain in
+        # ``agent_router._resolve_cli_chain`` (PR #245). Since
+        # ChatCliWorkflow is only invoked via ``run_agent_session``
+        # which is itself wrapped by the resolver chain loop, the
+        # internal cascade was redundant — both layers tried the same
+        # alternates on quota exhaustion. Yesterday's smoke confirmed:
+        # both layers fired on the same request.
+        #
+        # Now: each branch does ONE attempt and returns. On
+        # credit-exhausted / quota errors, the result's `error` field
+        # contains the platform's specific quota signal, which the
+        # resolver's ``classify_error`` regex (`credit balance`,
+        # `rate limit`, `429`, etc.) catches and walks the chain to
+        # the next CLI. Cleaner code, halves duplicate dispatch on
+        # quota events.
         if task_input.platform == "claude_code":
             logger.info("Using platform: claude_code")
-            claude_result = _execute_claude_chat(task_input, session_dir)
-            if claude_result and claude_result.success:
-                return claude_result
-            if not _is_claude_credit_exhausted(claude_result.error or ""):
-                return claude_result
-
-            # Claude Code exhausted — try Codex
-            logger.warning("Claude Code exhausted, falling back to Codex")
-            codex_result = _execute_codex_chat(task_input, session_dir, image_path)
-            if codex_result and codex_result.success:
-                meta = dict(codex_result.metadata or {})
-                meta["fallback_from"] = "claude_code"
-                codex_result.metadata = meta
-                return codex_result
-            
-            # Codex failed — try Copilot CLI
-            logger.warning("Codex fallback failed, falling back to Copilot CLI")
-            copilot_result = _execute_copilot_chat(task_input, session_dir)
-            if copilot_result and copilot_result.success:
-                meta = dict(copilot_result.metadata or {})
-                meta["fallback_from"] = "codex"
-                copilot_result.metadata = meta
-                return copilot_result
-            
-            return claude_result  # Return original error if all fallbacks fail
+            return _execute_claude_chat(task_input, session_dir)
 
         if task_input.platform == "codex":
             logger.info("Using platform: codex")
-            codex_result = _execute_codex_chat(task_input, session_dir, image_path)
-            if codex_result and codex_result.success:
-                return codex_result
-            if not _is_codex_credit_exhausted(codex_result.error or ""):
-                return codex_result
-
-            # Codex exhausted — try Claude Code
-            logger.warning("Codex exhausted, falling back to Claude Code")
-            claude_result = _execute_claude_chat(task_input, session_dir)
-            if claude_result and claude_result.success:
-                meta = dict(claude_result.metadata or {})
-                meta["fallback_from"] = "codex"
-                claude_result.metadata = meta
-                return claude_result
-            
-            # Claude failed — try Copilot CLI
-            logger.warning("Claude fallback failed, falling back to Copilot CLI")
-            copilot_result = _execute_copilot_chat(task_input, session_dir)
-            if copilot_result and copilot_result.success:
-                meta = dict(copilot_result.metadata or {})
-                meta["fallback_from"] = "claude_code"
-                copilot_result.metadata = meta
-                return copilot_result
-            
-            return codex_result
+            return _execute_codex_chat(task_input, session_dir, image_path)
 
         if task_input.platform == "copilot_cli":
             logger.info("Using platform: copilot_cli")
-            copilot_result = _execute_copilot_chat(task_input, session_dir)
-            if copilot_result and copilot_result.success:
-                return copilot_result
-            if not _is_copilot_credit_exhausted(copilot_result.error or ""):
-                return copilot_result
-
-            # Copilot exhausted — try Claude Code
-            logger.warning("Copilot CLI exhausted, falling back to Claude Code")
-            claude_result = _execute_claude_chat(task_input, session_dir)
-            if claude_result and claude_result.success:
-                meta = dict(claude_result.metadata or {})
-                meta["fallback_from"] = "copilot_cli"
-                claude_result.metadata = meta
-                return claude_result
-            
-            # Claude failed — try Codex
-            logger.warning("Claude fallback failed, falling back to Codex")
-            codex_result = _execute_codex_chat(task_input, session_dir, image_path)
-            if codex_result and codex_result.success:
-                meta = dict(codex_result.metadata or {})
-                meta["fallback_from"] = "claude_code"
-                codex_result.metadata = meta
-                return codex_result
-            
-            return copilot_result
+            return _execute_copilot_chat(task_input, session_dir)
 
         if task_input.platform == "gemini_cli":
             logger.info("Using platform: gemini_cli")
-            gemini_result = _execute_gemini_chat(task_input, session_dir, image_path)
-            if gemini_result and gemini_result.success:
-                return gemini_result
-
-            # Gemini failed — try Claude Code
-            logger.warning("Gemini CLI failed (%s), falling back to Claude Code", gemini_result.error[:200] if gemini_result and gemini_result.error else "unknown")
-            task_input.model = ""
-            claude_result = _execute_claude_chat(task_input, session_dir)
-            if claude_result and claude_result.success:
-                meta = dict(claude_result.metadata or {})
-                meta["fallback_from"] = "gemini_cli"
-                meta["requested_platform"] = "gemini_cli"
-                meta["gemini_error"] = (gemini_result.error or "")[:200] if gemini_result else "NoneType"
-                claude_result.metadata = meta
-                return claude_result
-
-            # Claude also failed — try Codex
-            logger.warning("Claude fallback failed (%s), falling back to Codex", claude_result.error[:200] if claude_result and claude_result.error else "unknown")
-            codex_result = _execute_codex_chat(task_input, session_dir, image_path)
-            if codex_result and codex_result.success:
-                meta = dict(codex_result.metadata or {})
-                meta["fallback_from"] = "claude_code"
-                meta["requested_platform"] = "gemini_cli"
-                meta["gemini_error"] = (gemini_result.error or "")[:200] if gemini_result else "NoneType"
-                meta["claude_error"] = (claude_result.error or "")[:200] if claude_result else "NoneType"
-                codex_result.metadata = meta
-                return codex_result
-
-            return ChatCliResult(
-                response_text="",
-                success=False,
-                error=f"Gemini CLI failed: {gemini_result.error if gemini_result else 'None'}. Claude fallback failed: {claude_result.error if claude_result else 'None'}. Codex fallback failed: {codex_result.error if codex_result else 'None'}",
-            )
+            return _execute_gemini_chat(task_input, session_dir, image_path)
 
         if task_input.platform == "opencode":
             logger.info("Using platform: opencode")
