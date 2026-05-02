@@ -21,7 +21,7 @@ from app.services.tool_groups import TIER_LIMITS, TIER_MODEL_MAP, format_allowed
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_CLI_PLATFORMS = {"claude_code", "codex", "gemini_cli", "opencode"}
+SUPPORTED_CLI_PLATFORMS = {"claude_code", "codex", "gemini_cli", "copilot_cli", "opencode"}
 
 
 # Universal anti-hallucination preamble. Lifted from aremko's "REGLA DE ORO"
