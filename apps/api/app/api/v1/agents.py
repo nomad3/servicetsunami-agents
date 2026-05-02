@@ -391,6 +391,38 @@ def discover_agents(
     return _discover_payload(matches, kind)
 
 
+@router.get("/microsoft/discover")
+async def discover_microsoft_agents(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Enumerate Copilot Studio + Azure AI Foundry agents the tenant owns.
+
+    Closes the loop on PR #243's "paste JSON" import flow — the UI can
+    show a list of discovered agents and let the user one-click import
+    any subset. The returned ``raw`` payload per agent is compatible
+    with ``parse_agent_definition`` so import is a single call.
+
+    Pre-condition: the tenant has authorized the ``microsoft`` OAuth
+    provider (typically via Outlook or Teams). Same access token is
+    reused — no separate consent flow.
+
+    Response shape:
+        {
+          "agents": [
+            {"kind": "copilot_studio", "id": "...", "display_name": "...",
+             "description": "...", "raw": {...}},
+            {"kind": "ai_foundry", ...},
+          ],
+          "count": N,
+          "reason": null | "not_connected" | "no_agents_found" | "partial_failure",
+          "errors": [...] | null
+        }
+    """
+    from app.services.microsoft_agent_discovery import discover
+    return await discover(db, current_user.tenant_id)
+
+
 @router.post("/import", response_model=schemas.agent.Agent, status_code=status.HTTP_201_CREATED)
 def import_agent(
     *,
