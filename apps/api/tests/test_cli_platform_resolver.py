@@ -13,6 +13,8 @@ def _isolate_local_cooldown(monkeypatch):
     """Each test gets a fresh in-process cooldown dict and Redis disabled
     so we exercise the local fallback deterministically."""
     monkeypatch.setattr(r, "_local_cooldown", {})
+    monkeypatch.setattr(r, "_redis_singleton", None)
+    monkeypatch.setattr(r, "_redis_init_failed", False)
     monkeypatch.setattr(r, "_redis_client", lambda: None)
 
 
@@ -37,10 +39,23 @@ def test_classify_auth_phrasings():
         "invalid_grant",
         "token expired",
         "authentication failed",
-        "GitHub Copilot CLI subscription is not connected",
         "403 Forbidden",
     ]:
         assert r.classify_error(s) == "auth", s
+
+
+def test_classify_missing_credential_does_not_match_auth():
+    """The platform's friendly 'subscription is not connected' message
+    must classify as ``missing_credential`` (chain-skip without cooldown),
+    NOT ``auth`` (chain-skip + 10-min cooldown). Cooling on a config
+    issue stretches a 1-second reconnect into 10 min of degraded replies.
+    Regression for the C1 finding in the PR #245 review."""
+    for s in [
+        "GitHub Copilot CLI subscription is not connected and the local model is unavailable.",
+        "Gemini CLI subscription is not connected. Please connect your account in Settings → Integrations.",
+        "GitHub Copilot CLI is not connected. Please connect your account in Settings → Integrations.",
+    ]:
+        assert r.classify_error(s) == "missing_credential", s
 
 
 def test_classify_returns_none_for_user_errors():
