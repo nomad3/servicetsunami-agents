@@ -39,7 +39,7 @@
     "skills": "Skills",
     "learning": "Aprendizaje",
     "integrations": "Integraciones",
-    "organizations": "Organizaciones",
+    "organizations": "Organizaci\u00f3n",
     "settings": "Configuraci\u00f3n",
     "aiOperations": "OPERACIONES IA",
     "data": "DATOS",
@@ -55,7 +55,7 @@
     "skills": "Explorar la biblioteca de skills",
     "learning": "Información y ajustes de RL",
     "integrations": "Conectores, fuentes de datos y datasets",
-    "organizations": "Administra organizaciones y unidades de negocio",
+    "organizations": "Identidad del tenant, miembros, auditoría",
     "settings": "Configuraci\u00f3n de la plataforma"
   },
   "landing": {

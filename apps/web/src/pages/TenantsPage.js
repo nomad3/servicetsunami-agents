@@ -1,244 +1,368 @@
-import { useEffect, useState } from 'react';
-import { Alert, Badge, Card, Col, Row, Spinner } from 'react-bootstrap';
+/*
+ * Organization page — replaces the prior `/tenants` dashboard.
+ *
+ * Tabs:
+ *   - Overview : tenant identity card + usage stats (refined version of
+ *                the prior page).
+ *   - Members  : list of users in the tenant via GET /users (new
+ *                endpoint added with this PR). Displays role, email,
+ *                active state.
+ *   - Audit    : cross-agent audit log via GET /audit/agents. Renders
+ *                only when the current user is a superuser.
+ *
+ * Replaces the prior page which mixed tenant identity with stats and
+ * had no way to see members or audit. The "Organizations" name is also
+ * misleading — a user belongs to ONE tenant — so the title is now
+ * "Organization" (singular) and the sidebar entry follows suit.
+ */
+import { useEffect, useMemo, useState } from 'react';
+import { Alert, Badge, Card, Spinner, Table } from 'react-bootstrap';
 import {
-  FaBox,
   FaBuilding,
   FaCalendarCheck,
+  FaCloudUploadAlt,
   FaCommentDots,
   FaComments,
-  FaCloudUploadAlt,
   FaDatabase,
-  FaProjectDiagram,
-  FaNetworkWired,
+  FaHistory,
   FaLayerGroup,
-  FaUser,
+  FaNetworkWired,
+  FaProjectDiagram,
   FaRobot,
-  FaTools
+  FaUserCircle,
+  FaUserShield,
+  FaUsers,
 } from 'react-icons/fa';
+
 import { useAuth } from '../App';
 import Layout from '../components/Layout';
 import api from '../services/api';
 import './TenantsPage.css';
 
+
+const TABS = [
+  { key: 'overview', icon: FaBuilding, label: 'Overview' },
+  { key: 'members',  icon: FaUsers,    label: 'Members' },
+  { key: 'audit',    icon: FaHistory,  label: 'Audit',   superuserOnly: true },
+];
+
+
 const TenantsPage = () => {
   const { user } = useAuth();
+
+  const [activeTab, setActiveTab] = useState('overview');
+
+  // Overview state
   const [tenant, setTenant] = useState(null);
   const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState(null);
 
+  // Members
+  const [members, setMembers] = useState(null);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState(null);
+
+  // Audit
+  const [auditEntries, setAuditEntries] = useState(null);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState(null);
+
+  const isSuperuser = !!user?.is_superuser;
+
+  // Filter the tab list to what this user can actually see — saves
+  // the "you are not authorized" surprise on the audit tab.
+  const visibleTabs = useMemo(
+    () => TABS.filter((t) => !t.superuserOnly || isSuperuser),
+    [isSuperuser],
+  );
+
+  // ── Overview load ──────────────────────────────────────────────────
   useEffect(() => {
-    const fetchTenantData = async () => {
+    let cancelled = false;
+    (async () => {
       try {
-        setLoading(true);
-
-        // Get current user (includes tenant info)
-        const userResponse = await api.get('/users/me');
-        setTenant(userResponse.data.tenant);
-
-        // Get dashboard stats for tenant metrics
-        const statsResponse = await api.get('/analytics/dashboard');
-        setStats(statsResponse.data);
-
-        setError(null);
+        setOverviewLoading(true);
+        const me = await api.get('/users/me');
+        if (cancelled) return;
+        setTenant(me.data.tenant);
+        try {
+          const s = await api.get('/analytics/dashboard');
+          if (!cancelled) setStats(s.data);
+        } catch {
+          // analytics is non-fatal — overview tab still shows the
+          // tenant card.
+        }
       } catch (err) {
-        setError('Failed to load tenant data. Please try again.');
-        console.error('Error fetching tenant data:', err);
+        if (!cancelled) setOverviewError('Failed to load tenant data.');
       } finally {
-        setLoading(false);
+        if (!cancelled) setOverviewLoading(false);
       }
-    };
-
-    fetchTenantData();
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  if (loading) {
-    return (
-      <Layout>
-        <div className="text-center py-5">
-          <Spinner animation="border" role="status" variant="primary">
-            <span className="visually-hidden">Loading...</span>
-          </Spinner>
-          <p className="mt-3 text-muted">Loading tenant information...</p>
-        </div>
-      </Layout>
-    );
-  }
+  // ── Members load (lazy, on tab switch) ─────────────────────────────
+  useEffect(() => {
+    if (activeTab !== 'members' || members !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setMembersLoading(true);
+        const r = await api.get('/users');
+        if (!cancelled) setMembers(r.data || []);
+      } catch (err) {
+        if (!cancelled) setMembersError('Could not load members.');
+      } finally {
+        if (!cancelled) setMembersLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeTab, members]);
 
-  if (error) {
-    return (
-      <Layout>
-        <Alert variant="danger">{error}</Alert>
-      </Layout>
-    );
-  }
+  // ── Audit load (lazy, on tab switch, superuser only) ───────────────
+  useEffect(() => {
+    if (activeTab !== 'audit' || !isSuperuser || auditEntries !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setAuditLoading(true);
+        const r = await api.get('/audit/agents', { params: { limit: 100 } });
+        if (!cancelled) setAuditEntries(r.data || []);
+      } catch (err) {
+        if (!cancelled) setAuditError('Could not load audit log.');
+      } finally {
+        if (!cancelled) setAuditLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeTab, isSuperuser, auditEntries]);
 
-  const StatItem = ({ icon: Icon, label, value, color = "primary" }) => (
-    <Col xs={6} md={4} lg={2} className="mb-4">
-      <div className="stat-item">
-        <div className={`stat-icon-wrapper bg-${color}-subtle`}>
-          <Icon className={`text-${color}`} size={20} />
-        </div>
-        <div className="stat-content">
-          <div className="stat-value">{value}</div>
-          <div className="stat-label">{label}</div>
-        </div>
+  // ── Render helpers ─────────────────────────────────────────────────
+  const StatItem = ({ icon: Icon, label, value, color = 'primary' }) => (
+    <div className="stat-item-grid">
+      <div className={`stat-icon-wrapper bg-${color}-subtle`}>
+        <Icon className={`text-${color}`} size={20} />
       </div>
-    </Col>
+      <div className="stat-content">
+        <div className="stat-value">{value ?? '—'}</div>
+        <div className="stat-label">{label}</div>
+      </div>
+    </div>
   );
 
   return (
     <Layout>
       <div className="tenants-page">
-        <div className="page-header">
-          <h1 className="page-title">
-            <FaBuilding className="text-primary" />
-            Organizations
-          </h1>
-          <p className="page-subtitle">
-            Manage your organizations, business units, and view usage statistics
-          </p>
+        <header className="ap-page-header">
+          <div>
+            <h1 className="ap-page-title">
+              <FaBuilding className="text-primary me-2" />
+              Organization
+            </h1>
+            <p className="ap-page-subtitle">
+              Tenant identity, members, and audit log.
+            </p>
+          </div>
+        </header>
+
+        <div className="ap-chip-row" role="tablist">
+          {visibleTabs.map(({ key, icon: Icon, label }) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === key}
+              className={`ap-chip-filter ${activeTab === key ? 'active' : ''}`}
+              onClick={() => setActiveTab(key)}
+            >
+              <Icon size={12} /> {label}
+            </button>
+          ))}
         </div>
 
-        {/* Tenant Overview */}
-        <Row className="g-4 mb-4">
-          <Col md={4}>
-            <Card className="tenant-card h-100">
-              <Card.Body className="card-body-custom">
-                <div className="d-flex align-items-center justify-content-between mb-3">
-                  <div className="icon-pill-sm">
-                    <FaBuilding size={20} />
-                  </div>
-                  <Badge bg="primary" className="px-3 py-2">Organization</Badge>
+        <div className="tab-content-inner">
+          {/* ── OVERVIEW ───────────────────────────────────────────── */}
+          {activeTab === 'overview' && (
+            <>
+              {overviewLoading ? (
+                <div className="text-center py-5">
+                  <Spinner animation="border" variant="primary" />
                 </div>
-                <h6 className="text-muted mb-1">Organization Name</h6>
-                <div className="h4 fw-bold mb-2">{tenant?.name || 'My Organization'}</div>
-                <div className="small text-muted text-truncate">Organization ID: {tenant?.id}</div>
+              ) : overviewError ? (
+                <Alert variant="danger">{overviewError}</Alert>
+              ) : (
+                <>
+                  <div className="org-identity-grid mb-4">
+                    <Card className="tenant-card">
+                      <Card.Body>
+                        <div className="d-flex align-items-center justify-content-between mb-3">
+                          <div className="icon-pill-sm"><FaBuilding size={20} /></div>
+                          <Badge bg="primary">Tenant</Badge>
+                        </div>
+                        <h6 className="text-muted mb-1">Organization Name</h6>
+                        <div className="h4 fw-bold mb-2">{tenant?.name || '—'}</div>
+                        <div className="small text-muted text-truncate">ID: {tenant?.id}</div>
+                      </Card.Body>
+                    </Card>
+
+                    <Card className="tenant-card">
+                      <Card.Body>
+                        <div className="d-flex align-items-center justify-content-between mb-3">
+                          <div className="icon-pill-sm"><FaUserCircle size={20} /></div>
+                          <Badge bg={isSuperuser ? 'warning' : 'success'}>
+                            {isSuperuser ? 'Admin' : 'Member'}
+                          </Badge>
+                        </div>
+                        <h6 className="text-muted mb-1">Logged in as</h6>
+                        <div className="h4 fw-bold mb-2">{user?.full_name || user?.email}</div>
+                        <div className="small text-muted">{user?.email}</div>
+                      </Card.Body>
+                    </Card>
+
+                    <Card className="tenant-card">
+                      <Card.Body>
+                        <div className="d-flex align-items-center justify-content-between mb-3">
+                          <div className="icon-pill-sm"><FaCalendarCheck size={20} /></div>
+                          <Badge bg="success">Active</Badge>
+                        </div>
+                        <h6 className="text-muted mb-1">Account Status</h6>
+                        <div className="h4 fw-bold text-success mb-2">Operational</div>
+                        <div className="small text-success">All systems nominal</div>
+                      </Card.Body>
+                    </Card>
+                  </div>
+
+                  {stats && (
+                    <Card className="tenant-card mb-4">
+                      <div className="card-header-transparent">
+                        <h5 className="mb-0">Platform usage</h5>
+                      </div>
+                      <Card.Body>
+                        <div className="stat-grid">
+                          <StatItem icon={FaRobot}            label="Agents"       value={stats.overview?.total_agents}        color="primary" />
+                          <StatItem icon={FaCloudUploadAlt}   label="Deployments"  value={stats.overview?.total_deployments}   color="success" />
+                          <StatItem icon={FaDatabase}         label="Datasets"     value={stats.overview?.total_datasets}      color="info" />
+                          <StatItem icon={FaLayerGroup}       label="Vector stores" value={stats.overview?.total_vector_stores} color="danger" />
+                          <StatItem icon={FaCommentDots}      label="Chat sessions" value={stats.overview?.total_chat_sessions} color="primary" />
+                          <StatItem icon={FaComments}         label="Messages"     value={stats.activity?.total_messages}      color="info" />
+                          <StatItem icon={FaNetworkWired}     label="Data sources" value={stats.overview?.total_data_sources}  color="success" />
+                          <StatItem icon={FaProjectDiagram}   label="Pipelines"    value={stats.overview?.total_pipelines}     color="warning" />
+                        </div>
+                      </Card.Body>
+                    </Card>
+                  )}
+                </>
+              )}
+            </>
+          )}
+
+          {/* ── MEMBERS ────────────────────────────────────────────── */}
+          {activeTab === 'members' && (
+            <Card className="tenant-card">
+              <Card.Body>
+                <h5 className="mb-3">Members</h5>
+                {membersLoading ? (
+                  <div className="text-center py-4">
+                    <Spinner animation="border" variant="primary" size="sm" />
+                  </div>
+                ) : membersError ? (
+                  <Alert variant="warning">{membersError}</Alert>
+                ) : !members?.length ? (
+                  <Alert variant="info">No members yet.</Alert>
+                ) : (
+                  <Table hover responsive className="mb-0">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {members.map((m) => (
+                        <tr key={m.id}>
+                          <td>{m.full_name || <span className="text-muted">—</span>}</td>
+                          <td>{m.email}</td>
+                          <td>
+                            {m.role === 'admin'
+                              ? <Badge bg="warning"><FaUserShield className="me-1" size={10} />Admin</Badge>
+                              : <Badge bg="secondary">Member</Badge>}
+                          </td>
+                          <td>
+                            {m.is_active
+                              ? <Badge bg="success">Active</Badge>
+                              : <Badge bg="secondary">Inactive</Badge>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                )}
+                <p className="text-muted mt-3 mb-0" style={{ fontSize: '0.85rem' }}>
+                  Inviting and removing members will land in a follow-up — today the API exposes read access only.
+                </p>
               </Card.Body>
             </Card>
-          </Col>
+          )}
 
-          <Col md={4}>
-            <Card className="tenant-card h-100">
-              <Card.Body className="card-body-custom">
-                <div className="d-flex align-items-center justify-content-between mb-3">
-                  <div className="icon-pill-sm">
-                    <FaUser size={20} />
+          {/* ── AUDIT (superuser-only tab) ─────────────────────────── */}
+          {activeTab === 'audit' && isSuperuser && (
+            <Card className="tenant-card">
+              <Card.Body>
+                <h5 className="mb-3">Cross-agent audit log</h5>
+                {auditLoading ? (
+                  <div className="text-center py-4">
+                    <Spinner animation="border" variant="primary" size="sm" />
                   </div>
-                  <Badge bg="success" className="px-3 py-2">Active User</Badge>
-                </div>
-                <h6 className="text-muted mb-1">Logged in as</h6>
-                <div className="h4 fw-bold mb-2">{user?.full_name || 'User'}</div>
-                <div className="small text-muted">{user?.email}</div>
+                ) : auditError ? (
+                  <Alert variant="warning">{auditError}</Alert>
+                ) : !auditEntries?.length ? (
+                  <Alert variant="info">No audit entries yet.</Alert>
+                ) : (
+                  <Table hover responsive size="sm" className="mb-0 audit-table">
+                    <thead>
+                      <tr>
+                        <th>When</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Latency</th>
+                        <th>Tokens</th>
+                        <th>Cost</th>
+                        <th>Input summary</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditEntries.map((row) => (
+                        <tr key={row.id}>
+                          <td className="text-nowrap">{new Date(row.created_at).toLocaleString()}</td>
+                          <td><code>{row.invocation_type}</code></td>
+                          <td>
+                            {row.status === 'success'
+                              ? <Badge bg="success">{row.status}</Badge>
+                              : <Badge bg="danger">{row.status}</Badge>}
+                          </td>
+                          <td className="text-nowrap">{row.latency_ms ? `${row.latency_ms}ms` : '—'}</td>
+                          <td className="text-nowrap">
+                            {(row.input_tokens || 0) + (row.output_tokens || 0) || '—'}
+                          </td>
+                          <td className="text-nowrap">{row.cost_usd ? `$${Number(row.cost_usd).toFixed(4)}` : '—'}</td>
+                          <td className="text-truncate" style={{ maxWidth: 320 }} title={row.input_summary}>
+                            {row.input_summary || <span className="text-muted">—</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                )}
+                <p className="text-muted mt-3 mb-0" style={{ fontSize: '0.85rem' }}>
+                  Showing the latest 100 entries across all agents in this tenant. Admin-only.
+                </p>
               </Card.Body>
             </Card>
-          </Col>
-
-          <Col md={4}>
-            <Card className="tenant-card h-100">
-              <Card.Body className="card-body-custom">
-                <div className="d-flex align-items-center justify-content-between mb-3">
-                  <div className="icon-pill-sm">
-                    <FaCalendarCheck size={20} />
-                  </div>
-                  <Badge bg="info" className="px-3 py-2">Status</Badge>
-                </div>
-                <h6 className="text-muted mb-1">Account Status</h6>
-                <div className="h4 fw-bold text-success mb-2">Active</div>
-                <div className="small text-success">All systems operational</div>
-              </Card.Body>
-            </Card>
-          </Col>
-        </Row>
-
-        {/* Platform Usage Statistics */}
-        {stats && (
-          <Card className="tenant-card mb-4">
-            <div className="card-header-transparent">
-              <h5 className="mb-0">Usage Statistics</h5>
-            </div>
-            <Card.Body className="card-body-custom">
-              <Row className="g-3">
-                <StatItem
-                  icon={FaRobot}
-                  label="Agent Fleet"
-                  value={stats.overview.total_agents}
-                  color="primary"
-                />
-                <StatItem
-                  icon={FaCloudUploadAlt}
-                  label="Deployments"
-                  value={stats.overview.total_deployments}
-                  color="success"
-                />
-                <StatItem
-                  icon={FaDatabase}
-                  label="Datasets"
-                  value={stats.overview.total_datasets}
-                  color="info"
-                />
-                <StatItem
-                  icon={FaLayerGroup}
-                  label="Knowledge Bases"
-                  value={stats.overview.total_vector_stores}
-                  color="danger"
-                />
-                <StatItem
-                  icon={FaCommentDots}
-                  label="AI Commands"
-                  value={stats.overview.total_chat_sessions}
-                  color="primary"
-                />
-                <StatItem
-                  icon={FaComments}
-                  label="Total Commands"
-                  value={stats.activity.total_messages}
-                  color="info"
-                />
-                <StatItem
-                  icon={FaNetworkWired}
-                  label="ERP Connections"
-                  value={stats.overview.total_data_sources}
-                  color="success"
-                />
-                <StatItem
-                  icon={FaProjectDiagram}
-                  label="Pipelines"
-                  value={stats.overview.total_pipelines}
-                  color="warning"
-                />
-                <StatItem
-                  icon={FaTools}
-                  label="Tools"
-                  value={stats.overview.total_tools}
-                  color="secondary"
-                />
-              </Row>
-            </Card.Body>
-          </Card>
-        )}
-
-        {/* Tenant Information */}
-        <Card className="tenant-card">
-          <div className="card-header-transparent">
-            <h5 className="mb-0">Organization Details</h5>
-          </div>
-          <Card.Body className="card-body-custom">
-            <Alert variant="info" className="info-alert mb-4">
-              <strong>Data Isolation:</strong> All your data is completely isolated from other organizations.
-              Your agents, datasets, AI commands, and configurations are private to your organization.
-            </Alert>
-
-            <div>
-              <h6 className="mb-3">What is an Organization?</h6>
-              <p className="text-muted mb-0">
-                An organization represents a company or business unit in your platform. All users
-                within an organization share access to the same AI agent fleet, datasets, and configurations.
-                Data is completely isolated between organizations for security and compliance.
-              </p>
-            </div>
-          </Card.Body>
-        </Card>
+          )}
+        </div>
       </div>
     </Layout>
   );

@@ -123,6 +123,42 @@
   border-top: 1px solid var(--ap-border);
 }
 
+/* Plan & Limits — read-only key/value rows */
+.settings-limits {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ap-space-2);
+}
+
+.settings-limit-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--ap-space-3) var(--ap-space-4);
+  background: var(--ap-code-bg);
+  border-radius: var(--ap-radius-md);
+}
+
+.settings-limit-label {
+  color: var(--ap-text-muted);
+  font-size: var(--ap-fs-sm);
+}
+
+.settings-limit-value {
+  color: var(--ap-text);
+  font-weight: 600;
+  font-size: var(--ap-fs-sm);
+  display: flex;
+  align-items: center;
+}
+
+.ap-card-subtitle {
+  font-size: var(--ap-fs-md);
+  font-weight: 600;
+  color: var(--ap-text);
+  margin-bottom: var(--ap-space-3);
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .security-item {

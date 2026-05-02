@@ -2,41 +2,11 @@
   "title": "Settings",
   "subtitle": "Manage your account and application preferences",
   "profile": {
-    "title": "Profile Settings",
+    "title": "Profile",
     "fullName": "Full Name",
     "fullNamePlaceholder": "John Doe",
     "email": "Email Address",
-    "emailPlaceholder": "john@example.com",
-    "organization": "Organization",
-    "organizationPlaceholder": "My Company Inc.",
     "saveChanges": "Save Changes"
-  },
-  "notifications": {
-    "title": "Notification Preferences",
-    "emailUpdates": "Email notifications for important updates",
-    "dataAlerts": "Alerts when data processing completes",
-    "aiInsights": "Weekly AI insights summary",
-    "systemUpdates": "System maintenance and updates"
-  },
-  "security": {
-    "title": "Security",
-    "password": "Password",
-    "passwordLastChanged": "Last changed 3 months ago",
-    "changePassword": "Change Password",
-    "twoFactor": "Two-Factor Authentication",
-    "twoFactorNotEnabled": "Not Enabled",
-    "twoFactorDescription": "Add an extra layer of security",
-    "enable2FA": "Enable 2FA"
-  },
-  "billing": {
-    "title": "Plan & Billing",
-    "planName": "Professional Plan",
-    "planDescription": "Unlimited users, 100GB storage, Priority support",
-    "active": "Active",
-    "nextBilling": "Next billing date:",
-    "amount": "Amount:",
-    "manageSubscription": "Manage Subscription",
-    "viewHistory": "View Billing History"
   },
   "llm": {
     "title": "LLM Providers",

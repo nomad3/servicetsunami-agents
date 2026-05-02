@@ -29,6 +29,7 @@ import SkillsPage from './pages/SkillsPage';
 import WorkflowsPage from './pages/WorkflowsPage';
 import WorkflowBuilder from './components/workflows/WorkflowBuilder';
 import LearningPage from './pages/LearningPage';
+import api from './services/api';
 import authService from './services/auth';
 
 // Create an Auth Context
@@ -51,7 +52,26 @@ const AuthProvider = ({ children }) => {
     navigate('/login');
   };
 
-  const value = { user, login, logout };
+  // Re-fetch the current user from the API and update the cached
+  // localStorage copy. Pages that mutate self-editable fields (like
+  // SettingsPage's full_name save) call this so the in-memory user
+  // object reflects the change without a full page reload.
+  const refreshUser = async () => {
+    try {
+      const resp = await api.get('/users/me');
+      const fresh = resp.data;
+      // Preserve the access_token that login persisted alongside the user.
+      const existing = authService.getCurrentUser() || {};
+      const merged = { ...existing, ...fresh };
+      localStorage.setItem('user', JSON.stringify(merged));
+      setUser(merged);
+      return merged;
+    } catch {
+      return null;
+    }
+  };
+
+  const value = { user, login, logout, refreshUser };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

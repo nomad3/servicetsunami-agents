@@ -145,3 +145,63 @@
 .bg-secondary-subtle {
   background: rgba(148, 163, 184, 0.15);
 }
+
+/* New tab-layout grids */
+.org-identity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.75rem;
+}
+
+.stat-item-grid {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  background: rgba(43, 125, 233, 0.04);
+  border-radius: 10px;
+  border: 1px solid rgba(180, 200, 220, 0.2);
+}
+
+.stat-item-grid .stat-icon-wrapper {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.stat-item-grid .stat-content {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.stat-item-grid .stat-value {
+  font-size: 1.15rem;
+  margin-bottom: 0;
+}
+
+.stat-item-grid .stat-label {
+  font-size: 0.78rem;
+}
+
+/* Audit table — compact rows for many entries */
+.audit-table th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(100, 120, 145, 0.7);
+  border-bottom: 1px solid rgba(180, 200, 220, 0.25);
+}
+
+.audit-table td {
+  font-size: 0.85rem;
+  vertical-align: middle;
+}

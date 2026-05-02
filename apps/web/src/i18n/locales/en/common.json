@@ -39,7 +39,7 @@
     "skills": "Skills",
     "learning": "Learning",
     "integrations": "Integrations",
-    "organizations": "Organizations",
+    "organizations": "Organization",
     "settings": "Settings",
     "aiOperations": "AI OPERATIONS",
     "data": "DATA",
@@ -55,7 +55,7 @@
     "skills": "Browse the file-based skills library",
     "learning": "RL insights & settings",
     "integrations": "Connectors, data sources & datasets",
-    "organizations": "Manage organizations & business units",
+    "organizations": "Tenant identity, members, audit log",
     "settings": "Platform settings"
   },
   "landing": {

@@ -2,41 +2,11 @@
   "title": "Configuración",
   "subtitle": "Administra tu cuenta y preferencias de la aplicación",
   "profile": {
-    "title": "Configuración del Perfil",
+    "title": "Perfil",
     "fullName": "Nombre Completo",
     "fullNamePlaceholder": "Juan Pérez",
     "email": "Correo Electrónico",
-    "emailPlaceholder": "juan@ejemplo.com",
-    "organization": "Organización",
-    "organizationPlaceholder": "Mi Empresa S.A.",
     "saveChanges": "Guardar Cambios"
-  },
-  "notifications": {
-    "title": "Preferencias de Notificaciones",
-    "emailUpdates": "Notificaciones por correo para actualizaciones importantes",
-    "dataAlerts": "Alertas cuando se completa el procesamiento de datos",
-    "aiInsights": "Resumen semanal de insights de IA",
-    "systemUpdates": "Mantenimiento y actualizaciones del sistema"
-  },
-  "security": {
-    "title": "Seguridad",
-    "password": "Contraseña",
-    "passwordLastChanged": "Último cambio hace 3 meses",
-    "changePassword": "Cambiar Contraseña",
-    "twoFactor": "Autenticación de Dos Factores",
-    "twoFactorNotEnabled": "No Habilitada",
-    "twoFactorDescription": "Agrega una capa extra de seguridad",
-    "enable2FA": "Habilitar 2FA"
-  },
-  "billing": {
-    "title": "Plan y Facturación",
-    "planName": "Plan Profesional",
-    "planDescription": "Usuarios ilimitados, 100GB de almacenamiento, Soporte prioritario",
-    "active": "Activo",
-    "nextBilling": "Próxima fecha de facturación:",
-    "amount": "Monto:",
-    "manageSubscription": "Administrar Suscripción",
-    "viewHistory": "Ver Historial de Facturación"
   },
   "llm": {
     "title": "Proveedores de LLM",
