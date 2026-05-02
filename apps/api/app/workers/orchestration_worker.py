@@ -16,6 +16,7 @@ from app.workflows.gap1_journal_synthesis import Gap1JournalSynthesis
 from app.workflows.post_chat_memory import PostChatMemoryWorkflow
 from app.workflows.episode_workflow import EpisodeWorkflow
 from app.workflows.idle_episode_scan import IdleEpisodeScanWorkflow
+from app.workflows.teams_monitor import TeamsMonitorWorkflow
 from app.workflows.backfill_embeddings import BackfillEmbeddingsWorkflow
 from app.workflows.coalition_workflow import CoalitionWorkflow
 from app.workflows.activities.dynamic_step import execute_dynamic_step, finalize_workflow_run
@@ -57,6 +58,7 @@ from app.workflows.activities.inbox_monitor import (
     check_proactive_triggers,
     log_monitor_cycle,
 )
+from app.workflows.activities.teams_monitor import teams_monitor_tick
 from app.workflows.activities.memory_consolidation import (
     find_duplicate_entities,
     auto_merge_duplicates,
@@ -221,6 +223,7 @@ async def run_orchestration_worker():
             BackfillEmbeddingsWorkflow,
             CoalitionWorkflow,
             AgentPerformanceRollupWorkflow,
+            TeamsMonitorWorkflow,
         ],
         activities=[
             dispatch_task,
@@ -247,6 +250,7 @@ async def run_orchestration_worker():
             extract_from_emails,
             check_proactive_triggers,
             log_monitor_cycle,
+            teams_monitor_tick,
             fetch_competitors,
             scrape_competitor_activity,
             fetch_aremko_snapshot,

@@ -218,6 +218,12 @@ async def enable_teams(
     Pre-condition: the tenant has already authorized the `microsoft` OAuth
     provider (via the Outlook integration card or similar). The Graph
     access_token is reused for Teams API calls.
+
+    Side effect: kicks off ``TeamsMonitorWorkflow`` on the orchestration
+    queue so inbound DMs are auto-replied via the chat path. Idempotent —
+    if the workflow is already running for this (tenant, account),
+    Temporal returns the existing run via
+    ``WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY``.
     """
     # Mirror WhatsApp's open-policy normalization — a tenant choosing
     # ``dm_policy="open"`` expects all senders to pass, but the underlying
@@ -234,7 +240,44 @@ async def enable_teams(
     )
     if not result.get("enabled"):
         raise HTTPException(status_code=400, detail=result.get("reason", "enable failed"))
-    return {"status": "enabled", "data": result}
+
+    # Best-effort: start the monitor workflow. A failure here does NOT
+    # roll back the channel-enable — admin can manually trigger the
+    # /teams/poll endpoint, or the workflow will start on the next
+    # enable call. The error is logged and surfaced in the response.
+    monitor_started = False
+    monitor_error = None
+    try:
+        from temporalio.client import Client, WorkflowIDReusePolicy
+        from app.core.config import settings as _settings
+        client = await Client.connect(_settings.TEMPORAL_ADDRESS)
+        wf_id = f"teams-monitor-{current_user.tenant_id}-{request.account_id}"
+        await client.start_workflow(
+            "TeamsMonitorWorkflow",
+            args=[str(current_user.tenant_id), request.account_id],
+            id=wf_id,
+            task_queue="agentprovision-orchestration",
+            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+        )
+        monitor_started = True
+    except Exception as e:
+        # Already-running counts as success — Temporal raises
+        # WorkflowAlreadyStartedError which we treat as idempotent.
+        if "WorkflowAlreadyStarted" in type(e).__name__ or "already started" in str(e).lower():
+            monitor_started = True
+        else:
+            logger.warning(
+                "TeamsMonitorWorkflow start failed for tenant=%s: %s",
+                str(current_user.tenant_id)[:8], e,
+            )
+            monitor_error = str(e)
+
+    return {
+        "status": "enabled",
+        "data": result,
+        "monitor_started": monitor_started,
+        "monitor_error": monitor_error,
+    }
 
 
 @router.post("/teams/disable")
