@@ -1,8 +1,20 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.js'],
+    include: ['src/**/*.{test,spec}.{js,jsx}'],
+    css: false,
+    // Tauri/three.js modules pull in browser-only globals — keep tests honest by
+    // failing fast when a missing import isn't part of the harness.
+    clearMocks: true,
+    restoreMocks: true,
+  },
   plugins: [
     react(),
     VitePWA({

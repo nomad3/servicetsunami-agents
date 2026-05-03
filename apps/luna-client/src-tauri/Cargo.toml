@@ -31,3 +31,6 @@ lazy_static = "1.4"
 # Mobile (iOS + Android)
 [target.'cfg(mobile)'.dependencies]
 tauri-plugin-haptics = "2"
+
+[dev-dependencies]
+pretty_assertions = "1"

@@ -632,3 +632,197 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running Luna");
 }
+
+#[cfg(test)]
+mod tests {
+    //! Pure-logic unit tests for src-tauri/src/lib.rs.
+    //!
+    //! Only covers helpers that don't require a running tauri runtime: the
+    //! `#[tauri::command]` async handlers that touch the AppHandle, system
+    //! webcam, or external `osascript`/`pbpaste` processes are out of scope
+    //! for default `cargo test` runs.
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    // ── platform / arch ─────────────────────────────────────────────────
+    #[test]
+    fn get_platform_returns_non_empty() {
+        let p = get_platform();
+        assert!(!p.is_empty(), "platform string should not be empty");
+        // OS family must be one of the standard Rust constants — guards
+        // against accidental hard-coding.
+        assert!(
+            matches!(p.as_str(), "macos" | "linux" | "windows" | "ios" | "android" | "freebsd" | "netbsd" | "openbsd" | "dragonfly" | "solaris"),
+            "unexpected platform: {p}",
+        );
+    }
+
+    #[test]
+    fn get_arch_returns_non_empty() {
+        let a = get_arch();
+        assert!(!a.is_empty(), "arch string should not be empty");
+    }
+
+    // ── truncate_str ────────────────────────────────────────────────────
+    #[test]
+    fn truncate_str_passes_short_through() {
+        assert_eq!(truncate_str("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_str_clips_long_to_max() {
+        assert_eq!(truncate_str("abcdefghij", 4), "abcd");
+    }
+
+    #[test]
+    fn truncate_str_handles_exact_length() {
+        assert_eq!(truncate_str("abc", 3), "abc");
+    }
+
+    // ── base64_encode ───────────────────────────────────────────────────
+    #[test]
+    fn base64_encode_empty_input() {
+        assert_eq!(base64_encode(&[]), "");
+    }
+
+    #[test]
+    fn base64_encode_known_vectors() {
+        // RFC 4648 test vectors.
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn base64_encode_binary_bytes() {
+        let bytes: [u8; 3] = [0x00, 0xFF, 0x10];
+        let encoded = base64_encode(&bytes);
+        assert_eq!(encoded.len(), 4);
+        // First two output chars come from 0x00 and the high nibbles of 0xFF.
+        assert!(encoded.starts_with("AP"));
+    }
+
+    // ── extract_project_from_args ───────────────────────────────────────
+    #[test]
+    fn extract_project_from_github_path() {
+        let got = extract_project_from_args("claude /Users/me/Documents/GitHub/agentprovision-agents/apps");
+        assert_eq!(got, "agentprovision-agents");
+    }
+
+    #[test]
+    fn extract_project_from_projects_path() {
+        let got = extract_project_from_args("npm run dev /Users/me/Projects/luna-os");
+        assert_eq!(got, "luna-os");
+    }
+
+    #[test]
+    fn extract_project_returns_empty_for_no_match() {
+        assert_eq!(extract_project_from_args("npm install"), "");
+        assert_eq!(extract_project_from_args(""), "");
+    }
+
+    // ── resolve_app_context ─────────────────────────────────────────────
+    #[test]
+    fn resolve_terminal_with_known_tool() {
+        let got = resolve_app_context("Terminal", "claude --some-flag");
+        assert_eq!(got, "Claude Code (Terminal)");
+    }
+
+    #[test]
+    fn resolve_terminal_with_docker() {
+        let got = resolve_app_context("iTerm2", "docker ps -a");
+        assert_eq!(got, "Docker CLI (iTerm2)");
+    }
+
+    #[test]
+    fn resolve_terminal_with_unknown_tool_returns_app_name() {
+        let got = resolve_app_context("Terminal", "ls -la");
+        assert_eq!(got, "Terminal");
+    }
+
+    #[test]
+    fn resolve_electron_extracts_project_with_em_dash() {
+        // U+2014 em-dash is the canonical separator in VS Code titles.
+        let got = resolve_app_context("Code", "agentprovision-agents \u{2014} CLAUDE.md");
+        assert_eq!(got, "agentprovision-agents");
+    }
+
+    #[test]
+    fn resolve_electron_extracts_project_with_hyphen() {
+        let got = resolve_app_context("Cursor", "luna-os - lib.rs");
+        assert_eq!(got, "luna-os");
+    }
+
+    #[test]
+    fn resolve_chrome_includes_window_short_title() {
+        let got = resolve_app_context("Google Chrome", "Test page - Chromium docs");
+        assert!(got.starts_with("Google Chrome"));
+        assert!(got.contains("Test page"));
+    }
+
+    #[test]
+    fn resolve_unknown_app_returns_app_name() {
+        let got = resolve_app_context("Slack", "general | acme");
+        assert_eq!(got, "Slack");
+    }
+
+    // ── ProjectionResult / project_embeddings logic ─────────────────────
+    //
+    // `project_embeddings` is `async fn` but does no IO — we drive it with
+    // `futures::executor::block_on` would require an extra dep, so use the
+    // tokio-free trick of polling once via `pollster`-style hack: call the
+    // future on a stub executor. The simpler path is to extract the logic
+    // by hand, but that requires touching prod code — instead we reuse the
+    // tauri-async runtime which is already pulled in by tauri itself.
+    //
+    // Tauri exposes `tauri::async_runtime::block_on` for this exact purpose.
+    #[test]
+    fn project_embeddings_empty_input_returns_empty_vec() {
+        let result = tauri::async_runtime::block_on(project_embeddings(vec![], vec![]))
+            .expect("empty input should not error");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn project_embeddings_length_mismatch_errors() {
+        let result = tauri::async_runtime::block_on(project_embeddings(
+            vec![vec![0.1, 0.2, 0.3]],
+            vec!["a".into(), "b".into()],
+        ));
+        match result {
+            Err(msg) => assert!(msg.contains("length mismatch"), "got: {msg}"),
+            Ok(_) => panic!("expected length-mismatch error"),
+        }
+    }
+
+    #[test]
+    fn project_embeddings_scales_first_three_dims() {
+        let result = tauri::async_runtime::block_on(project_embeddings(
+            vec![vec![0.1, 0.2, 0.3, 0.4]],
+            vec!["entity-1".into()],
+        ))
+        .expect("ok");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "entity-1");
+        // Scale factor is *100 in the implementation.
+        assert!((result[0].x - 10.0).abs() < 1e-4);
+        assert!((result[0].y - 20.0).abs() < 1e-4);
+        assert!((result[0].z - 30.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn project_embeddings_handles_short_vectors() {
+        // Vectors with fewer than 3 dims should pad with 0 not panic.
+        let result = tauri::async_runtime::block_on(project_embeddings(
+            vec![vec![0.5]],
+            vec!["x".into()],
+        ))
+        .expect("ok");
+        assert_eq!(result[0].x, 50.0);
+        assert_eq!(result[0].y, 0.0);
+        assert_eq!(result[0].z, 0.0);
+    }
+}

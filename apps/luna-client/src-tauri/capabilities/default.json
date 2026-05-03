@@ -13,7 +13,6 @@
     "shell:default",
     "opener:default",
     "updater:default",
-    "core:webview:allow-get-webview-window",
     "core:event:allow-listen",
     "core:event:allow-emit",
     "core:path:default"
