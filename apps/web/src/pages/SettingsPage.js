@@ -44,6 +44,7 @@ const TABS = [
   { key: 'workspace', icon: FaBuilding,      label: 'Workspace' },
   { key: 'plan',      icon: FaTachometerAlt, label: 'Plan & Limits' },
   { key: 'database',  icon: FaDatabase,      label: 'Database' },
+  { key: 'gestures',  icon: FaPalette,       label: 'Gestures' },
 ];
 
 const CLI_LABELS = {
@@ -397,7 +398,7 @@ const SettingsPage = () => {
             </article>
           )}
 
-          <GesturesSection />
+          {activeTab === 'gestures' && <GesturesSection />}
         </div>
       </div>
     </Layout>
@@ -414,15 +415,14 @@ const LimitRow = ({ label, value }) => (
 
 // Read-only stub — full bindings editor lives in the Luna desktop client.
 const GesturesSection = () => {
-  const [bindings, setBindings] = React.useState(null);
-  const [updatedAt, setUpdatedAt] = React.useState(null);
-  const [error, setError] = React.useState(null);
+  const [bindings, setBindings] = useState(null);
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const [error, setError] = useState(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const { default: api } = await import('../services/api');
         const res = await api.get('/users/me/gesture-bindings');
         if (cancelled) return;
         setBindings(Array.isArray(res.data?.bindings) ? res.data.bindings : []);

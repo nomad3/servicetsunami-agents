@@ -7,17 +7,22 @@ later assigns a reward (1.0 if the binding is still present after 24h, 0.0 if
 the user reverted it).
 
 Both writes are best-effort: failures are logged and swallowed so a transient
-DB blip never breaks the user-facing gesture action.
+DB blip never breaks the user-facing gesture action. Note that
+`memory_activity.log_activity` and `rl_experience_service.log_experience`
+each commit internally — partial success is therefore possible (one row
+written, the other failed). This is intentional given the audit-only nature
+of these endpoints.
 """
 import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api import deps
+from app.core.rate_limit import limiter
 from app.db.safe_ops import safe_rollback
 from app.models.user import User as UserModel
 from app.services import memory_activity, rl_experience_service
@@ -38,7 +43,9 @@ class GestureDispatch(BaseModel):
 
 
 @router.post("/gesture-dispatch", status_code=204)
+@limiter.limit("120/minute")
 def dispatch(
+    request: Request,
     payload: GestureDispatch,
     *,
     db: Session = Depends(deps.get_db),
@@ -85,8 +92,4 @@ def dispatch(
         logger.exception("[gesture-dispatch] rl_experience log failed")
         safe_rollback(db)
 
-    try:
-        db.commit()
-    except Exception:
-        safe_rollback(db)
     return None
