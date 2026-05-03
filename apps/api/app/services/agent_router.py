@@ -258,6 +258,72 @@ def _greeting_template(intent: dict | None, message: str, agent_slug: str) -> st
     return f"Hi! I'm {name}. How can I help?"
 
 
+# Display labels for CLI platforms surfaced in the chat UI's routing
+# footer. Keep these human-readable — the customer reads them directly.
+# Internal platform identifiers stay snake_case in code; this is the
+# mapping to the polished label they see under the assistant message.
+_CLI_DISPLAY_LABELS: Dict[str, str] = {
+    "claude_code": "Claude Code",
+    "copilot_cli": "GitHub Copilot CLI",
+    "codex": "Codex CLI",
+    "gemini_cli": "Gemini CLI",
+    "opencode": "OpenCode (local)",
+    "local_gemma": "Local model",
+    "template": "Template (no LLM)",
+}
+
+# Friendly summaries for fallback reasons surfaced in the chat UI.
+# The internal classification ("quota" / "auth" / "missing_credential" /
+# "exception") becomes a one-line user-facing explanation. Keep the
+# internal classification strings in metadata too for ops dashboards.
+_FALLBACK_REASON_LABELS: Dict[str, str] = {
+    "quota": "rate limit / quota exceeded",
+    "auth": "authentication failed",
+    "missing_credential": "subscription not connected",
+    "exception": "transient error",
+}
+
+
+def _build_routing_summary(
+    *,
+    served_by: Optional[str],
+    requested: Optional[str],
+    chain_length: int,
+    fallback_reason: Optional[str],
+) -> Dict[str, Any]:
+    """Build a CURATED routing summary for the chat UI footer.
+
+    Lands in ``ChatMessage.context.routing_summary`` and is rendered as
+    a one-line note under the assistant message ("Served by GitHub
+    Copilot CLI · 891 tokens · 14s"). Deliberately a small, polished
+    subset — NOT the raw `attempted` chain (that was the PR #245
+    review's concern about exposing internals). Operators get the full
+    chain via structured logs; customers get just enough to build trust.
+
+    Fields:
+      - served_by_platform: snake_case platform id (machine-readable)
+      - served_by: human-readable label ("GitHub Copilot CLI")
+      - requested: original platform pre-fallback (when fallback fired)
+      - fallback_reason: one of "quota" / "auth" / "missing_credential"
+        / "exception" — only present when a fallback fired
+      - fallback_explanation: friendly one-liner for the reason
+      - chain_length: number of CLIs the resolver tried (≥1)
+    """
+    summary: Dict[str, Any] = {
+        "served_by_platform": served_by,
+        "served_by": _CLI_DISPLAY_LABELS.get(served_by or "", served_by or "—"),
+        "chain_length": max(chain_length, 1),
+    }
+    if served_by and requested and served_by != requested:
+        summary["requested_platform"] = requested
+        summary["requested"] = _CLI_DISPLAY_LABELS.get(requested, requested)
+        summary["fallback_reason"] = fallback_reason or "unknown"
+        summary["fallback_explanation"] = _FALLBACK_REASON_LABELS.get(
+            fallback_reason or "", "fell back to the next available CLI",
+        )
+    return summary
+
+
 def _should_use_local_path(intent: dict | None, message: str, pin_to_cli: bool) -> bool:
     if pin_to_cli:
         return False
@@ -541,6 +607,9 @@ def route_and_execute(
             "agent_tier": "template",
             "agent_slug": agent_slug,
             "timings": {"template_match_ms": 0},
+            "routing_summary": _build_routing_summary(
+                served_by="template", requested=None, chain_length=1, fallback_reason=None,
+            ),
         }
 
     # 4. Agent selection
@@ -720,9 +789,12 @@ def route_and_execute(
                 safe_rollback(db)
             
             _local_meta = {
-                "platform": "local_inference", 
+                "platform": "local_inference",
                 "agent_tier": "local",
-                "recalled_entity_names": pre_built_memory_context.get("recalled_entity_names", []) if pre_built_memory_context else []
+                "recalled_entity_names": pre_built_memory_context.get("recalled_entity_names", []) if pre_built_memory_context else [],
+                "routing_summary": _build_routing_summary(
+                    served_by="local_gemma", requested=None, chain_length=1, fallback_reason=None,
+                ),
             }
             return _local_response, _local_meta
 
@@ -794,6 +866,7 @@ def route_and_execute(
     response_text: Optional[str] = None
     metadata: Dict[str, Any] = {}
     last_error: Optional[str] = None
+    last_err_class: Optional[str] = None
     attempted: List[str] = []
 
     try:
@@ -819,26 +892,42 @@ def route_and_execute(
                 # code-worker hiccup must not mass-degrade every tenant's
                 # preferred CLI for 10 min. Next chat turn retries.
                 last_error = f"{attempt_platform}: {exc}"
+                last_err_class = "exception"
                 logger.warning(
                     "CLI attempt raised (no cooldown set) — tenant=%s platform=%s err=%s",
                     str(tenant_id)[:8], attempt_platform, exc,
                 )
                 continue
 
-            # Successful response — done. Log chain telemetry; don't
-            # write it to metadata (avoids client leak via ChatMessage.context).
+            # Successful response — done. Log chain telemetry to ops logs;
+            # also stamp a CURATED routing_summary on metadata (lands in
+            # ChatMessage.context) so the chat UI can show "Served by X"
+            # under the assistant message. The summary deliberately
+            # excludes the raw `attempted` list (that was the PR #245
+            # review's concern about exposing internals); it surfaces
+            # only "served_by" + optional "fallback_from / fallback_reason"
+            # so the user sees what happened to their turn without
+            # bleeding routing strategy details.
             if response_text:
                 if attempt_platform != platform or len(attempted) > 1:
                     logger.info(
                         "CLI chain resolved — tenant=%s requested=%s served_by=%s attempted=%s",
                         str(tenant_id)[:8], platform, attempt_platform, attempted,
                     )
+                metadata = metadata or {}
+                metadata["routing_summary"] = _build_routing_summary(
+                    served_by=attempt_platform,
+                    requested=platform,
+                    chain_length=len(attempted),
+                    fallback_reason=last_err_class if attempt_platform != platform else None,
+                )
                 break
 
             # No response text but no exception — classify the metadata.error.
             err = (metadata or {}).get("error") if isinstance(metadata, dict) else None
             err_class = _classify_cli_error(err)
             last_error = err or "empty response"
+            last_err_class = err_class
             if err_class in {"quota", "auth"}:
                 logger.info(
                     "CLI %s returned %s for tenant=%s — cooldown + chain skip: %r",
