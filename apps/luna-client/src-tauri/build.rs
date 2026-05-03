@@ -4,7 +4,14 @@ fn main() {
     tauri_build::build();
 
     #[cfg(target_os = "macos")]
-    compile_swift_landmarker();
+    {
+        compile_swift_landmarker();
+        // CoreGraphics is required by gesture/cursor.rs (CGMainDisplayID,
+        // CGDisplayPixelsWide/High). It's already linked by the swift dylib's
+        // dependencies, but make it explicit so removing the swift step in
+        // the future doesn't silently break the cursor.
+        println!("cargo:rustc-link-lib=framework=CoreGraphics");
+    }
 }
 
 #[cfg(target_os = "macos")]

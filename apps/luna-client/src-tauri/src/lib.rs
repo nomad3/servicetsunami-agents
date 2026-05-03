@@ -508,16 +508,13 @@ pub fn run() {
                 setup_tray(app)?;
                 setup_global_shortcut(app)?;
 
-                // Hand off the AppHandle to the gesture engine so it can emit
-                // gesture-event / wake-state-changed / engine-status. The
-                // engine is started immediately; users can pause via tray /
-                // Cmd+Shift+G if they don't want gestures right now.
+                // Install the AppHandle so the engine can emit Tauri events,
+                // but DO NOT start the engine automatically. The frontend
+                // calls `gesture_start` after a successful login, so we don't
+                // burn camera + Apple Vision cycles on the login screen.
                 let gesture_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     crate::gesture::install_app_handle(gesture_handle).await;
-                    if let Err(e) = crate::gesture::start_engine().await {
-                        log::warn!("gesture engine failed to start: {}", e);
-                    }
                 });
 
                 // Auto-updater: check on startup + every 30 min

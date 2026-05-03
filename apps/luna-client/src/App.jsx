@@ -252,6 +252,23 @@ function AppContent({ windowLabel }) {
     try { return !localStorage.getItem('gesture_calibrated'); } catch { return false; }
   });
 
+  // Phase 4: gate engine boot on login so we don't burn camera + Apple Vision
+  // cycles on the login screen. Stops engine on logout.
+  useEffect(() => {
+    if (windowLabel === 'spatial_hud') return;
+    let cancelled = false;
+    (async () => {
+      const tauri = await import('@tauri-apps/api/core').catch(() => null);
+      if (!tauri || cancelled) return;
+      if (user) {
+        try { await tauri.invoke('gesture_start'); } catch {}
+      } else {
+        try { await tauri.invoke('gesture_stop'); } catch {}
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user, windowLabel]);
+
   if (windowLabel === 'spatial_hud') {
     return <SpatialHUD />;
   }

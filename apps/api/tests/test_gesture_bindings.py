@@ -254,9 +254,9 @@ def test_dispatch_rejects_unauthenticated():
     assert r.status_code in (401, 403)
 
 
-def test_dispatch_rejects_unbounded_gesture_payload(db_session, auth_headers):
-    # Holistic-review issue #2: gesture used to be `dict` with no cap; now
-    # it's the typed GestureSpec which rejects unknown keys / arbitrary blobs.
+def test_dispatch_rejects_unknown_gesture_keys(db_session, auth_headers):
+    # GestureSpec uses `extra="forbid"` (Phase 4 hardening) — unknown keys
+    # are actively rejected with 422 instead of silently stripped.
     r = client.post(
         "/api/v1/gesture-dispatch",
         json={
@@ -266,10 +266,7 @@ def test_dispatch_rejects_unbounded_gesture_payload(db_session, auth_headers):
         },
         headers=auth_headers,
     )
-    # Pydantic strips unknown keys silently by default; ensure the dispatch
-    # still succeeds with a clean payload (our defense-in-depth is the
-    # GestureSpec model, not the size of the unknown key).
-    assert r.status_code in (204, 422)
+    assert r.status_code == 422
 
 
 def test_dispatch_rejects_invalid_pose(db_session, auth_headers):
@@ -279,6 +276,20 @@ def test_dispatch_rejects_invalid_pose(db_session, auth_headers):
             "binding_id": "b1",
             "gesture": {"pose": "definitely_not_a_pose"},
             "action_kind": "nav_hud",
+        },
+        headers=auth_headers,
+    )
+    assert r.status_code == 422
+
+
+def test_dispatch_rejects_invalid_action_kind(db_session, auth_headers):
+    # action_kind tightened from `str` to ActionKind enum (Phase 4).
+    r = client.post(
+        "/api/v1/gesture-dispatch",
+        json={
+            "binding_id": "b1",
+            "gesture": {"pose": "open_palm"},
+            "action_kind": "definitely_not_an_action",
         },
         headers=auth_headers,
     )

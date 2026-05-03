@@ -38,7 +38,14 @@ export default function GestureBindingRow({ binding, conflict, onEdit, onToggle,
         {binding.enabled ? 'Disable' : 'Enable'}
       </button>
       <button onClick={() => onEdit(binding)} style={btnStyle}>Edit</button>
-      <button onClick={() => onDelete(binding.id)} style={{ ...btnStyle, color: '#f88' }}>
+      <button
+        onClick={() => {
+          if (window.confirm(`Delete binding "${gestureLabel(binding.gesture)} → ${binding.action.kind}"?`)) {
+            onDelete(binding.id);
+          }
+        }}
+        style={{ ...btnStyle, color: '#f88' }}
+      >
         Delete
       </button>
     </div>
