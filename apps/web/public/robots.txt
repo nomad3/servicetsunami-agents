@@ -1,0 +1,16 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /dashboard/
+Disallow: /chat/
+Disallow: /workflows/
+Disallow: /agents/
+Disallow: /memory/
+Disallow: /insights/
+Disallow: /integrations/
+Disallow: /settings
+Disallow: /reset-password
+Disallow: /confirm-reset
+
+Sitemap: https://agentprovision.com/sitemap.xml

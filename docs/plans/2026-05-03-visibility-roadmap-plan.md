@@ -198,6 +198,16 @@ Slice the same data as Tier 2 but by health, not cost.
   chain-exhausted count, last activity, primary CLI, agent + user
   counts. Stalled tenants surface as dimmed rows. 7 backend tests +
   3 frontend tests.
+- 2026-05-03: Mk-1 (#273) — SEO + analytics on landing. JSON-LD
+  Organization + WebSite + SoftwareApplication structured data,
+  canonical link, robots meta, robots.txt, sitemap.xml. Plausible
+  analytics shim gated on REACT_APP_PLAUSIBLE_DOMAIN — no third-
+  party script loads in dev / preview / self-hosted. CTA tracking
+  on hero / nav / footer-CTA. 9 tests pin the analytics gate +
+  no-PII behavior + idempotency + queue stub.
+
+**ROADMAP COMPLETE.** All 5 product tiers + 2 ops + 1 marketing
+shipped on 2026-05-03.
 
 ## Working agreements while this is in flight
 

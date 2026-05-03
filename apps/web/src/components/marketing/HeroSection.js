@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { motion, useScroll, useTransform, useReducedMotion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
+import { track } from '../../services/marketingAnalytics';
 
 const VIDEO_SRC = '/images/hero-transition.mp4';
 const VIDEO_POSTER = '/images/Gemini_Generated_Image_fovh8nfovh8nfovh.png';
@@ -41,10 +42,10 @@ export default function HeroSection() {
         >
           <h1 className="hero-scroll__title">{t('hero.title')}</h1>
           <div className="hero-scroll__ctas">
-            <Link to="/register" style={{ pointerEvents: 'auto' }}>
+            <Link to="/register" style={{ pointerEvents: 'auto' }} onClick={() => track('cta_get_started_click', { location: 'hero' })}>
               <button className="hero-scroll__cta-primary">{t('nav.getStarted')}</button>
             </Link>
-            <Link to="/login" style={{ pointerEvents: 'auto' }}>
+            <Link to="/login" style={{ pointerEvents: 'auto' }} onClick={() => track('cta_sign_in_click', { location: 'hero' })}>
               <button className="hero-scroll__cta-ghost">{t('nav.signIn')}</button>
             </Link>
           </div>

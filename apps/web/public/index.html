@@ -26,6 +26,50 @@
 
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <link rel="canonical" href="https://agentprovision.com/" />
+    <meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large" />
+    <meta name="author" content="AgentProvision" />
+    <meta property="og:site_name" content="AgentProvision" />
+    <meta name="twitter:site" content="@agentprovision" />
+
+    <!-- JSON-LD: Organization + SoftwareApplication. Search engines
+         use these to render rich results (sitelinks, knowledge panel).
+         Keep the shape conservative — extra fields can suppress
+         rendering if they fail validation. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://agentprovision.com/#org",
+          "name": "AgentProvision",
+          "url": "https://agentprovision.com/",
+          "logo": "https://agentprovision.com/logo512.png",
+          "description": "A network of specialized AI agents running your operations."
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://agentprovision.com/#site",
+          "url": "https://agentprovision.com/",
+          "name": "AgentProvision",
+          "publisher": { "@id": "https://agentprovision.com/#org" }
+        },
+        {
+          "@type": "SoftwareApplication",
+          "name": "AgentProvision",
+          "applicationCategory": "BusinessApplication",
+          "operatingSystem": "Web",
+          "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+        }
+      ]
+    }
+    </script>
+
+    <!-- Privacy-respecting analytics. Loads only when build defines
+         REACT_APP_PLAUSIBLE_DOMAIN (default off — dev/preview envs
+         do not ping the analytics server). The init() helper is in
+         src/services/analytics.js. -->
     <title>agentprovision.com — A Network of AI Agents That Runs Your Business</title>
   </head>
   <body>

@@ -1,4 +1,5 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
+import { initMarketingAnalytics } from './services/marketingAnalytics';
 import { Navigate, Route, BrowserRouter as Router, Routes, useNavigate } from 'react-router-dom';
 import { ToastProvider } from './components/common';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -100,6 +101,7 @@ export const useAuth = () => {
 };
 
 function App() {
+  useEffect(() => { initMarketingAnalytics(); }, []);
   return (
     <ThemeProvider>
       <Router>

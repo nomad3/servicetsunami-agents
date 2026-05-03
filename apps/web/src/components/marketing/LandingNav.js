@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { track } from '../../services/marketingAnalytics';
 
 const navLinks = ['platform', 'features', 'integrations', 'pricing'];
 
@@ -43,12 +44,12 @@ export default function LandingNav() {
         </div>
 
         <div className="landing-nav__actions">
-          <button className="landing-nav__signin" onClick={() => navigate('/login')}>
+          <button className="landing-nav__signin" onClick={() => { track('cta_sign_in_click', { location: 'nav' }); navigate('/login'); }}>
             {t('nav.signIn')}
           </button>
           <motion.button
             className="landing-nav__cta"
-            onClick={() => navigate('/register')}
+            onClick={() => { track('cta_get_started_click', { location: 'nav' }); navigate('/register'); }}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.97 }}
             transition={{ type: 'spring', stiffness: 400, damping: 17 }}
