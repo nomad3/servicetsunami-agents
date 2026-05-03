@@ -9,7 +9,7 @@
 
 Make hand gestures the **primary** interaction modality for the Luna Tauri client — replacing mouse/trackpad for the things users do dozens of times a day (navigate, scroll, click, switch agents, recall memory, run workflows). Mirror Apple's trackpad grammar (**finger-count + motion**) for familiarity, then extend with Luna-specific gestures (5-finger grab, two-handed frame, hand-rotation knob, hold-pose modifiers).
 
-Gestures must work **globally**, not only when Luna's WebView is focused. That requires a Rust-native sidecar process owning camera + MediaPipe, communicating with the React UI over Tauri's event channel.
+Gestures must work **globally**, not only when Luna's WebView is focused. That requires a Rust-native engine inside the Tauri main process owning camera + landmark extraction, communicating with the React UI over Tauri's event channel.
 
 The system is **wake-gesture activated** (open palm held 500ms) so always-on camera doesn't burn battery and doesn't fire on every random hand wave during a Zoom call.
 
@@ -259,7 +259,7 @@ Global shortcut additions (extending existing `tauri-plugin-global-shortcut` blo
 
 ## Data model
 
-### `GestureEvent` (sidecar → React)
+### `GestureEvent` (engine → React)
 
 ```ts
 type GestureEvent = {
@@ -458,7 +458,7 @@ For one-shot gestures like 3-finger swipe, pinch-to-zoom, 5-finger grab — thes
 - `recognizer.rs`: end-to-end against scripted landmark sequences.
 
 ### Integration tests (Rust)
-- Sidecar process lifecycle: spawn, send command, receive event, shutdown.
+- Engine task lifecycle: spawn, send command, receive event, shutdown.
 - Camera mock: feed pre-recorded frames, assert event sequence.
 
 ### Frontend tests (Vitest)
