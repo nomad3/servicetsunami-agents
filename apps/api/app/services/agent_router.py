@@ -274,14 +274,40 @@ _CLI_DISPLAY_LABELS: Dict[str, str] = {
 
 # Friendly summaries for fallback reasons surfaced in the chat UI.
 # The internal classification ("quota" / "auth" / "missing_credential" /
-# "exception") becomes a one-line user-facing explanation. Keep the
-# internal classification strings in metadata too for ops dashboards.
+# "exception" / "internal_error") becomes a one-line user-facing
+# explanation. Keep the internal classification strings in metadata too
+# for ops dashboards.
 _FALLBACK_REASON_LABELS: Dict[str, str] = {
     "quota": "rate limit / quota exceeded",
     "auth": "authentication failed",
     "missing_credential": "subscription not connected",
     "exception": "transient error",
+    "internal_error": "internal error",
 }
+
+
+def _classify_exception(exc: BaseException) -> str:
+    """Bucket Python exceptions for the routing footer's fallback reason.
+
+    A CancelledError mid-tick is genuinely transient — retry will help.
+    A Pydantic ValidationError / TypeError / AttributeError is internal
+    and the customer-facing "transient" promise would mislead.
+    Everything else falls back to "exception" (which renders as
+    "transient error" — the conservative default).
+
+    I4 from the PR #256 review.
+    """
+    name = type(exc).__name__
+    # Network / Temporal cancellation — genuinely transient
+    if name in ("CancelledError", "TimeoutError", "ConnectionError",
+                "ConnectionResetError", "ConnectionRefusedError",
+                "ReadTimeout", "ConnectTimeout"):
+        return "exception"
+    # Schema / programming errors — not transient
+    if name in ("ValidationError", "TypeError", "AttributeError",
+                "KeyError", "ValueError", "AssertionError"):
+        return "internal_error"
+    return "exception"
 
 
 def _build_routing_summary(
@@ -290,37 +316,69 @@ def _build_routing_summary(
     requested: Optional[str],
     chain_length: int,
     fallback_reason: Optional[str],
+    error_state: Optional[str] = None,
+    last_attempted: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build a CURATED routing summary for the chat UI footer.
 
     Lands in ``ChatMessage.context.routing_summary`` and is rendered as
     a one-line note under the assistant message ("Served by GitHub
     Copilot CLI · 891 tokens · 14s"). Deliberately a small, polished
-    subset — NOT the raw `attempted` chain (that was the PR #245
-    review's concern about exposing internals). Operators get the full
-    chain via structured logs; customers get just enough to build trust.
+    subset — NOT the raw `attempted` chain (PR #245 review concern).
 
     Fields:
-      - served_by_platform: snake_case platform id (machine-readable)
+      - served_by_platform: snake_case platform id (None when chain
+        exhausted with no successful CLI)
       - served_by: human-readable label ("GitHub Copilot CLI")
       - requested: original platform pre-fallback (when fallback fired)
       - fallback_reason: one of "quota" / "auth" / "missing_credential"
-        / "exception" — only present when a fallback fired
+        / "exception" / "internal_error" — present when fallback fired
+        OR when chain exhausted with errors
       - fallback_explanation: friendly one-liner for the reason
       - chain_length: number of CLIs the resolver tried (≥1)
+      - error_state: "exhausted" when chain ran through all CLIs without
+        a successful response. Frontend renders a "Tried X, Y, Z — all
+        failed" footer for this case (C2 from PR #256 review).
+      - last_attempted_platform / last_attempted: snake_case + label of
+        the LAST CLI tried before exhaustion. Only set when error_state
+        is present.
     """
+    # Case-insensitive comparison so future drift in casing (someone
+    # stores "Copilot_CLI" instead of "copilot_cli") doesn't fire a
+    # spurious fallback. M9 from the review.
+    served_lc = (served_by or "").lower()
+    requested_lc = (requested or "").lower()
     summary: Dict[str, Any] = {
         "served_by_platform": served_by,
-        "served_by": _CLI_DISPLAY_LABELS.get(served_by or "", served_by or "—"),
+        "served_by": _CLI_DISPLAY_LABELS.get(served_lc, served_by or "—"),
         "chain_length": max(chain_length, 1),
     }
-    if served_by and requested and served_by != requested:
+    fallback_fired = bool(served_by) and bool(requested) and served_lc != requested_lc
+    if fallback_fired:
         summary["requested_platform"] = requested
-        summary["requested"] = _CLI_DISPLAY_LABELS.get(requested, requested)
+        summary["requested"] = _CLI_DISPLAY_LABELS.get(requested_lc, requested)
         summary["fallback_reason"] = fallback_reason or "unknown"
         summary["fallback_explanation"] = _FALLBACK_REASON_LABELS.get(
             fallback_reason or "", "fell back to the next available CLI",
         )
+    # Chain-exhausted error state (C2). When `served_by` is None, no CLI
+    # answered — frontend should render a "Tried X — all failed" line
+    # instead of silently dropping the footer entirely.
+    if error_state:
+        summary["error_state"] = error_state
+        if requested:
+            summary["requested_platform"] = requested
+            summary["requested"] = _CLI_DISPLAY_LABELS.get(requested_lc, requested)
+        if last_attempted:
+            summary["last_attempted_platform"] = last_attempted
+            summary["last_attempted"] = _CLI_DISPLAY_LABELS.get(
+                last_attempted.lower(), last_attempted,
+            )
+        if fallback_reason:
+            summary["fallback_reason"] = fallback_reason
+            summary["fallback_explanation"] = _FALLBACK_REASON_LABELS.get(
+                fallback_reason, "internal error",
+            )
     return summary
 
 
@@ -867,6 +925,14 @@ def route_and_execute(
     metadata: Dict[str, Any] = {}
     last_error: Optional[str] = None
     last_err_class: Optional[str] = None
+    # I1: Track the FIRST failure separately so the customer-facing
+    # fallback message attributes the right error to the originally-
+    # requested CLI. Was previously using last_err_class which reports
+    # codex's auth fail when the real story was "claude_code returned
+    # quota → walked through codex → copilot served". The customer sees
+    # "your requested CLI returned X" — that should be the original
+    # CLI's actual error, not whichever was last in the chain.
+    first_err_class: Optional[str] = None
     attempted: List[str] = []
 
     try:
@@ -887,15 +953,19 @@ def route_and_execute(
                     agent_memory_domains=agent_memory_domains,
                 )
             except Exception as exc:
-                # Hard exception (Temporal CancelledError, network blip).
-                # Skip to the next CLI but do NOT cool — a transient
-                # code-worker hiccup must not mass-degrade every tenant's
-                # preferred CLI for 10 min. Next chat turn retries.
+                # Hard exception. Classify finer than just "exception" —
+                # a CancelledError mid-tick is genuinely transient, but
+                # a Pydantic ValidationError or a TypeError is internal
+                # and should NOT promise the customer "retry will help".
+                # I4 from the PR #256 review.
+                err_class_local = _classify_exception(exc)
                 last_error = f"{attempt_platform}: {exc}"
-                last_err_class = "exception"
+                last_err_class = err_class_local
+                if first_err_class is None:
+                    first_err_class = err_class_local
                 logger.warning(
-                    "CLI attempt raised (no cooldown set) — tenant=%s platform=%s err=%s",
-                    str(tenant_id)[:8], attempt_platform, exc,
+                    "CLI attempt raised (no cooldown set) — tenant=%s platform=%s class=%s err=%s",
+                    str(tenant_id)[:8], attempt_platform, err_class_local, exc,
                 )
                 continue
 
@@ -903,23 +973,51 @@ def route_and_execute(
             # also stamp a CURATED routing_summary on metadata (lands in
             # ChatMessage.context) so the chat UI can show "Served by X"
             # under the assistant message. The summary deliberately
-            # excludes the raw `attempted` list (that was the PR #245
-            # review's concern about exposing internals); it surfaces
-            # only "served_by" + optional "fallback_from / fallback_reason"
-            # so the user sees what happened to their turn without
-            # bleeding routing strategy details.
+            # excludes the raw `attempted` list (PR #245 review concern).
+            #
+            # C1 fix: read the ACTUAL served platform from metadata first.
+            # ``cli_session_manager.run_agent_session``'s subscription_missing
+            # branch can substitute local_gemma when the requested CLI lacks
+            # creds — `attempt_platform` is the requested CLI ("claude_code")
+            # while `metadata["platform"]` is what actually served
+            # ("local_gemma"). Without this fix, the footer would say
+            # "Served by Claude Code" when Local Gemma actually answered,
+            # poisoning every downstream analytics metric (cost dashboard,
+            # fleet health, etc).
+            #
+            # I1 fix: pass `first_err_class` so the fallback message
+            # attributes the original CLI's actual failure, not whichever
+            # CLI failed last in the chain.
+            #
+            # I2 fix: when `platform` was None (autodetect, no explicit
+            # default), attribute the chain head as the "requested" so
+            # the fallback footer still renders ("Routed to Copilot
+            # after Claude Code returned X") instead of silently hiding
+            # the chain depth.
             if response_text:
-                if attempt_platform != platform or len(attempted) > 1:
+                served_actual = (metadata or {}).get("platform") or attempt_platform
+                # When chain dispatched and the resolved/served platform
+                # differs from the requested one, that's a fallback. For
+                # autodetect (platform=None), use the head of the chain
+                # as the "requested" stand-in so the customer sees what
+                # the resolver actually attempted first.
+                requested_for_summary = platform or (cli_chain[0] if cli_chain else None)
+                fallback_fired = (
+                    served_actual != requested_for_summary
+                    if requested_for_summary
+                    else False
+                )
+                if fallback_fired or len(attempted) > 1:
                     logger.info(
-                        "CLI chain resolved — tenant=%s requested=%s served_by=%s attempted=%s",
-                        str(tenant_id)[:8], platform, attempt_platform, attempted,
+                        "CLI chain resolved — tenant=%s requested=%s served_actual=%s attempted=%s",
+                        str(tenant_id)[:8], requested_for_summary, served_actual, attempted,
                     )
                 metadata = metadata or {}
                 metadata["routing_summary"] = _build_routing_summary(
-                    served_by=attempt_platform,
-                    requested=platform,
+                    served_by=served_actual,
+                    requested=requested_for_summary,
                     chain_length=len(attempted),
-                    fallback_reason=last_err_class if attempt_platform != platform else None,
+                    fallback_reason=first_err_class if fallback_fired else None,
                 )
                 break
 
@@ -928,6 +1026,8 @@ def route_and_execute(
             err_class = _classify_cli_error(err)
             last_error = err or "empty response"
             last_err_class = err_class
+            if first_err_class is None:
+                first_err_class = err_class
             if err_class in {"quota", "auth"}:
                 logger.info(
                     "CLI %s returned %s for tenant=%s — cooldown + chain skip: %r",
@@ -949,6 +1049,19 @@ def route_and_execute(
         if not response_text:
             metadata = metadata or {}
             metadata.setdefault("error", last_error or "all CLI fallbacks failed")
+            # C2 fix: stamp a routing_summary with `error_state="exhausted"`
+            # so the failure UX has CLI attribution. Without this, an
+            # exhausted chain leaves an error message in chat with no
+            # signal about which CLIs were tried — exactly the moment
+            # the customer most needs the "we tried X then Y" context.
+            metadata["routing_summary"] = _build_routing_summary(
+                served_by=None,
+                requested=platform or (cli_chain[0] if cli_chain else None),
+                chain_length=len(attempted),
+                fallback_reason=first_err_class,
+                error_state="exhausted",
+                last_attempted=attempted[-1] if attempted else None,
+            )
             logger.warning(
                 "CLI chain exhausted — tenant=%s requested=%s attempted=%s last_error=%r",
                 str(tenant_id)[:8], platform, attempted, last_error,

@@ -64,22 +64,20 @@ def _install_probe(monkeypatch, probe: _LoopProbe):
 
 
 def _exec_chain_loop(probe, monkeypatch, *, initial_platform="copilot_cli"):
-    """Replay the chain loop in isolation. We construct just enough of
-    `route_and_execute`'s state to run the loop and observe behavior;
-    we do NOT call the full function (which needs DB, memory recall,
-    presence, RL, etc).
+    """Replay the chain loop in isolation. Mirrors the production
+    `route_and_execute` loop including the routing_summary stamping
+    logic added in PR #256 / its review follow-up.
 
-    The loop's real implementation lives in `route_and_execute`; here
-    we re-implement the same control flow against the probe and assert
-    its branches. If the production loop diverges from this skeleton,
-    the test will fail — which is the point.
+    If the production loop diverges from this skeleton, tests fail —
+    which is the point. Update both in lockstep.
     """
     _install_probe(monkeypatch, probe)
-    # Inline-translate the loop from agent_router for assertion.
     cli_chain = agent_router._resolve_cli_chain(None, uuid.uuid4(), explicit_platform=initial_platform)
     response_text = None
     metadata = {}
     last_error = None
+    last_err_class = None
+    first_err_class = None
     attempted = []
     for attempt_platform in cli_chain:
         attempted.append(attempt_platform)
@@ -93,19 +91,52 @@ def _exec_chain_loop(probe, monkeypatch, *, initial_platform="copilot_cli"):
             )
         except Exception as exc:
             last_error = f"{attempt_platform}: {exc}"
-            # NOTE: matches production — no cooldown on bare exceptions.
+            err_class_local = agent_router._classify_exception(exc)
+            last_err_class = err_class_local
+            if first_err_class is None:
+                first_err_class = err_class_local
             continue
         if response_text:
+            # C1 fix: read actual served platform from metadata first.
+            served_actual = (metadata or {}).get("platform") or attempt_platform
+            requested_for_summary = initial_platform or (cli_chain[0] if cli_chain else None)
+            fallback_fired = (
+                served_actual != requested_for_summary
+                if requested_for_summary
+                else False
+            )
+            metadata = metadata or {}
+            metadata["routing_summary"] = agent_router._build_routing_summary(
+                served_by=served_actual,
+                requested=requested_for_summary,
+                chain_length=len(attempted),
+                fallback_reason=first_err_class if fallback_fired else None,
+            )
             break
         err = (metadata or {}).get("error") if isinstance(metadata, dict) else None
         err_class = resolver.classify_error(err)
         last_error = err
+        last_err_class = err_class
+        if first_err_class is None:
+            first_err_class = err_class
         if err_class in {"quota", "auth"}:
             agent_router._mark_cli_cooldown(uuid.uuid4(), attempt_platform, reason=err_class)
             continue
         if err_class == "missing_credential":
             continue
         break
+    if not response_text:
+        # C2 fix: stamp exhausted routing_summary so the failure UX
+        # has CLI attribution.
+        metadata = metadata or {}
+        metadata["routing_summary"] = agent_router._build_routing_summary(
+            served_by=None,
+            requested=initial_platform or (cli_chain[0] if cli_chain else None),
+            chain_length=len(attempted),
+            fallback_reason=first_err_class,
+            error_state="exhausted",
+            last_attempted=attempted[-1] if attempted else None,
+        )
     return response_text, metadata, attempted, last_error
 
 
@@ -224,3 +255,83 @@ def test_all_paid_clis_quota_falls_to_opencode(monkeypatch):
     assert text == "local gemma reply"
     assert attempted == ["copilot_cli", "claude_code", "opencode"]
     assert sorted(p for p, _ in probe.cooldowns) == ["claude_code", "copilot_cli"]
+
+
+# ── PR #256 review follow-ups ─────────────────────────────────────────
+
+
+def test_routing_summary_uses_actual_served_platform_not_requested(monkeypatch):
+    """C1 from PR #256 review: when ``cli_session_manager`` substitutes
+    a local-Gemma response under ``metadata["platform"]="local_gemma"``
+    (because the requested CLI lacked credentials), the routing_summary
+    must report the ACTUAL server, not the requested one. Otherwise the
+    footer says "Served by Claude Code" when Local Gemma actually
+    answered, poisoning every downstream analytics metric.
+    """
+    probe = _LoopProbe(["claude_code", "opencode"])
+    # Claude attempt "succeeds" with non-empty text but the metadata
+    # says local_gemma served it (the subscription_missing fallback in
+    # cli_session_manager).
+    probe.queue_run("local-gemma served this", {"platform": "local_gemma"})
+    text, meta, attempted, _err = _exec_chain_loop(probe, monkeypatch, initial_platform="claude_code")
+    assert text == "local-gemma served this"
+    rs = meta.get("routing_summary")
+    assert rs is not None
+    assert rs["served_by_platform"] == "local_gemma"
+    assert rs["served_by"] == "Local model"
+
+
+def test_routing_summary_stamps_chain_exhausted_state(monkeypatch):
+    """C2 from PR #256 review: when no CLI in the chain succeeds, the
+    routing_summary should still surface error_state="exhausted" with
+    last_attempted so the customer-facing footer can render
+    "Tried X — chain exhausted" instead of silently dropping."""
+    probe = _LoopProbe(["copilot_cli", "claude_code", "opencode"])
+    probe.queue_run(None, {"error": "rate limit exceeded"})  # quota
+    probe.queue_run(None, {"error": "401 Unauthorized"})      # auth
+    probe.queue_run(None, {"error": "Tool foo crashed"})      # unclassified — surfaces
+    text, meta, attempted, _err = _exec_chain_loop(probe, monkeypatch)
+    assert text is None
+    rs = meta.get("routing_summary")
+    assert rs is not None
+    assert rs["error_state"] == "exhausted"
+    assert rs["last_attempted_platform"] == attempted[-1]
+
+
+def test_routing_summary_attributes_first_failure_not_last_in_chain(monkeypatch):
+    """I1 from PR #256 review: when a 3-deep chain walks claude (quota)
+    → codex (auth) → copilot (success), the customer-facing fallback
+    message should attribute the QUOTA error from the requested CLI,
+    not the AUTH error from the middle-of-chain CLI. Customer hears
+    "your requested CLI returned X" — that should be its actual error.
+    """
+    probe = _LoopProbe(["claude_code", "codex", "copilot_cli"])
+    probe.queue_run(None, {"error": "rate limit exceeded"})  # quota — first
+    probe.queue_run(None, {"error": "401 Unauthorized"})      # auth — middle
+    probe.queue_run("served by copilot", {"platform": "copilot_cli"})
+    text, meta, _attempted, _err = _exec_chain_loop(probe, monkeypatch, initial_platform="claude_code")
+    assert text == "served by copilot"
+    rs = meta["routing_summary"]
+    # The fallback story is told from the customer's POV: "you asked
+    # for Claude, Claude returned QUOTA, we routed to Copilot."
+    assert rs["fallback_reason"] == "quota"
+    assert rs["fallback_explanation"] == "rate limit / quota exceeded"
+
+
+def test_routing_summary_no_leak_invariant_end_to_end(monkeypatch):
+    """I3 from PR #256 review: the metadata returned to the caller (and
+    thence to ChatMessage.context) must NOT contain forbidden keys
+    (`cli_chain_attempted`, `attempted`, `chain`). Unit-level tests
+    pin _build_routing_summary's output, but a future regression
+    elsewhere in the loop could add these keys to metadata directly.
+    Guard at the integration level."""
+    probe = _LoopProbe(["copilot_cli", "claude_code", "opencode"])
+    probe.queue_run(None, {"error": "rate limit exceeded"})
+    probe.queue_run("ok", {"platform": "claude_code"})
+    _text, meta, _attempted, _err = _exec_chain_loop(probe, monkeypatch)
+    forbidden = {"cli_chain_attempted", "attempted", "chain"}
+    # Top-level metadata
+    assert forbidden.isdisjoint(meta.keys())
+    # Inside routing_summary
+    if isinstance(meta.get("routing_summary"), dict):
+        assert forbidden.isdisjoint(meta["routing_summary"].keys())

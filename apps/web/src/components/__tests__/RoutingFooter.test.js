@@ -74,6 +74,89 @@ describe('RoutingFooter', () => {
     expect(screen.queryByText(/[\d.]+s$/)).toBeNull();
   });
 
+  test('does not render raw chain even if backend wrongly sends it', () => {
+    // I3 frontend defense: if a future regression dumps `cli_chain_attempted`
+    // into context (the PR #245 leak the backend tests guard against),
+    // the footer must NOT echo it. Forbidden keys passed in context
+    // should be ignored — we only render fields explicitly read from
+    // routing_summary.
+    const ctx = {
+      tokens_used: 891,
+      cli_chain_attempted: ['claude_code', 'codex', 'copilot_cli'],
+      attempted: ['internal-leak'],
+      chain: 'should-not-render',
+      routing_summary: {
+        served_by: 'GitHub Copilot CLI',
+        served_by_platform: 'copilot_cli',
+        chain_length: 1,
+      },
+    };
+    render(<RoutingFooter context={ctx} />);
+    // Forbidden values from the leak attempt must not appear anywhere
+    expect(screen.queryByText(/claude_code, codex/)).toBeNull();
+    expect(screen.queryByText('internal-leak')).toBeNull();
+    expect(screen.queryByText(/should-not-render/)).toBeNull();
+  });
+
+  test('renders chain-exhausted footer when no CLI served', () => {
+    // C2 frontend rendering: when error_state="exhausted" the footer
+    // should surface the failure with attribution rather than silently
+    // disappear (which is what happened pre-fix and left customers
+    // staring at an unattributed error).
+    const ctx = {
+      routing_summary: {
+        served_by: '—',
+        served_by_platform: null,
+        chain_length: 3,
+        error_state: 'exhausted',
+        last_attempted_platform: 'opencode',
+        last_attempted: 'OpenCode (local)',
+        fallback_reason: 'quota',
+        fallback_explanation: 'rate limit / quota exceeded',
+      },
+    };
+    render(<RoutingFooter context={ctx} />);
+    expect(screen.getByText(/Tried/)).toBeInTheDocument();
+    expect(screen.getByText('OpenCode (local)')).toBeInTheDocument();
+    expect(screen.getByText('chain exhausted')).toBeInTheDocument();
+    expect(screen.getByText(/rate limit \/ quota exceeded/)).toBeInTheDocument();
+  });
+
+  test('uses correct CLI/CLIs grammar in tooltip aria-label', () => {
+    // M2: chain_length=1 → "CLI", chain_length>1 → "CLIs". The
+    // aria-label mirrors the tooltip text, which is the easiest
+    // surface to assert against.
+    const single = {
+      routing_summary: {
+        served_by: 'Claude Code',
+        served_by_platform: 'claude_code',
+        chain_length: 1,
+      },
+    };
+    const { rerender } = render(<RoutingFooter context={single} />);
+    expect(screen.getByRole('group')).toHaveAttribute(
+      'aria-label',
+      expect.stringMatching(/chain_length=1\.$/),
+    );
+
+    const multi = {
+      routing_summary: {
+        served_by: 'Claude Code',
+        served_by_platform: 'claude_code',
+        requested: 'GitHub Copilot CLI',
+        requested_platform: 'copilot_cli',
+        fallback_reason: 'quota',
+        fallback_explanation: 'rate limit / quota exceeded',
+        chain_length: 2,
+      },
+    };
+    rerender(<RoutingFooter context={multi} />);
+    expect(screen.getByRole('group')).toHaveAttribute(
+      'aria-label',
+      expect.stringMatching(/2 CLIs/),
+    );
+  });
+
   test('respects per-message context — different messages render different footers', () => {
     const fallbackCtx = {
       tokens_used: 1000,
