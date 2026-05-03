@@ -27,6 +27,13 @@ tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
 lazy_static = "1.4"
+once_cell = "1"
+ulid = { version = "1", features = ["serde"] }
+tokio = { version = "1", features = ["sync", "time", "rt-multi-thread", "macros"] }
+
+# Gesture engine (desktop only; mobile uses a stub)
+[target.'cfg(target_os = "macos")'.dependencies]
+nokhwa = { version = "0.10", features = ["input-avfoundation"] }
 
 # Mobile (iOS + Android)
 [target.'cfg(mobile)'.dependencies]

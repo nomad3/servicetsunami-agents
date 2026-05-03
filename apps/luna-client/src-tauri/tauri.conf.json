@@ -57,7 +57,11 @@
       "icons/AppIcon.appiconset/Contents.json"
     ],
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Luna uses your camera to recognize hand gestures.",
+        "NSAccessibilityUsageDescription": "Luna uses Accessibility access to move the cursor and click via hand gestures."
+      }
     },
     "iOS": {
       "minimumSystemVersion": "16.0",

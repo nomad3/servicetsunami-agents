@@ -2,6 +2,8 @@ use tauri::Manager;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+mod gesture;
+
 lazy_static::lazy_static! {
     static ref CAPTURE_RUNNING: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 }
@@ -125,42 +127,55 @@ struct SpatialFrame {
 }
 
 #[tauri::command]
-async fn start_spatial_capture(app: tauri::AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        if CAPTURE_RUNNING.load(Ordering::Relaxed) {
-            return Ok(()); // Already running
-        }
-
-        CAPTURE_RUNNING.store(true, Ordering::Relaxed);
-        let running = CAPTURE_RUNNING.clone();
-
-        // Run in a dedicated thread to avoid blocking the main loop
-        std::thread::spawn(move || {
-            log::info!("Native Spatial Capture initialized (60 FPS Target)");
-            while running.load(Ordering::Relaxed) {
-                let timestamp = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs_f64();
-
-                let _ = tauri::Emitter::emit(&app, "spatial-frame", SpatialFrame {
-                    width: 1920,
-                    height: 1080,
-                    timestamp,
-                });
-                std::thread::sleep(std::time::Duration::from_millis(16));
-            }
-            log::info!("Native Spatial Capture stopped");
-        });
-    }
-    
-    #[cfg(not(target_os = "macos"))]
-    {
-        log::warn!("Spatial capture is only supported on macOS");
-    }
-    
+async fn start_spatial_capture(_app: tauri::AppHandle) -> Result<(), String> {
+    // Real `spatial-frame` events are now emitted by the gesture engine
+    // (`gesture::supervisor::run_engine_loop`). This command is kept as a
+    // no-op for FFI compatibility with the existing frontend HUD bootstrap.
+    CAPTURE_RUNNING.store(true, Ordering::Relaxed);
     Ok(())
+}
+
+#[tauri::command]
+async fn stop_spatial_capture() -> Result<(), String> {
+    CAPTURE_RUNNING.store(false, Ordering::Relaxed);
+    Ok(())
+}
+
+// ── Gesture engine commands ─────────────────────────────────────────────────
+
+#[tauri::command]
+async fn gesture_start() -> Result<(), String> {
+    gesture::start_engine().await
+}
+
+#[tauri::command]
+async fn gesture_stop() -> Result<(), String> {
+    gesture::stop_engine().await
+}
+
+#[tauri::command]
+async fn gesture_pause() -> Result<(), String> {
+    gesture::pause_engine().await
+}
+
+#[tauri::command]
+async fn gesture_resume() -> Result<(), String> {
+    gesture::resume_engine().await
+}
+
+#[tauri::command]
+async fn gesture_status() -> Result<gesture::EngineStatus, String> {
+    Ok(gesture::engine_status().await)
+}
+
+#[tauri::command]
+async fn gesture_list_cameras() -> Result<Vec<String>, String> {
+    Ok(gesture::list_cameras().await)
+}
+
+#[tauri::command]
+async fn gesture_set_camera_index(index: usize) -> Result<(), String> {
+    gesture::set_camera_index(index).await
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -394,6 +409,7 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
 
     let palette_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space);
     let hud_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyL);
+    let gesture_killswitch = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyG);
 
     app.global_shortcut().on_shortcut(palette_shortcut, move |app, _shortcut, event| {
         if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
@@ -420,6 +436,20 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
                     let _ = window.set_focus();
                 }
             }
+        }
+    })?;
+
+    // Cmd+Shift+G — gesture engine kill-switch (toggle pause/resume).
+    app.global_shortcut().on_shortcut(gesture_killswitch, move |_app, _shortcut, event| {
+        if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+            tauri::async_runtime::spawn(async move {
+                let status = crate::gesture::engine_status().await;
+                if status.state == "paused" {
+                    let _ = crate::gesture::resume_engine().await;
+                } else {
+                    let _ = crate::gesture::pause_engine().await;
+                }
+            });
         }
     })?;
 
@@ -461,6 +491,18 @@ pub fn run() {
             {
                 setup_tray(app)?;
                 setup_global_shortcut(app)?;
+
+                // Hand off the AppHandle to the gesture engine so it can emit
+                // gesture-event / wake-state-changed / engine-status. The
+                // engine is started immediately; users can pause via tray /
+                // Cmd+Shift+G if they don't want gestures right now.
+                let gesture_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::gesture::install_app_handle(gesture_handle).await;
+                    if let Err(e) = crate::gesture::start_engine().await {
+                        log::warn!("gesture engine failed to start: {}", e);
+                    }
+                });
 
                 // Auto-updater: check on startup + every 30 min
                 let handle = app.handle().clone();
@@ -627,7 +669,15 @@ pub fn run() {
             haptic_feedback,
             toggle_spatial_hud,
             start_spatial_capture,
+            stop_spatial_capture,
             project_embeddings,
+            gesture_start,
+            gesture_stop,
+            gesture_pause,
+            gesture_resume,
+            gesture_status,
+            gesture_list_cameras,
+            gesture_set_camera_index,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Luna");
