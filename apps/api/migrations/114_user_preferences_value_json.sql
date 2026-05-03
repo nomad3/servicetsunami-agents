@@ -6,9 +6,17 @@
 ALTER TABLE user_preferences
   ADD COLUMN IF NOT EXISTS value_json JSONB NULL;
 
-ALTER TABLE user_preferences
-  ADD CONSTRAINT user_preferences_value_json_size_cap
-  CHECK (value_json IS NULL OR octet_length(value_json::text) <= 65536);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'user_preferences_value_json_size_cap'
+  ) THEN
+    ALTER TABLE user_preferences
+      ADD CONSTRAINT user_preferences_value_json_size_cap
+      CHECK (value_json IS NULL OR octet_length(value_json::text) <= 65536);
+  END IF;
+END $$;
 
 ALTER TABLE user_preferences
   ALTER COLUMN value DROP NOT NULL;

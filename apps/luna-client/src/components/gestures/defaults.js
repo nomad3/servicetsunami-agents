@@ -51,8 +51,11 @@ export const DEFAULT_BINDINGS = [
     user_recorded: false,
   },
   {
-    id: 'd-five-tap',
-    gesture: { pose: 'five', motion: { kind: 'tap' } },
+    // Note: classify() collapses "5 fingers extended" geometry to OpenPalm,
+    // so the default memory_record gesture is open_palm + tap (a quick
+    // pinch-and-release while the palm is open).
+    id: 'd-palm-tap',
+    gesture: { pose: 'open_palm', motion: { kind: 'tap' } },
     action: { kind: 'memory_record' },
     scope: 'global',
     enabled: true,

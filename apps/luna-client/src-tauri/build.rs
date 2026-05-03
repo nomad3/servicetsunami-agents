@@ -12,13 +12,11 @@ fn compile_swift_landmarker() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
     let swift_src = format!("{}/swift/HandLandmarker.swift", manifest_dir);
-    let lib_path = format!("{}/libluna_hand_landmarker.a", out_dir);
+    let lib_path = format!("{}/libluna_hand_landmarker.dylib", out_dir);
 
     println!("cargo:rerun-if-changed={}", swift_src);
     println!("cargo:rerun-if-changed=build.rs");
 
-    // Build a static library from the Swift source. -parse-as-library is
-    // required because the file uses @_cdecl rather than top-level statements.
     let target = std::env::var("TARGET").unwrap_or_else(|_| "arm64-apple-macosx11.0".into());
     let swift_target = if target.contains("aarch64") {
         "arm64-apple-macos11"
@@ -26,15 +24,23 @@ fn compile_swift_landmarker() {
         "x86_64-apple-macos11"
     };
 
+    // Emit a *dynamic* library, not a static archive. A dynamic Swift dylib
+    // pulls in its own runtime references (libswiftCore, libswiftFoundation,
+    // libswift_Concurrency, etc.) at load time via @rpath, which is exactly
+    // what we want; a static `.a` would force us to enumerate every Swift
+    // runtime lib explicitly and is brittle across Xcode versions.
     let status = Command::new("swiftc")
         .args([
             "-emit-library",
-            "-static",
             "-o",
             &lib_path,
             "-target",
             swift_target,
             "-parse-as-library",
+            "-Xlinker",
+            "-install_name",
+            "-Xlinker",
+            "@rpath/libluna_hand_landmarker.dylib",
             &swift_src,
         ])
         .status()
@@ -45,24 +51,13 @@ fn compile_swift_landmarker() {
     }
 
     println!("cargo:rustc-link-search=native={}", out_dir);
-    println!("cargo:rustc-link-lib=static=luna_hand_landmarker");
+    println!("cargo:rustc-link-lib=dylib=luna_hand_landmarker");
     println!("cargo:rustc-link-lib=framework=Vision");
     println!("cargo:rustc-link-lib=framework=CoreImage");
     println!("cargo:rustc-link-lib=framework=CoreGraphics");
-    // Required so the Swift static lib can resolve its standard-library symbols
-    // when linked into a Rust crate that doesn't otherwise know about them.
-    println!("cargo:rustc-link-arg=-Xlinker");
-    println!("cargo:rustc-link-arg=-no_warn_duplicate_libraries");
-    let xcode_dev_dir = Command::new("xcode-select")
-        .arg("-p")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "/Applications/Xcode.app/Contents/Developer".to_string());
-    let swift_lib_dir = format!(
-        "{}/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx",
-        xcode_dev_dir
-    );
-    println!("cargo:rustc-link-search=native={}", swift_lib_dir);
+
+    // Add an rpath pointing at the Swift runtime so the dylib resolves at
+    // load time without requiring DYLD_LIBRARY_PATH at run time.
+    println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path/../Frameworks");
 }
