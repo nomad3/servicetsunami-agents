@@ -8,6 +8,7 @@ import { useAuth } from '../App';
 import Layout from '../components/Layout';
 import FeedbackActions from '../components/chat/FeedbackActions';
 import ReportVisualization from '../components/chat/ReportVisualization';
+import RoutingFooter from '../components/RoutingFooter';
 import CollaborationPanel from '../components/CollaborationPanel';
 // LunaAvatar removed
 import { useLunaPresence } from '../context/LunaPresenceContext';
@@ -499,6 +500,10 @@ const ChatPage = () => {
               {t('entitiesExtracted', { count: message.context.entities_extracted })}
             </Badge>
           </div>
+        )}
+
+        {message.role === 'assistant' && (
+          <RoutingFooter context={message.context} />
         )}
 
         {message.context && message.context.summary && (
