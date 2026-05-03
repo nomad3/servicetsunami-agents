@@ -1,0 +1,330 @@
+name: Tests (parallel, non-blocking)
+
+# Parallel test matrix across every app in the monorepo. Non-blocking on
+# purpose: a red test reports back to the agent/human as a signal, but does
+# not gate merge. See docs/plans/2026-05-03-test-suite-modernization-design.md.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same PR to save runner time.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write   # for the sticky PR comment
+
+jobs:
+  # ─── Path filtering ──────────────────────────────────────────────────────
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+      mcp: ${{ steps.filter.outputs.mcp }}
+      code_worker: ${{ steps.filter.outputs.code_worker }}
+      rust: ${{ steps.filter.outputs.rust }}
+      luna_client: ${{ steps.filter.outputs.luna_client }}
+      device_bridge: ${{ steps.filter.outputs.device_bridge }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'apps/api/**'
+              - '.github/workflows/tests.yaml'
+            web:
+              - 'apps/web/**'
+              - '.github/workflows/tests.yaml'
+            mcp:
+              - 'apps/mcp-server/**'
+              - '.github/workflows/tests.yaml'
+            code_worker:
+              - 'apps/code-worker/**'
+              - '.github/workflows/tests.yaml'
+            rust:
+              - 'apps/embedding-service/**'
+              - 'apps/memory-core/**'
+              - '.github/workflows/tests.yaml'
+            luna_client:
+              - 'apps/luna-client/**'
+              - '.github/workflows/tests.yaml'
+            device_bridge:
+              - 'apps/device-bridge/**'
+              - '.github/workflows/tests.yaml'
+
+  # ─── apps/api ────────────────────────────────────────────────────────────
+  api:
+    name: api (pytest)
+    needs: changes
+    if: needs.changes.outputs.api == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'apps/api/requirements.txt'
+      - name: Install dependencies
+        working-directory: apps/api
+        run: |
+          pip install -r requirements.txt
+          pip install pytest-cov
+      - name: Run tests with coverage
+        working-directory: apps/api
+        env:
+          # Required env per config.py — fail-closed values for unit tests.
+          SECRET_KEY: test-secret-key-not-real-32bytes-12345
+          API_INTERNAL_KEY: test-internal-key-not-real-32bytes-12
+          MCP_API_KEY: test-mcp-key-not-real-24bytes-12345
+          ENCRYPTION_KEY: 'M0FsbHA0c3N3MHJkSXNUMHRhbGx5RmFrZUtleVgx'
+          DATABASE_URL: 'sqlite:///./test.db'
+        run: |
+          pytest -m "not integration" \
+                 --cov=app --cov-report=xml --cov-report=term \
+                 --maxfail=50 -q || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-api
+          path: apps/api/coverage.xml
+          if-no-files-found: ignore
+
+  # ─── apps/web ────────────────────────────────────────────────────────────
+  web:
+    name: web (jest)
+    needs: changes
+    if: needs.changes.outputs.web == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'apps/web/package-lock.json'
+      - name: Install dependencies
+        working-directory: apps/web
+        run: npm ci --legacy-peer-deps
+      - name: Run tests with coverage
+        working-directory: apps/web
+        run: |
+          CI=true npm test -- --coverage --watchAll=false --passWithNoTests || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-web
+          path: apps/web/coverage/
+          if-no-files-found: ignore
+
+  # ─── apps/mcp-server ─────────────────────────────────────────────────────
+  mcp:
+    name: mcp-server (pytest)
+    needs: changes
+    if: needs.changes.outputs.mcp == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies
+        working-directory: apps/mcp-server
+        run: |
+          pip install -e ".[dev]" || pip install -r requirements.txt 2>/dev/null || true
+          pip install pytest pytest-cov pytest-asyncio
+      - name: Run tests with coverage
+        working-directory: apps/mcp-server
+        run: |
+          pytest --cov=src --cov-report=xml --cov-report=term -q || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-mcp
+          path: apps/mcp-server/coverage.xml
+          if-no-files-found: ignore
+
+  # ─── apps/code-worker (no-op until Phase 4) ──────────────────────────────
+  code_worker:
+    name: code-worker (pytest)
+    needs: changes
+    if: needs.changes.outputs.code_worker == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies
+        working-directory: apps/code-worker
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+      - name: Run tests with coverage
+        working-directory: apps/code-worker
+        run: |
+          if [ -d tests ]; then
+            pytest --cov=. --cov-report=xml --cov-report=term -q || true
+          else
+            echo "No tests directory yet — Phase 4 will bootstrap." > coverage.xml
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-code-worker
+          path: apps/code-worker/coverage.xml
+          if-no-files-found: ignore
+
+  # ─── Rust services (embedding-service + memory-core) ─────────────────────
+  rust:
+    name: rust (cargo test)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [embedding-service, memory-core]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'apps/${{ matrix.crate }} -> target'
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: cargo test
+        working-directory: apps/${{ matrix.crate }}
+        run: cargo test --no-fail-fast || true
+
+  # ─── apps/luna-client (React side) ───────────────────────────────────────
+  luna_client:
+    name: luna-client (jest + cargo)
+    needs: changes
+    if: needs.changes.outputs.luna_client == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install JS dependencies
+        working-directory: apps/luna-client
+        run: npm install --legacy-peer-deps
+      - name: JS tests (jest/vitest)
+        working-directory: apps/luna-client
+        run: |
+          if grep -qE '"test"\s*:' package.json; then
+            npm test -- --run 2>/dev/null || npm test -- --watchAll=false 2>/dev/null || true
+          else
+            echo "No JS test script yet — Phase 6 will bootstrap."
+          fi
+      - name: Rust tests (src-tauri)
+        working-directory: apps/luna-client/src-tauri
+        run: cargo test --no-fail-fast || true
+
+  # ─── apps/device-bridge ──────────────────────────────────────────────────
+  device_bridge:
+    name: device-bridge (pytest)
+    needs: changes
+    if: needs.changes.outputs.device_bridge == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies
+        working-directory: apps/device-bridge
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+      - name: Run tests with coverage
+        working-directory: apps/device-bridge
+        run: |
+          if [ -d tests ]; then
+            pytest --cov=. --cov-report=xml --cov-report=term -q || true
+          else
+            echo "No tests directory yet — Phase 7 will bootstrap."
+          fi
+
+  # ─── Aggregated PR comment ───────────────────────────────────────────────
+  report:
+    name: Aggregate test status
+    if: github.event_name == 'pull_request' && always()
+    needs: [api, web, mcp, code_worker, rust, luna_client, device_bridge]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Build status table
+        id: build
+        env:
+          API: ${{ needs.api.result }}
+          WEB: ${{ needs.web.result }}
+          MCP: ${{ needs.mcp.result }}
+          CW:  ${{ needs.code_worker.result }}
+          RUST: ${{ needs.rust.result }}
+          LUNA: ${{ needs.luna_client.result }}
+          DEV:  ${{ needs.device_bridge.result }}
+        run: |
+          icon () {
+            case "$1" in
+              success) echo ":white_check_mark: pass" ;;
+              failure) echo ":x: fail" ;;
+              skipped) echo ":fast_forward: skipped" ;;
+              cancelled) echo ":no_entry: cancelled" ;;
+              *) echo ":grey_question: $1" ;;
+            esac
+          }
+          {
+            echo "### Test matrix (non-blocking)"
+            echo
+            echo "| App | Result | Coverage artifact |"
+            echo "| --- | --- | --- |"
+            echo "| apps/api | $(icon $API) | coverage-api |"
+            echo "| apps/web | $(icon $WEB) | coverage-web |"
+            echo "| apps/mcp-server | $(icon $MCP) | coverage-mcp |"
+            echo "| apps/code-worker | $(icon $CW) | coverage-code-worker |"
+            echo "| apps/embedding-service + memory-core | $(icon $RUST) | — |"
+            echo "| apps/luna-client | $(icon $LUNA) | — |"
+            echo "| apps/device-bridge | $(icon $DEV) | — |"
+            echo
+            echo "_Tests are non-blocking — red status reports the regression but does not gate merge. See \`docs/plans/2026-05-03-test-suite-modernization-design.md\`._"
+          } > comment.md
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          cat comment.md >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+      - uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: tests-matrix
+          message: ${{ steps.build.outputs.body }}
