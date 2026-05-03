@@ -268,7 +268,6 @@ docker exec -i $PG psql -U postgres agentprovision \
 |-------|-----------|
 | `agentprovision-orchestration` | TaskExecution, ChannelHealthMonitor, FollowUp, InboxMonitor, CompetitorMonitor, **TeamsMonitor** (#250), DynamicWorkflowExecutor, CoalitionWorkflow, AgentPerformanceSnapshot |
 | `agentprovision-code` | CodeTaskWorkflow, ChatCliWorkflow, ProviderReviewWorkflow |
-| `agentprovision-postgres` | DatasetSync, KnowledgeExtraction, DataSourceSync |
 | `agentprovision-business` | DealPipeline, RemediaOrder, MonthlyBilling |
 
 > **Heartbeat discipline**: long-running CLI activities must `heartbeat()` ≤240s or Temporal cancels. `execute_chat_cli` is a sync activity in a thread pool with a background heartbeat loop.

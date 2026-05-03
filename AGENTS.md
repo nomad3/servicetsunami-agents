@@ -188,7 +188,6 @@ Scores logged as `rl_experience` with reward components, token/cost tracking, pl
 ### Rust (Luna client + memory services)
 
 - Tauri 2 plugins: `global-shortcut`, `updater`, tray API.
-- macOS audio: `cpal` Stream is `!Send` — build and drop on the same spawned thread.
 
 ### Error handling
 

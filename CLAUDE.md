@@ -201,7 +201,6 @@ Scores are logged as RL experiences (`rl_experience` table) with reward componen
 
 **Temporal workflows** (static — being migrated to dynamic): Durable workflow execution across four task queues:
 - `agentprovision-orchestration`: `TaskExecutionWorkflow`, `ChannelHealthMonitorWorkflow`, `FollowUpWorkflow`, `InboxMonitorWorkflow`, `CompetitorMonitorWorkflow`, `TeamsMonitorWorkflow`, `DynamicWorkflowExecutor`, `CoalitionWorkflow` (A2A), `AgentPerformanceSnapshotWorkflow` (hourly rollup).
-- `agentprovision-postgres`: `DatasetSyncWorkflow`, `KnowledgeExtractionWorkflow`, `DataSourceSyncWorkflow`.
 - `agentprovision-code`: `CodeTaskWorkflow` (Claude Code / Gemini CLI / Codex CLI / GitHub Copilot CLI execution in isolated code-worker pod), `ChatCliWorkflow` (per-agent chat turn as a child workflow — used by CoalitionWorkflow).
 - `agentprovision-business`: Industry-specific flows:
   - `DealPipelineWorkflow`: Discover → Score → Research → Outreach → Advance → Sync (6 steps).
@@ -213,9 +212,8 @@ Scores are logged as RL experiences (`rl_experience` table) with reward componen
 
 **Luna Native Client** (`apps/luna-client`, Tauri 2 + React + Vite): Desktop/mobile app with PWA fallback.
 - **Visual avatar**: `LunaAvatar` SVG component renders emotional states (idle, thinking, happy, alert) from LLM response metadata; wired into `ChatInterface` header.
-- **Native push-to-talk**: Rust audio capture via `cpal` in `src-tauri/src/lib.rs` (`start_audio_capture` → `AudioConfig{sample_rate, channels}`, `stop_audio_capture`). Stream is built AND dropped on the same spawned thread (CoreAudio-safe — `Stream` is `!Send` on macOS). Frontend `useVoice` hook wraps the captured Float32 PCM in a proper WAV (RIFF/PCM16) header before posting to `/api/v1/media/transcribe`.
-- **Voice context**: `VoiceProvider` (React context) wraps the authenticated app so `VoiceInput` (in chat) and `CommandPalette` share one `useVoice` instance — avoids duplicate `audio-chunk` listeners.
-- **Global shortcuts**: `Cmd+Shift+Space` = push-to-talk (emits `voice-start`/`voice-stop`), `Cmd+Shift+L` = toggle Spatial HUD. Unregistered on window destroy. `tauri-plugin-global-shortcut`.
+- **Voice input**: native `cpal`/PTT designed in PR #154 is **not currently in the tree** — `cpal` is not in `src-tauri/Cargo.toml`, and no `start_audio_capture`/`stop_audio_capture` functions exist. The `/api/v1/media/transcribe` endpoint is still wired to ingest audio when a client provides it.
+- **Global shortcuts** (`setup_global_shortcut` in `src-tauri/src/lib.rs:392`): `Cmd+Shift+Space` emits `toggle-palette` → React opens the `CommandPalette` (and un-hides the main window if needed). `Cmd+Shift+L` toggles the `spatial_hud` window's visibility. `tauri-plugin-global-shortcut`.
 - **System tray** (`setup_tray`): Open, Voice Input, Toggle Spatial HUD, Quit. Uses `PredefinedMenuItem::separator`.
 - **Auto-updater**: `tauri-plugin-updater`, checks on startup + every 30 min. Emits `update-available` → React banner.
 - **Clipboard watcher** + **activity tracker**: Background threads emit `clipboard-changed` and `activity-event`. Resolves real tool/project from terminal and editor window titles (Claude Code, Docker CLI, etc.).
@@ -385,8 +383,7 @@ Business logic layer (one service per model):
 ### Workers (`apps/api/app/workers/`)
 
 Temporal workers for async processing:
-- `orchestration_worker.py`: TaskExecutionWorkflow, ChannelHealthMonitorWorkflow, FollowUpWorkflow, InboxMonitorWorkflow, CompetitorMonitorWorkflow, **TeamsMonitorWorkflow** (#250, auto-starts on `/teams/enable`), DynamicWorkflowExecutor, CoalitionWorkflow, AgentPerformanceSnapshotWorkflow (queue: `agentprovision-orchestration`)
-- `postgres_worker.py`: DatasetSync, KnowledgeExtraction, DataSourceSync workflows (queue: `agentprovision-postgres`)
+- `orchestration_worker.py`: TaskExecutionWorkflow, ChannelHealthMonitorWorkflow, FollowUpWorkflow, InboxMonitorWorkflow, CompetitorMonitorWorkflow, **TeamsMonitorWorkflow** (#250, auto-starts on `/teams/enable`), DynamicWorkflowExecutor, CoalitionWorkflow, AgentPerformanceSnapshotWorkflow, plus DatasetSyncWorkflow / KnowledgeExtractionWorkflow / DataSourceSyncWorkflow (queue: `agentprovision-orchestration`)
 - `scheduler_worker.py`: Automated pipeline execution (cron/interval scheduling, polls every 60s)
 
 ### Routes (`apps/api/app/api/v1/`)

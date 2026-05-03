@@ -19,7 +19,7 @@
 
 > **Latest (2026-04-19 → 2026-05-03):** Skills Marketplace v2 (`_bundled/` + `_tenant/<uuid>/` layout, Claude-Code-format SKILL.md, library_revisions audit), External Agents + A2A v2 (Microsoft Copilot Studio + Azure AI Foundry import, Workflows-as-spine, no `agent_messages` table), Microsoft Teams channel via Graph + `TeamsMonitorWorkflow`, **GitHub Copilot CLI** runtime, autodetect CLI + quota fallback chain, greeting fast-path latency win (~130×–397× on warm path), internal endpoints blocked from public internet (#207), routing transparency footer in chat. See [`docs/changelog/2026-04-19-to-2026-05-03.md`](docs/changelog/2026-04-19-to-2026-05-03.md) for the full digest.
 >
-> **Previously (2026-04-12 → 2026-04-19):** Agent Lifecycle Management Platform, A2A Collaboration, Luna OS Spatial Workstation, native voice PTT, redesigned landing page, security hardening. See [`docs/changelog/2026-04-12-to-2026-04-19.md`](docs/changelog/2026-04-12-to-2026-04-19.md).
+> **Previously (2026-04-12 → 2026-04-19):** Agent Lifecycle Management Platform, A2A Collaboration, Luna OS Spatial Workstation, redesigned landing page, security hardening. See [`docs/changelog/2026-04-12-to-2026-04-19.md`](docs/changelog/2026-04-12-to-2026-04-19.md). (Native cpal PTT was designed in #154 but is not currently in the tree.)
 
 ---
 
@@ -32,7 +32,8 @@ Luna is the native presence layer for AgentProvision. A 4.9MB Tauri 2.0 desktop 
 | Native macOS ARM64 app (Tauri 2.0 + Rust) | Shipped |
 | System tray with show/hide toggle | Shipped |
 | Cmd+Shift+Space global shortcut (Raycast-style) | Shipped |
-| Cmd+Shift+Space native push-to-talk (Rust cpal audio) | **Shipped 2026-04-19** |
+| Cmd+Shift+Space command palette (`tauri-plugin-global-shortcut`) | Shipped |
+| Voice input via browser MediaRecorder → `/api/v1/media/transcribe` | Shipped (native cpal PTT designed in #154 not currently in tree) |
 | Cmd+Shift+L Spatial HUD (Three.js knowledge nebula) | **Shipped 2026-04-13** |
 | Chat with SSE streaming + markdown rendering | Shipped |
 | Emotion-reactive LunaAvatar (SVG, state-driven) | **Shipped 2026-04-19** |
@@ -504,7 +505,7 @@ Luna is evolving from a chat client into an AI-first native operating system.
 | **Phase 1** | Desktop presence (menu bar, shortcuts, notifications, screenshot) | **Done** |
 | **Phase 2** | Memory-led native (episodic recall, cross-device continuity) | **Done** |
 | **Phase 3** | Spatial workstation (transparent Tauri window, knowledge nebula, A2A visuals, hand tracking) | **Done 2026-04-13** |
-| **Phase 4** | Voice-first interaction (native cpal PTT, WAV encoding, voice context) | **Done 2026-04-19** |
+| **Phase 4** | Voice-first interaction (browser MediaRecorder today; native cpal PTT designed in #154 not currently in tree) | Browser path live; native deferred |
 | **Phase 5** | Device bridge (camera, IoT registry, desk sensors) | **Done 2026-04-19** |
 | **Phase 6** | Mobile companion (iOS/Android, BLE wearable relay) | Planned |
 | **Phase 7** | Local actions (automations, file ops, system commands with trust gates) | Planned |
@@ -514,7 +515,7 @@ See `docs/plans/2026-03-29-luna-native-operating-system-plan.md` and `docs/plans
 
 ## Stack
 
-FastAPI · React 18 · Tauri 2.0 (Rust + cpal) · Three.js + Framer Motion · PostgreSQL + pgvector · Temporal · Redis · FastMCP · Ollama (Gemma 4) · Neonize (WhatsApp) · Cloudflare Tunnel · Docker Compose (local) / Helm on Rancher Desktop (prod-path) · nomic-embed-text-v1.5
+FastAPI · React 18 · Tauri 2.0 (Rust) · Three.js + Framer Motion · PostgreSQL + pgvector · Temporal · Redis · FastMCP · Ollama (Gemma 4) · Neonize (WhatsApp) · Cloudflare Tunnel · Docker Compose (local) / Helm on Rancher Desktop (prod-path) · nomic-embed-text-v1.5
 
 ## Documentation
 
@@ -528,7 +529,7 @@ FastAPI · React 18 · Tauri 2.0 (Rust + cpal) · Three.js + Framer Motion · Po
 
 **Recent highlights:**
 - [`docs/changelog/2026-04-19-to-2026-05-03.md`](docs/changelog/2026-04-19-to-2026-05-03.md) — most recent fortnight (Skills v2, External Agents v2, Teams, Copilot CLI runtime, latency)
-- [`docs/changelog/2026-04-12-to-2026-04-19.md`](docs/changelog/2026-04-12-to-2026-04-19.md) — prior week (ALM, A2A, Spatial HUD, voice PTT)
+- [`docs/changelog/2026-04-12-to-2026-04-19.md`](docs/changelog/2026-04-12-to-2026-04-19.md) — prior week (ALM, A2A, Spatial HUD)
 - [`docs/plans/2026-04-26-external-agents-and-a2a-enhancement-plan.md`](docs/plans/2026-04-26-external-agents-and-a2a-enhancement-plan.md) — External Agents + A2A v2 design
 - [`docs/plans/2026-04-26-skills-fleet-alignment-plan.md`](docs/plans/2026-04-26-skills-fleet-alignment-plan.md) — Skills Marketplace v2
 - [`docs/plans/2026-04-23-luna-latency-reduction-plan.md`](docs/plans/2026-04-23-luna-latency-reduction-plan.md) — latency campaign (greeting fast-path, prompt trim, KV cache probe)
