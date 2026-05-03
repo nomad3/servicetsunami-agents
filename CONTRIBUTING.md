@@ -1,10 +1,10 @@
 # Contributing to AgentProvision
 
-Thanks for working on AgentProvision. This file is the short version of the rules — the full picture lives in [`CLAUDE.md`](CLAUDE.md) (architecture + patterns) and [`AGENTS.md`](AGENTS.md) (agent-system layout). If something here disagrees with `CLAUDE.md`, `CLAUDE.md` wins.
+Thanks for working on AgentProvision. This file is the short version of the rules — the full picture lives in [`CLAUDE.md`](CLAUDE.md) (architecture + patterns) and [`AGENTS.md`](AGENTS.md) (agent-system layout — CLI runtimes vs platform agents, ALM, A2A, Skills v2, MCP tools). If something here disagrees with `CLAUDE.md`, `CLAUDE.md` wins.
 
 ## Hard rules (no exceptions)
 
-1. **Never commit to `main`.** Always feature-branch + PR. Assign PRs to `nomad3`.
+1. **Never commit to `main`.** Always feature-branch + PR. Assign PRs to `nomad3` (the GitHub login; the user goes by "nomade" elsewhere).
 2. **Never add `Co-Authored-By: Claude` (or any AI credit — Gemini, Codex, Copilot) to commits, PR descriptions, or code comments.**
 3. **Never add docs / plans / tests / scripts to the repo root.** Use the dedicated folders:
    - `docs/plans/YYYY-MM-DD-<slug>.md` for design docs and implementation plans.
@@ -39,9 +39,9 @@ cp apps/api/.env.example apps/api/.env
 docker compose up -d
 
 # 3. Apply migrations (manual SQL, no Alembic — see "Migrations" below)
-PG=$(docker ps --format '{{.Names}}' | grep db-1)
+PG=$(docker compose ps -q db)
 for f in apps/api/migrations/*.sql; do
-  docker exec -i $PG psql -U postgres agentprovision < "$f"
+  docker exec -i "$PG" psql -U postgres agentprovision < "$f"
 done
 
 # Endpoints (host ports)
@@ -94,19 +94,20 @@ For long-running parallel work, use `git worktree add -b <branch> ../<dir> origi
 Manual SQL — no Alembic.
 
 ```bash
-# 1. Add SQL to apps/api/migrations/
-# Use the next number: latest is 113_tenant_github_primary_account.sql
-apps/api/migrations/NNN_<slug>.sql
+# 1. Find the next number
+ls apps/api/migrations/*.sql | sort | tail -1
+# Add SQL at apps/api/migrations/NNN_<slug>.sql
 
-# 2. Force-add (the global .gitignore catches *.sql)
+# 2. Force-add (the repo .gitignore catches *.sql)
 git add -f apps/api/migrations/NNN_*.sql
 
-# 3. Apply against the local DB pod
-PG=$(docker ps --format '{{.Names}}' | grep db-1)
-docker exec -i $PG psql -U postgres agentprovision < apps/api/migrations/NNN_<slug>.sql
+# 3. Apply against the local DB container
+#    Resolves the compose project's db service even if it isn't named "*-db-1"
+PG=$(docker compose ps -q db)
+docker exec -i "$PG" psql -U postgres agentprovision < apps/api/migrations/NNN_<slug>.sql
 
 # 4. Record the application
-docker exec -i $PG psql -U postgres agentprovision \
+docker exec -i "$PG" psql -U postgres agentprovision \
   -c "INSERT INTO _migrations(filename) VALUES ('NNN_<slug>.sql');"
 ```
 
