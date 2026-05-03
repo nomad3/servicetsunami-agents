@@ -52,6 +52,14 @@ impl Recognizer {
             confidence: primary.confidence,
         };
         self.last_emit_ms = now_ms;
+        // Clear the motion buffer after emitting a successful swipe so the
+        // same swipe doesn't keep firing as the buffer scrolls. Without this
+        // a single 3-finger swipe up would trigger nav_hud ~12 times.
+        if let Some(m) = motion {
+            if matches!(m.kind, MotionKind::Swipe | MotionKind::Pinch | MotionKind::Tap) {
+                self.motion.clear();
+            }
+        }
         (Some(event), Some(pose))
     }
 }

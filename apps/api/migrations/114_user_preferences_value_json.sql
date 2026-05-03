@@ -17,6 +17,5 @@ COMMENT ON COLUMN user_preferences.value_json IS
   'Optional rich JSON payload for preferences that exceed the 200-char value column. '
   'Used by gesture_bindings and similar preference types. Capped at 64KB.';
 
-INSERT INTO _migrations (filename, applied_at)
-VALUES ('114_user_preferences_value_json.sql', NOW())
-ON CONFLICT (filename) DO NOTHING;
+INSERT INTO _migrations(filename) VALUES ('114_user_preferences_value_json.sql')
+ON CONFLICT DO NOTHING;

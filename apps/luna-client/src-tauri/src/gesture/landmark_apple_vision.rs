@@ -1,17 +1,20 @@
-//! Apple Vision-backed landmark extractor for macOS.
-//!
-//! v1 ships with a pure-Rust placeholder that returns no landmarks. The actual
-//! `VNDetectHumanHandPoseRequest` integration via Swift FFI is the next ticket
-//! after the Phase 1 frame plumbing lands; the placeholder lets the rest of
-//! the engine (camera, wake state, recognizer, Tauri events) be exercised
-//! end-to-end while the Swift bridge work is in flight.
-//!
-//! When the FFI lands, the body of `extract` will call out to a Swift
-//! `luna_extract_landmarks` symbol, parse the returned float buffer into
-//! 21-landmark hands, and return them.
+//! Apple Vision-backed landmark extractor for macOS. Calls into Swift via
+//! a C-callable symbol declared in `swift/HandLandmarker.swift` and built
+//! by `build.rs` into a static library linked at compile time.
 
 use crate::gesture::landmark::LandmarkExtractor;
 use crate::gesture::types::*;
+
+extern "C" {
+    fn luna_extract_landmarks(
+        rgb_bytes: *const u8,
+        width: i32,
+        height: i32,
+        out_buf: *mut f32,
+        out_confidence: *mut f32,
+        out_handedness_left: *mut u8,
+    ) -> i32;
+}
 
 pub struct AppleVisionExtractor;
 
@@ -21,13 +24,49 @@ impl AppleVisionExtractor {
     }
 }
 
+impl Default for AppleVisionExtractor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LandmarkExtractor for AppleVisionExtractor {
-    fn extract(&self, _rgb: &[u8], _width: u32, _height: u32) -> Vec<HandFrame> {
-        // TODO(luna-gestures-ffi): replace with extern "C" call to
-        // `luna_extract_landmarks` (Swift) once the build.rs swift-bridge
-        // wiring lands. Returning empty here lets the rest of the engine
-        // run in a "no hands detected" state, which exercises the wake
-        // state machine's idle path and the React UI's overlay.
-        Vec::new()
+    fn extract(&self, rgb: &[u8], width: u32, height: u32) -> Vec<HandFrame> {
+        if rgb.len() < (width as usize) * (height as usize) * 3 {
+            return Vec::new();
+        }
+        let mut buf = [0f32; 126]; // 2 hands × 21 × 3
+        let mut conf = [0f32; 2];
+        let mut left = [0u8; 2];
+        let n = unsafe {
+            luna_extract_landmarks(
+                rgb.as_ptr(),
+                width as i32,
+                height as i32,
+                buf.as_mut_ptr(),
+                conf.as_mut_ptr(),
+                left.as_mut_ptr(),
+            )
+        };
+        let n = n.max(0) as usize;
+        let n = n.min(2);
+        (0..n)
+            .map(|h| {
+                let mut lm = [Landmark { x: 0.0, y: 0.0, z: 0.0 }; 21];
+                for i in 0..21 {
+                    let base = (h * 21 + i) * 3;
+                    lm[i] = Landmark {
+                        x: buf[base],
+                        y: buf[base + 1],
+                        z: buf[base + 2],
+                    };
+                }
+                HandFrame {
+                    handedness: if left[h] == 1 { Hand::Left } else { Hand::Right },
+                    landmarks: lm,
+                    confidence: conf[h],
+                }
+            })
+            .collect()
     }
 }

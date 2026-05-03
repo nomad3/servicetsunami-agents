@@ -38,11 +38,8 @@ impl WakeMachine {
 
     pub fn set_confirm_pending(&mut self, v: bool) {
         self.confirm_pending = v;
-        if !v {
-            // Clearing confirm-pending should refresh the idle baseline so
-            // the user gets a fresh 5s window after their destructive action.
-            self.last_activity_ms = self.last_activity_ms.max(0);
-        }
+        // Callers should follow with a Pose tick to refresh `last_activity_ms`
+        // so the idle countdown re-baselines from clear-time. Tests rely on this.
     }
 
     pub fn force_sleep(&mut self) {
