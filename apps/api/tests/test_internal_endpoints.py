@@ -1,6 +1,9 @@
 import pytest
 import os
 
+# Full FastAPI app + Postgres/pgvector path — see test_api.py for rationale.
+pytestmark = pytest.mark.integration
+
 # Set TESTING environment variable BEFORE importing app
 os.environ["TESTING"] = "True"
 

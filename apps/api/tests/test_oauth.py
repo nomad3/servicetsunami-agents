@@ -3,6 +3,10 @@ from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+
+# Drives full app + Postgres/pgvector — see test_api.py for rationale.
+pytestmark = pytest.mark.integration
+
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_db

@@ -21,6 +21,7 @@ anthropic
 openai
 pytest
 pytest-asyncio
+pytest-cov
 asyncpg
 # postgres-sql-connector (Removed - PostgreSQL no longer used)
 # snowflake-connector-python (Removed in migration to PostgreSQL)

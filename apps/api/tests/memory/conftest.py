@@ -12,6 +12,18 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 
+def pytest_collection_modifyitems(config, items):
+    """Mark every test under tests/memory/ as `integration`.
+
+    Memory tests hit pgvector and require a live Postgres; the default unit
+    run (`-m "not integration"`) should skip them. The integration job in
+    `.github/workflows/tests.yaml` runs them against a real database.
+    """
+    for item in items:
+        if "tests/memory/" in str(item.path).replace("\\", "/"):
+            item.add_marker(pytest.mark.integration)
+
+
 @pytest.fixture
 def db_session():
     """Yield a Session bound to the production DB. Rolls back at teardown."""
