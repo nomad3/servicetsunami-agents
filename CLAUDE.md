@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AgentProvision is a **memory-first, Kubernetes-native** AI agent orchestration platform. Routes tasks to **Gemini CLI** (primary, configurable per-tenant via `tenant_features.default_cli_platform`) via Temporal workflows. Agents are defined as marketplace skills, tools are served via **MCP** (81 tools), and the platform learns from user feedback via RL. Deployed on **Rancher Desktop K8s** with **Cloudflare Tunnel** (in-cluster pod) serving `agentprovision.com`.
+AgentProvision is a **memory-first, Kubernetes-native** AI agent orchestration platform. Routes tasks across four CLI runtimes (**Claude Code, Codex, Gemini CLI, GitHub Copilot CLI**) via Temporal workflows, with autodetect + quota-fallback chaining (#245) and per-tenant default selectable in `tenant_features.default_cli_platform`. Agents are governed via the ALM platform, tools are served via **MCP** (90+ tools), and the platform learns which runtime performs best per task type via RL. Deployed on **Rancher Desktop K8s** with **Cloudflare Tunnel** (in-cluster pod) serving `agentprovision.com`.
 
-**Key architecture**: Chat → Agent Router (Python, zero LLM cost) → Memory Recall (pre-loaded context, pgvector) → Temporal → code-worker (Gemini CLI / Claude Code CLI / Codex CLI) → MCP tools (FastMCP, 81 tools) → response → PostChatMemoryWorkflow (async entity extraction via Gemma 4). Every response is auto-scored by a local Gemma 4 council. All scores logged as RL experiences.
+**Key architecture**: Chat → Agent Router (Python, zero LLM cost) → Memory Recall (pre-loaded context, pgvector) → Temporal → code-worker (Claude Code / Codex / Gemini CLI / GitHub Copilot CLI, with autodetect + quota fallback) → MCP tools (FastMCP, 90+ tools) → response → PostChatMemoryWorkflow (async entity extraction via Gemma 4). Every response is auto-scored by a local Gemma 4 council. All scores logged as RL experiences.
 
 **Memory-First Design** (Phase 1 shipped, Phase 2 in validation):
 - `apps/api/app/memory/` package: `recall()`, `record_*()`, `ingest_events()`
@@ -26,14 +26,14 @@ AgentProvision is a **memory-first, Kubernetes-native** AI agent orchestration p
 **Kubernetes on Rancher Desktop** (migrated from Docker Compose 2026-04-10). All services deployed via Helm (`helm/charts/microservice` base chart). Cloudflare tunnel runs as an in-cluster pod.
 
 - **`apps/api`**: FastAPI backend — chat service, agent router, memory layer, RL, knowledge graph, skill marketplace. K8s: `api` deployment, 2Gi memory limit.
-- **`apps/code-worker`**: CLI execution via Temporal (Gemini CLI primary, Claude Code + Codex fallbacks). Has git, gh, gemini, claude, node. Fetches per-tenant OAuth tokens at runtime. K8s: `code-worker` deployment on `agentprovision-code` queue.
+- **`apps/code-worker`**: CLI execution via Temporal across all four runtimes (Claude Code, Codex, Gemini CLI, GitHub Copilot CLI) with autodetect + quota fallback (#245). Has git, gh, claude, codex, gemini, copilot, node. Fetches per-tenant OAuth tokens at runtime. K8s: `code-worker` deployment on `agentprovision-code` queue.
 - **`apps/embedding-service`**: Rust gRPC service for fast vector embeddings. Uses fastembed (ONNX Runtime) with nomic-embed-text-v1.5 (768-dim). K8s: `embedding-service` on port 50051, 2Gi limit, 120s probe delay for model download.
 - **`apps/memory-core`**: Rust gRPC service for memory operations (Recall, RecordObservation, RecordCommitment, IngestEvents). Talks to embedding-service + PostgreSQL via pgvector. K8s: `memory-core` on port 50052.
 - **`apps/web`**: React SPA with nginx. Proxies `/api/*` to api service, `/ws/*` for WebSocket. K8s: `web` deployment.
-- **`apps/mcp-server`**: **Deprecated** — was the old Databricks/Playwright MCP server. Replaced by FastMCP tools integrated in the API.
+- **`apps/mcp-server`**: FastMCP tools server (90+ tools) over MCP SSE on port 8086. See full module list under "Monorepo Structure" below.
 - **`cloudflared`**: Runs as K8s pod (`kubernetes/cloudflared-deployment.yaml`), routes `agentprovision.com` to internal services by DNS name (`http://api:80`, `http://web:80`). No port-forwards needed.
 - **`temporal`**: Workflow engine (auto-setup image). K8s: `temporal` deployment on port 7233.
-- **`postgresql`**: pgvector/pgvector:pg13 with PVC protected by `helm.sh/resource-policy: keep`. 67 SQL migrations tracked in `_migrations` table.
+- **`postgresql`**: pgvector/pgvector:pg13 with PVC protected by `helm.sh/resource-policy: keep`. 90+ SQL migrations (latest: `113_tenant_github_primary_account.sql`) tracked in `_migrations` table.
 - **`redis`**: Session cache. K8s: `redis` deployment.
 - **`ollama`** (native host, port 11434): Runs natively on Mac M4 for GPU acceleration (~57 tok/s). Hosts Gemma 4 for auto-scoring, entity extraction, commitment classification. K8s pods reach it via `host.docker.internal:11434`.
 
@@ -63,7 +63,7 @@ Previously a Turborepo monorepo managed with `pnpm` workspaces:
 
 - **`apps/device-bridge`** (new 2026-04-19): Local IoT device + camera bridge used by Luna client Phase 2. See `apps/luna-client` integration.
 
-- **`apps/mcp-server`**: FastMCP tools server (81+ tools). Serves MCP over SSE on port 8086. Shipped tool modules in `src/mcp_tools/`: `drive`, `email`, `calendar`, `ads`, `competitor`, `knowledge`, `aremko`, `sales`, `devices`, `github`, `jira`, `shell`, `data`, `connectors`, `reports`, `memory_continuity`, `monitor`, `webhooks`, `skills`, `supermarket`, `mcp_servers`, `copilot_studio` (new 2026-04-18), `unsupervised_learning`, `dynamic_workflows`, `analytics`. Auth via `X-Internal-Key` + `X-Tenant-Id` headers.
+- **`apps/mcp-server`**: FastMCP tools server (90+ tools). Serves MCP over SSE on port 8086. Shipped tool modules in `src/mcp_tools/`: `ads`, `agent_messaging`, `analytics`, `aremko`, `calendar`, `competitor`, `connectors`, `copilot_studio`, `data`, `devices`, `drive`, `dynamic_workflows`, `email`, `github`, `jira`, `knowledge`, `mcp_servers`, `memory_continuity`, `monitor`, `reports`, `sales`, `shell`, `skills`, `supermarket`, `unsupervised_learning`, `webhooks`. Auth via `X-Internal-Key` + `X-Tenant-Id` headers.
 
 - **`apps/api/app/memory/`**: Memory-First package (Phase 1 shipped)
   - `recall.py`: Pre-loads context for chat hot path. 1500ms hard timeout, pgvector semantic search, token budget enforcement. Dual-read mode compares Python vs Rust (gRPC) results.
@@ -165,13 +165,14 @@ Scores are logged as RL experiences (`rl_experience` table) with reward componen
 - `classify_task_type()`: Message intent classification for agent routing
 - Models: `gemma4` (default fast + quality scoring + tool calling + provider review)
 
-**Skill Marketplace**: Three-tier file-based skill system with GitHub import:
-- **Native tier**: Bundled skills shipped with the container (read-only): sql_query, calculator, data_summary, entity_extraction, knowledge_search, lead_scoring, report_generation
-- **Community tier**: Imported from GitHub repos via `POST /skills/library/import-github`. Supports external formats (GWS `SKILL.md`, Claude Code superpowers). Auto-adapter normalizes frontmatter (semver→int, nested categories, engine mapping).
-- **Custom tier**: Per-tenant skills created/edited in the UI with versioning and CHANGELOG
-- **Engines**: `python` (script.py), `shell` (script.sh), `markdown` (prompt.md), `tool` (class registry)
-- **Semantic search**: Skills are embedded via pgvector for auto-trigger matching
-- **GitHub import**: Paste a repo URL → imports single skill or scans subdirectories. Supports GWS (92 skills), superpowers, or any repo with SKILL.md/skill.md files.
+**Skill Marketplace v2** (shipped 2026-04-26, PRs #182–#193): File-based skill library with two-folder layout on a shared volume:
+- **`_bundled/`** — read-only, ships with the container. Built-in skills: sql_query, calculator, data_summary, entity_extraction, knowledge_search, lead_scoring, report_generation.
+- **`_tenant/<tenant-uuid>/`** — per-tenant, custom + community-imported.
+- **Format**: Claude-Code-style `SKILL.md` (frontmatter + instructions). Engines: `python` (script.py), `shell` (script.sh), `markdown` (prompt.md), `tool` (class registry).
+- **Audit**: every change written to `library_revisions` (migration 110).
+- **Code-worker access**: via the **`read_library_skill` MCP tool**. The library is intentionally **not** mounted into the worker pod — the MCP path keeps the worker stateless and the library a single source of truth.
+- **MCP CRUD**: `update_skill`, `update_agent`, `read_library_skill`. The legacy `match_skills_to_context` tool and the GitHub-import flow have been retired (auto-trigger uses pgvector embeddings).
+- **Auto-trigger**: skills are embedded via pgvector for context matching.
 
 **UI/UX (Ocean Theme)**:
 - **Design System**: Glassmorphic "Ocean Theme" with support for high-contrast light and dark modes.
@@ -199,8 +200,7 @@ Scores are logged as RL experiences (`rl_experience` table) with reward componen
 - **Internal auth**: MCP tools use `/internal/*` endpoints with `X-Internal-Key` + `X-Tenant-Id` headers (accepts both `API_INTERNAL_KEY` and `MCP_API_KEY`).
 
 **Temporal workflows** (static — being migrated to dynamic): Durable workflow execution across four task queues:
-- `agentprovision-orchestration`: `TaskExecutionWorkflow`, `ChannelHealthMonitorWorkflow`, `FollowUpWorkflow`, `InboxMonitorWorkflow`, `CompetitorMonitorWorkflow`, `DynamicWorkflowExecutor`, `CoalitionWorkflow` (A2A), `AgentPerformanceSnapshotWorkflow` (hourly rollup).
-- `agentprovision-postgres`: `DatasetSyncWorkflow`, `KnowledgeExtractionWorkflow`, `DataSourceSyncWorkflow`.
+- `agentprovision-orchestration`: `TaskExecutionWorkflow`, `ChannelHealthMonitorWorkflow`, `FollowUpWorkflow`, `InboxMonitorWorkflow`, `CompetitorMonitorWorkflow`, `TeamsMonitorWorkflow`, `DynamicWorkflowExecutor`, `CoalitionWorkflow` (A2A), `AgentPerformanceSnapshotWorkflow` (hourly rollup).
 - `agentprovision-code`: `CodeTaskWorkflow` (Claude Code / Gemini CLI / Codex CLI / GitHub Copilot CLI execution in isolated code-worker pod), `ChatCliWorkflow` (per-agent chat turn as a child workflow — used by CoalitionWorkflow).
 - `agentprovision-business`: Industry-specific flows:
   - `DealPipelineWorkflow`: Discover → Score → Research → Outreach → Advance → Sync (6 steps).
@@ -212,9 +212,8 @@ Scores are logged as RL experiences (`rl_experience` table) with reward componen
 
 **Luna Native Client** (`apps/luna-client`, Tauri 2 + React + Vite): Desktop/mobile app with PWA fallback.
 - **Visual avatar**: `LunaAvatar` SVG component renders emotional states (idle, thinking, happy, alert) from LLM response metadata; wired into `ChatInterface` header.
-- **Native push-to-talk**: Rust audio capture via `cpal` in `src-tauri/src/lib.rs` (`start_audio_capture` → `AudioConfig{sample_rate, channels}`, `stop_audio_capture`). Stream is built AND dropped on the same spawned thread (CoreAudio-safe — `Stream` is `!Send` on macOS). Frontend `useVoice` hook wraps the captured Float32 PCM in a proper WAV (RIFF/PCM16) header before posting to `/api/v1/media/transcribe`.
-- **Voice context**: `VoiceProvider` (React context) wraps the authenticated app so `VoiceInput` (in chat) and `CommandPalette` share one `useVoice` instance — avoids duplicate `audio-chunk` listeners.
-- **Global shortcuts**: `Cmd+Shift+Space` = push-to-talk (emits `voice-start`/`voice-stop`), `Cmd+Shift+L` = toggle Spatial HUD. Unregistered on window destroy. `tauri-plugin-global-shortcut`.
+- **Voice input**: native `cpal`/PTT designed in PR #154 is **not currently in the tree** — `cpal` is not in `src-tauri/Cargo.toml`, and no `start_audio_capture`/`stop_audio_capture` functions exist. The `/api/v1/media/transcribe` endpoint is still wired to ingest audio when a client provides it.
+- **Global shortcuts** (`setup_global_shortcut` in `src-tauri/src/lib.rs:392`): `Cmd+Shift+Space` emits `toggle-palette` → React opens the `CommandPalette` (and un-hides the main window if needed). `Cmd+Shift+L` toggles the `spatial_hud` window's visibility. `tauri-plugin-global-shortcut`.
 - **System tray** (`setup_tray`): Open, Voice Input, Toggle Spatial HUD, Quit. Uses `PredefinedMenuItem::separator`.
 - **Auto-updater**: `tauri-plugin-updater`, checks on startup + every 30 min. Emits `update-available` → React banner.
 - **Clipboard watcher** + **activity tracker**: Background threads emit `clipboard-changed` and `activity-event`. Resolves real tool/project from terminal and editor window titles (Claude Code, Docker CLI, etc.).
@@ -356,7 +355,7 @@ Business logic layer (one service per model):
 - `embedding_service.py`: Local embedding generation via nomic-embed-text-v1.5 (768-dim). Functions: `embed_text()`, `embed_and_store()`, `search_similar()`, `recall()`. Used by knowledge, chat, memory, RL, skills.
 - `mcp_client.py`: MCP server client
 - `knowledge.py`, `knowledge_extraction.py`: Knowledge graph operations and extraction
-- `skill_manager.py`: Three-tier skill marketplace (native/community/custom). GitHub import with external format adapter (GWS SKILL.md support). Skill execution across 4 engines. Semantic auto-trigger matching.
+- `skill_manager.py`: Skills v2 file-based marketplace (`_bundled/` + `_tenant/<uuid>/`, Claude-Code-style SKILL.md, four engines: python/shell/markdown/tool). Every change is audited to `library_revisions` (migration 110). Code-worker access is via the `read_library_skill` MCP tool; the library is intentionally not mounted into the worker pod. Semantic auto-trigger via pgvector embeddings.
 - `skill_registry_service.py`: Sync file skills to DB + pgvector embeddings
 - `whatsapp_service.py`: Neonize-based WhatsApp integration with persistent typing indicator (refreshes composing presence every 4s until response sent)
 - `branding.py`, `features.py`, `tenant_analytics.py`: Tenant customization services
@@ -384,8 +383,7 @@ Business logic layer (one service per model):
 ### Workers (`apps/api/app/workers/`)
 
 Temporal workers for async processing:
-- `orchestration_worker.py`: TaskExecutionWorkflow, ChannelHealthMonitorWorkflow, FollowUpWorkflow, InboxMonitorWorkflow, CompetitorMonitorWorkflow, DynamicWorkflowExecutor, CoalitionWorkflow, AgentPerformanceSnapshotWorkflow (queue: `agentprovision-orchestration`)
-- `postgres_worker.py`: DatasetSync, KnowledgeExtraction, DataSourceSync workflows (queue: `agentprovision-postgres`)
+- `orchestration_worker.py`: TaskExecutionWorkflow, ChannelHealthMonitorWorkflow, FollowUpWorkflow, InboxMonitorWorkflow, CompetitorMonitorWorkflow, **TeamsMonitorWorkflow** (#250, auto-starts on `/teams/enable`), DynamicWorkflowExecutor, CoalitionWorkflow, AgentPerformanceSnapshotWorkflow, plus DatasetSyncWorkflow / KnowledgeExtractionWorkflow / DataSourceSyncWorkflow (queue: `agentprovision-orchestration`)
 - `scheduler_worker.py`: Automated pipeline execution (cron/interval scheduling, polls every 60s)
 
 ### Routes (`apps/api/app/api/v1/`)
@@ -449,7 +447,7 @@ API_PORT=8000    # FastAPI backend
 WEB_PORT=8002    # React frontend
 DB_PORT=8003     # PostgreSQL
 MCP_PORT=8086    # MCP server (PostgreSQL)
-                 # MCP tools on 8087 (FastMCP, 81 tools)
+                 # MCP tools on 8087 (FastMCP, 90+ tools)
 ```
 
 ### API Configuration (`apps/api/.env`)
@@ -492,7 +490,7 @@ GOOGLE_CLIENT_SECRET=xxx
 - **Skill execution sandbox**: `_execute_python` and `_execute_shell` in `skill_manager.py` strip sensitive env vars (SECRET_KEY, ENCRYPTION_KEY, OAuth secrets, platform tokens) before spawning subprocess.
 - **Password reset**: tokens hashed with SHA-256 before DB insert, verification uses `hmac.compare_digest`, response message identical for existing vs. missing email (no enumeration). Rate-limited via `slowapi`: login 10/min, recovery 3/hour, confirm 5/hour.
 - **Media upload hardening**: transcription endpoint streams to disk instead of reading fully into memory (prevents OOM).
-- **Internal routes**: `/api/v1/*/internal/*` are still internet-reachable — Cloudflare tunnel `notFound` rule planned. See open items in `docs/plans/2026-04-18-security-remediation-plan.md`.
+- **Internal routes blocked from public internet** (#207, 2026-04-22): `/api/v1/*/internal/*` rejects external traffic at the Cloudflare tunnel. In-cluster service-to-service calls (MCP server, code-worker) still reach them via `X-Internal-Key` auth.
 - **Pentest reports**: `docs/report/2026-04-18-full-security-audit.md` (8 findings) and `docs/report/2026-04-18-pentest-verification.md` (black-hat verification).
 
 ### Web Configuration (`apps/web/.env.local`)

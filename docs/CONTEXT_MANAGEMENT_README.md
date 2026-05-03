@@ -1,4 +1,12 @@
-# Conversation Context & Memory Management ✅
+# Conversation Context & Memory Management (historical reference)
+
+> **⚠️ Historical document.** Describes the original Anthropic-API conversation context manager. As of 2026-04, the platform uses a **memory-first** architecture (`apps/api/app/memory/`) with pre-loaded pgvector context, Rust gRPC services (`embedding-service` :50051, `memory-core` :50052), and `PostChatMemoryWorkflow` for async entity extraction via Gemma 4. Conversation summarization runs locally via Gemma 4, not Anthropic.
+>
+> For current behavior see the **Memory-First Design** section in [`../CLAUDE.md`](../CLAUDE.md). Curl examples below use the legacy host port `8001`; the current API host port is `8000`.
+>
+> Kept for historical context only.
+
+---
 
 ## Overview
 

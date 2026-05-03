@@ -1,5 +1,7 @@
 # AgentProvision UX Improvements for C-Level Executives
 
+> **⚠️ Historical document.** AgentKit was removed 2026-04-19 — chat sessions now bind to an Agent directly via `chat_sessions.agent_id`, and the `/agent-kits` route has been replaced by `/agents` (with `AgentDetailPage` tabs: Overview / Performance / Audit / Versions / Integrations). Recommendations referencing "Agent Kits" should be read as "Agents" today.
+
 ## Executive Summary
 
 This document outlines UX improvements to make AgentProvision more intuitive and valuable for CEOs and C-level executives. The focus is on **simplification, visual clarity, and business-relevant insights**.

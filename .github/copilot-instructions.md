@@ -1,72 +1,72 @@
 # Copilot Instructions for AgentProvision
 
-AgentProvision is an **AI agent orchestration platform** that routes tasks to Claude Code CLI, Codex, and Gemini CLI via Temporal workflows. It serves 81 MCP tools, maintains a knowledge graph with pgvector, and auto-scores responses with local Qwen models for reinforcement learning.
+AgentProvision is a **memory-first, multi-tenant AI agent orchestration platform**. It routes tasks to existing CLI agent runtimes (**Claude Code, Codex, Gemini CLI, GitHub Copilot CLI**) via Temporal workflows, serves **90+ MCP tools**, maintains a knowledge graph in pgvector (768-dim, `nomic-embed-text-v1.5`), and auto-scores responses with **local Gemma 4** (Ollama) for reinforcement learning.
+
+> **Source of truth for architecture:** [`CLAUDE.md`](../CLAUDE.md). Quick agent reference: [`AGENTS.md`](../AGENTS.md). This file is the entry point for GitHub Copilot.
 
 ## Quick Start
 
 ```bash
-# Start all services locally
-DB_PORT=8003 API_PORT=8001 WEB_PORT=8002 docker-compose up --build
+# 1. Configure secrets (all three are REQUIRED — startup fails without them)
+cp apps/api/.env.example apps/api/.env
+# Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+# Edit apps/api/.env to set SECRET_KEY, API_INTERNAL_KEY, MCP_API_KEY
 
-# Services available at:
-# - Web: http://localhost:8002
-# - API: http://localhost:8001
-# - Temporal UI: http://localhost:8233
-# - Demo login: test@example.com / password
+# 2. Start the stack (docker-compose is the primary local runtime)
+docker compose up -d
+
+# 3. Apply migrations
+PG=$(docker ps --format '{{.Names}}' | grep db-1)
+for f in apps/api/migrations/*.sql; do
+  docker exec -i $PG psql -U postgres agentprovision < "$f"
+done
+
+# Endpoints (host ports, mapped through .env)
+# Web:        http://localhost:8002              (or https://agentprovision.com via Cloudflare tunnel)
+# API:        http://localhost:8000              (or https://agentprovision.com/api/v1/)
+# Luna:       http://localhost:8009              (or https://luna.agentprovision.com)
+# Temporal:   http://localhost:8233
+# Demo login: test@example.com / password
 ```
 
-## Build, Test, and Lint Commands
+> Production-style K8s deployment (Rancher Desktop + Helm) is documented in [`docs/KUBERNETES_DEPLOYMENT.md`](../docs/KUBERNETES_DEPLOYMENT.md) and [`scripts/deploy_k8s_local.sh`](../scripts/deploy_k8s_local.sh).
 
-### Python (API & Code-Worker)
+## Build / Test / Lint
+
+### Python (API + workers + MCP server)
 
 ```bash
-# Setup
-cd apps/api
-pip install -r requirements.txt
-
-# Run all tests
-pytest
-
-# Run specific test file
-pytest tests/test_api.py
-
-# Run single test
-pytest tests/test_api.py::test_login -v
-
-# Lint code
-ruff check app
-
-# Fix linting issues
-ruff check app --fix
+cd apps/api && pip install -r requirements.txt
+pytest                                  # full suite
+pytest tests/test_api.py                # single file
+pytest tests/test_api.py::test_login -v # single test
+ruff check app                          # lint
+ruff check app --fix                    # autofix
 ```
 
-### React (Web Frontend)
+### React Web Frontend
 
 ```bash
-# Setup
-cd apps/web
-npm install
-
-# Run tests (watch mode)
-npm test
-
-# Run tests once (CI mode)
-npm test -- --ci --watchAll=false
-
-# Run specific test file
-npm test -- WizardStepper.test.js
-
-# Build for production
-npm run build
-
-# Start dev server
-npm start
+cd apps/web && npm install
+npm start                                  # dev server (port 3000)
+npm test                                   # watch mode
+npm test -- --ci --watchAll=false          # CI mode
+npm run build                              # production bundle
 ```
 
-### Monorepo (All Services)
+### Luna Client (Tauri 2)
 
 ```bash
-# Install and build all
+cd apps/luna-client && npm install
+npm run tauri dev                          # desktop hot reload
+cd src-tauri && cargo check                # Rust type check
+```
+
+> Don't build production Tauri DMGs locally — push to `main` and let GitHub Actions build via the `luna-client-build` workflow.
+
+### Monorepo
+
+```bash
 pnpm install && pnpm build && pnpm lint
 ```
 
@@ -74,134 +74,145 @@ pnpm install && pnpm build && pnpm lint
 
 ### Core Stack
 
-- **Backend**: FastAPI (Python 3.11) at `apps/api` (port 8001)
-- **Frontend**: React 18 SPA at `apps/web` (port 8002)
-- **Code Execution**: Claude Code CLI Temporal worker at `apps/code-worker`
-- **MCP Tools**: FastMCP server at `apps/mcp-server` (ports 8086-8087)
-- **Orchestration**: Temporal at port 7233
-- **Database**: PostgreSQL with pgvector at port 8003
-- **Local ML**: Ollama at port 11434 (Qwen models for scoring, extraction, summarization)
-- **Tunneling**: Cloudflare Tunnel (agentprovision.com + agentprovision.com)
+| Service | Path | Port | Purpose |
+|---------|------|------|---------|
+| API | `apps/api` | 8000 | FastAPI backend, all REST + SSE endpoints |
+| Web | `apps/web` | 8002 (host) → 80 (nginx) | React 18 SPA |
+| Luna | `apps/luna-client` | 8009 (host) | Tauri 2 desktop + PWA |
+| MCP server | `apps/mcp-server` | 8086 | FastMCP, 90+ tools |
+| Code worker | `apps/code-worker` | — | Temporal worker on `agentprovision-code` queue |
+| Embedding service | `apps/embedding-service` | 50051 | Rust gRPC, fastembed/ONNX |
+| Memory core | `apps/memory-core` | 50052 | Rust gRPC, recall + record |
+| Temporal | — | 7233 | Workflow engine |
+| PostgreSQL | — | 5432 | pgvector/pgvector:pg13 |
+| Redis | — | 6379 | Pub/sub + agent registry |
+| Ollama | host:11434 | — | Native Gemma 4 (M4 GPU) |
+| Cloudflare tunnel | in-cluster pod | — | `agentprovision.com` ingress |
 
 ### Request Flow
 
 ```
-User Input (Web/WhatsApp/API)
-  ↓
+User input  (Web · WhatsApp · Luna desktop · API · Microsoft Teams)
+     │
+     ▼
 FastAPI Chat Service
-  ↓
-Agent Router (Python, deterministic routing — zero LLM cost)
-  ↓
-Temporal Workflow Dispatcher
-  ↓
-Code-Worker Pod (Claude Code CLI with tenant's OAuth token)
-  ↓
-MCP Tool Server (81 tools)
-  ↓
-Response → Auto Quality Scorer (local Qwen, 6-dim rubric) → RL Experience
+     │  ┌──────────── Memory Recall (pgvector, 1500ms hard cap) ────────┐
+     │  └──────────── Pre-loads context into CLAUDE.md ────────────────┘
+     ▼
+Agent Router (Python, deterministic, RL-augmented — zero LLM cost)
+     │
+     ▼
+Temporal: ChatCliWorkflow (queue: agentprovision-code)
+     │
+     ▼
+Code Worker pod
+     │  ┌── Claude Code · Codex · Gemini CLI · GitHub Copilot CLI ──┐
+     │  └── tenant OAuth from vault → set per-subprocess env ──────┘
+     ▼
+MCP Tool Server (FastMCP SSE :8086, X-Internal-Key auth)
+     │
+     ▼
+Response  →  Auto Quality Scorer (Gemma 4, 6-dim rubric)  →  RL experience
+        ↓
+        PostChatMemoryWorkflow (entity extraction, async)
 ```
 
 ### Service Organization
 
-**`apps/api`** (FastAPI backend):
-- **Models** (`app/models/`): SQLAlchemy ORM with `tenant_id` for multi-tenancy
-- **Services** (`app/services/`): Business logic, CRUD, LLM calls, embeddings
-- **Routes** (`app/api/v1/`): RESTful endpoints with dependency injection
-- **Workers** (`app/workers/`): Temporal workflow definitions
-- **Workflows** (`app/workflows/`): Temporal activities and orchestration
-- **Skills** (`app/skills/`): Skill marketplace (native/community/custom tiers)
+`apps/api`:
+- **Models** (`app/models/`) — SQLAlchemy ORM, every model carries `tenant_id`. Includes ALM tables (`agent_versions`, `agent_audit_log`, `agent_policies`, `agent_permissions`, `agent_performance_snapshots`, `external_agents`).
+- **Services** (`app/services/`) — business logic, CRUD, embeddings, RL, agent router, A2A coalition.
+- **Routes** (`app/api/v1/`) — REST + SSE endpoints, dependency-injected.
+- **Workers** (`app/workers/`) — Temporal worker registration (orchestration, postgres, scheduler).
+- **Workflows** (`app/workflows/`) — Temporal workflow definitions including `DynamicWorkflowExecutor`, `CoalitionWorkflow`, `InboxMonitorWorkflow`, `CompetitorMonitorWorkflow`, `TeamsMonitorWorkflow` (#250).
+- **Memory** (`app/memory/`) — recall / record / ingest / dispatch package.
+- **Skills** (`app/skills/`) — file-based marketplace (`_bundled/` + `_tenant/<uuid>/`).
 
-**`apps/web`** (React SPA):
-- **Pages** (`src/pages/`): Dashboard, Chat, Agents, Workflows, Memory (Knowledge Base), Integrations, Settings
-- **Components** (`src/components/`): Reusable UI (Layout, TaskTimeline, NotificationBell, etc.)
-- **Bootstrap 5 + React Bootstrap**: Glassmorphic "Ocean Theme" with dark mode support
+`apps/web` — `pages/` (DashboardPage, ChatPage, AgentsPage, AgentDetailPage, WorkflowsPage, MemoryPage, IntegrationsPage, NotebooksPage, SettingsPage, BrandingPage, LLMSettingsPage), `components/` (Layout, NotificationBell, TaskTimeline, IntegrationsPanel, CollaborationPanel, workflows/*, wizard/*).
 
-**`apps/code-worker`** (Temporal worker):
-- Autonomous Python/Node.js agent
-- Executes `claude` commands with tenant's OAuth token (subscription-based, not API credits)
-- Creates feature branches, commits, and opens PRs with full audit trail
-- Task queue: `agentprovision-code`
+`apps/code-worker` — Python + Node.js. Owns the CLI subprocess lifecycle. Heartbeat ≤240s. Multi-account-aware GitHub MCP wiring (#249).
 
-**`apps/mcp-server`** (MCP protocol):
-- 81 tools across 15 categories: Knowledge, Email, Calendar, Jira, GitHub, Ads, Data, Sales, Competitor, Monitor, Reports, Analytics, Skills, Shell, Drive
-- Served via FastMCP (Anthropic's MCP standard)
+`apps/mcp-server` — Tools across knowledge, email, calendar, drive, Jira, GitHub, ads, data, sales, competitor, monitor, reports, analytics, workflows, skills, devices, shell, connectors, tenant-specific, Copilot Studio.
 
 ## Key Conventions & Patterns
 
-### Multi-Tenancy
+### Multi-Tenancy (CRITICAL)
 
-**CRITICAL**: Every database query must filter by `tenant_id` to enforce isolation. All models inherit `tenant_id: UUID`.
+Every database query must filter by `tenant_id`. All models inherit a `tenant_id: UUID` FK.
 
 ```python
-# ✅ Correct: Filter by tenant
+# ✅ Correct
 agents = db.query(Agent).filter(Agent.tenant_id == current_user.tenant_id).all()
 
-# ❌ WRONG: No tenant filter
+# ❌ Multi-tenancy break
 agents = db.query(Agent).all()
 ```
 
 ### Authentication
 
-- JWT-based: `Authorization: Bearer <token>` header
-- Routes extract user via `get_current_user()` dependency (in `app/api/v1/deps.py`)
-- All protected endpoints require user context
-- Demo credentials: `test@example.com` / `password`
+- JWT-based: `Authorization: Bearer <token>` header.
+- `get_current_user()` dependency (`app/api/v1/deps.py`) extracts the user.
+- Tokens expire ~30min — re-login during long sessions.
+- Demo: `test@example.com` / `password`.
 
-### Database Initialization
+### Required Secrets (no defaults — hardened 2026-04-18)
 
-On API startup, `apps/api/app/main.py` calls `init_db()` which:
-1. Creates tables (idempotent)
-2. Seeds demo data
-3. Uses SQLAlchemy synchronous sessions (despite `asyncpg` driver)
+Startup `ValidationError` if missing:
+- `SECRET_KEY` (32+ byte hex) — JWT signing.
+- `API_INTERNAL_KEY` (32+ byte hex) — for `/api/v1/*/internal/*` endpoints (now blocked from public internet at the Cloudflare tunnel since #207).
+- `MCP_API_KEY` (24+ byte hex) — for MCP server ↔ API calls.
+- `ENCRYPTION_KEY` (Fernet) — credential vault.
 
-### Multi-LLM Provider Routing
+> Footgun: in `docker-compose.yml`, `environment:` overrides `env_file`. After rotating a key, recreate services: `docker compose up -d --force-recreate api code-worker orchestration-worker mcp-tools`.
 
-- **Integration Registry + Credential Vault pattern**: Tenants select LLM provider (Claude Code, Codex, Gemini) via integrations page
-- **OAuth token storage**: Credentials are Fernet-encrypted in the database
-- **Agent Router**: Deterministic routing (zero LLM cost) maps user intents/channels to agent skills
-- **Fallback**: Local Qwen model (Luna persona) when no subscription connected
+### CLI Runtime Routing
 
-### Knowledge Graph & Vector Search
+- **Per-tenant default** via `tenant_features.default_cli_platform` (Settings → Integrations).
+- **Autodetect + quota fallback chain** (#245) — auto-routes to a working CLI when the preferred one is rate-limited or unavailable.
+- **Subscription-based OAuth** — credentials stored Fernet-encrypted in the integration vault, fetched at runtime, never logged.
 
-- Entities (`knowledge_entity.py`) and relations (`knowledge_relation.py`) stored in PostgreSQL
-- **pgvector embeddings**: 768-dim vectors via `nomic-embed-text-v1.5` (local, open-source)
-- **Centralized in `embedding_service.py`**: Functions `embed_text()`, `embed_and_store()`, `search_similar()`, `recall()`
-- Used by: knowledge operations, chat context, memory activities, RL experiences, skill registry (auto-trigger matching)
+### Agent Lifecycle Management (ALM, shipped 2026-04-18)
+
+`draft → staging → production → deprecated` with `successor_agent_id`. Versioned snapshots in `agent_versions`, audit in `agent_audit_log`, hourly performance rollup in `agent_performance_snapshots`, RBAC in `agent_permissions`, governance rules in `agent_policies`. Redis-backed capability registry. External agents (OpenAI Assistants, MCP servers, webhooks, Copilot Studio, Azure AI Foundry) via `external_agents` + adapter service.
+
+### A2A Collaboration (shipped 2026-04-12, v2 2026-04-26)
+
+Multi-agent coalitions over a shared **Blackboard**. `CoalitionWorkflow` runs phased patterns (`gather_facts → hypothesize → prescribe`). Each agent turn is a `ChatCliWorkflow` child workflow. Live SSE stream powers `CollaborationPanel`. Patterns ship as `workflow_templates` JSON. Handoffs persist as `ChatMessage(context.kind="handoff")` + `WorkflowRun` — no separate `agent_messages` table. **CLI-agnostic** — never hardcode a CLI in pattern definitions.
+
+### Knowledge Graph + pgvector
+
+Entities (`knowledge_entity.py`) + relations (`knowledge_relation.py`) + observations (`knowledge_observations`) + history (`knowledge_entity_history`). Centralized embeddings via `embedding_service.embed_text()` — routes to Rust gRPC (port 50051) or Python sentence-transformers fallback. 768-dim, `nomic-embed-text-v1.5`. Used by knowledge, chat, memory, RL, skill auto-trigger.
 
 ### Auto Quality Scoring & RL
 
-Every response is automatically scored by local Qwen across 6 dimensions (100 pts total):
+Gemma 4 scores every response across 6 dimensions (100 pts):
 
-| Dimension | Pts | Measures |
-|-----------|-----|----------|
+| Dim | Pts | Measures |
+|-----|-----|----------|
 | Accuracy | 25 | Factual correctness, no hallucinations |
-| Helpfulness | 20 | Addresses actual user need, actionable |
+| Helpfulness | 20 | Addresses actual user need |
 | Tool Usage | 20 | Appropriate MCP tool selection |
-| Memory Usage | 15 | Knowledge graph recall, context building |
-| Efficiency | 10 | Concise, fast response |
+| Memory Usage | 15 | Knowledge graph recall |
+| Efficiency | 10 | Concise, fast |
 | Context Awareness | 10 | Conversation continuity |
 
-Scores logged as **RL experiences** (`rl_experience` table) with reward components for continuous improvement. Zero cloud cost — fully local inference.
+Logged as `rl_experience` with cost tracking and platform recommendations. Side-effect tools / low scores / fragile consensus / 5% sample fan out to a **multi-provider review council** (Claude + Codex + Gemma 4) on the `agentprovision-code` queue.
 
-### Service Structure Pattern
-
-Each service extends the `BaseService` pattern:
+### Service Pattern
 
 ```python
 from app.services.base import BaseService
 
 class AgentService(BaseService):
     model = Agent
-    
+
     def create(self, db: Session, tenant_id: UUID, **kwargs):
-        # Always filter by tenant
         obj = self.model(tenant_id=tenant_id, **kwargs)
-        db.add(obj)
-        db.commit()
+        db.add(obj); db.commit()
         return obj
 ```
 
-### Import Order (Python)
+### Python Imports
 
 ```python
 # 1. Standard library
@@ -211,247 +222,128 @@ from datetime import datetime
 # 2. Third-party
 from fastapi import FastAPI
 from sqlalchemy import Column, String
-from pydantic import BaseModel
 
 # 3. Local app
 from app.db.session import SessionLocal
 from app.models.agent import Agent
 ```
 
-### React Component Structure
+### React Components
 
 ```jsx
-// PascalCase for components
-export function WizardStepper({ steps, onComplete }) {
-  const [currentStep, setCurrentStep] = useState(0);
-  
-  // Hooks, event handlers
-  const handleNext = () => setCurrentStep(prev => prev + 1);
-  
-  return (
-    <div className="wizard-container">
-      {/* JSX */}
-    </div>
-  );
-}
+// PascalCase components
+export function WizardStepper({ steps, onComplete }) { ... }
 
-// camelCase for services
+// camelCase service singletons
 export const agentService = {
   list: () => axios.get('/api/v1/agents'),
-  create: (data) => axios.post('/api/v1/agents', data),
 };
 ```
 
 ### Error Handling
 
-**API**:
-- Return proper HTTP status codes with error details
-- Validation errors: `422 Unprocessable Entity`
-- Auth errors: `401 Unauthorized` or `403 Forbidden`
-- Not found: `404 Not Found`
+- API: 422 (validation), 401/403 (auth), 404 (missing), proper error detail.
+- Frontend: try/catch + user-friendly messages, full error to console.
+- Always validate tenant isolation in queries.
 
-**Frontend**:
-- Try/catch around API calls
-- Display user-friendly error messages
-- Log full errors to console for debugging
+### Database Migrations (manual, no Alembic)
 
-### Database Migrations
+```bash
+# 1. Add SQL file
+apps/api/migrations/NNN_<slug>.sql        # NNN = next number
+git add -f apps/api/migrations/NNN_*.sql  # *.sql is in global .gitignore — force add
 
-Manual SQL scripts in `apps/api/migrations/` (not Alembic). See `migrations/README.md` for runbook.
+# 2. Apply against the DB pod
+PG=$(docker ps --format '{{.Names}}' | grep db-1)
+docker exec -i $PG psql -U postgres agentprovision < apps/api/migrations/NNN_<slug>.sql
 
-### Temporal Workflows
-
-**Task Queues**:
-- `agentprovision-orchestration`: TaskExecution, ChannelHealthMonitor, FollowUp, InboxMonitor, CompetitorMonitor
-- `agentprovision-code`: Code-worker (Claude Code CLI execution)
-- `agentprovision-postgres`: DatasetSync, KnowledgeExtraction, AgentKitExecution
-
-Workflow structure:
-```python
-@workflow.defn
-class CodeTaskWorkflow:
-    @workflow.run
-    async def run(self, task: CodeTask) -> str:
-        # Dispatch to activities
-        result = await workflow.execute_activity(execute_code_task, task)
-        return result
+# 3. Record it
+docker exec -i $PG psql -U postgres agentprovision \
+  -c "INSERT INTO _migrations(filename) VALUES ('NNN_<slug>.sql');"
 ```
 
-### Skill Marketplace
+### Temporal Task Queues
 
-Three-tier system:
-1. **Native**: Built-in skills (sql_query, calculator, entity_extraction, knowledge_search, report_generation)
-2. **Community**: Imported from GitHub repos (supports GWS SKILL.md format + Claude Code superpowers)
-3. **Custom**: Per-tenant skills created/edited in UI with versioning
+| Queue | Workflows |
+|-------|-----------|
+| `agentprovision-orchestration` | TaskExecution, ChannelHealthMonitor, FollowUp, InboxMonitor, CompetitorMonitor, **TeamsMonitor** (#250), DynamicWorkflowExecutor, CoalitionWorkflow, AgentPerformanceSnapshot |
+| `agentprovision-code` | CodeTaskWorkflow, ChatCliWorkflow, ProviderReviewWorkflow |
+| `agentprovision-business` | DealPipeline, RemediaOrder, MonthlyBilling |
 
-Engines: `python`, `shell`, `markdown`, `tool` (class registry)
+> **Heartbeat discipline**: long-running CLI activities must `heartbeat()` ≤240s or Temporal cancels. `execute_chat_cli` is a sync activity in a thread pool with a background heartbeat loop.
+
+### Skill Marketplace v2 (shipped 2026-04-26)
+
+Two-folder file layout:
+- `_bundled/` — read-only, ships with the container.
+- `_tenant/<uuid>/` — per-tenant, custom + community.
+- Format: Claude-Code-style `SKILL.md` (frontmatter + instructions + optional `script.py`/`script.sh`/`prompt.md`).
+- Audit: every change → `library_revisions` row (migration 110).
+- Code-worker access: via `read_library_skill` MCP tool. Don't mount the library into the worker pod.
+- Discovery via MCP: `update_skill`, `update_agent`, `read_library_skill`.
 
 ### Adding a New Resource
 
-1. **Model**: `apps/api/app/models/{resource}.py` with `tenant_id` FK
-2. **Schema**: `apps/api/app/schemas/` with `{Resource}Create`, `{Resource}Update`, `{Resource}InDB`
-3. **Service**: `apps/api/app/services/{resources}.py` extending `BaseService`
-4. **Routes**: `apps/api/app/api/v1/{resources}.py` with dependency injection
-5. **Frontend**: Add page in `apps/web/src/pages/` and route in `App.js`
-6. **Helm**: Update `helm/values/` if Kubernetes resources needed
+1. **Model** — `apps/api/app/models/{resource}.py` with `tenant_id` FK.
+2. **Schema** — `apps/api/app/schemas/{resource}.py`.
+3. **Service** — `apps/api/app/services/{resources}.py` extending `BaseService`.
+4. **Routes** — `apps/api/app/api/v1/{resources}.py`, mount in `routes.py`.
+5. **Migration** — manual SQL (see above).
+6. **Frontend** — page in `apps/web/src/pages/`, route in `App.js`, nav in `Layout.js`.
+7. **Helm** — values in `helm/values/` if a new service is needed.
 
 ## Configuration & Environment
 
-### Docker Compose Ports
+### API `.env` (`apps/api/.env`)
 
 ```bash
-API_PORT=8001      # FastAPI backend
-WEB_PORT=8002      # React frontend
-DB_PORT=8003       # PostgreSQL
-MCP_PORT=8086      # MCP server
-                   # MCP tools on 8087
-```
+SECRET_KEY=<jwt-signing-key>           # 32+ byte hex (REQUIRED)
+API_INTERNAL_KEY=<internal-svc-key>    # 32+ byte hex (REQUIRED)
+MCP_API_KEY=<mcp-key>                  # 24+ byte hex (REQUIRED)
+ENCRYPTION_KEY=<fernet-key>            # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
-### API Environment (`apps/api/.env`)
-
-```bash
 ANTHROPIC_API_KEY=sk-ant-...
 DATABASE_URL=postgresql://postgres:postgres@db:5432/agentprovision
-SECRET_KEY=<your-jwt-secret>
 TEMPORAL_ADDRESS=temporal:7233
-MCP_SERVER_URL=http://mcp-server:8000
-ENCRYPTION_KEY=<fernet-key>  # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+MCP_SERVER_URL=http://mcp-tools:8000   # internal compose hostname (helm uses agentprovision-mcp, see #238)
+
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 ```
 
-### Web Environment (`apps/web/.env.local`)
+### Web `.env.local` (`apps/web/.env.local`)
 
 ```bash
-REACT_APP_API_BASE_URL=http://localhost:8001
+REACT_APP_API_BASE_URL=http://localhost:8000
 ```
 
-### Code-Worker Configuration
+### Code-Worker
 
-```bash
-GITHUB_TOKEN=ghp_xxxxx                      # GitHub PAT
-API_INTERNAL_KEY=xxxxx                      # Internal API auth
-API_BASE_URL=http://agentprovision-api      # Internal service URL
-TEMPORAL_ADDRESS=temporal:7233
-# CLAUDE_CODE_OAUTH_TOKEN set dynamically per-task from tenant's vault
-```
+- `GITHUB_TOKEN` — git + PR ops (from secrets).
+- `API_INTERNAL_KEY` — to fetch tenant OAuth tokens.
+- `API_BASE_URL=http://api:8000` — internal compose URL (default since #234).
+- `CLAUDE_CODE_OAUTH_TOKEN` / Codex `auth.json` / Gemini creds / Copilot token — set per-subprocess from the tenant's vault, never in pod env.
 
-## Important Files & Directories
+## Hard Rules
 
-| Path | Purpose |
-|------|---------|
-| `apps/api/app/main.py` | API entry point, initialization |
-| `apps/api/app/models/` | SQLAlchemy ORM models (all with `tenant_id`) |
-| `apps/api/app/services/` | Business logic, CRUD, API calls |
-| `apps/api/app/api/v1/` | FastAPI routers and endpoints |
-| `apps/api/app/workflows/` | Temporal workflow definitions |
-| `apps/api/app/workers/` | Temporal worker registration |
-| `apps/web/src/pages/` | React page components |
-| `apps/web/src/components/` | Reusable UI components |
-| `apps/code-worker/` | Claude Code CLI Temporal worker |
-| `apps/mcp-server/` | MCP tool definitions |
-| `docker-compose.yml` | Local development stack |
-| `helm/` | Kubernetes Helm charts |
-| `infra/terraform/` | AWS infrastructure as code |
-
-## Testing Strategy
-
-### Unit Tests
-
-Place tests in same directory as code:
-```
-apps/api/tests/test_services.py
-apps/api/tests/test_api.py
-apps/web/src/components/__tests__/WizardStepper.test.js
-```
-
-### Running Tests Locally
-
-```bash
-# Full suite
-pytest
-
-# Single file
-pytest tests/test_api.py -v
-
-# Single test function
-pytest tests/test_api.py::test_login -v
-
-# With coverage
-pytest --cov=app tests/
-```
-
-### E2E Testing
-
-```bash
-BASE_URL=http://localhost:8001 ./scripts/e2e_test_production.sh
-```
-
-## Deployment
-
-### Local Development
-```bash
-docker-compose up --build
-```
-
-### Production (Kubernetes + GitHub Actions)
-- See `.github/workflows/` for CI/CD pipelines
-- Deploys via Helm charts to GKE
-- Credentials stored in GCP Secret Manager
-- Terraform for AWS infrastructure
-
-## Common Tasks
-
-### Add a Database Model
-
-1. Create `apps/api/app/models/my_resource.py`:
-```python
-from sqlalchemy import Column, String
-from app.db.base import Base
-import uuid
-
-class MyResource(Base):
-    __tablename__ = "my_resource"
-    id = Column(UUID, primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID, ForeignKey("tenant.id"), nullable=False)
-    name = Column(String, nullable=False)
-```
-
-2. Add to `apps/api/app/models/__init__.py`
-
-3. Create migration SQL in `apps/api/migrations/`
-
-4. Create service in `apps/api/app/services/my_resources.py`
-
-5. Create schema in `apps/api/app/schemas/my_resource.py`
-
-6. Add routes in `apps/api/app/api/v1/my_resources.py`
-
-### Add a React Page
-
-1. Create `apps/web/src/pages/MyResourcePage.js`
-2. Add route in `apps/web/src/App.js`
-3. Add nav item in `apps/web/src/components/Layout.js`
-
-### Connect to MCP Tool
-
-MCP tools are auto-exposed to agent CLIs via config in `session_manager.py`. No extra registration needed — just call the tool from within Claude Code or another CLI agent.
-
-### Debug Temporal Workflow
-
-- View Temporal UI at http://localhost:8233
-- See workflow history, failed activities, and execution traces
-- Check worker logs: `docker-compose logs api-worker`
+- **Never** commit to `main` — feature branch + PR. Assign PRs to `nomade`.
+- **Never** add `Co-Authored-By: Claude` (or any AI credit) to commits, PRs, or comments.
+- **Never** add docs / plans / tests / scripts at the repo root — use dedicated folders.
+- **Never** build production Tauri DMGs locally — push to main, let CI build.
+- **Never** run destructive Docker / git commands without approval.
+- When making manual changes, **mirror them into Helm + Git + Terraform** to prevent drift.
+- All `tenant_id` filtering is mandatory.
 
 ## Reference Documentation
 
-- **Full architecture**: `CLAUDE.md` (comprehensive, covers models, services, workflows, deployment)
-- **Agent structure**: `AGENTS.md` (agent hierarchy, tools, code style guidelines)
-- **Gemini integration**: `GEMINI.md` (Gemini CLI setup and integration)
-- **README**: `README.md` (high-level overview, quick start)
+- [`CLAUDE.md`](../CLAUDE.md) — full architecture, models, services, dev commands, patterns. Source of truth.
+- [`AGENTS.md`](../AGENTS.md) — agent-system layout (CLI runtimes vs platform agents, ALM, A2A).
+- [`docs/changelog/`](../docs/changelog/) — weekly digests.
+- [`docs/plans/`](../docs/plans/) — design docs and implementation plans.
+- [`docs/report/`](../docs/report/) — security audits, pentest verifications.
+- [`docs/KUBERNETES_DEPLOYMENT.md`](../docs/KUBERNETES_DEPLOYMENT.md) — K8s runbook.
+- [`README.md`](../README.md) — high-level overview, quick start.
 
 ---
 
-**Last Updated**: 2026-03-25
-
-For questions about codebase structure or patterns, refer to `CLAUDE.md` which contains exhaustive architecture and service documentation.
+**Last updated:** 2026-05-03

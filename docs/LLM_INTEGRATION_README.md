@@ -1,4 +1,12 @@
-# LLM Integration Complete ✅
+# LLM Integration (historical reference)
+
+> **⚠️ Historical document.** Describes the original direct-Anthropic-API integration from the platform's early days. The current architecture routes through **CLI agent runtimes** (Claude Code, Codex, Gemini CLI, GitHub Copilot CLI) using **tenant subscriptions via OAuth** — zero API credits. Local inference (scoring, summarization, extraction, triage) runs on **Gemma 4 via Ollama**, not Qwen.
+>
+> For current behavior see [`../CLAUDE.md`](../CLAUDE.md), [`../AGENTS.md`](../AGENTS.md), and [`../README.md`](../README.md).
+>
+> Kept for historical context only — endpoint paths, model names, ports, and agent-kit references in this file are out of date as of 2026-05-03.
+
+---
 
 ## What Was Implemented
 

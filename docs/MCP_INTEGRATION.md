@@ -5,8 +5,8 @@ Connect any external MCP server to AgentProvision. Agents get access to all disc
 ## How It Works
 
 ```
-User message → Luna → CLI Orchestrator (Claude Code)
-                         ├── mcp__agentprovision__*  (built-in, 81 tools)
+User message → Luna → CLI Orchestrator (Claude Code · Codex · Gemini · Copilot CLI)
+                         ├── mcp__agentprovision__*  (built-in, 90+ tools)
                          ├── mcp__integral-sre__*    (external, 71 tools)
                          └── mcp__your-server__*     (external, N tools)
 ```

@@ -17,7 +17,9 @@
   Don't build agents — orchestrate them. AgentProvision routes tasks to existing AI agent platforms (Claude Code, Codex, Gemini CLI, GitHub Copilot CLI), serves 90+ MCP tools, maintains a knowledge graph, auto-scores every response with a local LLM, and learns which platform performs best via RL. Enterprise-grade <b>Agent Lifecycle Management</b> with versioning, audit, rollback, and governance. Each tenant uses their own subscription — zero API credits.
 </p>
 
-> **Latest:** week of 2026-04-12 → 04-19 shipped the Agent Lifecycle Management Platform, A2A Collaboration, Luna OS Spatial Workstation, native voice PTT, redesigned landing page, and security hardening. See `docs/changelog/2026-04-12-to-2026-04-19.md` for the full digest.
+> **Latest (2026-04-19 → 2026-05-03):** Skills Marketplace v2 (`_bundled/` + `_tenant/<uuid>/` layout, Claude-Code-format SKILL.md, library_revisions audit), External Agents + A2A v2 (Microsoft Copilot Studio + Azure AI Foundry import, Workflows-as-spine, no `agent_messages` table), Microsoft Teams channel via Graph + `TeamsMonitorWorkflow`, **GitHub Copilot CLI** runtime, autodetect CLI + quota fallback chain, greeting fast-path latency win (~130×–397× on warm path), internal endpoints blocked from public internet (#207), routing transparency footer in chat. See [`docs/changelog/2026-04-19-to-2026-05-03.md`](docs/changelog/2026-04-19-to-2026-05-03.md) for the full digest.
+>
+> **Previously (2026-04-12 → 2026-04-19):** Agent Lifecycle Management Platform, A2A Collaboration, Luna OS Spatial Workstation, redesigned landing page, security hardening. See [`docs/changelog/2026-04-12-to-2026-04-19.md`](docs/changelog/2026-04-12-to-2026-04-19.md). (Native cpal PTT was designed in #154 but is not currently in the tree.)
 
 ---
 
@@ -30,7 +32,8 @@ Luna is the native presence layer for AgentProvision. A 4.9MB Tauri 2.0 desktop 
 | Native macOS ARM64 app (Tauri 2.0 + Rust) | Shipped |
 | System tray with show/hide toggle | Shipped |
 | Cmd+Shift+Space global shortcut (Raycast-style) | Shipped |
-| Cmd+Shift+Space native push-to-talk (Rust cpal audio) | **Shipped 2026-04-19** |
+| Cmd+Shift+Space command palette (`tauri-plugin-global-shortcut`) | Shipped |
+| Voice input via browser MediaRecorder → `/api/v1/media/transcribe` | Shipped (native cpal PTT designed in #154 not currently in tree) |
 | Cmd+Shift+L Spatial HUD (Three.js knowledge nebula) | **Shipped 2026-04-13** |
 | Chat with SSE streaming + markdown rendering | Shipped |
 | Emotion-reactive LunaAvatar (SVG, state-driven) | **Shipped 2026-04-19** |
@@ -68,7 +71,7 @@ Internet ─▶ Cloudflare Tunnel
   └─▶ luna.agentprovision.com           (Luna PWA / Tauri client)
 
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Channels: WhatsApp (Neonize) · Web Chat · Luna Desktop · API       │
+│  Channels: WhatsApp · Web · Luna Desktop · API · Microsoft Teams    │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 │
 ┌───────────────────────────────▼─────────────────────────────────────┐
@@ -323,6 +326,48 @@ Game-inspired transparent Tauri window (`Cmd+Shift+L`) for A2A visualization and
 
 ---
 
+## Skills Marketplace v2
+
+File-based skills laid out across two folders on a shared volume. Shipped 2026-04-26 (PRs #182–#193).
+
+```
+skills/
+├── _bundled/              # read-only, ships with the container
+│   └── <skill-slug>/
+│       ├── SKILL.md       # Claude-Code-format frontmatter + instructions
+│       ├── script.py      # optional, engine: python
+│       ├── script.sh      # optional, engine: shell
+│       └── prompt.md      # optional, engine: markdown
+└── _tenant/
+    └── <tenant-uuid>/     # custom + community-imported skills
+        └── <skill-slug>/...
+```
+
+- **Audit log** — every change writes a `library_revisions` row (migration 110).
+- **Code-worker access** — via the `read_library_skill` MCP tool. The library is intentionally **not** mounted into the worker pod.
+- **MCP tools** — `update_skill`, `update_agent`, `read_library_skill` for full CRUD from any CLI runtime.
+- **Auto-trigger** — pgvector embeddings power semantic match-on-context.
+
+---
+
+## External Agents + A2A v2
+
+Shipped 2026-04-26 (PRs #194–#205). Workflows are the audit + dispatch spine — no separate `agent_messages` table.
+
+| Capability | How |
+|------------|-----|
+| OpenAI Assistants, MCP servers, webhooks | `external_agents` row + `external_agent_adapter.py` |
+| Microsoft Copilot Studio | `GET /agents/microsoft/discover` enumerates Copilot Studio + AI Foundry → `POST /agents/import` adopts on Copilot CLI runtime |
+| CrewAI / LangChain / AutoGen import | `agent_importer.py` config translator |
+| Reliability shim | Mirrors Temporal RetryPolicy across native + external calls |
+| Handoffs | `ChatMessage(context.kind="handoff")` + `WorkflowRun` (no new table) |
+| Patterns | Ship as `workflow_templates` JSON (incident_investigation, deal_brief, cardiology_case_review) |
+| Resolution | `_call_agent` resolves UUIDs to native or external dispatch |
+
+**Hire wizard** (#205) unifies native + external + marketplace + import in a single onboarding flow.
+
+---
+
 ## Dynamic Workflows — 26 Native Templates
 
 JSON-defined workflows interpreted at runtime by a single `DynamicWorkflowExecutor` Temporal workflow. Visual ReactFlow builder at `/workflows/builder/:id`.
@@ -401,12 +446,14 @@ Each CLI platform uses subscription-based OAuth — zero API credits:
 | Claude Code | OAuth token via vault | **Live** |
 | Codex (OpenAI) | auth.json via vault | **Live** |
 | Gemini CLI | Manual OAuth (via Web UI) | **Live** |
-| GitHub Copilot CLI | OAuth token via vault | **Live (new 2026-04-18)** |
-| GitHub | OAuth via agentprovision.com | **Live** |
+| GitHub Copilot CLI | OAuth token via vault, JSON output mode | **Live runtime (#244, 2026-04-26)** |
+| GitHub | OAuth via agentprovision.com (multi-account aware) | **Live** |
 | Gmail / Calendar / Drive | Google OAuth with auto-refresh | **Live** |
 | Microsoft / Outlook | Microsoft OAuth | **Live** |
+| Microsoft Teams | Microsoft Graph (reuses microsoft OAuth) + `TeamsMonitorWorkflow` | **Live (#241/#250, 2026-04-26)** |
 | Jira | Basic Auth | **Live** |
-| Copilot Studio (DirectLine) | Per-request token passthrough | **Live (new 2026-04-18)** |
+| Copilot Studio (DirectLine) | Per-request token passthrough | **Live** |
+| Microsoft Copilot Studio + Azure AI Foundry agents | `GET /agents/microsoft/discover` → adopt on Copilot CLI runtime | **Live (#243/#251, 2026-04-26)** |
 
 ## Quick Start
 
@@ -458,7 +505,7 @@ Luna is evolving from a chat client into an AI-first native operating system.
 | **Phase 1** | Desktop presence (menu bar, shortcuts, notifications, screenshot) | **Done** |
 | **Phase 2** | Memory-led native (episodic recall, cross-device continuity) | **Done** |
 | **Phase 3** | Spatial workstation (transparent Tauri window, knowledge nebula, A2A visuals, hand tracking) | **Done 2026-04-13** |
-| **Phase 4** | Voice-first interaction (native cpal PTT, WAV encoding, voice context) | **Done 2026-04-19** |
+| **Phase 4** | Voice-first interaction (browser MediaRecorder today; native cpal PTT designed in #154 not currently in tree) | Browser path live; native deferred |
 | **Phase 5** | Device bridge (camera, IoT registry, desk sensors) | **Done 2026-04-19** |
 | **Phase 6** | Mobile companion (iOS/Android, BLE wearable relay) | Planned |
 | **Phase 7** | Local actions (automations, file ops, system commands with trust gates) | Planned |
@@ -468,7 +515,7 @@ See `docs/plans/2026-03-29-luna-native-operating-system-plan.md` and `docs/plans
 
 ## Stack
 
-FastAPI · React 18 · Tauri 2.0 (Rust + cpal) · Three.js + Framer Motion · PostgreSQL + pgvector · Temporal · Redis · FastMCP · Ollama (Gemma 4) · Neonize (WhatsApp) · Cloudflare Tunnel · Docker Compose (local) / Helm on Rancher Desktop (prod-path) · nomic-embed-text-v1.5
+FastAPI · React 18 · Tauri 2.0 (Rust) · Three.js + Framer Motion · PostgreSQL + pgvector · Temporal · Redis · FastMCP · Ollama (Gemma 4) · Neonize (WhatsApp) · Cloudflare Tunnel · Docker Compose (local) / Helm on Rancher Desktop (prod-path) · nomic-embed-text-v1.5
 
 ## Documentation
 
@@ -481,11 +528,15 @@ FastAPI · React 18 · Tauri 2.0 (Rust + cpal) · Three.js + Framer Motion · Po
 | [`docs/KUBERNETES_DEPLOYMENT.md`](docs/KUBERNETES_DEPLOYMENT.md) | Full K8s deployment runbook |
 
 **Recent highlights:**
-- [`docs/changelog/2026-04-12-to-2026-04-19.md`](docs/changelog/2026-04-12-to-2026-04-19.md) — most recent week
+- [`docs/changelog/2026-04-19-to-2026-05-03.md`](docs/changelog/2026-04-19-to-2026-05-03.md) — most recent fortnight (Skills v2, External Agents v2, Teams, Copilot CLI runtime, latency)
+- [`docs/changelog/2026-04-12-to-2026-04-19.md`](docs/changelog/2026-04-12-to-2026-04-19.md) — prior week (ALM, A2A, Spatial HUD)
+- [`docs/plans/2026-04-26-external-agents-and-a2a-enhancement-plan.md`](docs/plans/2026-04-26-external-agents-and-a2a-enhancement-plan.md) — External Agents + A2A v2 design
+- [`docs/plans/2026-04-26-skills-fleet-alignment-plan.md`](docs/plans/2026-04-26-skills-fleet-alignment-plan.md) — Skills Marketplace v2
+- [`docs/plans/2026-04-23-luna-latency-reduction-plan.md`](docs/plans/2026-04-23-luna-latency-reduction-plan.md) — latency campaign (greeting fast-path, prompt trim, KV cache probe)
+- [`docs/plans/2026-04-25-luna-hallucination-reduction-plan.md`](docs/plans/2026-04-25-luna-hallucination-reduction-plan.md) — hallucination reduction
 - [`docs/plans/2026-04-18-agent-lifecycle-management-platform-plan.md`](docs/plans/2026-04-18-agent-lifecycle-management-platform-plan.md) — ALM design
 - [`docs/plans/2026-04-12-a2a-collaboration-demo-design.md`](docs/plans/2026-04-12-a2a-collaboration-demo-design.md) — A2A coalitions
-- [`docs/report/2026-04-18-full-security-audit.md`](docs/report/2026-04-18-full-security-audit.md) — security findings
-- [`docs/report/2026-04-18-pentest-verification.md`](docs/report/2026-04-18-pentest-verification.md) — black-hat verification
+- [`docs/report/2026-04-18-pentest-verification.md`](docs/report/2026-04-18-pentest-verification.md) — black-hat verification of the security hardening
 
 ---
 
