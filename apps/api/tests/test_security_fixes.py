@@ -6,10 +6,16 @@ from unittest.mock import patch
 from pydantic import ValidationError
 
 
-def test_secret_key_has_no_insecure_default():
-    """Settings must raise on startup when critical env vars are missing."""
+def test_secret_key_has_no_insecure_default(monkeypatch, tmp_path):
+    """Settings must raise on startup when critical env vars are missing.
+
+    Uses ``monkeypatch.chdir`` into an empty directory so pydantic-settings
+    cannot pick up the developer's local ``apps/api/.env`` file (which would
+    silently provide the missing values).
+    """
     env_without_secrets = {k: v for k, v in os.environ.items()
                            if k not in ("SECRET_KEY", "MCP_API_KEY", "API_INTERNAL_KEY")}
+    monkeypatch.chdir(tmp_path)
     with patch.dict(os.environ, env_without_secrets, clear=True):
         # Remove any cached module so the reload triggers a fresh Settings() call
         sys.modules.pop("app.core.config", None)

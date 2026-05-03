@@ -1,4 +1,12 @@
 import pytest
+
+# This suite drives the full FastAPI app + Postgres/pgvector stack via TestClient.
+# It cannot run on a stock SQLite engine (JSONB columns, pgvector indexes), so we
+# mark the whole module as integration. Default `pytest -m "not integration"`
+# runs skip it; the dedicated integration job in tests.yaml runs it against a
+# real Postgres service container.
+pytestmark = pytest.mark.integration
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

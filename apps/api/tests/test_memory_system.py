@@ -54,8 +54,13 @@ def test_agent_fixture(db_session: Session, test_tenant: Tenant):
     return agent
 
 
+@pytest.mark.integration
 class TestAgentMemoryModel:
-    """Test AgentMemory model creation and attributes"""
+    """Test AgentMemory model creation and attributes.
+
+    Requires Postgres + pgvector — uses `Vector` columns and JSONB metadata.
+    Marked integration so the default unit run skips it.
+    """
 
     def test_create_agent_memory(self, db_session: Session, test_tenant: Tenant, test_agent: Agent):
         """Test creating an agent memory record"""

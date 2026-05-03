@@ -1,5 +1,9 @@
 """Tests for multi-provider LLM integration."""
 import pytest
+
+# Drives full app + Postgres/pgvector — see test_api.py for rationale.
+pytestmark = pytest.mark.integration
+
 from sqlalchemy import inspect
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
