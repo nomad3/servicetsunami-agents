@@ -62,6 +62,7 @@ from app.api.v1 import (
     external_agents,
     agent_marketplace,
     agent_tests,
+    insights_fleet_health,
 )
 
 _logger = logging.getLogger(__name__)
@@ -92,6 +93,8 @@ router.include_router(data_sources.router, prefix="/data_sources", tags=["data_s
 router.include_router(data_pipelines.router, prefix="/data_pipelines", tags=["data_pipelines"])
 router.include_router(notebooks.router, prefix="/notebooks", tags=["notebooks"])
 router.include_router(agents.router, prefix="/agents", tags=["agents"])
+# Tier 3 fleet-health endpoint mounts under /agents/fleet-health
+router.include_router(insights_fleet_health.router, prefix="/agents", tags=["agents"])
 router.include_router(agent_groups.router, prefix="/agent_groups", tags=["agent_groups"])
 router.include_router(agent_tasks.router, prefix="/tasks", tags=["tasks"])
 router.include_router(tools.router, prefix="/tools", tags=["tools"])

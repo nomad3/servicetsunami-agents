@@ -1,0 +1,59 @@
+.fleet-health-page {
+  max-width: 1300px;
+  margin: 0 auto;
+}
+
+.fleet-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.fleet-stat-tile {
+  padding: 1rem 1.25rem;
+  background: rgba(43, 125, 233, 0.04);
+  border: 1px solid rgba(180, 200, 220, 0.25);
+  border-radius: 12px;
+}
+
+.fleet-stat-tile.fleet-stat-warning {
+  background: rgba(245, 158, 11, 0.06);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+
+.fleet-stat-tile.fleet-stat-danger {
+  background: rgba(214, 90, 90, 0.06);
+  border-color: rgba(214, 90, 90, 0.2);
+}
+
+.fleet-stat-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--ap-text, #1a2b3c);
+  line-height: 1.1;
+}
+
+.fleet-stat-label {
+  font-size: 0.78rem;
+  color: var(--ap-text-muted, rgba(100, 120, 145, 0.72));
+  margin-top: 0.25rem;
+  display: flex;
+  align-items: center;
+}
+
+.fleet-health-table th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(100, 120, 145, 0.7);
+  border-bottom: 1px solid rgba(180, 200, 220, 0.25);
+}
+
+.fleet-health-table td {
+  font-size: 0.85rem;
+  vertical-align: middle;
+}
+
+.fleet-health-table tbody tr:hover {
+  background: rgba(43, 125, 233, 0.04);
+}

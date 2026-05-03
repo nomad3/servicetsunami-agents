@@ -15,7 +15,8 @@ import {
   FaRobot as Robot,
   FaSun as SunFill,
   FaPuzzlePiece as PuzzlePiece,
-  FaChartLine as ChartLine
+  FaChartLine as ChartLine,
+  FaHeartbeat as HeartbeatFill
 } from 'react-icons/fa';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../App';
@@ -67,6 +68,7 @@ const Layout = ({ children }) => {
       items: [
         { path: '/chat', icon: ChatDotsFill, label: t('sidebar.chat'), description: t('sidebar_desc.chat') },
         { path: '/agents', icon: Robot, label: t('sidebar.agents'), description: t('sidebar_desc.agents') },
+        { path: '/insights/fleet-health', icon: HeartbeatFill, label: t('sidebar.fleetHealth', 'Fleet Health'), description: t('sidebar_desc.fleetHealth', 'Imported-agent activity and zombies') },
         { path: '/workflows', icon: ProjectDiagramFill, label: t('sidebar.workflows'), description: t('sidebar_desc.workflows') },
         { path: '/memory', icon: DatabaseFill, label: t('sidebar.memory'), description: t('sidebar_desc.memory') },
         { path: '/skills', icon: PuzzlePiece, label: t('sidebar.skills'), description: t('sidebar_desc.skills') },

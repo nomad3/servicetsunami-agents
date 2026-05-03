@@ -8,6 +8,7 @@ import LandingPage from './LandingPage';
 // Agent Kits removed - using ADK for agent configuration
 import AgentDetailPage from './pages/AgentDetailPage';
 import AgentsPage from './pages/AgentsPage';
+import FleetHealthPage from './pages/FleetHealthPage';
 import AgentWizardPage from './pages/AgentWizardPage';
 import BrandingPage from './pages/BrandingPage';
 import ChatPage from './pages/ChatPage';
@@ -115,6 +116,7 @@ function App() {
                 <Route path="/integrations" element={<ProtectedRoute><IntegrationsPage /></ProtectedRoute>} />
                 <Route path="/notebooks" element={<ProtectedRoute><NotebooksPage /></ProtectedRoute>} />
                 <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
+                <Route path="/insights/fleet-health" element={<ProtectedRoute><FleetHealthPage /></ProtectedRoute>} />
                 <Route path="/agents/wizard" element={<ProtectedRoute><AgentWizardPage /></ProtectedRoute>} />
                 <Route path="/agents/:id" element={<ProtectedRoute><AgentDetailPage /></ProtectedRoute>} />
                 <Route path="/datasets" element={<Navigate to="/integrations?tab=datasets" replace />} />

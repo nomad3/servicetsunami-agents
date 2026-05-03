@@ -171,6 +171,16 @@ Slice the same data as Tier 2 but by health, not cost.
 
 - 2026-05-03: PR #256 — routing footer (Tier 1). 8 backend tests +
   6 frontend tests. Verified live on AgentProvision.
+- 2026-05-03: PR #260 — routing footer review fixes (C1 served-actual,
+  C2 chain-exhausted, I1 first-err attribution, I2 autodetect,
+  I3 E2E no-leak, I4 exception classification + M cleanup). 22 backend
+  + 9 frontend tests.
+- 2026-05-03: Tier 3 — imported-agent fleet health. New
+  `GET /agents/fleet-health` endpoint (cursor pagination, audit_log
+  aggregations, zombie / source / owner / team filters) + new
+  `/insights/fleet-health` page. Lean response schema (no tenant_id,
+  no nested config, owner-as-email-only). Drift detection deferred —
+  needs MicrosoftAgentSyncWorkflow. 10 backend + 6 frontend tests.
 
 ## Working agreements while this is in flight
 
