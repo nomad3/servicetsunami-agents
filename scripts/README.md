@@ -7,7 +7,7 @@ Utility scripts. Categorized by purpose. Each is self-contained — read its top
 | Script | Purpose |
 |--------|---------|
 | `deploy_k8s_local.sh` | Full local K8s deploy on Rancher Desktop: builds images, runs Helm, applies migrations, brings up the Cloudflare tunnel. Flags: `--skip-build`, `--infra-only`. |
-| `local-deploy.sh` | Wrapper that delegates to `deploy_k8s_local.sh`. |
+| `local-deploy.sh` | Standalone local Kubernetes deploy (Rancher Desktop). Functional overlap with `deploy_k8s_local.sh` — prefer the latter; this is a known cleanup item. |
 | `backup_db.sh` | Daily PostgreSQL backup of the local AgentProvision database. |
 
 ## Testing
@@ -29,7 +29,6 @@ Utility scripts. Categorized by purpose. Each is self-contained — read its top
 | `backfill_embeddings.py` | Backfill missing embeddings on `knowledge_entities` and `knowledge_observations`. |
 | `backfill_knowledge_from_sessions.py` | Extract knowledge from Claude Code sessions and feed it into Luna's knowledge graph. |
 | `migrate_skills_layout.py` | One-shot migration to the Skills v2 `_bundled/` + `_tenant/<uuid>/` layout. Idempotent. |
-| `seed_data.sql` | SQL seed for demo tenants, agents, integrations. Applied automatically on API startup via `init_db.py`. |
 | `create_agent.py` | CLI helper to create an Agent record outside the wizard. |
 | `check_datasets.py` | Inspect dataset rows + sync state. |
 | `check_db_stats.py` | Print row counts across the multi-tenant tables. |

@@ -4,7 +4,7 @@
 
 For a quick agent reference (CLI runtimes, ALM, A2A, Skills v2, MCP tools, code style) see [`AGENTS.md`](AGENTS.md).
 
-For the platform's required `tenant_id` rule and other Gemini-specific notes, see the **Calling MCP tools (Luna / OpenCode / local Gemma 4)** section in `AGENTS.md` — the rule is the same for Gemini CLI: every MCP tool call must include `tenant_id`.
+**MCP tool-call rule (mandatory for Gemini CLI):** every MCP tool call must include `tenant_id`. The tools fail without it. See the **Code Style Guidelines** section in [`AGENTS.md`](AGENTS.md) for the rule and the tenant UUID convention.
 
 ## Hard rules (mirrored from CLAUDE.md)
 

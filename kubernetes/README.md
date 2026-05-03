@@ -21,7 +21,7 @@ kubernetes/
 
 ## Cloudflare tunnel
 
-The cloudflared deployment is an **in-cluster pod** that holds an outbound TCP tunnel to Cloudflare. It routes `agentprovision.com` → `api:80` and `web:80`, and `luna.agentprovision.com` → the Luna PWA service. There is no port-forward and no external load balancer.
+The cloudflared deployment is an **in-cluster pod** that holds an outbound TCP tunnel to Cloudflare. It routes `agentprovision.com` → `api:8000` + `web:80`, and `luna.agentprovision.com` → `api:8000` + `luna-client:80`. There is no port-forward and no external load balancer.
 
 The `notFound` rule in the tunnel config blocks `/api/v1/*/internal/*` from public-internet traffic (#207, 2026-04-22) — these endpoints are still reachable in-cluster for service-to-service calls authenticated with `X-Internal-Key`.
 
