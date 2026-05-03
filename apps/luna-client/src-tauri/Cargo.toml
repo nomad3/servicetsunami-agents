@@ -34,6 +34,7 @@ tokio = { version = "1", features = ["sync", "time", "rt-multi-thread", "macros"
 # Gesture engine (desktop only; mobile uses a stub)
 [target.'cfg(target_os = "macos")'.dependencies]
 nokhwa = { version = "0.10", features = ["input-avfoundation"] }
+enigo = "0.2"
 
 # Mobile (iOS + Android)
 [target.'cfg(mobile)'.dependencies]

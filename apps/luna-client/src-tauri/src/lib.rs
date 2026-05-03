@@ -178,6 +178,22 @@ async fn gesture_set_camera_index(index: usize) -> Result<(), String> {
     gesture::set_camera_index(index).await
 }
 
+#[tauri::command]
+async fn gesture_check_accessibility() -> Result<bool, String> {
+    Ok(gesture::check_accessibility())
+}
+
+#[tauri::command]
+async fn gesture_set_cursor_global(enabled: bool) -> Result<(), String> {
+    gesture::set_global_mode(enabled);
+    Ok(())
+}
+
+#[tauri::command]
+async fn gesture_get_cursor_global() -> Result<bool, String> {
+    Ok(gesture::global_mode())
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct ProjectionResult {
     id: String,
@@ -678,6 +694,9 @@ pub fn run() {
             gesture_status,
             gesture_list_cameras,
             gesture_set_camera_index,
+            gesture_check_accessibility,
+            gesture_set_cursor_global,
+            gesture_get_cursor_global,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Luna");

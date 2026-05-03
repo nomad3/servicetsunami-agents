@@ -12,6 +12,8 @@ import WorkflowSuggestions from './components/WorkflowSuggestions';
 import SpatialHUD from './components/spatial/SpatialHUD';
 import GestureOverlay from './components/gestures/GestureOverlay';
 import GestureBindingsPage from './components/gestures/GestureBindingsPage';
+import GestureCalibration from './components/gestures/GestureCalibration';
+import LunaCursor from './components/luna/LunaCursor';
 import { useShellPresence } from './hooks/useShellPresence';
 import { useSessionEvents } from './hooks/useSessionEvents';
 import { useTrustProfile } from './hooks/useTrustProfile';
@@ -218,6 +220,7 @@ function AuthenticatedApp() {
       <ClipboardToast />
       <WorkflowSuggestions visible={suggestionsOpen} onClose={() => setSuggestionsOpen(false)} />
       <GestureOverlay />
+      <LunaCursor />
     </div>
   );
 }
@@ -245,16 +248,24 @@ function useHashRoute() {
 function AppContent({ windowLabel }) {
   const { user, loading } = useAuth();
   const hash = useHashRoute();
+  const [showCalibration, setShowCalibration] = useState(() => {
+    try { return !localStorage.getItem('gesture_calibrated'); } catch { return false; }
+  });
 
   if (windowLabel === 'spatial_hud') {
     return <SpatialHUD />;
   }
   if (loading) return <div className="luna-loading">Loading...</div>;
   if (!user) return <LoginForm />;
-  if (hash.startsWith('#/settings/gestures')) {
-    return <GestureBindingsPage />;
-  }
-  return <AuthenticatedApp />;
+
+  return (
+    <>
+      {hash.startsWith('#/settings/gestures') ? <GestureBindingsPage /> : <AuthenticatedApp />}
+      {showCalibration && (
+        <GestureCalibration onDone={() => setShowCalibration(false)} />
+      )}
+    </>
+  );
 }
 
 function RootShell() {

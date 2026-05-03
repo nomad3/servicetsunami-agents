@@ -52,9 +52,29 @@ impl Recognizer {
             confidence: primary.confidence,
         };
         self.last_emit_ms = now_ms;
-        // Clear the motion buffer after emitting a successful swipe so the
-        // same swipe doesn't keep firing as the buffer scrolls. Without this
-        // a single 3-finger swipe up would trigger nav_hud ~12 times.
+
+        // Drive the system cursor directly from Rust on `point` pose so the
+        // tip-to-cursor latency stays under 16ms (bypasses React entirely
+        // per the design's two-budget split). Cursor.rs gates on
+        // Accessibility permission + frontmost-app rules.
+        if matches!(pose, Pose::Point) {
+            let x = primary.landmarks[8].x;
+            let y = primary.landmarks[8].y;
+            tokio::spawn(async move {
+                crate::gesture::cursor::move_abs(x, y).await;
+            });
+        }
+        // A pinch-tap during point-pose synthesizes a click.
+        if let Some(m) = motion {
+            if matches!(m.kind, MotionKind::Tap) && matches!(pose, Pose::Point) {
+                tokio::spawn(async {
+                    crate::gesture::cursor::click().await;
+                });
+            }
+        }
+
+        // Clear the motion buffer after emitting a successful swipe/pinch/tap
+        // so the same gesture doesn't keep firing as the buffer scrolls.
         if let Some(m) = motion {
             if matches!(m.kind, MotionKind::Swipe | MotionKind::Pinch | MotionKind::Tap) {
                 self.motion.clear();

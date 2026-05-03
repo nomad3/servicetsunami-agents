@@ -7,6 +7,7 @@
 pub mod types;
 #[cfg(target_os = "macos")]
 pub mod camera;
+pub mod cursor;
 pub mod landmark;
 #[cfg(target_os = "macos")]
 pub mod landmark_apple_vision;
@@ -22,5 +23,8 @@ mod tests;
 pub use supervisor::{
     engine_status, install_app_handle, list_cameras, pause_engine, resume_engine,
     set_camera_index, start_engine, stop_engine,
+};
+pub use cursor::{
+    accessibility_ok, check_accessibility, global_mode, set_global_mode,
 };
 pub use types::{EngineStatus, GestureEvent, WakeState};
