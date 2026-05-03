@@ -56,4 +56,4 @@ Built from `Dockerfile`. Built and deployed via CI — don't build locally.
 
 - [`../embedding-service/`](../embedding-service/) — paired service, generates the vectors this service searches against.
 - [`../../CLAUDE.md`](../../CLAUDE.md) — full memory-first architecture, dual-read validation strategy, cutover criteria.
-- [`../../docs/plans/2026-04-07-memory-first-agent-platform-design.md`](../../docs/plans/2026-04-07-memory-first-agent-platform-design.md) — original design doc (if it exists locally).
+- [`../../docs/plans/2026-04-07-memory-first-agent-platform-design.md`](../../docs/plans/2026-04-07-memory-first-agent-platform-design.md) — original design doc.

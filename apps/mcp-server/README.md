@@ -1,6 +1,6 @@
 # apps/mcp-server
 
-FastMCP tool server. Serves **90+ tools** to CLI agent runtimes (Claude Code, Codex, Gemini, Copilot CLI) and the in-process local tool agent over MCP SSE on port 8086.
+FastMCP tool server. Serves **130+ tools across 26 modules** to CLI agent runtimes (Claude Code, Codex, Gemini, Copilot CLI) and the in-process local tool agent over MCP SSE.
 
 For full architecture see [`../../CLAUDE.md`](../../CLAUDE.md).
 
@@ -41,8 +41,10 @@ src/mcp_tools/
 ```bash
 cd apps/mcp-server
 pip install -e ".[dev]"
-python -m src.server                    # http://localhost:8086
+FASTMCP_PORT=8086 python -m src.server   # http://localhost:8086
 ```
+
+`FASTMCP_PORT` defaults to `8000` if unset. The Helm chart pins it to `8086` (and the `mcp-tools` compose service inherits the same). Use `8086` locally to match.
 
 Or via compose: the `mcp-tools` service.
 

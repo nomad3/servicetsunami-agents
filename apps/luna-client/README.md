@@ -1,26 +1,46 @@
 # apps/luna-client
 
-Native AI client — Tauri 2 desktop (macOS ARM64) + React + Vite, with PWA fallback served over Cloudflare tunnel at `luna.agentprovision.com`. Lives in the menu bar, push-to-talk, spatial HUD.
+Native AI client — Tauri 2 desktop (macOS ARM64) + React + Vite, with PWA fallback served over Cloudflare tunnel at `luna.agentprovision.com`. Lives in the menu bar with a global command palette, screenshot/clipboard capture, activity tracking, and a separate spatial HUD window.
 
 For full architecture see [`../../CLAUDE.md`](../../CLAUDE.md). For iOS-specific notes see [`IOS_BUILD.md`](IOS_BUILD.md).
+
+> **Note:** native audio push-to-talk described in older design docs is not currently in the tree. Voice input today is browser-based (MediaRecorder in the React layer); see `useLunaStream` and `MemoryPanel`.
 
 ## Layout
 
 ```
-src/                      # React app (Vite)
-├── ChatInterface.jsx
-├── components/           # LunaAvatar, VoiceInput, CommandPalette, ...
-├── context/              # VoiceProvider (shared useVoice instance)
-├── hooks/                # useVoice (WAV-encoded PTT), useAuth, ...
-└── App.jsx               # window-label routing (main vs spatial_hud)
-src-tauri/                # Rust side (Tauri plugins, audio, tray, updater)
-├── src/lib.rs            # cpal audio capture (start/stop_audio_capture)
-├── src/main.rs           # window setup, global shortcut registration
+src/                              # React app (Vite)
+├── App.jsx                       # window-label routing (main vs spatial_hud)
+├── api.js                        # axios client + JWT
+├── components/
+│   ├── ChatInterface.jsx
+│   ├── CommandPalette.jsx        # opened by Cmd+Shift+Space
+│   ├── MemoryPanel.jsx
+│   ├── NotificationBell.jsx
+│   ├── ActionApproval.jsx        # trust-gated local action approval
+│   ├── ClipboardToast.jsx
+│   ├── TrustBadge.jsx
+│   ├── WorkflowSuggestions.jsx
+│   ├── LoginForm.jsx
+│   ├── luna/                     # avatar / emote subcomponents
+│   └── spatial/                  # Three.js scenes for spatial_hud window
+├── context/
+│   └── AuthContext.jsx
+└── hooks/
+    ├── useActivityTracker.js     # window-title-based activity capture
+    ├── useLunaStream.js          # SSE streaming chat
+    ├── useNotifications.js
+    ├── useSessionEvents.js       # /chat/sessions/{id}/events/stream
+    ├── useShellPresence.js       # heartbeat to API
+    └── useTrustProfile.js        # local-action trust tier
+src-tauri/                        # Rust side (Tauri plugins)
+├── src/main.rs                   # 5-line shim → luna_lib::run()
+├── src/lib.rs                    # all Rust handlers + setup
 ├── tauri.conf.json
 └── Cargo.toml
 public/
 index.html
-nginx.conf                # PWA hosting config
+nginx.conf                        # PWA hosting config
 vite.config.js
 ```
 
@@ -49,14 +69,16 @@ cd src-tauri && cargo check
 
 Push to `main` and let GitHub Actions build the signed macOS ARM64 DMG via [`.github/workflows/luna-client-build.yaml`](../../.github/workflows/luna-client-build.yaml). Release artifact powers the auto-updater. Local production builds aren't signed and won't ingest the auto-updater feed.
 
-## Key integrations
+## Key integrations (in `src-tauri/src/lib.rs`)
 
-- **Native push-to-talk** — Rust `cpal` captures Float32 PCM in a spawned thread. The stream is `!Send` on macOS; **build and drop it on the same thread**. Frontend `useVoice` hook wraps the buffer in a proper WAV (RIFF / PCM16) header before posting to `/api/v1/media/transcribe`.
-- **VoiceProvider context** — wraps the authenticated app so `VoiceInput` (chat) and `CommandPalette` share **one** `useVoice` instance. Two would register duplicate `audio-chunk` listeners.
-- **Global shortcuts** — `Cmd+Shift+Space` PTT, `Cmd+Shift+L` toggles the Spatial HUD. Registered in `src-tauri/src/main.rs`. Unregister on window destroy.
-- **System tray** — Open / Voice / Toggle Spatial HUD / Quit (`PredefinedMenuItem::separator` for the dividers).
-- **Auto-updater** — `tauri-plugin-updater`. Checks on startup + every 30 min. Emits `update-available` → React banner.
-- **Spatial HUD** — separate Tauri window label `spatial_hud`. `App.jsx` routes by label with a 1s safety fallback to `main`. Three.js knowledge nebula + A2A combat visuals + MediaPipe hand tracking.
+- **Global shortcuts** (`setup_global_shortcut`, line 392)
+  - `Cmd+Shift+Space` — emits `toggle-palette`; React opens the `CommandPalette`. Also un-hides the main window if needed.
+  - `Cmd+Shift+L` — toggles the `spatial_hud` window's visibility.
+- **System tray** (`setup_tray`, line 356) — `TrayIconBuilder` with click-to-show/focus the main window.
+- **Spatial HUD** — separate Tauri window labeled `spatial_hud`. Toggled by the shortcut above; `App.jsx` routes by window label with a 1s safety fallback to `main`. The Rust `project_embeddings` command does a 3-PC projection for the Three.js scene.
+- **Native handlers** exposed to React via `invoke()`: `capture_screenshot`, `haptic_feedback`, `get_active_app`, `read_clipboard`, `toggle_spatial_hud`, `start_spatial_capture`, `project_embeddings`.
+- **Activity context** — `resolve_app_context`, `get_subprocess_context`, `extract_project_from_args` resolve the user's current tool/project from the active window title (Claude Code, Docker CLI, editors, etc.) for the activity tracker.
+- **Auto-updater** — `tauri-plugin-updater`. Checks on startup and periodically. Emits `update-available` for the React banner.
 
 ## Required env (frontend)
 
@@ -66,7 +88,7 @@ VITE_API_BASE_URL=http://localhost:8000        # API host port
 
 ## iOS / Android
 
-Blocked on Apple Developer Program ($99/yr). Free-tier team is insufficient for Tauri mobile signing. See `IOS_BUILD.md`.
+Blocked on Apple Developer Program ($99/yr). Free-tier team is insufficient for Tauri mobile signing. See [`IOS_BUILD.md`](IOS_BUILD.md).
 
 ## Container image
 

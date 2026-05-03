@@ -19,7 +19,8 @@ app/
 ├── workers/           # Temporal worker registration
 └── workflows/         # Temporal workflow + activity definitions
 migrations/            # manual SQL migrations (no Alembic)
-proto/                 # gRPC stubs for embedding + memory-core
+proto/                 # gRPC .proto contracts for embedding + memory-core
+                       # (generated stubs land in app/generated/)
 storage/               # local cache for uploads, attachments
 scripts/               # one-off ops scripts
 tests/                 # pytest
@@ -95,8 +96,9 @@ git add -f migrations/NNN_*.sql
 
 ## Workers
 
-- `workers/orchestration_worker.py` — `agentprovision-orchestration` queue (TaskExecution, ChannelHealthMonitor, FollowUp, InboxMonitor, CompetitorMonitor, TeamsMonitor, DynamicWorkflowExecutor, CoalitionWorkflow, AgentPerformanceSnapshot).
-- `workers/postgres_worker.py` — `agentprovision-postgres` queue (DatasetSync, KnowledgeExtraction, DataSourceSync).
+Two worker modules live in this app:
+
+- `workers/orchestration_worker.py` — `agentprovision-orchestration` queue (TaskExecution, ChannelHealthMonitor, FollowUp, InboxMonitor, CompetitorMonitor, TeamsMonitor, DynamicWorkflowExecutor, CoalitionWorkflow, AgentPerformanceSnapshot, plus DatasetSync / KnowledgeExtraction / DataSourceSync).
 - `workers/scheduler_worker.py` — polls cron/interval pipelines every 60s.
 
 The CLI worker runs in a separate service: see [`../code-worker/`](../code-worker/).
