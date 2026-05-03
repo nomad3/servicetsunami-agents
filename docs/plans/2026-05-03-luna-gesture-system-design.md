@@ -33,74 +33,98 @@ The system is **wake-gesture activated** (open palm held 500ms) so always-on cam
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                         Luna Tauri 2 application                         │
-│                                                                          │
-│  ┌────────────────────────┐         ┌──────────────────────────────────┐ │
-│  │  React WebView (UI)    │ ◀──IPC──│  Rust core (lib.rs)              │ │
-│  │                        │         │   ├─ spawn/manage sidecar         │ │
-│  │  GestureContext        │         │   ├─ system tray + global shortcut│ │
-│  │   ├─ GestureOverlay    │         │   └─ persist bindings to disk     │ │
-│  │   ├─ GestureBindings   │         └──────────┬───────────────────────┘ │
-│  │   ├─ GestureCalibration│                    │ stdin/stdout JSON-lines │
-│  │   └─ LunaCursor        │                    ▼                         │
-│  │                        │         ┌──────────────────────────────────┐ │
-│  └────────────────────────┘         │  luna-gesture-engine (sidecar)   │ │
-│                                     │   ├─ camera.rs   (nokhwa)        │ │
-│                                     │   ├─ mediapipe.rs (landmarks)    │ │
-│                                     │   ├─ pose.rs     (geometric)     │ │
-│                                     │   ├─ motion.rs   (ring buffer)   │ │
-│                                     │   ├─ wake.rs     (state machine) │ │
-│                                     │   ├─ recognizer.rs               │ │
-│                                     │   └─ ipc.rs      (event emitter) │ │
-│                                     └──────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────────┘
-                                              │
-                                              ▼
-                                   ┌──────────────────────┐
-                                   │  Webcam (AVFoundation)│
-                                   └──────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       Luna Tauri 2 application (single process)         │
+│                                                                         │
+│  ┌────────────────────────┐         ┌─────────────────────────────────┐ │
+│  │  React WebView (UI)    │ ◀──IPC──│  Rust main (lib.rs)             │ │
+│  │                        │  Tauri  │                                 │ │
+│  │  GestureContext        │  events │   gesture-engine module         │ │
+│  │   ├─ GestureOverlay    │         │     ├─ camera.rs    (owner)     │ │
+│  │   ├─ GestureBindings   │         │     ├─ landmark.rs  (Vision/MP) │ │
+│  │   ├─ GestureCalibration│         │     ├─ pose.rs                  │ │
+│  │   ├─ GestureRecorder   │         │     ├─ motion.rs                │ │
+│  │   └─ LunaCursor        │         │     ├─ wake.rs                  │ │
+│  │                        │         │     ├─ recognizer.rs            │ │
+│  │                        │         │     ├─ supervisor.rs (restart)  │ │
+│  │                        │         │     └─ cursor.rs (enigo, gated) │ │
+│  └────────────────────────┘         │   tray + global shortcuts       │ │
+│                                     │   bindings persistence          │ │
+│                                     │   spatial-frame consumer feed   │ │
+│                                     └────────────────┬────────────────┘ │
+└──────────────────────────────────────────────────────┼──────────────────┘
+                                                       │
+                                                       ▼
+                                          ┌────────────────────────┐
+                                          │  Webcam (AVFoundation) │
+                                          └────────────────────────┘
 ```
 
-### Why a sidecar process?
+### In-process, not separate sidecar binary
 
-1. **Survives WebView reloads.** The recognizer keeps its state (calibration, wake state) when the React app hot-reloads or navigates between Luna's main window and the Spatial HUD window.
-2. **Background-capable.** Camera + landmark extraction continues when Luna is not the foreground app, which is required for "raise your palm anywhere on your desk" wake-gesture UX.
-3. **Process isolation.** A native MediaPipe binding crash doesn't take down the Tauri main process or the WebView.
-4. **CPU governance.** Sidecar can be paused/killed independently for the kill-switch without restarting Luna.
+Earlier drafts proposed a separate `luna-gesture-engine` binary spawned via `tauri-plugin-shell` and bundled as `externalBin`. We **reject** that for v1 because:
 
-The sidecar binary is bundled with Luna via `tauri.conf.json` `bundle.externalBin`. Tauri spawns it via `tauri-plugin-shell` (already a dep). Communication is JSON-line over stdin/stdout; results re-emitted as Tauri events to the WebView.
+- macOS code-signing and notarization cost: every external binary needs its own signature, hardened runtime, and entitlements; `.github/workflows/luna-client-build.yaml` already signs only the main app bundle.
+- The "background-capable" requirement is satisfied by any code that runs outside the WebView — a Rust thread inside the main Tauri process already runs continuously, regardless of WebView focus.
+- Process isolation buys little: a MediaPipe panic that takes down the engine thread can be recovered by the supervisor (`supervisor.rs`); a panic that takes down the whole process is recoverable by the user re-launching Luna, which is acceptable.
 
-### Why Rust + MediaPipe via FFI (not WebView MediaPipe)?
+The gesture engine is a **Rust module inside `apps/luna-client/src-tauri/`** running on a dedicated Tokio task. It emits `gesture-event`, `wake-state`, and `engine-status` directly via Tauri's event channel to the WebView. No stdin/stdout, no extra binary, no extra signing.
 
-The existing `GestureController.jsx` runs `@mediapipe/hands` in the WebView. That's good enough for the Spatial HUD demo but has three blockers for primary input:
+### Camera ownership: gesture engine is the sole owner
 
-1. Stops when window loses focus.
+The existing `lib.rs` `start_spatial_capture` (lines 127–164) is a **synthetic placeholder** — it emits fake `SpatialFrame` events on a 60Hz timer and does **not** open the camera today. Multi-owner camera access is a non-issue for now.
+
+In v1 we redefine ownership cleanly:
+
+- `gesture-engine/camera.rs` is the sole AVFoundation client.
+- `start_spatial_capture` is rewritten to be a **consumer**: it subscribes to the same frame stream the engine processes, downsamples to 30Hz, and emits `spatial-frame` for the HUD scene. No second camera handle is opened.
+- A single Tauri command `set_camera_index(i)` controls which device the engine binds to; both the engine and `start_spatial_capture` share that selection.
+
+This way the green camera light never flickers from ownership churn, and removing/replacing `start_spatial_capture`'s placeholder code is part of Phase 1.
+
+### Landmark runtime — Apple Vision first, MediaPipe second
+
+The existing `GestureController.jsx` uses `@mediapipe/hands` in the WebView. It's fine for HUD demos but has three blockers for primary input:
+
+1. Stops when the window loses focus.
 2. Tied to the WebView's frame loop — drops to single-digit fps under React rerenders.
-3. Cannot drive a global cursor or be the only input modality.
+3. Cannot drive a system cursor or be the only input modality.
 
-For the sidecar we have two viable Rust paths:
+For the native engine we have **three** candidate runtimes, evaluated in a 2-day spike (Phase 1 days 1–2):
 
-- **`mediapipe-rs`** — community Rust binding to MediaPipe Tasks. Lower risk, pure Rust, but newer / less battle-tested.
-- **MediaPipe Tasks C++ via cxx FFI** — Google's official C++ runtime, bundled as a `.dylib` for macOS ARM64 in CI. Higher confidence, more setup.
+- **a. Apple Vision (`VNDetectHumanHandPoseRequest`)** via Swift FFI — *recommended primary*. Native to macOS, hardware-accelerated on M-series, no model files to ship, no additional notarization, lowest CPU. Returns 21 landmarks per hand. **Risk:** Swift↔Rust FFI plumbing.
+- **b. `mediapipe-rs`** — pure-Rust community binding. **Risk:** hand-landmarker task on macOS ARM64 has not been validated at 30fps with the CPU budget.
+- **c. MediaPipe Tasks C++ via `cxx` FFI** — Google's official runtime, ships a `.dylib` (universal2/arm64) plus `.task` model files (~12 MB). **Risk:** binary size, signing, app-bundle layout, model load time (~300ms cold).
 
-We'll spike both in Phase 1 Task 1 (a half-day timebox) and pick whichever delivers stable 30fps on a Mac M4 with <12% CPU. Default to `mediapipe-rs` if it works.
+**Spike pass criteria** (one runtime must satisfy all):
+- Sustained 30 fps landmark extraction on a Mac M4 with both hands visible.
+- ≤ 12% CPU averaged over a 60-second armed session.
+- ≤ 50 ms p95 frame-to-landmarks latency.
+- App bundle size growth ≤ 25 MB.
+- Clean shutdown (no leaked threads, camera released within 200 ms of `pause`).
+
+**Decision tree:**
+1. If (a) passes → use Apple Vision; (b) and (c) are not pursued in v1.
+2. If (a) fails on FFI complexity but the recognition works → still use (a), invest the FFI time.
+3. If (a) fails on accuracy → fall back to (c) MediaPipe C++ (more proven than (b)).
+4. If (a) and (c) both fail → escalate to the user; do not silently fall back to WebView MediaPipe (defeats the purpose).
 
 ## Components
 
-### 1. Rust sidecar — `apps/luna-client/src-tauri/crates/gesture-engine/`
+### 1. Rust gesture-engine module — `apps/luna-client/src-tauri/src/gesture/`
 
-New cargo crate, compiled into a separate binary `luna-gesture-engine` and bundled via `tauri.conf.json`.
+Module inside the existing `luna_lib` crate. Owns one Tokio task pool. No separate binary.
 
 **`camera.rs`**
-- Wraps `nokhwa` for cross-platform camera capture (uses AVFoundation on macOS).
-- Exposes `CameraStream::frames() -> impl Stream<Item = Frame>`.
-- Configurable resolution (default 640×480) and fps (default 30).
-- Drops gracefully when sleep state turns off motion analysis (camera stays open at low fps to keep the wake-gesture detector alive).
+- Wraps `nokhwa` for AVFoundation camera capture on macOS (Linux/Windows deferred).
+- Exposes `CameraStream::frames() -> impl Stream<Item = Frame>` and `list_cameras() -> Vec<CameraInfo>`.
+- Configurable resolution (default 640×480) and fps (default 30, drops to 5 while Sleeping).
+- Hot-plug recovery: if the bound camera disappears, the stream emits `CameraEvent::Disconnected`; supervisor re-binds to default device or surfaces an `engine-status` error.
+- The same `Frame` stream is fanned out to two consumers: the landmark extractor and the HUD's `spatial-frame` emitter (downsampled).
 
-**`mediapipe.rs`**
+**`landmark.rs`**
 - Single trait `LandmarkExtractor::extract(frame) -> Vec<Hand>`.
-- One impl using the runtime chosen in the spike (`mediapipe-rs` or C++ FFI).
+- v1 impl is whichever runtime won the spike (Apple Vision via Swift FFI, MediaPipe C++ FFI, or `mediapipe-rs` — see "Landmark runtime" section).
 - Returns `Hand { handedness: Left|Right, landmarks: [Landmark; 21], confidence: f32 }`.
 
 **`pose.rs`**
@@ -130,26 +154,54 @@ New cargo crate, compiled into a separate binary `luna-gesture-engine` and bundl
 - Combines `Pose` + `Motion` + `WakeState` into `GestureEvent`s.
 - Emits at most 1 event per 80ms (debounce) to avoid action storms.
 - Detects two-handed gestures by aligning frames where both hands are present.
+- **Confirm-window timer extension:** when a binding requires a two-step confirm (destructive actions), the recognizer arms a `ConfirmPending` substate within `Armed`. While `ConfirmPending`, the wake-state idle timer is suspended (idle countdown does not advance) until either the confirm fist completes (800ms hold) or the user releases the pose. This prevents the disarm-mid-confirm race called out in the review.
 
-**`ipc.rs`**
-- JSON-lines protocol over stdout to parent Tauri process.
-- Outbound events: `gesture`, `pose`, `wake_state_changed`, `engine_status` (fps, cpu, last_error).
-- Inbound commands: `pause`, `resume`, `set_camera_index`, `set_calibration`, `shutdown`.
+**`supervisor.rs`**
+- Owns engine lifecycle: spawn the Tokio task, watch for panics, restart with bounded budget.
+- **Restart policy:** at most **3 restarts per Luna session** (not per minute). After exhaustion, surface a persistent error in the menubar dot (cross-out icon) and emit a `engine-status: { state: "fatal", reason }` event. The user must manually re-enable from the tray menu.
+- Each restart releases and re-acquires the camera handle; the menubar dot dims briefly during this window.
 
-### 2. Tauri main process — `apps/luna-client/src-tauri/src/lib.rs` (extend existing)
+**Engine API (Tauri commands + events)**
+- Outbound Tauri events: `gesture-event`, `pose-changed`, `wake-state-changed`, `engine-status` (fps, cpu, last_error).
+- Inbound Tauri commands: `gesture_pause`, `gesture_resume`, `gesture_set_camera_index`, `gesture_list_cameras`, `gesture_set_calibration`, `gesture_shutdown`.
 
-New module `gestures.rs` with:
-- `start_gesture_engine() -> Result<()>` — spawn sidecar via `tauri-plugin-shell`.
-- `stop_gesture_engine()` / `pause_gesture_engine()` / `resume_gesture_engine()`.
-- `gesture_engine_status() -> EngineStatus`.
-- Forwards JSON-line events from sidecar stdout to Tauri events: `gesture-event`, `wake-state`, `engine-status`.
-- Persists user bindings to `~/Library/Application Support/luna/gesture-bindings.json` (macOS standard path).
+**`cursor.rs`**
+- Owns `enigo` for cursor moves and synthetic clicks, **gated** behind:
+  1. macOS Accessibility permission (`AXIsProcessTrusted` check at startup).
+  2. A user-controlled `cursor_global_mode` flag (default **off**).
+- When `cursor_global_mode` is **off**, cursor/click events are no-ops if Luna or the Spatial HUD is not the frontmost app (checked via `NSWorkspace.frontmostApplication`).
+- When `cursor_global_mode` is **on**, cursor/click drive the system cursor over any frontmost app — explicit user opt-in only, with an in-app warning shown the first time the toggle is enabled ("Pinch click will fire in whatever app is in front of you").
+- If Accessibility permission is denied, all `cursor_move`/`click` bindings are disabled in `useGestureBindings` and shown with a "permission required" badge in `GestureBindingsPage`. The rest of the system continues to work.
+
+### 2. Tauri main wiring — `apps/luna-client/src-tauri/src/lib.rs` (extend existing)
+
+The gesture engine runs as a Tokio task started during the existing `tauri::Builder::default()...setup` closure (alongside `setup_tray` and audio capture). New Tauri commands:
+
+- `gesture_start()` / `gesture_stop()` — spawn or join the engine task.
+- `gesture_pause()` / `gesture_resume()` — soft-disable (kill-switch); `pause` releases the camera handle.
+- `gesture_status() -> EngineStatus`.
+- `gesture_list_cameras() -> Vec<CameraInfo>`.
+- `gesture_set_camera_index(i: usize)`.
+
+Persistence:
+- Bindings: `~/Library/Application Support/luna/gesture-bindings.json` (canonical local copy, written atomically via `tempfile::persist`).
+- Calibration: `~/Library/Application Support/luna/gesture-calibration.json` (local-only, never synced).
+
+**Migration of existing `start_spatial_capture`:** the synthetic-frame placeholder in `lib.rs` lines 127–164 is rewritten to subscribe to `gesture-engine`'s frame fan-out instead of running its own 60 Hz timer. Dependency direction: `lib.rs` → `gesture` module owns camera; `start_spatial_capture` becomes a thin consumer that emits `spatial-frame` from real frames.
 
 Tray menu additions (extending existing `setup_tray`):
-- "Pause Gestures" (toggle).
+- "Pause Gestures" (toggle, `Cmd+Shift+G` mirror).
 - "Show Gesture Overlay".
 - "Open Gesture Bindings…".
-- Visible camera-active indicator dot (red while Armed, dim while Sleeping, hidden while Paused).
+
+**Camera indicator dot — three states (always visible while engine is not Paused):**
+
+| State | Visual | Meaning |
+|---|---|---|
+| Paused | hidden | engine off, camera released |
+| Sleeping | dim outline (no fill) | camera open at 5fps, only wake detector active |
+| Armed | solid red | camera open at 30fps, full recognition active |
+| Fatal | red cross-out | supervisor exhausted restart budget; click to re-enable |
 
 Global shortcut additions (extending existing `tauri-plugin-global-shortcut` block):
 - `Cmd+Shift+G` — toggle pause/resume (kill-switch).
@@ -184,15 +236,21 @@ Global shortcut additions (extending existing `tauri-plugin-global-shortcut` blo
 - Saves on confirm.
 
 **`components/gestures/GestureCalibration.jsx`** (one-time onboarding)
-- Step 1: Camera permission request.
-- Step 2: Pose tutorial — open palm, fist, point, peace, five. Records each user's baseline landmark distances; stored as calibration JSON in `~/Library/Application Support/luna/gesture-calibration.json`.
-- Step 3: Wake-gesture practice ("raise an open palm to wake Luna").
-- Step 4: 5-card walkthrough of default bindings (animated previews).
+- Step 1: Camera permission request, with explanation copy before the OS prompt fires.
+- Step 2: Camera selection (built-in FaceTime by default; `gesture_list_cameras` for alternates).
+- Step 3: **Accessibility permission** — only requested if the user enables a cursor binding now or later. Wizard shows a "Skip" option so non-cursor users aren't blocked. Cursor bindings are gated by an `AXIsProcessTrusted` runtime check; when denied, the bindings UI marks them "permission required" with a button to open System Settings → Privacy & Security → Accessibility.
+- Step 4: Pose tutorial — open palm, fist, point, peace, five. Records each user's baseline landmark distances; stored as calibration JSON in `~/Library/Application Support/luna/gesture-calibration.json`.
+- Step 5: Wake-gesture practice ("raise an open palm to wake Luna").
+- Step 6: 5-card walkthrough of default bindings (animated previews).
 
 **`components/luna/LunaCursor.jsx`**
-- Renders virtual cursor (≈ a small luna-glow dot) when the active pose is `Point` and the engine is `Armed`.
-- Cursor position derived from index-finger-tip x/y via Tauri `set_cursor_position` Rust command (uses `enigo` crate or platform API).
-- Pinch (thumb+index) → simulated click via `enigo`.
+- Renders an in-app virtual cursor overlay (luna-glow dot) when the active pose is `Point` and the engine is `Armed` — used as visual feedback regardless of the cursor permission state.
+- The system cursor itself is moved by Rust `cursor.rs` via `enigo`, **not** by React. Cursor frames bypass `GestureContext` and React rerenders entirely; landmark → `set_cursor_position` happens inside the engine's recognizer task to hit the <16ms tip-to-cursor target.
+- Pinch (thumb+index) → simulated click via `enigo`, gated by the same Accessibility + frontmost-app rules described in `cursor.rs`.
+
+**Required Info.plist entries** (added to `tauri.conf.json` macOS bundle config):
+- `NSCameraUsageDescription` (already required) — "Luna uses your camera to recognize hand gestures."
+- `NSAccessibilityUsageDescription` — "Luna uses Accessibility access to move the cursor and click via hand gestures."
 
 **Routing & integration:**
 - Add `/gestures` route to `App.jsx` rendering `GestureBindingsPage`.
@@ -245,24 +303,54 @@ type Binding = {
       | "mcp_tool" | "custom";
     params?: Record<string, unknown>;
   };
-  scope: "global" | "hud_only" | "chat_only";
+  scope: "global" | "luna_only" | "hud_only" | "chat_only";
   enabled: boolean;
   user_recorded: boolean;          // true if captured via GestureRecorder
 };
 ```
 
 ### Persistence
-- Local: `~/Library/Application Support/luna/gesture-bindings.json` (canonical local copy).
+- Local: `~/Library/Application Support/luna/gesture-bindings.json` (canonical local copy, atomic write).
 - Sync: `GET/PUT /api/v1/users/me/gesture-bindings` (new endpoints, `apps/api/app/api/v1/users.py`).
 - Calibration: `~/Library/Application Support/luna/gesture-calibration.json` (per-user landmark baselines, never synced).
+
+### Server-side schema & migration
+
+Verified `apps/api/app/models/user.py` has **no** `preferences` column today (fields: id, full_name, email, hashed_password, is_active, is_superuser, password_reset_token, password_reset_expires, tenant_id). Latest migration is `113`.
+
+Decision: add a **dedicated table** `user_gesture_bindings` rather than overload `User` with a JSONB grab-bag. This keeps the model focused and avoids a future "what else lives in `preferences`?" debate.
+
+Migration `apps/api/migrations/114_user_gesture_bindings.sql`:
+
+```sql
+CREATE TABLE user_gesture_bindings (
+  user_id    UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  bindings   JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT bindings_size_cap CHECK (octet_length(bindings::text) <= 65536)
+);
+```
+
+Down migration `114_user_gesture_bindings.down.sql` drops the table.
+
+### API endpoints (`apps/api/app/api/v1/users.py`)
+
+- `GET /api/v1/users/me/gesture-bindings` → `{ bindings: Binding[] }`.
+- `PUT /api/v1/users/me/gesture-bindings` body `{ bindings: Binding[] }` → 204.
+
+Hardening (consistent with the 2026-04-18 security posture):
+- **Pydantic schema validation** mirroring the TS `Binding` type. Reject unknown action kinds, unknown poses, and out-of-range `magnitude`/`velocity`.
+- **Payload cap 64 KB** (also enforced by the DB CHECK constraint).
+- **Rate limit via `slowapi`:** PUT 10/min per user, GET 60/min per user — consistent with existing route limits.
+- **Authentication:** standard `deps.get_current_user`. No tenant-cross access (user-scoped only).
 
 ## Default bindings
 
 | Gesture | Action | Scope |
 |---|---|---|
 | Open palm hold 500ms | Wake / arm | global |
-| 1-finger point + motion | `cursor_move` | global |
-| Pinch (thumb+index) | `click` | global |
+| 1-finger point + motion | `cursor_move` | luna_only by default; `global` requires opt-in to "global cursor mode" + Accessibility |
+| Pinch (thumb+index) | `click` | luna_only by default; same opt-in for global |
 | 2-finger swipe ↕ | `scroll_up` / `scroll_down` | global |
 | 2-finger swipe ↔ | nav prev/next message | chat_only |
 | 2-finger pinch in/out | `zoom_in` / `zoom_out` | chat_only |
@@ -321,25 +409,45 @@ The kill-switch (`Cmd+Shift+G` or tray) forces `Sleeping` and additionally tells
 | CPU (Mac M4) | < 3% | < 12% |
 | RAM | < 200 MB | < 350 MB |
 | Landmark fps | 5 | 30 |
-| Gesture → action latency p95 | n/a | < 80 ms (excluding 500 ms wake) |
 | Battery overhead (8 h typical use) | — | < 8 % |
 
-Latency budget for Armed:
-- Capture frame → landmark: 18 ms (MediaPipe).
-- Landmark → pose+motion: 2 ms.
-- IPC + dispatch: 5 ms.
-- Action handler: 5 ms.
-- React rerender: ≤ 50 ms.
+**Two distinct latency budgets**, because they have different paths through the system:
+
+### Discrete gesture → action (with React in the loop)
+
+For one-shot gestures like 3-finger swipe, pinch-to-zoom, 5-finger grab — these route through Tauri events, `GestureContext`, and a React handler that calls into the API or navigates. **Target: < 80 ms p95 (excluding the 500 ms wake hold).**
+
+| Stage | Budget |
+|---|---|
+| Capture frame → landmark | 18 ms |
+| Landmark → pose+motion classify | 2 ms |
+| Recognizer debounce + dispatch (Tauri event) | 5 ms |
+| `GestureContext` lookup + handler call | 5 ms |
+| Action handler (API or nav) | ≤ 50 ms |
+
+### Continuous tracking → cursor (Rust direct, **bypasses React**)
+
+`cursor_move` is driven from `cursor.rs` inside the engine task, calling `enigo` directly on every armed frame. Tauri events and `GestureContext` are **not** in this path; React only renders the on-screen luna-glow overlay as decorative feedback. **Target: < 16 ms p95 tip-to-system-cursor (60 fps perceptual).**
+
+| Stage | Budget |
+|---|---|
+| Capture frame → landmark | 12 ms |
+| Index-tip x/y → smoothed cursor coords | 1 ms |
+| `enigo::set_cursor_position` | 3 ms |
 
 ## Integration with existing code
 
 - **Replaces** `apps/luna-client/src/components/spatial/GestureController.jsx`. The Spatial HUD will instead read from the same `GestureContext` so HUD and main window share one engine.
+- **Existing `luna-gesture-move` consumers must migrate.** Audit (run during Phase 1 day 5) found:
+  - `apps/luna-client/src/components/spatial/GestureController.jsx` — the producer; deleted.
+  - `apps/luna-client/src/components/spatial/KnowledgeNebula.jsx` — listens to `luna-gesture-move` (lines 123/128). Migrated to `useGesture()` consuming the same dx/dy/dz from `GestureEvent.motion` when pose=`Point` and engine is `Armed`.
+  - No other consumers in the repo (verified via `grep -rln "luna-gesture-move" apps/luna-client/src`).
 - **Coexists** with `VoiceProvider` and `useVoice`: voice and gesture are independent. Push-to-talk gesture (e.g. open-palm hold) can call `voiceStart()`.
 - **Reuses** existing API endpoints for the action targets: memory (`apps/api/app/memory/recall.py`, `record.py`), workflows (`POST /workflows/{id}/run`), MCP (`POST /mcp/tools/{name}/invoke`), notifications (`PUT /notifications/{id}/read`).
 - **New API endpoints** (`apps/api/app/api/v1/users.py`):
   - `GET /users/me/gesture-bindings` — fetch user's binding set.
-  - `PUT /users/me/gesture-bindings` — replace user's binding set (validates schema).
-- **No new database tables.** Bindings are stored as a JSON column on `users.preferences` (existing JSONB field). If `users.preferences` doesn't exist, add it via migration.
+  - `PUT /users/me/gesture-bindings` — replace user's binding set (validates schema, 64KB cap, rate-limited 10/min).
+- **New table** `user_gesture_bindings` via migration `114_user_gesture_bindings.sql` (see "Server-side schema & migration" above). Replicate to Helm values if any API env-var tuning is required (not anticipated).
 
 ## Testing strategy
 
@@ -366,28 +474,28 @@ Latency budget for Armed:
 
 ## Phases & milestones
 
-### Phase 1 — Sidecar + grammar (week 1)
-- **Day 1:** spike `mediapipe-rs` vs C++ FFI; pick winner.
-- **Days 2–3:** `camera.rs`, `mediapipe.rs`, `pose.rs`, `motion.rs`, `wake.rs`, `recognizer.rs`, `ipc.rs`.
-- **Day 4:** Tauri side `gestures.rs`, sidecar lifecycle, tray + shortcut wiring.
-- **Day 5:** `GestureContext`, `GestureOverlay` (replacing existing controller). Hard-coded default bindings. End-to-end test: wake → 3-finger swipe up opens HUD.
+### Phase 1 — Engine + grammar (week 1)
+- **Days 1–2:** landmark-runtime spike (Apple Vision → MediaPipe C++ → `mediapipe-rs`), pick winner against the spike pass criteria above.
+- **Days 3–4:** `camera.rs`, `landmark.rs`, `pose.rs`, `motion.rs`, `wake.rs`, `recognizer.rs`, `supervisor.rs`. Tauri command + event wiring in `lib.rs`. Rewrite `start_spatial_capture` as a frame-fan-out consumer.
+- **Day 5:** `GestureContext`, `GestureOverlay` (replacing existing controller). Migrate `KnowledgeNebula` consumer to `useGesture`. Hard-coded default bindings. End-to-end smoke: wake → 3-finger swipe up opens HUD.
 
-**Exit criteria:** all default bindings work end-to-end. Sleeping <3% CPU. Armed <12% CPU. Latency <80ms p95.
+**Exit criteria:** all default bindings work end-to-end. Sleeping <3% CPU. Armed <12% CPU. Discrete-gesture latency <80ms p95. No `luna-gesture-move` listeners remain.
 
 ### Phase 2 — Bindings UI (week 2)
 - `GestureBindingsPage`, `GestureRecorder`, `useGestureBindings`.
-- API endpoints + migration if needed.
-- Conflict detection, scope toggles, export/import.
+- Migration `114_user_gesture_bindings.sql` + API endpoints (validation, rate limit, 64KB cap).
+- Conflict detection, scope toggles (`global`/`luna_only`/`hud_only`/`chat_only`), export/import.
 
-**Exit criteria:** user can record a custom gesture and bind it to any action; conflict warnings work; bindings sync to API.
+**Exit criteria:** user can record a custom gesture and bind it to any action; conflict warnings work; bindings round-trip through API and DB; payload size + rate limit enforced.
 
 ### Phase 3 — Extensions (week 3)
-- `LunaCursor` (point-pose virtual cursor + pinch click).
+- `cursor.rs` (point-pose system cursor + pinch click) gated by Accessibility + frontmost-app rules. `LunaCursor.jsx` overlay.
 - Hand-rotation knob (continuous parameter binding).
 - Two-handed frame for region-select → summarize MCP tool.
-- `GestureCalibration` onboarding wizard.
+- `GestureCalibration` onboarding wizard with Accessibility step.
+- "Global cursor mode" opt-in toggle in `GestureBindingsPage` with first-time warning copy.
 
-**Exit criteria:** virtual cursor reliably tracks across full screen; rotation knob drives chat zoom and model temperature smoothly; calibration wizard reduces false-detection rate.
+**Exit criteria:** in-app cursor tracking <16ms p95; system cursor only fires when Luna or HUD is frontmost (or when the user has explicitly opted in to global cursor mode); calibration wizard reduces false-detection rate; rotation knob drives chat zoom and model temperature smoothly.
 
 ## Risks & mitigations
 
@@ -398,7 +506,8 @@ Latency budget for Armed:
 | False wake (open palm during conversation) | 500 ms hold + confidence > 0.85 threshold; user can tune in bindings page |
 | Battery drain | Sleeping at 5fps + only pose classifier; auto-disarm after 5s |
 | Action storms from misclassification | 80 ms event debounce + two-step confirm for destructive actions |
-| Sidecar crash | Tauri main supervises and restarts up to 3× per minute, then surfaces error toast |
+| Engine task panic | `supervisor.rs` restarts up to **3× per session total**. After exhaustion, menubar dot shows red cross-out and the engine stays off until the user re-enables from the tray. Each restart releases and re-acquires the camera handle (brief green-light flash). |
+| Camera unplugged mid-session | `camera.rs` emits `Disconnected`; supervisor falls back to default device, or surfaces `engine-status: { state: "no_camera" }` if none available. |
 | User locks themselves out of the bindings UI | Settings remain reachable via keyboard nav (`Cmd+,` → Gestures); gestures can always be paused via `Cmd+Shift+G` |
 
 ## Open questions
