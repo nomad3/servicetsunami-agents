@@ -26,6 +26,60 @@ pub mod embedding {
 use embedding::v1::embedding_service_client::EmbeddingServiceClient;
 use embedding::v1::EmbedRequest;
 
+// ─── pure helpers (no I/O, unit-tested below) ───────────────────────────────
+
+/// Encode a Rust f32 slice into the literal pgvector accepts via parameter
+/// binding: e.g. `[0.1,0.2,-0.3]`. Centralizing this lets us regression-test
+/// the encoding (e.g. that we never emit scientific notation that pgvector
+/// would reject).
+pub fn format_pgvector(v: &[f32]) -> String {
+    format!(
+        "[{}]",
+        v.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(",")
+    )
+}
+
+/// Validate and parse a tenant-scoped UUID string as it arrives off the wire.
+/// Maps any parse failure to a gRPC `invalid_argument` so the client can act
+/// on it without inspecting backend logs.
+pub fn parse_tenant_id(raw: &str) -> Result<Uuid, Status> {
+    Uuid::parse_str(raw).map_err(|_| Status::invalid_argument("Invalid tenant_id"))
+}
+
+/// Same as `parse_tenant_id` but for the entity_id field. Kept distinct so
+/// the error message tells the client which field they got wrong.
+pub fn parse_entity_id(raw: &str) -> Result<Uuid, Status> {
+    Uuid::parse_str(raw).map_err(|_| Status::invalid_argument("Invalid entity_id"))
+}
+
+/// Convert an inbound protobuf Timestamp to `chrono::DateTime<Utc>`. A
+/// timestamp that protobuf considers in-range but chrono cannot represent
+/// degrades to `Utc::now()` — the same fallback the production handler uses.
+pub fn proto_ts_to_chrono(ts: Option<prost_types::Timestamp>) -> Option<chrono::DateTime<chrono::Utc>> {
+    ts.map(|t| {
+        chrono::DateTime::from_timestamp(t.seconds, t.nanos as u32)
+            .unwrap_or_else(chrono::Utc::now)
+    })
+}
+
+/// Convert a `chrono::DateTime<Utc>` to a protobuf Timestamp.
+pub fn chrono_to_proto_ts(dt: chrono::DateTime<chrono::Utc>) -> prost_types::Timestamp {
+    prost_types::Timestamp {
+        seconds: dt.timestamp(),
+        nanos: dt.timestamp_subsec_nanos() as i32,
+    }
+}
+
+/// Resolve the source_type used when persisting an observation. Empty string
+/// from the caller defaults to `"agent"`; everything else passes through.
+pub fn default_source_type(provided: &str) -> String {
+    if provided.is_empty() {
+        "agent".to_string()
+    } else {
+        provided.to_string()
+    }
+}
+
 pub struct MyMemoryCore {
     pool: sqlx::PgPool,
     embedding_client: EmbeddingServiceClient<tonic::transport::Channel>,
@@ -56,14 +110,13 @@ impl MemoryCore for MyMemoryCore {
     async fn recall(&self, request: Request<RecallRequest>) -> Result<Response<RecallResponse>, Status> {
         let start = Instant::now();
         let req = request.into_inner();
-        let tenant_id = Uuid::parse_str(&req.tenant_id)
-            .map_err(|_| Status::invalid_argument("Invalid tenant_id"))?;
+        let tenant_id = parse_tenant_id(&req.tenant_id)?;
 
         println!("Recalling for tenant {} query: {}", tenant_id, req.query);
 
         // 1. Embed the query
         let query_vec = self.get_embedding(&req.query, "search_query").await?;
-        let query_vec_str = format!("[{}]", query_vec.iter().map(|v| v.to_string()).collect::<Vec<String>>().join(","));
+        let query_vec_str = format_pgvector(&query_vec);
 
         // 2. Search entities
         let entity_rows = sqlx::query(
@@ -171,10 +224,7 @@ impl MemoryCore for MyMemoryCore {
         let episodes: Vec<EpisodeSummary> = episode_rows.iter().map(|r| EpisodeSummary {
             id: r.get("id"),
             summary: r.get("summary"),
-            created_at: Some(prost_types::Timestamp {
-                seconds: r.get::<chrono::DateTime<chrono::Utc>, _>("created_at").timestamp(),
-                nanos: r.get::<chrono::DateTime<chrono::Utc>, _>("created_at").timestamp_subsec_nanos() as i32,
-            }),
+            created_at: Some(chrono_to_proto_ts(r.get::<chrono::DateTime<chrono::Utc>, _>("created_at"))),
             similarity: r.get::<f64, _>("similarity") as f32,
         }).collect();
 
@@ -206,10 +256,7 @@ impl MemoryCore for MyMemoryCore {
                 title: r.get("title"),
                 commitment_type: r.get("commitment_type"),
                 status: r.get("state"),
-                due_at: due_at.map(|dt| prost_types::Timestamp {
-                    seconds: dt.timestamp(),
-                    nanos: dt.timestamp_subsec_nanos() as i32,
-                }),
+                due_at: due_at.map(chrono_to_proto_ts),
                 owner_agent_slug: r.get("owner_agent_slug"),
             }
         }).collect();
@@ -241,10 +288,7 @@ impl MemoryCore for MyMemoryCore {
                 session_id: r.get("session_id"),
                 content: r.get("content"),
                 role: r.get("role"),
-                created_at: dt.map(|d| prost_types::Timestamp {
-                    seconds: d.timestamp(),
-                    nanos: d.timestamp_subsec_nanos() as i32,
-                }),
+                created_at: dt.map(chrono_to_proto_ts),
                 similarity: r.get::<f64, _>("similarity") as f32,
             }
         }).collect();
@@ -283,20 +327,15 @@ impl MemoryCore for MyMemoryCore {
 
     async fn record_observation(&self, request: Request<RecordObservationRequest>) -> Result<Response<()>, Status> {
         let req = request.into_inner();
-        let tenant_id = Uuid::parse_str(&req.tenant_id)
-            .map_err(|_| Status::invalid_argument("Invalid tenant_id"))?;
-        let entity_id = Uuid::parse_str(&req.entity_id)
-            .map_err(|_| Status::invalid_argument("Invalid entity_id"))?;
+        let tenant_id = parse_tenant_id(&req.tenant_id)?;
+        let entity_id = parse_entity_id(&req.entity_id)?;
 
         // Embed the observation text
         let embedding = self.get_embedding(&req.content, "search_document").await?;
-        let embedding_str = format!(
-            "[{}]",
-            embedding.iter().map(|v| v.to_string()).collect::<Vec<String>>().join(",")
-        );
+        let embedding_str = format_pgvector(&embedding);
 
         let obs_id = Uuid::new_v4();
-        let source_type = if req.source_type.is_empty() { "agent".to_string() } else { req.source_type.clone() };
+        let source_type = default_source_type(&req.source_type);
 
         // INSERT into knowledge_observations
         sqlx::query(
@@ -339,16 +378,12 @@ impl MemoryCore for MyMemoryCore {
 
     async fn record_commitment(&self, request: Request<RecordCommitmentRequest>) -> Result<Response<()>, Status> {
         let req = request.into_inner();
-        let tenant_id = Uuid::parse_str(&req.tenant_id)
-            .map_err(|_| Status::invalid_argument("Invalid tenant_id"))?;
+        let tenant_id = parse_tenant_id(&req.tenant_id)?;
 
         let commitment_id = Uuid::new_v4();
 
         // Convert optional protobuf Timestamp to chrono DateTime
-        let due_at: Option<chrono::DateTime<chrono::Utc>> = req.due_at.map(|ts| {
-            chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)
-                .unwrap_or_else(|| chrono::Utc::now())
-        });
+        let due_at: Option<chrono::DateTime<chrono::Utc>> = proto_ts_to_chrono(req.due_at);
 
         // INSERT into commitment_records
         sqlx::query(
@@ -390,8 +425,7 @@ impl MemoryCore for MyMemoryCore {
 
     async fn ingest_events(&self, request: Request<IngestRequest>) -> Result<Response<IngestResponse>, Status> {
         let req = request.into_inner();
-        let tenant_id = Uuid::parse_str(&req.tenant_id)
-            .map_err(|_| Status::invalid_argument("Invalid tenant_id"))?;
+        let tenant_id = parse_tenant_id(&req.tenant_id)?;
 
         let mut processed: i32 = 0;
 
@@ -513,4 +547,207 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use memory::v1::{
+        CommitmentSummary, ConversationSnippet, Entity, EpisodeSummary, Observation,
+    };
+    use pretty_assertions::assert_eq;
+
+    // ---- format_pgvector ---------------------------------------------------
+
+    #[test]
+    fn format_pgvector_simple_three_dim() {
+        assert_eq!(format_pgvector(&[0.1, 0.2, 0.3]), "[0.1,0.2,0.3]");
+    }
+
+    #[test]
+    fn format_pgvector_empty_vector_renders_empty_brackets() {
+        assert_eq!(format_pgvector(&[]), "[]");
+    }
+
+    #[test]
+    fn format_pgvector_single_element() {
+        assert_eq!(format_pgvector(&[1.0_f32]), "[1]");
+    }
+
+    #[test]
+    fn format_pgvector_handles_negative_and_zero() {
+        let s = format_pgvector(&[0.0, -0.5, 0.5]);
+        assert_eq!(s, "[0,-0.5,0.5]");
+    }
+
+    #[test]
+    fn format_pgvector_round_trips_via_split() {
+        // Round-trip: parse the literal back into f32 values and compare.
+        // pgvector requires plain decimal — this guards against accidental
+        // scientific-notation output for large/small floats.
+        let original: Vec<f32> = vec![1e-3, 2.5, -7.25];
+        let s = format_pgvector(&original);
+        let inner = &s[1..s.len() - 1];
+        let parsed: Vec<f32> = inner.split(',').map(|t| t.parse::<f32>().unwrap()).collect();
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn format_pgvector_768_dim_has_brackets_and_767_commas() {
+        let v = vec![0.0_f32; 768];
+        let s = format_pgvector(&v);
+        assert!(s.starts_with('['));
+        assert!(s.ends_with(']'));
+        let commas = s.chars().filter(|c| *c == ',').count();
+        assert_eq!(commas, 767);
+    }
+
+    // ---- parse_tenant_id / parse_entity_id ---------------------------------
+
+    #[test]
+    fn parse_tenant_id_accepts_valid_uuid() {
+        let u = Uuid::new_v4();
+        let parsed = parse_tenant_id(&u.to_string()).expect("should parse");
+        assert_eq!(parsed, u);
+    }
+
+    #[test]
+    fn parse_tenant_id_rejects_garbage_with_invalid_argument() {
+        let err = parse_tenant_id("not-a-uuid").expect_err("should fail");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("tenant_id"));
+    }
+
+    #[test]
+    fn parse_tenant_id_rejects_empty_string() {
+        let err = parse_tenant_id("").expect_err("empty must fail");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[test]
+    fn parse_entity_id_accepts_valid_uuid() {
+        let u = Uuid::new_v4();
+        let parsed = parse_entity_id(&u.to_string()).expect("should parse");
+        assert_eq!(parsed, u);
+    }
+
+    #[test]
+    fn parse_entity_id_rejects_garbage_with_distinct_message() {
+        let err = parse_entity_id("nope").expect_err("should fail");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("entity_id"));
+    }
+
+    #[test]
+    fn parse_tenant_id_and_entity_id_have_different_messages() {
+        // Sanity: clients can tell which field is wrong from the error alone.
+        let t_err = parse_tenant_id("x").unwrap_err();
+        let e_err = parse_entity_id("x").unwrap_err();
+        assert_ne!(t_err.message(), e_err.message());
+    }
+
+    // ---- proto_ts_to_chrono / chrono_to_proto_ts ---------------------------
+
+    #[test]
+    fn proto_ts_to_chrono_none_passes_through() {
+        assert!(proto_ts_to_chrono(None).is_none());
+    }
+
+    #[test]
+    fn proto_ts_to_chrono_round_trip() {
+        let ts = prost_types::Timestamp { seconds: 1_700_000_000, nanos: 123_456_789 };
+        let chrono_dt = proto_ts_to_chrono(Some(ts.clone())).expect("should convert");
+        let back = chrono_to_proto_ts(chrono_dt);
+        assert_eq!(back.seconds, ts.seconds);
+        assert_eq!(back.nanos, ts.nanos);
+    }
+
+    #[test]
+    fn chrono_to_proto_ts_unix_epoch() {
+        let dt = chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap();
+        let ts = chrono_to_proto_ts(dt);
+        assert_eq!(ts.seconds, 0);
+        assert_eq!(ts.nanos, 0);
+    }
+
+    #[test]
+    fn proto_ts_to_chrono_zero_is_unix_epoch() {
+        let ts = prost_types::Timestamp { seconds: 0, nanos: 0 };
+        let dt = proto_ts_to_chrono(Some(ts)).expect("should convert");
+        assert_eq!(dt.timestamp(), 0);
+    }
+
+    // ---- default_source_type -----------------------------------------------
+
+    #[test]
+    fn default_source_type_empty_yields_agent() {
+        assert_eq!(default_source_type(""), "agent");
+    }
+
+    #[test]
+    fn default_source_type_passthrough() {
+        assert_eq!(default_source_type("user"), "user");
+        assert_eq!(default_source_type("imported"), "imported");
+    }
+
+    #[test]
+    fn default_source_type_whitespace_is_not_empty() {
+        // Caller intent: whitespace was a deliberate input, do not coerce it.
+        assert_eq!(default_source_type(" "), " ");
+    }
+
+    // ---- estimate_tokens ---------------------------------------------------
+
+    fn entity(name: &str, etype: &str, cat: &str, desc: &str) -> Entity {
+        Entity {
+            id: "e".into(),
+            name: name.into(),
+            entity_type: etype.into(),
+            category: cat.into(),
+            description: desc.into(),
+            similarity: 0.0,
+        }
+    }
+
+    #[test]
+    fn estimate_tokens_empty_inputs_return_zero() {
+        let n = estimate_tokens(&[], &[], &[], &[], &[]);
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn estimate_tokens_uses_chars_div_4() {
+        // Total content length = 16 chars => 4 tokens (16 / 4).
+        let entities = vec![entity("aaaa", "bb", "cc", "dddddd")]; // 4+2+2+6 = 14
+        let observations = vec![Observation { id: "".into(), entity_id: "".into(), content: "xx".into(), similarity: 0.0 }]; // 2
+        // total chars = 14 + 2 = 16 -> 16/4 = 4
+        let n = estimate_tokens(&entities, &observations, &[], &[], &[]);
+        assert_eq!(n, 4);
+    }
+
+    #[test]
+    fn estimate_tokens_aggregates_all_buckets() {
+        let entities = vec![entity("ab", "cd", "ef", "gh")]; // 8
+        let observations = vec![Observation { id: "".into(), entity_id: "".into(), content: "ijkl".into(), similarity: 0.0 }]; // 4
+        let episodes = vec![EpisodeSummary { id: "".into(), summary: "mnop".into(), created_at: None, similarity: 0.0 }]; // 4
+        let commitments = vec![CommitmentSummary {
+            id: "".into(), title: "qrst".into(), commitment_type: "uv".into(),
+            status: "wx".into(), due_at: None, owner_agent_slug: "".into(),
+        }]; // 4+2+2 = 8
+        let conversations = vec![ConversationSnippet {
+            session_id: "".into(), content: "yzAB".into(), role: "".into(),
+            created_at: None, similarity: 0.0,
+        }]; // 4
+        // Total = 8 + 4 + 4 + 8 + 4 = 28 -> 28/4 = 7
+        let n = estimate_tokens(&entities, &observations, &episodes, &commitments, &conversations);
+        assert_eq!(n, 7);
+    }
+
+    #[test]
+    fn estimate_tokens_truncates_toward_zero() {
+        // 7 chars / 4 = 1 (integer division)
+        let entities = vec![entity("aaaaaaa", "", "", "")]; // 7
+        let n = estimate_tokens(&entities, &[], &[], &[], &[]);
+        assert_eq!(n, 1);
+    }
 }
