@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { GestureProvider } from './context/GestureContext';
 import ChatInterface from './components/ChatInterface';
 import LoginForm from './components/LoginForm';
 import NotificationBell from './components/NotificationBell';
@@ -9,12 +10,48 @@ import CommandPalette from './components/CommandPalette';
 import ClipboardToast from './components/ClipboardToast';
 import WorkflowSuggestions from './components/WorkflowSuggestions';
 import SpatialHUD from './components/spatial/SpatialHUD';
+import GestureOverlay from './components/gestures/GestureOverlay';
 import { useShellPresence } from './hooks/useShellPresence';
 import { useSessionEvents } from './hooks/useSessionEvents';
 import { useTrustProfile } from './hooks/useTrustProfile';
 import { useActivityTracker } from './hooks/useActivityTracker';
 import { apiJson } from './api';
 import './App.css';
+
+function dispatchGestureAction(binding /*, event */) {
+  switch (binding.action.kind) {
+    case 'nav_hud':
+      window.dispatchEvent(new Event('luna-toggle-hud'));
+      break;
+    case 'nav_chat':
+      window.dispatchEvent(new Event('luna-focus-chat'));
+      break;
+    case 'nav_command_palette':
+      window.dispatchEvent(new Event('toggle-palette'));
+      break;
+    case 'agent_next':
+      window.dispatchEvent(new Event('luna-agent-next'));
+      break;
+    case 'agent_prev':
+      window.dispatchEvent(new Event('luna-agent-prev'));
+      break;
+    case 'dismiss':
+      window.dispatchEvent(new Event('luna-dismiss'));
+      break;
+    case 'memory_record':
+      window.dispatchEvent(new CustomEvent('luna-memory-record', { detail: binding }));
+      break;
+    case 'scroll_up':
+      window.scrollBy({ top: -120, behavior: 'smooth' });
+      break;
+    case 'scroll_down':
+      window.scrollBy({ top: 120, behavior: 'smooth' });
+      break;
+    default:
+      // Unknown / Phase 3 actions handled elsewhere.
+      break;
+  }
+}
 
 function useTheme() {
   const [theme, setTheme] = useState(() => localStorage.getItem('luna_theme') || 'dark');
@@ -163,6 +200,7 @@ function AuthenticatedApp() {
       />
       <ClipboardToast />
       <WorkflowSuggestions visible={suggestionsOpen} onClose={() => setSuggestionsOpen(false)} />
+      <GestureOverlay />
     </div>
   );
 }
@@ -230,7 +268,9 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <GestureProvider onAction={dispatchGestureAction}>
+        <AppContent />
+      </GestureProvider>
     </AuthProvider>
   );
 }

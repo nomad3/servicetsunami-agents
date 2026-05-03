@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Stars, PerspectiveCamera, Text, Float, Line } from '@react-three/drei';
 import { EffectComposer, Bloom, Noise, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
+import { useGesture } from '../../hooks/useGesture';
 
 // --- Instanced Entities (High Performance) ---
 function InstancedEntities({ nodes = [] }) {
@@ -112,22 +113,29 @@ function NebulaCamera() {
     const up = (e) => (keys.current[e.code] = false);
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
-    
-    // Listen for Gesture coordinates from HUD
-    const handleGestureMove = (e) => {
-      const { dx, dy, dz } = e.detail;
-      camera.translateX(dx * 0.1);
-      camera.translateY(dy * 0.1);
-      camera.translateZ(dz * 0.1);
-    };
-    window.addEventListener('luna-gesture-move', handleGestureMove);
 
     return () => {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
-      window.removeEventListener('luna-gesture-move', handleGestureMove);
     };
   }, [camera]);
+
+  // Drive the HUD camera off the gesture engine's pose+motion stream when the
+  // user is in `point` pose. Replaces the previous `luna-gesture-move` window
+  // event from the deleted spatial/GestureController.jsx.
+  const { wakeState, lastEvent } = useGesture();
+  useEffect(() => {
+    if (wakeState !== 'armed' || !lastEvent) return;
+    if (lastEvent.pose !== 'point' || !lastEvent.motion) return;
+    const dir = lastEvent.motion.direction;
+    const mag = lastEvent.motion.magnitude || 0;
+    const dx = dir === 'right' ? mag * 20 : dir === 'left' ? -mag * 20 : 0;
+    const dy = dir === 'up' ? mag * 20 : dir === 'down' ? -mag * 20 : 0;
+    const dz = dir === 'in' ? mag * 50 : dir === 'out' ? -mag * 50 : 0;
+    camera.translateX(dx * 0.1);
+    camera.translateY(dy * 0.1);
+    camera.translateZ(dz * 0.1);
+  }, [lastEvent, wakeState, camera]);
 
   useFrame((state, delta) => {
     const speed = keys.current['ShiftLeft'] ? moveSpeed * 3 : moveSpeed;

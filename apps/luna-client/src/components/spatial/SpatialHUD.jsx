@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import KnowledgeNebula from './KnowledgeNebula';
-import GestureController from './GestureController';
 import { apiJson } from '../../api';
+import { useGesture } from '../../hooks/useGesture';
 import './SpatialHUD.css';
 
 const AGENT_COLORS = {
@@ -10,6 +10,17 @@ const AGENT_COLORS = {
   'analyst': '#aa00ff',
   'commander': '#ffaa00'
 };
+
+// Bridges the gesture engine's wake state to the HUD's "spatial sync"
+// indicator. Replaces the camera-ownership the deleted GestureController
+// had — the engine is now the sole camera owner.
+function SpatialHudGestureSync({ onSyncChange }) {
+  const { wakeState } = useGesture();
+  React.useEffect(() => {
+    onSyncChange?.(wakeState === 'armed');
+  }, [wakeState, onSyncChange]);
+  return null;
+}
 
 export default function SpatialHUD() {
   const [stats, setStats] = useState({ tokens: 65, cost: 0.42, manaPercent: 65 });
@@ -154,7 +165,7 @@ export default function SpatialHUD() {
   return (
     <div className={`spatial-hud-container ${consensus >= 90 ? 'consensus-glow' : ''}`}>
       <KnowledgeNebula nodes={nodes} agents={agents} beams={beams} />
-      <GestureController onSyncChange={setTrackingActive} />
+      <SpatialHudGestureSync onSyncChange={setTrackingActive} />
 
       <header className="hud-top">
         <div className="hud-group">
