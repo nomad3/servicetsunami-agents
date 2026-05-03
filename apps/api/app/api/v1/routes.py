@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     audit,
     auth,
+    insights_resolver_metrics,
     channels,
     data_sources,
     data_pipelines,
@@ -154,6 +155,7 @@ router.include_router(audit.router, prefix="/audit", tags=["audit"])
 router.include_router(external_agents.router, prefix="/external-agents", tags=["external-agents"])
 router.include_router(agent_marketplace.router, prefix="/marketplace", tags=["marketplace"])
 router.include_router(agent_tests.router, prefix="/agents", tags=["agent-tests"])
+router.include_router(insights_resolver_metrics.router, prefix="/insights", tags=["insights"])
 
 # Register optional modules that loaded successfully
 _optional_routes = {

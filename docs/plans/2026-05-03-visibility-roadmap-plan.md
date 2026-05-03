@@ -186,6 +186,12 @@ Slice the same data as Tier 2 but by health, not cost.
   `GET /insights/collaborations(/:id)` endpoints + `CoalitionReplayPage`
   (list + detail). Reads persisted blackboard substrate from A2A
   shipped 2026-04-12. 6 backend tests.
+- 2026-05-03: Op-1 (#269) — Resolver chain metrics endpoint
+  (`GET /insights/resolver-metrics`). Tenant-wide rollup of how the
+  resolver served chat turns over the last N hours (≤7d): served-by
+  distribution, fallback rate, fallback reasons, chain-exhausted
+  count, chain length p50/p95. Curated shape, no message IDs, no raw
+  cli_chain_attempted. 10 tests pin invariants.
 
 ## Working agreements while this is in flight
 
