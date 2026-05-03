@@ -42,6 +42,11 @@ impl Recognizer {
         }
 
         let motion = self.motion.classify();
+        let tip_xy = if matches!(pose, Pose::Point) {
+            Some((primary.landmarks[8].x, primary.landmarks[8].y))
+        } else {
+            None
+        };
         let event = GestureEvent {
             id: Ulid::new().to_string(),
             ts: now_ms,
@@ -50,6 +55,7 @@ impl Recognizer {
             motion,
             hand: primary.handedness,
             confidence: primary.confidence,
+            tip_xy,
         };
         self.last_emit_ms = now_ms;
 

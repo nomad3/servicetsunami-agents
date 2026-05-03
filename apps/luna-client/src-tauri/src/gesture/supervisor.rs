@@ -4,6 +4,7 @@
 //! emits gesture-event / wake-state-changed / engine-status events.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Mutex as StdMutex;
 
 use once_cell::sync::Lazy;
 use tokio::sync::Mutex;
@@ -27,12 +28,22 @@ static PAUSED: AtomicBool = AtomicBool::new(false);
 static CAMERA_INDEX: AtomicUsize = AtomicUsize::new(0);
 
 static HANDLE: Lazy<Mutex<Option<JoinHandle<()>>>> = Lazy::new(|| Mutex::new(None));
-static APP_HANDLE: Lazy<Mutex<Option<AppHandle>>> = Lazy::new(|| Mutex::new(None));
+// AppHandle storage uses a *sync* std::sync::Mutex so `install_app_handle`
+// can be called from the Tauri setup closure without spawning, eliminating
+// the race where `gesture_start` (called from React on auto-login) would
+// see an empty handle.
+static APP_HANDLE: Lazy<StdMutex<Option<AppHandle>>> = Lazy::new(|| StdMutex::new(None));
 
 const MAX_RESTARTS: usize = 3;
 
-pub async fn install_app_handle(handle: AppHandle) {
-    *APP_HANDLE.lock().await = Some(handle);
+pub fn install_app_handle(handle: AppHandle) {
+    if let Ok(mut guard) = APP_HANDLE.lock() {
+        *guard = Some(handle);
+    }
+}
+
+fn app_handle() -> Option<AppHandle> {
+    APP_HANDLE.lock().ok().and_then(|g| g.clone())
 }
 
 pub async fn list_cameras() -> Vec<String> {
@@ -80,11 +91,7 @@ pub async fn start_engine() -> Result<(), String> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return Ok(());
     }
-    let app = APP_HANDLE
-        .lock()
-        .await
-        .clone()
-        .ok_or_else(|| "app handle not installed".to_string())?;
+    let app = app_handle().ok_or_else(|| "app handle not installed".to_string())?;
 
     // Probe Accessibility once at startup so cursor/click bindings work
     // immediately when the user has already granted the permission. Skip

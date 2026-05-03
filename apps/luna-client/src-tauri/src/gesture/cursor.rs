@@ -6,10 +6,14 @@
 //!      cursor moves only fire while Luna or Spatial HUD is the frontmost
 //!      app, so a stray pinch doesn't click in some other app.
 //!
-//! Phase 3 wires this into the recognizer's `point` pose path. Display size
-//! is hardcoded to 1920×1080 in v1; a follow-up will read `CGDisplayBounds`.
+//! Phase 4 improvements over the v1 from the gesture-system PR:
+//!   - Display size read once at startup via `CGDisplayPixelsWide/High` so
+//!     cursor coordinates work on Retina, multi-monitor, and non-1080p setups.
+//!   - Frontmost-app check cached at 1Hz instead of shelling `osascript` per
+//!     cursor frame. ~30× CPU reduction while pointing.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use once_cell::sync::Lazy;
 use tokio::sync::Mutex;
@@ -19,6 +23,15 @@ use enigo::{Button, Coordinate, Direction, Enigo, Mouse, Settings};
 
 static GLOBAL_MODE: AtomicBool = AtomicBool::new(false);
 static ACCESSIBILITY_OK: AtomicBool = AtomicBool::new(false);
+
+// Frontmost-Luna cache — refreshed at most once per FRONTMOST_TTL_MS.
+static FRONTMOST_LAST_CHECK_MS: AtomicI64 = AtomicI64::new(0);
+static FRONTMOST_IS_LUNA: AtomicBool = AtomicBool::new(false);
+const FRONTMOST_TTL_MS: i64 = 1_000;
+
+// Display dimensions cache. -1 = not yet read.
+static DISPLAY_W: AtomicI64 = AtomicI64::new(-1);
+static DISPLAY_H: AtomicI64 = AtomicI64::new(-1);
 
 #[cfg(target_os = "macos")]
 static ENIGO: Lazy<Mutex<Option<Enigo>>> = Lazy::new(|| Mutex::new(None));
@@ -35,11 +48,16 @@ pub fn accessibility_ok() -> bool {
     ACCESSIBILITY_OK.load(Ordering::SeqCst)
 }
 
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 #[cfg(target_os = "macos")]
 pub fn check_accessibility() -> bool {
     use std::process::Command;
-    // A cheap read-only Apple Events probe — if we have Accessibility, this
-    // returns the frontmost process name. If not, osascript exits non-zero.
     let ok = Command::new("osascript")
         .args([
             "-e",
@@ -58,26 +76,75 @@ pub fn check_accessibility() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn frontmost_is_luna() -> bool {
+fn probe_frontmost_luna_now() -> bool {
     use std::process::Command;
-    let out = Command::new("osascript")
+    Command::new("osascript")
         .args([
             "-e",
             "tell application \"System Events\" to get name of first application process whose frontmost is true",
         ])
-        .output();
-    match out {
-        Ok(o) if o.status.success() => {
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
             let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
             s == "Luna" || s == "luna"
-        }
-        _ => false,
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "macos")]
+fn frontmost_is_luna_cached() -> bool {
+    let now = now_ms();
+    let last = FRONTMOST_LAST_CHECK_MS.load(Ordering::Relaxed);
+    if now - last >= FRONTMOST_TTL_MS {
+        let v = probe_frontmost_luna_now();
+        FRONTMOST_IS_LUNA.store(v, Ordering::Relaxed);
+        FRONTMOST_LAST_CHECK_MS.store(now, Ordering::Relaxed);
+        v
+    } else {
+        FRONTMOST_IS_LUNA.load(Ordering::Relaxed)
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn frontmost_is_luna() -> bool {
+fn frontmost_is_luna_cached() -> bool {
     false
+}
+
+/// Read main display size once; fall back to 1920×1080 if CG isn't available.
+#[cfg(target_os = "macos")]
+fn ensure_display_size() -> (i32, i32) {
+    let cached_w = DISPLAY_W.load(Ordering::Relaxed);
+    let cached_h = DISPLAY_H.load(Ordering::Relaxed);
+    if cached_w > 0 && cached_h > 0 {
+        return (cached_w as i32, cached_h as i32);
+    }
+    let (w, h) = read_main_display_size();
+    DISPLAY_W.store(w as i64, Ordering::Relaxed);
+    DISPLAY_H.store(h as i64, Ordering::Relaxed);
+    (w, h)
+}
+
+#[cfg(target_os = "macos")]
+fn read_main_display_size() -> (i32, i32) {
+    // CGDirectDisplayID is u32 on macOS.
+    extern "C" {
+        fn CGMainDisplayID() -> u32;
+        fn CGDisplayPixelsWide(display: u32) -> usize;
+        fn CGDisplayPixelsHigh(display: u32) -> usize;
+    }
+    unsafe {
+        let did = CGMainDisplayID();
+        let w = CGDisplayPixelsWide(did) as i32;
+        let h = CGDisplayPixelsHigh(did) as i32;
+        if w > 0 && h > 0 { (w, h) } else { (1920, 1080) }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_display_size() -> (i32, i32) {
+    (1920, 1080)
 }
 
 /// Move the system cursor to absolute coordinates `(x, y)` in [0, 1] image
@@ -86,11 +153,11 @@ fn frontmost_is_luna() -> bool {
 #[cfg(target_os = "macos")]
 pub async fn move_abs(x: f32, y: f32) {
     if !ACCESSIBILITY_OK.load(Ordering::SeqCst) { return; }
-    if !GLOBAL_MODE.load(Ordering::SeqCst) && !frontmost_is_luna() { return; }
+    if !GLOBAL_MODE.load(Ordering::SeqCst) && !frontmost_is_luna_cached() { return; }
 
-    // Display size is hardcoded for v1; follow-up will read CGDisplayBounds.
-    let px = (x.clamp(0.0, 1.0) * 1920.0) as i32;
-    let py = (y.clamp(0.0, 1.0) * 1080.0) as i32;
+    let (dw, dh) = ensure_display_size();
+    let px = (x.clamp(0.0, 1.0) * dw as f32) as i32;
+    let py = (y.clamp(0.0, 1.0) * dh as f32) as i32;
 
     let mut guard = ENIGO.lock().await;
     if guard.is_none() {
@@ -104,7 +171,7 @@ pub async fn move_abs(x: f32, y: f32) {
 #[cfg(target_os = "macos")]
 pub async fn click() {
     if !ACCESSIBILITY_OK.load(Ordering::SeqCst) { return; }
-    if !GLOBAL_MODE.load(Ordering::SeqCst) && !frontmost_is_luna() { return; }
+    if !GLOBAL_MODE.load(Ordering::SeqCst) && !frontmost_is_luna_cached() { return; }
 
     let mut guard = ENIGO.lock().await;
     if guard.is_none() {

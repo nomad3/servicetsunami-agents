@@ -76,6 +76,11 @@ pub struct GestureEvent {
     pub motion: Option<Motion>,
     pub hand: Hand,
     pub confidence: f32,
+    /// Index-fingertip xy in normalized [0,1] image space when the pose is
+    /// `Point`; None otherwise. Lets the React `LunaCursor` overlay actually
+    /// track the fingertip instead of sitting at screen centre.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip_xy: Option<(f32, f32)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -7,7 +7,7 @@ size cap enforced both here and at the DB level via the value_json CHECK constra
 from enum import Enum
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field, conlist
+from pydantic import BaseModel, ConfigDict, Field, conlist
 
 
 class Pose(str, Enum):
@@ -56,17 +56,20 @@ class ActionKind(str, Enum):
 
 
 class MotionSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     kind: Literal["swipe", "pinch", "rotate", "tap", "none"]
     direction: Optional[Literal["up", "down", "left", "right", "in", "out", "cw", "ccw"]] = None
 
 
 class GestureSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     pose: Pose
     motion: Optional[MotionSpec] = None
     modifier_pose: Optional[Pose] = None
 
 
 class ActionSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     kind: ActionKind
     params: Optional[dict] = None
 
