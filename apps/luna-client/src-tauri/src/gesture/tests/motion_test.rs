@@ -104,6 +104,30 @@ fn detects_rotate_cw() {
 }
 
 #[test]
+fn detects_sweep_left() {
+    let mut a = MotionAnalyzer::new();
+    // Large slow lateral motion — palm sweeps from x=0.85 to x=0.15 over 600ms.
+    for i in 0..20 {
+        let x = 0.85 - (i as f32) * 0.035;
+        a.push(&frame_with_palm_at(x, 0.5), 1_700_000_000_000 + i * 30);
+    }
+    let m = a.classify().expect("sweep must classify");
+    assert_eq!(m.kind, MotionKind::Sweep);
+    assert_eq!(m.direction, Some(Direction::Left));
+}
+
+#[test]
+fn small_fast_motion_is_swipe_not_sweep() {
+    let mut a = MotionAnalyzer::new();
+    // Magnitude 0.30, duration ~270ms — too small for sweep, fits swipe.
+    for i in 0..10 {
+        a.push(&frame_with_palm_at(i as f32 * 0.033, 0.5), 1_700_000_000_000 + i * 30);
+    }
+    let m = a.classify().unwrap();
+    assert_eq!(m.kind, MotionKind::Swipe);
+}
+
+#[test]
 fn detects_tap() {
     let mut a = MotionAnalyzer::new();
     // Open → close → open in ~150ms.

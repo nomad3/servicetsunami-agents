@@ -20,6 +20,13 @@ const TAP_PINCH_THRESHOLD: f32 = 0.06;
 const ROTATE_DELTA_RADIANS: f32 = 0.6; // ~34°
 const ROTATE_MAX_DURATION_MS: i64 = 600;
 
+// Sweep-arm: bigger and slower than a swipe. Captures the conductor's
+// "bring this section in" or "out" motion — open palm moves laterally a
+// large distance (>0.5 normalized) over 0.4–1.2s.
+const SWEEP_MIN_MAGNITUDE: f32 = 0.50;
+const SWEEP_MIN_DURATION_MS: i64 = 400;
+const SWEEP_MAX_DURATION_MS: i64 = 1200;
+
 #[derive(Clone, Copy)]
 struct Sample {
     palm: Landmark,        // landmark 9 — middle MCP, palm-center proxy
@@ -63,10 +70,12 @@ impl MotionAnalyzer {
 
         // Try the more-specific motions first (tap is a pinch open→close→open
         // within 200ms; pinch is a sustained distance change; rotate is palm
-        // angle velocity). Swipe is the fallback.
+        // angle velocity; sweep is a large slow lateral palm move). Swipe is
+        // the fallback for the small/fast lateral case.
         if let Some(m) = self.classify_tap() { return Some(m); }
         if let Some(m) = self.classify_pinch() { return Some(m); }
         if let Some(m) = self.classify_rotate() { return Some(m); }
+        if let Some(m) = self.classify_sweep() { return Some(m); }
         if let Some(m) = self.classify_swipe() { return Some(m); }
 
         Some(Motion {
@@ -158,6 +167,27 @@ impl MotionAnalyzer {
             });
         }
         None
+    }
+
+    fn classify_sweep(&self) -> Option<Motion> {
+        let start = self.samples.front()?;
+        let end = self.samples.back()?;
+        let dx = end.palm.x - start.palm.x;
+        let dy = end.palm.y - start.palm.y;
+        let mag = (dx * dx + dy * dy).sqrt();
+        let dur = end.ts - start.ts;
+        if mag < SWEEP_MIN_MAGNITUDE { return None; }
+        if dur < SWEEP_MIN_DURATION_MS || dur > SWEEP_MAX_DURATION_MS { return None; }
+        // Sweep is dominantly horizontal — reject if the vertical component
+        // is bigger.
+        if dy.abs() > dx.abs() { return None; }
+        let direction = if dx > 0.0 { Direction::Right } else { Direction::Left };
+        Some(Motion {
+            kind: MotionKind::Sweep,
+            direction: Some(direction),
+            magnitude: mag.min(1.0),
+            velocity: mag / (dur as f32 / 1000.0),
+        })
     }
 
     fn classify_rotate(&self) -> Option<Motion> {

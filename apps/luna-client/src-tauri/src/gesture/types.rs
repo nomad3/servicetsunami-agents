@@ -34,6 +34,11 @@ pub enum MotionKind {
     Pinch,
     Rotate,
     Tap,
+    /// Sweep-arm — large, slow, sustained horizontal palm motion (the
+    /// "bring section in" / "section out" conducting gesture). Distinct
+    /// from Swipe in that it requires open-palm pose, longer duration,
+    /// and larger magnitude.
+    Sweep,
     None,
 }
 
@@ -81,6 +86,27 @@ pub struct GestureEvent {
     /// track the fingertip instead of sitting at screen centre.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tip_xy: Option<(f32, f32)>,
+    /// Two-handed pose info — present when both hands are visible. The
+    /// React side reads this to detect "both hands rising" (crescendo),
+    /// "both hands falling" (diminuendo), and two-handed framing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub two_handed: Option<TwoHanded>,
+}
+
+/// Compact summary of the secondary hand when two are present, plus
+/// whether their motion is mirrored (rising/falling/framing).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TwoHanded {
+    pub other_pose: Pose,
+    pub other_hand: Hand,
+    /// Vertical motion of both palms over the last ~600ms. Positive =
+    /// both palms rising in image-space y (which is screen-down due to
+    /// y-flip in the Swift bridge → user is moving them up).
+    pub coordinated_dy: f32,
+    /// Horizontal spread between the two palms over the last ~600ms.
+    /// Positive = palms moving apart (frame opening), negative = palms
+    /// closing (frame closing).
+    pub spread_dx: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

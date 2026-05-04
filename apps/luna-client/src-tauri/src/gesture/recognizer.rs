@@ -47,6 +47,29 @@ impl Recognizer {
         } else {
             None
         };
+        // Two-handed: when a second hand is visible, classify its pose and
+        // compute coordinated motion for crescendo / diminuendo / framing.
+        let two_handed = if hands.len() >= 2 {
+            let other = &hands[1];
+            let (other_pose, _) = classify(other);
+            // Coordinated dy: average vertical motion of both palms over
+            // the recognizer's recent buffer (approximated from current
+            // palm positions vs the secondary hand's landmark[9]).
+            // We don't have history per-hand here; supervisor pushes only
+            // primary into the motion analyzer. For Phase E the spec is to
+            // surface the *delta between the two palms* in the same frame,
+            // which the React side can integrate over its own short window.
+            let coordinated_dy = -(primary.landmarks[9].y + other.landmarks[9].y) * 0.5;
+            let spread_dx = (primary.landmarks[9].x - other.landmarks[9].x).abs();
+            Some(crate::gesture::types::TwoHanded {
+                other_pose,
+                other_hand: other.handedness,
+                coordinated_dy,
+                spread_dx,
+            })
+        } else {
+            None
+        };
         let event = GestureEvent {
             id: Ulid::new().to_string(),
             ts: now_ms,
@@ -56,6 +79,7 @@ impl Recognizer {
             hand: primary.handedness,
             confidence: primary.confidence,
             tip_xy,
+            two_handed,
         };
         self.last_emit_ms = now_ms;
 
