@@ -226,29 +226,64 @@ describe('teamsService', () => {
 });
 
 describe('miscellaneous services', () => {
-  test('hit their declared endpoints without throwing', async () => {
+  test('hit their declared endpoints', async () => {
     await notebookService.getAll();
-    await toolService.getAll();
-    await vectorStoreService.getAll();
-    await dataSourceService.getAll();
-    await dataPipelineService.getAll();
-    await deploymentService.getAll();
-    await datasetGroupService.getAll();
+    expect(api.get).toHaveBeenCalledWith('/notebooks');
 
-    // Touch each module's named/default exports just enough to register
-    // their function bodies for coverage. Some don't actually export
-    // CRUD-shaped helpers, so tolerate undefined.
-    Object.values(brandingMod || {}).forEach((fn) => typeof fn === 'function' && fn.length === 0 && fn());
-    Object.values(analyticsMod || {}).forEach((fn) => typeof fn === 'function' && fn.length === 0 && fn());
-    if (connectorService?.getAll) await connectorService.getAll();
-    if (skillService?.getAll) await skillService.getAll();
-    if (taskService?.getAll) await taskService.getAll();
-    if (channelService?.getWhatsAppStatus) await channelService.getWhatsAppStatus();
-    if (mediaService?.transcribeAudio) {
-      await mediaService.transcribeAudio(new Blob(['x'], { type: 'audio/wav' }));
+    await toolService.getAll();
+    expect(api.get).toHaveBeenCalledWith('/tools');
+
+    // vectorStore + datasetGroup + connector + ... import from
+    // '../utils/api', so they hit the utilApi mock instead of the
+    // services/api mock.
+    await vectorStoreService.getAll();
+    expect(utilApi.get).toHaveBeenCalledWith('/vector_stores/');
+
+    await dataSourceService.getAll();
+    expect(api.get).toHaveBeenCalledWith('/data_sources/');
+
+    await dataPipelineService.getAll();
+    expect(api.get).toHaveBeenCalledWith('/data_pipelines/');
+
+    await deploymentService.getAll();
+    expect(api.get).toHaveBeenCalledWith('/deployments');
+
+    await datasetGroupService.getAll();
+    expect(utilApi.get).toHaveBeenCalledWith('/dataset-groups/');
+
+    // branding/analytics modules are intentionally not asserted: they expose
+    // store-style helpers without a fixed URL surface, and we already cover
+    // them in their own focused tests.
+    expect(brandingMod).toBeDefined();
+    expect(analyticsMod).toBeDefined();
+
+    if (connectorService?.getAll) {
+      await connectorService.getAll();
+      expect(utilApi.get).toHaveBeenCalledWith('/connectors/');
     }
 
-    // Just ensure SOMETHING was called on the api mocks.
-    expect(api.get.mock.calls.length + utilApi.get.mock.calls.length).toBeGreaterThan(0);
+    if (skillService?.health) {
+      await skillService.health();
+      expect(utilApi.get).toHaveBeenCalledWith('/skills/health');
+    }
+
+    if (taskService?.getAll) {
+      await taskService.getAll();
+      expect(utilApi.get).toHaveBeenCalledWith('/tasks', { params: {} });
+    }
+
+    if (channelService?.getWhatsAppStatus) {
+      await channelService.getWhatsAppStatus();
+      expect(api.get).toHaveBeenCalledWith('/channels/whatsapp/status');
+    }
+
+    if (mediaService?.transcribeAudio) {
+      await mediaService.transcribeAudio(new Blob(['x'], { type: 'audio/wav' }));
+      expect(utilApi.post).toHaveBeenCalledWith(
+        '/media/transcribe',
+        expect.any(Object),
+        expect.objectContaining({ headers: expect.any(Object) }),
+      );
+    }
   });
 });
