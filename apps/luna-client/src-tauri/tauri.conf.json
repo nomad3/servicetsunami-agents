@@ -16,13 +16,15 @@
         "label": "spatial_hud",
         "fullscreen": false,
         "resizable": true,
-        "decorations": false,
+        "decorations": true,
         "transparent": false,
         "alwaysOnTop": false,
         "visible": true,
         "maximized": true,
         "shadow": true,
-        "center": true
+        "center": true,
+        "minWidth": 800,
+        "minHeight": 600
       },
       {
         "title": "Luna",
@@ -75,7 +77,7 @@
       "endpoints": [
         "https://github.com/nomad3/servicetsunami-agents/releases/latest/download/latest.json"
       ],
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZBRUUwNDNCOEE5NEU1NTMKUldSVDVaU0tPd1R1YXZwdFlxd1NrekVJL1REcktVVW14Y0M3Z09XMnNueS9kaG42aXlGSUx0T2MK",
       "windows": {
         "installMode": "passive"
       }

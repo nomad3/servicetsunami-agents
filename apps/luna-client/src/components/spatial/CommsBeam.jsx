@@ -1,38 +1,47 @@
 /**
  * Animated beam of light between two agents — visible when an A2A
- * collaboration is active. Reads the wake state to dim itself when the
- * conductor is sleeping, lights up bright when armed.
+ * collaboration is active. Pulses opacity for an "active comms" feel; dims
+ * to ambient when the conductor is sleeping.
  */
-import React, { useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 export default function CommsBeam({ from, to, color = '#4cf', armed = true }) {
-  const ref = useRef();
+  const matRef = useRef();
+
+  // Cylinder maths — orient default-Y cylinder along (to - from).
+  const { mid, quat, len } = useMemo(() => {
+    const start = new THREE.Vector3(...from);
+    const end = new THREE.Vector3(...to);
+    const dir = end.clone().sub(start);
+    const length = dir.length();
+    const center = start.clone().add(end).multiplyScalar(0.5);
+    const up = new THREE.Vector3(0, 1, 0);
+    const q = new THREE.Quaternion().setFromUnitVectors(
+      up,
+      length > 1e-6 ? dir.divideScalar(length) : up.clone(),
+    );
+    return { mid: center.toArray(), quat: q.toArray(), len: length };
+  }, [from, to]);
 
   useFrame((state) => {
-    if (!ref.current) return;
+    if (!matRef.current) return;
     const t = state.clock.elapsedTime;
-    // Pulse opacity for "active comms" feel
     const base = armed ? 0.55 : 0.2;
-    ref.current.material.opacity = base + Math.sin(t * 4) * 0.15;
+    matRef.current.opacity = base + Math.sin(t * 4) * 0.15;
   });
 
-  // Thin cylinder oriented from `from` to `to`.
-  const start = new THREE.Vector3(...from);
-  const end = new THREE.Vector3(...to);
-  const mid = start.clone().add(end).multiplyScalar(0.5);
-  const dir = end.clone().sub(start);
-  const len = dir.length();
-  // Default cylinder is along Y; rotate so it points along `dir`.
-  const up = new THREE.Vector3(0, 1, 0);
-  const quat = new THREE.Quaternion().setFromUnitVectors(up, dir.normalize());
-
   return (
-    <mesh position={mid.toArray()} quaternion={quat.toArray()}>
+    <mesh position={mid} quaternion={quat}>
       <cylinderGeometry args={[0.025, 0.025, len, 8, 1, true]} />
-      <meshBasicMaterial color={color} transparent opacity={0.5} depthWrite={false} />
-      <primitive object={ref.current || {}} attach="material" />
+      <meshBasicMaterial
+        ref={matRef}
+        color={color}
+        transparent
+        opacity={0.5}
+        depthWrite={false}
+      />
     </mesh>
   );
 }

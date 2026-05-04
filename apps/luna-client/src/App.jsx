@@ -38,7 +38,12 @@ function dispatchGestureAction(binding, event) {
 
   switch (binding.action.kind) {
     case 'nav_hud':
-      window.dispatchEvent(new Event('luna-toggle-hud'));
+      // Bring the Luna OS spatial podium to the front. Pre-Luna-OS this
+      // toggled the HUD subwindow; now spatial_hud IS the OS, so the
+      // gesture means "make sure the conductor's podium is foreground."
+      import('@tauri-apps/api/core')
+        .then((tauri) => tauri.invoke('focus_podium').catch(() => {}))
+        .catch(() => {});
       break;
     case 'nav_chat':
       // Summon the comms panel (the secondary `main` chat window) from

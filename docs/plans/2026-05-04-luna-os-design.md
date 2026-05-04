@@ -160,11 +160,17 @@ Each phase ships independently as a PR. Branches are chained per the project mem
 ## Success criteria for Phase A
 
 - Luna boots into the podium within 1.5s on a Mac M4
-- All tenant agents appear in their correct section clusters
-- An agent halo pulses when the user spawns a task on it
-- A2A comms beams light up during a real coalition run
-- Inbox melody surfaces at least one item from each of: notifications, commitments
-- Wake gesture transitions scene from dim to lit; idle 5s reverses
-- Point + voice on an agent + "investigate the cardiac report" lands as an `agent_task` for that agent
+- All tenant agents appear in their correct section clusters (driven by `agent_groups`)
+- An agent halo pulses with intensity proportional to last-24h activity (`agent_performance_snapshots.invocation_count`)
+- A2A comms beams render for active blackboards (status='active', updated within 1h) with participants derived from distinct `BlackboardEntry.author_agent_slug` values
+- Inbox melody surfaces high-priority notifications first, then medium, then low (CASE-ranked, not alphabetic)
+- Wake gesture transitions scene from dim to lit (CSS opacity); idle 5s reverses
 - Comms panel summons cleanly with 4-finger pinch; fist dismisses
-- Original chat-panel `main` window still reachable via tray; nothing in the broader app workflow is broken
+- Original chat-panel `main` window still reachable via tray + `Cmd+Shift+L`; nothing in the broader app workflow is broken
+- Live updates: 60-second polling refresh of `/fleet/snapshot` (Phase B replaces with tenant-wide SSE)
+
+## Phase A deferrals (called out so we don't pretend they ship)
+
+- **Voice dispatch on point** — the `useDispatchOnPoint` hook is wired to fire on `luna-podium-target-agent` + `luna-podium-voice-text` events, but no voice hook in the current Luna client emits the second one. Voice dispatch ships in Phase B alongside the Score zone, when we wire `useVoice` against the existing `/media/transcribe` endpoint per `luna_client_voice_pattern.md`.
+- **Tenant-wide live SSE** — Phase A polls `/fleet/snapshot` every 60s. The existing `/collaborations/{session_id}/stream` SSE is per-session and Bearer-only (EventSource can't pre-flight headers). A tenant-scoped feed lands in Phase B.
+- **Knowledge Nebula behind the orchestra** — the existing nebula owns its own Canvas; refactoring it to nest inside another scene is Phase B+ work. Phase A uses `<Stars/>` from drei as the background.

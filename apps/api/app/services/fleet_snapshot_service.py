@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 import uuid
 
-from sqlalchemy import desc, func
+from sqlalchemy import case, desc, func
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
@@ -116,44 +116,71 @@ def build_snapshot(db: Session, tenant_id: uuid.UUID) -> Dict[str, Any]:
     groups_payload = [_group_to_dict(g) for g in groups]
 
     # ── Active collaborations (for comms beams) ────────────────────────────
-    # Reuse the existing collaboration / blackboard infrastructure. We avoid
-    # importing the model directly here to keep this service decoupled — the
-    # consumer reads /collaborations/stream SSE for live updates anyway.
-    # For the initial snapshot we just say "what's running right now" via a
-    # raw query so we don't depend on whether the model exists in this build.
+    # Active = blackboards with status='active' that have entries within the
+    # last hour. Participants are derived from the *distinct authors* of
+    # those entries (BlackboardEntry.author_agent_slug). We resolve each
+    # slug to an agent.id by name match against the tenant's agent roster
+    # so the spatial scene can locate them; slugs that don't match any
+    # known agent are returned as-is so the UI can still log them.
     active_collaborations: List[Dict[str, Any]] = []
     try:
-        from app.models.blackboard import Blackboard  # type: ignore
+        from app.models.blackboard import Blackboard, BlackboardEntry  # type: ignore
+
+        # Build a slug → agent_id map once. Agents may not have a "slug" field
+        # so we match on lowercased name; this is best-effort.
+        slug_to_agent_id: Dict[str, str] = {}
+        for a in agents:
+            if a.name:
+                slug_to_agent_id[a.name.lower()] = str(a.id)
+                # Common slug convention: lowercased name with spaces → underscores
+                slug_to_agent_id[a.name.lower().replace(" ", "_")] = str(a.id)
+
         live = (
             db.query(Blackboard)
             .filter(
                 Blackboard.tenant_id == tenant_id,
-                Blackboard.created_at >= one_hour_ago,
+                Blackboard.status == "active",
+                Blackboard.updated_at >= one_hour_ago,
             )
-            .order_by(desc(Blackboard.created_at))
+            .order_by(desc(Blackboard.updated_at))
             .limit(20)
             .all()
         )
         for bb in live:
-            participants = []
-            try:
-                participants = list((bb.shared_context or {}).get("participants", []))
-            except Exception:
-                participants = []
+            slugs = (
+                db.query(BlackboardEntry.author_agent_slug)
+                .filter(BlackboardEntry.blackboard_id == bb.id)
+                .distinct()
+                .all()
+            )
+            slug_set = [s[0] for s in slugs if s[0]]
+            participants = [
+                slug_to_agent_id.get(s.lower(), s) for s in slug_set
+            ]
             active_collaborations.append(
                 {
                     "id": str(bb.id),
-                    "pattern": getattr(bb, "pattern", None),
-                    "phase": getattr(bb, "phase", None),
+                    "title": bb.title,
+                    "status": bb.status,
                     "participants": participants,
+                    "participant_slugs": slug_set,  # for UI fallback
                     "started_at": bb.created_at.isoformat() if bb.created_at else None,
+                    "updated_at": bb.updated_at.isoformat() if bb.updated_at else None,
                 }
             )
-    except Exception:
-        # Blackboard model unavailable in this build — leave empty.
+    except Exception as e:  # pragma: no cover — defensive for schema variants
         active_collaborations = []
 
     # ── Inbox melody — recent notifications (unread, last 24h) ─────────────
+    # Priority is a string column ("high"/"medium"/"low"); alphabetic sort
+    # would order "high" < "low" < "medium" which puts low-priority items
+    # ahead of medium ones. Map to integer rank so high comes first.
+    priority_rank = case(
+        (Notification.priority == "high", 0),
+        (Notification.priority == "medium", 1),
+        (Notification.priority == "low", 2),
+        else_=3,
+    )
     notifications = (
         db.query(Notification)
         .filter(
@@ -161,7 +188,7 @@ def build_snapshot(db: Session, tenant_id: uuid.UUID) -> Dict[str, Any]:
             Notification.dismissed.is_(False),
             Notification.created_at >= now - timedelta(hours=24),
         )
-        .order_by(Notification.priority.asc(), Notification.created_at.desc())
+        .order_by(priority_rank, Notification.created_at.desc())
         .limit(15)
         .all()
     )

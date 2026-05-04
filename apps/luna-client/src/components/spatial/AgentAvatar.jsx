@@ -49,8 +49,9 @@ export default function AgentAvatar({ agent, position, teamName, targeted, onCli
   useFrame((state) => {
     if (!meshRef.current) return;
     const t = state.clock.elapsedTime;
-    // Subtle bob
-    meshRef.current.position.y = position[1] + Math.sin(t * 1.2 + position[0]) * 0.05;
+    // Subtle bob — local Y inside the parent <group position={position}>.
+    // Don't add position[1] here; the group already places us in world Y.
+    meshRef.current.position.y = Math.sin(t * 1.2 + position[0]) * 0.05;
     // Halo pulse: faster when activity is higher
     if (haloRef.current) {
       const pulse = 0.85 + Math.sin(t * (1.0 + intensity * 3)) * 0.15;

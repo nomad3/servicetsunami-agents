@@ -33,10 +33,11 @@ export function useDispatchOnPoint() {
         const task = await apiJson('/api/v1/tasks', {
           method: 'POST',
           body: JSON.stringify({
-            agent_id: target.agentId,
-            description: voice.text,
+            assigned_agent_id: target.agentId,
+            objective: voice.text,
             priority: 'normal',
-            source: 'podium_dispatch',
+            task_type: 'podium_dispatch',
+            context: { source: 'podium_dispatch' },
           }),
         });
         window.dispatchEvent(

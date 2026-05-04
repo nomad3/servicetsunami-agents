@@ -216,6 +216,19 @@ async fn hide_main_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Bring the Luna OS spatial podium to the foreground. Used by the
+/// `nav_hud` gesture binding from any window.
+#[tauri::command]
+async fn focus_podium(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("spatial_hud") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        Ok(())
+    } else {
+        Err("spatial_hud window not registered".into())
+    }
+}
+
 /// Whether the updater is configured with a non-empty signing pubkey. When
 /// false, `download_and_install` would fail at the verification step after
 /// a wasteful full DMG download — `tauri-plugin-updater` calls
@@ -790,6 +803,7 @@ pub fn run() {
             updater_signing_status,
             open_main_window,
             hide_main_window,
+            focus_podium,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Luna");
