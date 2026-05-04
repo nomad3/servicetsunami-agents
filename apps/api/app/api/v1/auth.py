@@ -3,8 +3,10 @@ import hashlib
 import hmac
 import secrets
 import logging
+import time
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.schemas import token as token_schema
@@ -22,6 +24,12 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _PASSWORD_RESET_MESSAGE = "Password reset instructions sent if email is registered"
+
+# Cap the refresh chain. Even with /auth/refresh, the *original* iat travels
+# with every refreshed token, so a stolen token at hour 0 can be refreshed
+# at most until hour `MAX_TOKEN_CHAIN_AGE_SECONDS / 3600`. After that the
+# user must re-authenticate. 7 days = weekly forced re-auth.
+MAX_TOKEN_CHAIN_AGE_SECONDS = 7 * 24 * 60 * 60
 
 
 @router.post("/login", response_model=token_schema.Token)
@@ -50,6 +58,16 @@ def login_for_access_token(
     return {"access_token": access_token, "token_type": "bearer"}
 
 
+def _bearer_token(request: Request) -> str | None:
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not auth:
+        return None
+    parts = auth.split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    return parts[1].strip()
+
+
 @router.post("/refresh", response_model=token_schema.Token)
 @limiter.limit("60/minute")
 def refresh_access_token(
@@ -59,10 +77,39 @@ def refresh_access_token(
     """Re-issue a fresh access token for the currently authenticated caller.
 
     The caller must present a still-valid bearer token. We re-mint with the
-    same claims and a fresh expiry. This lets long-running clients (e.g. the
-    Luna desktop app) refresh proactively before the current token expires
-    instead of getting kicked out mid-session.
+    same identity claims, a fresh `exp`, and the *original* `iat` preserved
+    so the refresh chain has a bounded lifetime. After
+    `MAX_TOKEN_CHAIN_AGE_SECONDS` since original login, the user must
+    re-authenticate.
     """
+    raw_token = _bearer_token(request)
+    original_iat: int | None = None
+    if raw_token:
+        try:
+            decoded = jwt.decode(
+                raw_token,
+                settings.SECRET_KEY,
+                algorithms=[security.ALGORITHM],
+            )
+            iat_claim = decoded.get("iat")
+            if isinstance(iat_claim, (int, float)):
+                original_iat = int(iat_claim)
+        except JWTError:
+            # Token failed to decode — get_current_active_user already
+            # rejected this case, so we shouldn't get here. Fall through
+            # to a fresh iat to avoid hard-failing the refresh on an
+            # encoding edge case.
+            original_iat = None
+
+    if original_iat is not None:
+        age = int(time.time()) - original_iat
+        if age > MAX_TOKEN_CHAIN_AGE_SECONDS:
+            raise HTTPException(
+                status_code=401,
+                detail="session too old; please re-authenticate",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     claims = {"user_id": str(current_user.id)}
     if current_user.tenant_id:
@@ -71,7 +118,9 @@ def refresh_access_token(
         current_user.email,
         expires_delta=access_token_expires,
         additional_claims=claims,
+        iat=original_iat,
     )
+    logger.info("Token refreshed for %s", current_user.email)
     return {"access_token": access_token, "token_type": "bearer"}
 
 
