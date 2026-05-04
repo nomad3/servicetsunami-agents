@@ -53,22 +53,11 @@ const AuthProvider = ({ children }) => {
   // the closure see the latest in-flight Promise without a re-render.
   const refreshInFlight = { current: null };
 
-  const login = async (email, password) => {
-    const userData = await authService.login(email, password);
-    setUser(userData);
-    return userData;
-  };
-
-  const logout = () => {
-    authService.logout();
-    setUser(null);
-    navigate('/login');
-  };
-
   // Re-fetch the current user from the API and update the cached
-  // localStorage copy. Pages that mutate self-editable fields (like
-  // SettingsPage's full_name save) call this so the in-memory user
-  // object reflects the change without a full page reload.
+  // localStorage copy. Called by login (so is_superuser / email /
+  // tenant land immediately on the user blob — the /auth/login response
+  // alone only carries access_token) and by pages that mutate
+  // self-editable fields (SettingsPage save).
   const refreshUser = async () => {
     if (refreshInFlight.current) return refreshInFlight.current;
     refreshInFlight.current = (async () => {
@@ -89,6 +78,35 @@ const AuthProvider = ({ children }) => {
     })();
     return refreshInFlight.current;
   };
+
+  const login = async (email, password) => {
+    const userData = await authService.login(email, password);
+    setUser(userData);
+    // Hydrate is_superuser / email / tenant onto the user blob so
+    // sidebar navigation that gates on those fields renders correctly
+    // on the first authenticated page after login. Errors are
+    // swallowed inside refreshUser, so this never breaks login itself.
+    refreshUser();
+    return userData;
+  };
+
+  const logout = () => {
+    authService.logout();
+    setUser(null);
+    navigate('/login');
+  };
+
+  // Existing-session hydration: if the user reloads the page (or
+  // returns from a browser restart) their localStorage blob may have
+  // just the access_token from an older login that didn't merge
+  // /users/me. Detect that — `email` is the cheapest sentinel since
+  // it always lands when /users/me succeeds — and refresh once.
+  useEffect(() => {
+    if (user?.access_token && !user?.email) {
+      refreshUser();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const value = { user, login, logout, refreshUser };
 

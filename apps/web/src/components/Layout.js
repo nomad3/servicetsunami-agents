@@ -87,6 +87,12 @@ const Layout = ({ children }) => {
       items: [
         { path: '/tenants', icon: BuildingFill, label: t('sidebar.organizations'), description: t('sidebar_desc.organizations') },
         { path: '/settings', icon: GearFill, label: t('sidebar.settings'), description: t('sidebar_desc.settings') },
+        // Tenant Health is superuser-only on the backend; hide the
+        // link entirely for regular tenant admins so it doesn't read
+        // as broken when they click and get a 403.
+        ...(auth.user?.is_superuser
+          ? [{ path: '/admin/tenant-health', icon: HeartbeatFill, label: t('sidebar.tenantHealth', 'Tenant Health'), description: t('sidebar_desc.tenantHealth', 'Cross-tenant superuser triage') }]
+          : []),
       ]
     }
   ];
