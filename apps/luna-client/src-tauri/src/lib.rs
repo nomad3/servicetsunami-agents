@@ -194,6 +194,33 @@ async fn gesture_get_cursor_global() -> Result<bool, String> {
     Ok(gesture::global_mode())
 }
 
+/// Download and apply the latest available update, then restart the app.
+/// The updater plugin verifies each chunk against the configured pubkey;
+/// if verification is disabled (empty pubkey) only HTTPS to GitHub Releases
+/// guards integrity.
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| format!("updater init: {e}"))?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| format!("check: {e}"))?
+        .ok_or_else(|| "no update available".to_string())?;
+    let mut downloaded: usize = 0;
+    update
+        .download_and_install(
+            |chunk_len, _content_length| {
+                downloaded += chunk_len;
+                log::debug!("update: downloaded {} bytes", downloaded);
+            },
+            || log::info!("update: download complete; restarting"),
+        )
+        .await
+        .map_err(|e| format!("install: {e}"))?;
+    app.restart();
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct ProjectionResult {
     id: String,
@@ -517,7 +544,10 @@ pub fn run() {
                 // `gesture_start` after a successful login so we don't burn
                 // camera + Apple Vision cycles on the login screen.
 
-                // Auto-updater: check on startup + every 30 min
+                // Auto-updater: check on startup + every 30 min, emit
+                // `update-available` so the React banner shows. The actual
+                // download + install happens in `install_update` when the
+                // user clicks the banner button.
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     loop {
@@ -525,7 +555,7 @@ pub fn run() {
                         tauri::async_runtime::block_on(async move {
                             let updater = match tauri_plugin_updater::UpdaterExt::updater(&h) {
                                 Ok(u) => u,
-                                Err(e) => { log::debug!("Updater init failed: {}", e); return; }
+                                Err(e) => { log::warn!("Updater init failed: {}", e); return; }
                             };
                             match updater.check().await {
                                 Ok(Some(update)) => {
@@ -533,7 +563,7 @@ pub fn run() {
                                     let _ = tauri::Emitter::emit(&h, "update-available", update.version.clone());
                                 }
                                 Ok(None) => log::info!("No update available"),
-                                Err(e) => log::debug!("Update check failed: {}", e),
+                                Err(e) => log::warn!("Update check failed: {}", e),
                             }
                         });
                         std::thread::sleep(std::time::Duration::from_secs(1800));
@@ -694,6 +724,7 @@ pub fn run() {
             gesture_check_accessibility,
             gesture_set_cursor_global,
             gesture_get_cursor_global,
+            install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Luna");

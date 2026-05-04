@@ -14,7 +14,9 @@ class Settings(BaseSettings):
         return v
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    # 24 hours. Long-running clients (Luna desktop) call /auth/refresh
+    # proactively 5 minutes before expiry to avoid mid-session logouts.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     DATABASE_URL: str = "postgresql://postgres:postgres@db:5432/agentprovision"
     # Default storage path: /app/storage in container (set by IN_DOCKER=1 in
     # Dockerfile), ./storage for local dev. Helm/compose should set

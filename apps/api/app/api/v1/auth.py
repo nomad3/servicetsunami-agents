@@ -49,6 +49,32 @@ def login_for_access_token(
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
+
+@router.post("/refresh", response_model=token_schema.Token)
+@limiter.limit("60/minute")
+def refresh_access_token(
+    request: Request,
+    current_user=Depends(deps.get_current_active_user),
+):
+    """Re-issue a fresh access token for the currently authenticated caller.
+
+    The caller must present a still-valid bearer token. We re-mint with the
+    same claims and a fresh expiry. This lets long-running clients (e.g. the
+    Luna desktop app) refresh proactively before the current token expires
+    instead of getting kicked out mid-session.
+    """
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    claims = {"user_id": str(current_user.id)}
+    if current_user.tenant_id:
+        claims["tenant_id"] = str(current_user.tenant_id)
+    access_token = security.create_access_token(
+        current_user.email,
+        expires_delta=access_token_expires,
+        additional_claims=claims,
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
 @router.post("/register", response_model=user_schema.User)
 def register_user(
     *,

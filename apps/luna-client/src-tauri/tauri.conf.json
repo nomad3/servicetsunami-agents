@@ -73,7 +73,10 @@
       "endpoints": [
         "https://github.com/nomad3/servicetsunami-agents/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZBRUUwNDNCOEE5NEU1NTMKUldSVDVaU0tPd1R1YXZwdFlxd1NrekVJL1REcktVVW14Y0M3Z09XMnNueS9kaG42aXlGSUx0T2MK"
+      "pubkey": "",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

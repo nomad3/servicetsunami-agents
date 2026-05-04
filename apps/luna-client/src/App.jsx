@@ -98,9 +98,19 @@ function useUpdateBanner() {
   }, []);
   const dismiss = useCallback(() => setUpdateVersion(null), []);
   const restart = useCallback(async () => {
-    // Open the GitHub Release page to download the latest DMG
-    // (full auto-install requires Apple Developer code signing)
-    window.open('https://github.com/nomad3/servicetsunami-agents/releases/latest', '_blank');
+    try {
+      const tauri = await import('@tauri-apps/api/core');
+      // install_update downloads, verifies, applies, and restarts the app.
+      // If it fails (e.g. signature mismatch, network error), fall back to
+      // opening the GitHub Releases page so the user can install manually.
+      await tauri.invoke('install_update');
+    } catch (e) {
+      console.warn('[Luna] install_update failed; opening releases page', e);
+      window.open(
+        'https://github.com/nomad3/servicetsunami-agents/releases/latest',
+        '_blank',
+      );
+    }
   }, []);
   return { updateVersion, dismiss, restart };
 }
