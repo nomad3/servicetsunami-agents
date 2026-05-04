@@ -141,7 +141,7 @@ def test_refresh_token_with_valid_bearer(db_session, test_user_token):
 
     # Decode both tokens to confirm the refreshed one carries the same
     # identity claims and an `exp` not earlier than the original.
-    import jwt as _jwt
+    from jose import jwt as _jwt
     from app.core.config import settings as _settings
 
     old = _jwt.decode(test_user_token, _settings.SECRET_KEY, algorithms=[_settings.ALGORITHM])

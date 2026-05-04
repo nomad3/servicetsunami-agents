@@ -28,6 +28,9 @@ function scheduleRefresh(token) {
   }
   const expMs = decodeJwtExp(token);
   if (!expMs) return;
+  // Already-expired token — don't schedule a doomed refresh; the next API
+  // call will 401 and the app's logout handler takes over.
+  if (expMs <= Date.now()) return;
   const delay = Math.min(
     MAX_REFRESH_DELAY_MS,
     Math.max(MIN_REFRESH_DELAY_MS, expMs - Date.now() - REFRESH_LEAD_MS),
@@ -44,12 +47,19 @@ function scheduleRefresh(token) {
         stored.access_token = res.data.access_token;
         stored.token_type = res.data.token_type;
         localStorage.setItem('user', JSON.stringify(stored));
+        // scheduleRefresh clears + reassigns refreshTimerId, so the catch
+        // path also needs to null it out — see below — to keep
+        // getCurrentUser's re-arm guard correct.
         scheduleRefresh(res.data.access_token);
+        return;
       }
     } catch {
       // Let the next API call surface a 401; the app's existing 401 handler
       // will log the user out via authService.logout().
     }
+    // Either the refresh threw or the response had no access_token. Null
+    // the timer ref so getCurrentUser can re-arm if the user reloads.
+    refreshTimerId = null;
   }, delay);
 }
 
