@@ -194,6 +194,41 @@ async fn gesture_get_cursor_global() -> Result<bool, String> {
     Ok(gesture::global_mode())
 }
 
+/// Show + focus the secondary `main` chat window (the comms panel of Luna
+/// OS — the conductor's score sheet for typed dialogue).
+#[tauri::command]
+async fn open_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        Ok(())
+    } else {
+        Err("main window not registered".into())
+    }
+}
+
+/// Hide the secondary `main` chat window without quitting it.
+#[tauri::command]
+async fn hide_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
+/// Bring the Luna OS spatial podium to the foreground. Used by the
+/// `nav_hud` gesture binding from any window.
+#[tauri::command]
+async fn focus_podium(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("spatial_hud") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        Ok(())
+    } else {
+        Err("spatial_hud window not registered".into())
+    }
+}
+
 /// Whether the updater is configured with a non-empty signing pubkey. When
 /// false, `download_and_install` would fail at the verification step after
 /// a wasteful full DMG download — `tauri-plugin-updater` calls
@@ -437,16 +472,26 @@ fn base64_encode(data: &[u8]) -> String {
 
 #[cfg(desktop)]
 fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let open_item = MenuItem::with_id(app, "open", "Open Luna", true, None::<&str>)?;
+    // The tray "Open" verbs target the spatial_hud (Luna OS primary
+    // surface). The chat panel (`main`) is summonable separately so users
+    // who closed it can get it back without losing the podium.
+    let open_os = MenuItem::with_id(app, "open_os", "Open Luna OS", true, None::<&str>)?;
+    let open_chat = MenuItem::with_id(app, "open_chat", "Open Chat Panel", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit Luna", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+    let menu = Menu::with_items(app, &[&open_os, &open_chat, &quit_item])?;
 
     let _tray = TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
-        .tooltip("Luna — AI Assistant")
+        .tooltip("Luna OS — Conductor's Podium")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "open" => {
+            "open_os" => {
+                if let Some(window) = app.get_webview_window("spatial_hud") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "open_chat" => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
@@ -460,7 +505,9 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .on_tray_icon_event(|tray, event| {
             if let tauri::tray::TrayIconEvent::Click { .. } = event {
                 let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
+                // Tray icon click goes to the OS surface; right-click
+                // opens the menu so users can pick the chat panel instead.
+                if let Some(window) = app.get_webview_window("spatial_hud") {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
@@ -493,12 +540,15 @@ fn setup_global_shortcut(app: &tauri::App) -> Result<(), Box<dyn std::error::Err
         }
     })?;
 
+    // Cmd+Shift+L now toggles the secondary `main` chat window (the comms
+    // panel of Luna OS). The spatial_hud is the primary surface and stays
+    // visible; pre-Luna-OS this shortcut toggled the HUD which no longer
+    // makes sense as a "show / hide" verb when the HUD IS the OS.
     app.global_shortcut().on_shortcut(hud_shortcut, move |app, _shortcut, event| {
         if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-            if let Some(window) = app.get_webview_window("spatial_hud") {
+            if let Some(window) = app.get_webview_window("main") {
                 if window.is_visible().unwrap_or(false) {
                     let _ = window.hide();
-                    CAPTURE_RUNNING.store(false, Ordering::Relaxed);
                 } else {
                     let _ = window.show();
                     let _ = window.set_focus();
@@ -751,6 +801,9 @@ pub fn run() {
             gesture_get_cursor_global,
             install_update,
             updater_signing_status,
+            open_main_window,
+            hide_main_window,
+            focus_podium,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Luna");

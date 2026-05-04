@@ -14,6 +14,7 @@ import GestureOverlay from './components/gestures/GestureOverlay';
 import GestureBindingsPage from './components/gestures/GestureBindingsPage';
 import GestureCalibration from './components/gestures/GestureCalibration';
 import LunaCursor from './components/luna/LunaCursor';
+import PodiumScene from './components/spatial/PodiumScene';
 import { useShellPresence } from './hooks/useShellPresence';
 import { useSessionEvents } from './hooks/useSessionEvents';
 import { useTrustProfile } from './hooks/useTrustProfile';
@@ -37,9 +38,19 @@ function dispatchGestureAction(binding, event) {
 
   switch (binding.action.kind) {
     case 'nav_hud':
-      window.dispatchEvent(new Event('luna-toggle-hud'));
+      // Bring the Luna OS spatial podium to the front. Pre-Luna-OS this
+      // toggled the HUD subwindow; now spatial_hud IS the OS, so the
+      // gesture means "make sure the conductor's podium is foreground."
+      import('@tauri-apps/api/core')
+        .then((tauri) => tauri.invoke('focus_podium').catch(() => {}))
+        .catch(() => {});
       break;
     case 'nav_chat':
+      // Summon the comms panel (the secondary `main` chat window) from
+      // anywhere in Luna OS via the existing `open_main_window` Tauri cmd.
+      import('@tauri-apps/api/core')
+        .then((tauri) => tauri.invoke('open_main_window').catch(() => {}))
+        .catch(() => {});
       window.dispatchEvent(new Event('luna-focus-chat'));
       break;
     case 'nav_command_palette':
@@ -269,10 +280,12 @@ function AppContent({ windowLabel }) {
     try { return !localStorage.getItem('gesture_calibrated'); } catch { return false; }
   });
 
-  // Phase 4: gate engine boot on login so we don't burn camera + Apple Vision
-  // cycles on the login screen. Stops engine on logout.
+  // Gate engine boot on login so we don't burn camera + Apple Vision cycles
+  // on the login screen. Stops on logout. Engine is global to the app, but
+  // we only kick the lifecycle from the spatial_hud window (the primary
+  // Luna OS surface) so the secondary main window doesn't toggle it.
   useEffect(() => {
-    if (windowLabel === 'spatial_hud') return;
+    if (windowLabel !== 'spatial_hud') return;
     let cancelled = false;
     (async () => {
       const tauri = await import('@tauri-apps/api/core').catch(() => null);
@@ -286,20 +299,46 @@ function AppContent({ windowLabel }) {
     return () => { cancelled = true; };
   }, [user, windowLabel]);
 
+  // Luna OS: spatial_hud is the conductor's podium. Login form renders
+  // here when not authenticated so first-launch isn't a blank starfield.
   if (windowLabel === 'spatial_hud') {
-    return <SpatialHUD />;
+    if (loading) {
+      return (
+        <div className="luna-loading" style={{ background: '#040816', color: '#9ad' }}>
+          Tuning the orchestra…
+        </div>
+      );
+    }
+    if (!user) {
+      return (
+        <div style={{ position: 'fixed', inset: 0, background: '#040816', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <LoginForm />
+        </div>
+      );
+    }
+    if (hash.startsWith('#/settings/gestures')) {
+      return <GestureBindingsPage />;
+    }
+    if (hash.startsWith('#/legacy-hud')) {
+      return <SpatialHUD />;
+    }
+    return (
+      <>
+        <PodiumScene />
+        {showCalibration && (
+          <GestureCalibration onDone={() => setShowCalibration(false)} />
+        )}
+      </>
+    );
   }
+
+  // Secondary `main` window — the comms panel.
   if (loading) return <div className="luna-loading">Loading...</div>;
   if (!user) return <LoginForm />;
-
-  return (
-    <>
-      {hash.startsWith('#/settings/gestures') ? <GestureBindingsPage /> : <AuthenticatedApp />}
-      {showCalibration && (
-        <GestureCalibration onDone={() => setShowCalibration(false)} />
-      )}
-    </>
-  );
+  if (hash.startsWith('#/settings/gestures')) {
+    return <GestureBindingsPage />;
+  }
+  return <AuthenticatedApp />;
 }
 
 function RootShell() {
