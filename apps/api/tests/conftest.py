@@ -9,13 +9,14 @@ at the top of each affected file).
 When the default suite runs with `-m "not integration"`, we still need to keep
 import-time errors from breaking *collection* — pytest evaluates the module
 body before it consults the marker. We therefore short-circuit collection of
-those files entirely unless the user explicitly opts in via the `integration`
-marker expression or runs the file by path.
+those files via `pytest_configure` (which has access to the resolved marker
+expression) unless the user opts in via `-m integration` or runs the file by
+path. This avoids parsing `sys.argv` ourselves, which is fragile under
+pytest-xdist and any wrapper that mutates argv before pytest sees it.
 """
 from __future__ import annotations
 
 import os
-import sys
 
 # Files that will fail to import without a live Postgres + pgvector backend.
 # Listed by basename; we use `collect_ignore` to skip them at the collection
@@ -29,29 +30,24 @@ _INTEGRATION_ONLY_FILES = {
 }
 
 
-def _running_integration() -> bool:
-    """Return True when the user's marker expression includes integration tests."""
-    # `-m "integration"` or `-m "integration or X"` — anything that does NOT
-    # exclude the marker. The most common default is `-m "not integration"`,
-    # in which case we want to skip the heavy files entirely.
-    argv = sys.argv
-    for i, arg in enumerate(argv):
-        if arg == "-m" and i + 1 < len(argv):
-            expr = argv[i + 1]
-            return "integration" in expr and "not integration" not in expr
-        if arg.startswith("-m="):
-            expr = arg.split("=", 1)[1]
-            return "integration" in expr and "not integration" not in expr
-    # No `-m` flag: pytest runs everything. Don't ignore.
-    return True
-
-
-# `collect_ignore` is consulted by pytest at collection time. Populating it
-# only when the marker filter actively excludes integration tests means the
-# integration job (which runs `-m integration`) still picks these files up.
+# Populated dynamically in pytest_configure based on the resolved -m marker
+# expression. pytest reads collect_ignore after pytest_configure runs, so
+# mutating it here is safe.
 collect_ignore: list[str] = []
-if not _running_integration():
-    collect_ignore.extend(sorted(_INTEGRATION_ONLY_FILES))
+
+
+def _marker_expr_wants_integration(config) -> bool:
+    """Return True iff the active -m expression *includes* integration tests.
+
+    Uses pytest's resolved option value (`config.getoption("-m")`) instead of
+    walking `sys.argv` ourselves, so it works under pytest-xdist, wrapper
+    scripts, and pytest.ini-set markers.
+    """
+    expr = config.getoption("-m", default="") or ""
+    if not expr:
+        # No marker filter — collect everything.
+        return True
+    return "integration" in expr and "not integration" not in expr
 
 
 def pytest_configure(config):
@@ -72,3 +68,7 @@ def pytest_configure(config):
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)
+
+    # Skip integration-only files unless the active marker filter wants them.
+    if not _marker_expr_wants_integration(config):
+        collect_ignore.extend(sorted(_INTEGRATION_ONLY_FILES))

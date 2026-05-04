@@ -32,7 +32,7 @@ use embedding::v1::EmbedRequest;
 /// binding: e.g. `[0.1,0.2,-0.3]`. Centralizing this lets us regression-test
 /// the encoding (e.g. that we never emit scientific notation that pgvector
 /// would reject).
-pub fn format_pgvector(v: &[f32]) -> String {
+pub(crate) fn format_pgvector(v: &[f32]) -> String {
     format!(
         "[{}]",
         v.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(",")
@@ -42,20 +42,20 @@ pub fn format_pgvector(v: &[f32]) -> String {
 /// Validate and parse a tenant-scoped UUID string as it arrives off the wire.
 /// Maps any parse failure to a gRPC `invalid_argument` so the client can act
 /// on it without inspecting backend logs.
-pub fn parse_tenant_id(raw: &str) -> Result<Uuid, Status> {
+pub(crate) fn parse_tenant_id(raw: &str) -> Result<Uuid, Status> {
     Uuid::parse_str(raw).map_err(|_| Status::invalid_argument("Invalid tenant_id"))
 }
 
 /// Same as `parse_tenant_id` but for the entity_id field. Kept distinct so
 /// the error message tells the client which field they got wrong.
-pub fn parse_entity_id(raw: &str) -> Result<Uuid, Status> {
+pub(crate) fn parse_entity_id(raw: &str) -> Result<Uuid, Status> {
     Uuid::parse_str(raw).map_err(|_| Status::invalid_argument("Invalid entity_id"))
 }
 
 /// Convert an inbound protobuf Timestamp to `chrono::DateTime<Utc>`. A
 /// timestamp that protobuf considers in-range but chrono cannot represent
 /// degrades to `Utc::now()` — the same fallback the production handler uses.
-pub fn proto_ts_to_chrono(ts: Option<prost_types::Timestamp>) -> Option<chrono::DateTime<chrono::Utc>> {
+pub(crate) fn proto_ts_to_chrono(ts: Option<prost_types::Timestamp>) -> Option<chrono::DateTime<chrono::Utc>> {
     ts.map(|t| {
         chrono::DateTime::from_timestamp(t.seconds, t.nanos as u32)
             .unwrap_or_else(chrono::Utc::now)
@@ -63,7 +63,7 @@ pub fn proto_ts_to_chrono(ts: Option<prost_types::Timestamp>) -> Option<chrono::
 }
 
 /// Convert a `chrono::DateTime<Utc>` to a protobuf Timestamp.
-pub fn chrono_to_proto_ts(dt: chrono::DateTime<chrono::Utc>) -> prost_types::Timestamp {
+pub(crate) fn chrono_to_proto_ts(dt: chrono::DateTime<chrono::Utc>) -> prost_types::Timestamp {
     prost_types::Timestamp {
         seconds: dt.timestamp(),
         nanos: dt.timestamp_subsec_nanos() as i32,
@@ -72,7 +72,7 @@ pub fn chrono_to_proto_ts(dt: chrono::DateTime<chrono::Utc>) -> prost_types::Tim
 
 /// Resolve the source_type used when persisting an observation. Empty string
 /// from the caller defaults to `"agent"`; everything else passes through.
-pub fn default_source_type(provided: &str) -> String {
+pub(crate) fn default_source_type(provided: &str) -> String {
     if provided.is_empty() {
         "agent".to_string()
     } else {

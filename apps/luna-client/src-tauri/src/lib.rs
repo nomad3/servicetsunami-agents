@@ -764,11 +764,14 @@ mod tests {
 
     #[test]
     fn base64_encode_binary_bytes() {
+        // 0x00 0xFF 0x10
+        //  = 00000000 11111111 00010000
+        //  = 000000 001111 111100 010000
+        //  = 0 15 60 16
+        //  = A  P  8  Q
         let bytes: [u8; 3] = [0x00, 0xFF, 0x10];
         let encoded = base64_encode(&bytes);
-        assert_eq!(encoded.len(), 4);
-        // First two output chars come from 0x00 and the high nibbles of 0xFF.
-        assert!(encoded.starts_with("AP"));
+        assert_eq!(encoded, "AP8Q");
     }
 
     // ── extract_project_from_args ───────────────────────────────────────

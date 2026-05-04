@@ -294,27 +294,20 @@ def _detect_tag(task_description: str) -> str:
     return 'feat'
 
 
-def _fetch_claude_token(tenant_id: str) -> str:
-    """Fetch the Claude Code session token from the API's internal endpoint."""
-    data = _fetch_integration_credentials("claude_code", tenant_id)
-
-    token = data.get("session_token")
-    if not token:
-        raise RuntimeError(f"No session_token in response: {data}")
-    return token
-
-
-def _is_claude_credit_exhausted(error_text: str) -> bool:
+def _is_claude_credit_exhausted(error_text: Optional[str]) -> bool:
+    # Accepts None / empty defensively — callers pass through whatever
+    # `resp.text` or a captured exception message yielded, which can be
+    # None when the request failed before a body was read.
     text = (error_text or "").lower()
     return any(pattern in text for pattern in CLAUDE_CREDIT_ERROR_PATTERNS)
 
 
-def _is_codex_credit_exhausted(error_text: str) -> bool:
+def _is_codex_credit_exhausted(error_text: Optional[str]) -> bool:
     text = (error_text or "").lower()
     return any(pattern in text for pattern in CODEX_CREDIT_ERROR_PATTERNS)
 
 
-def _is_copilot_credit_exhausted(error_text: str) -> bool:
+def _is_copilot_credit_exhausted(error_text: Optional[str]) -> bool:
     text = (error_text or "").lower()
     return any(pattern in text for pattern in COPILOT_CREDIT_ERROR_PATTERNS)
 

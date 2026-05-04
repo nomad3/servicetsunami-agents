@@ -20,7 +20,7 @@ pub mod embedding {
 /// indexed, classification input, or clustering input. Anything else
 /// (empty / unknown) falls back to no prefix, which matches the legacy
 /// behavior of upstream callers that did not pass a task_type.
-pub fn task_type_prefix(task_type: &str) -> &'static str {
+pub(crate) fn task_type_prefix(task_type: &str) -> &'static str {
     match task_type {
         "search_query" => "search_query: ",
         "search_document" => "search_document: ",
@@ -32,14 +32,14 @@ pub fn task_type_prefix(task_type: &str) -> &'static str {
 
 /// Apply the task-type prefix to `text`. Centralized so the unary and
 /// batch paths cannot drift apart.
-pub fn prefixed_text(task_type: &str, text: &str) -> String {
+pub(crate) fn prefixed_text(task_type: &str, text: &str) -> String {
     format!("{}{}", task_type_prefix(task_type), text)
 }
 
 /// Build the canonical EmbedResponse for a single 768-dim vector. The
 /// model name and dimension are constants — keeping them in one place
 /// avoids drift between unary and batch code paths.
-pub fn make_embed_response(vector: Vec<f32>) -> embedding::v1::EmbedResponse {
+pub(crate) fn make_embed_response(vector: Vec<f32>) -> embedding::v1::EmbedResponse {
     embedding::v1::EmbedResponse {
         vector,
         model: "nomic-embed-text-v1.5".to_string(),

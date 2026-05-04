@@ -14,7 +14,6 @@ config readers) — only the network layer and external SDKs are stubbed.
 """
 from __future__ import annotations
 
-import os
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
@@ -22,11 +21,34 @@ import pytest
 
 
 # Test env defaults so tools that read os.environ at import time get
-# stable values. Hard-coded fallbacks already exist in production code,
-# but this keeps assertions deterministic.
-os.environ.setdefault("MCP_API_KEY", "test-mcp-key")
-os.environ.setdefault("API_INTERNAL_KEY", "test-mcp-key")
-os.environ.setdefault("API_BASE_URL", "http://api:8000")
+# stable values. We use a session-scoped autouse fixture wrapping
+# `pytest.MonkeyPatch.context()` so the values are unset when the test
+# session ends rather than leaking into a parent process or a subsequent
+# session running in the same interpreter (e.g. under pytest-watch or a
+# long-lived `python -m pytest` invoker).
+_TEST_ENV_DEFAULTS = {
+    "MCP_API_KEY": "test-mcp-key",
+    "API_INTERNAL_KEY": "test-mcp-key",
+    "API_BASE_URL": "http://api:8000",
+}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _mcp_env_defaults():
+    """Set test env defaults for the session and unset them on teardown.
+
+    Uses ``MonkeyPatch.context()`` (rather than function-scoped
+    ``monkeypatch``) so the values survive the entire session but don't
+    bleed across sessions. Only sets a key if it isn't already populated,
+    matching the previous ``os.environ.setdefault`` behaviour.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        import os
+
+        for key, value in _TEST_ENV_DEFAULTS.items():
+            if not os.environ.get(key):
+                mp.setenv(key, value)
+        yield
 
 
 @pytest.fixture
