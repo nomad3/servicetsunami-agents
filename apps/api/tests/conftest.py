@@ -23,6 +23,7 @@ import os
 # stage so they never even get imported in default runs.
 _INTEGRATION_ONLY_FILES = {
     "test_api.py",
+    "test_gesture_bindings.py",
     "test_integrations.py",
     "test_internal_endpoints.py",
     "test_multi_provider.py",
