@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>Luna uses your camera to recognize hand gestures.</string>
+  <key>NSAccessibilityUsageDescription</key>
+  <string>Luna uses Accessibility access to move the cursor and click via hand gestures.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Luna uses your microphone for push-to-talk voice dispatch on the spatial podium.</string>
+</dict>
+</plist>
