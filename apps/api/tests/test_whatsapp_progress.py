@@ -63,26 +63,9 @@ class TestProgressHelpers:
         for i in range(20):
             assert len(_get_progress_message(i)) < 100
 
-    @pytest.mark.xfail(
-        reason="`_build_completion_summary` was removed from whatsapp_service "
-               "during the typing-indicator refactor. The summarisation now "
-               "lives in chat.py. These three tests need to be rewritten "
-               "against the current location.",
-        strict=False,
-    )
-    def test_completion_summary_for_long_response(self):
-        from app.services.whatsapp_service import _build_completion_summary
-        summary = _build_completion_summary("x" * 500, elapsed_seconds=120)
-        assert summary is not None
-        assert "done" in summary.lower()
-        assert len(summary) < 150
-
-    @pytest.mark.xfail(reason="See test_completion_summary_for_long_response.", strict=False)
-    def test_no_summary_for_quick_response(self):
-        from app.services.whatsapp_service import _build_completion_summary
-        assert _build_completion_summary("short", elapsed_seconds=5) is None
-
-    @pytest.mark.xfail(reason="See test_completion_summary_for_long_response.", strict=False)
-    def test_no_summary_for_short_text(self):
-        from app.services.whatsapp_service import _build_completion_summary
-        assert _build_completion_summary("short", elapsed_seconds=60) is None
+    # `_build_completion_summary` was removed from `whatsapp_service` during
+    # the typing-indicator refactor and is no longer present anywhere in the
+    # codebase. The xfail tests that used to live here have been deleted —
+    # there is nothing left to test against. If/when the summarisation
+    # behaviour is reintroduced (it currently doesn't exist in chat.py
+    # either), write fresh tests targeting the new location.

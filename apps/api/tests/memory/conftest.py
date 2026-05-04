@@ -1,9 +1,14 @@
 """Memory test fixtures.
 
 Integration tests use a real Postgres because pgvector queries don't
-work on SQLite/in-memory. The DB pointed at by DATABASE_URL is the
-production tenant DB at localhost:8003 — tests MUST rollback at the end
-and never commit mutations to production rows.
+work on SQLite/in-memory.
+
+DB selection: callers MUST set `DATABASE_URL` (or `MEMORY_TEST_DATABASE_URL`)
+to a disposable test database with the pgvector extension installed. The
+fallback default is `agentprovision_test` on a local Postgres — explicitly
+NOT the production tenant DB. The fixture rolls back at teardown as a
+belt-and-braces safety net, but this is not a license to point the suite
+at production.
 """
 import os
 
@@ -24,12 +29,21 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.integration)
 
 
+# Disposable test DB default. Override via MEMORY_TEST_DATABASE_URL or
+# DATABASE_URL when running locally against your own Postgres+pgvector.
+# This is intentionally NOT pointed at the production tenant DB.
+_DEFAULT_TEST_DB_URL = (
+    "postgresql://postgres:postgres@localhost:5432/agentprovision_test"
+)
+
+
 @pytest.fixture
 def db_session():
-    """Yield a Session bound to the production DB. Rolls back at teardown."""
-    url = os.environ.get(
-        "DATABASE_URL",
-        "postgresql://postgres:postgres@localhost:8003/agentprovision",
+    """Yield a Session bound to a disposable test DB. Rolls back at teardown."""
+    url = (
+        os.environ.get("MEMORY_TEST_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+        or _DEFAULT_TEST_DB_URL
     )
     engine = create_engine(url, future=True)
     Session = sessionmaker(bind=engine, expire_on_commit=False)
@@ -39,9 +53,8 @@ def db_session():
     finally:
         # Defensive: even if a test forgot to rollback, this guarantees
         # nothing it INSERTed/UPDATEd persists. The recall_count UPDATE
-        # in recall() does call db.commit() — but those are reads-with-
-        # side-effects on production rows that the chat path also
-        # mutates, so this is acceptable per the plan.
+        # in recall() does call db.commit() — those side-effects only
+        # land in the disposable test DB.
         try:
             db.rollback()
         except Exception:
