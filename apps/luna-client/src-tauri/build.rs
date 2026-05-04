@@ -3,6 +3,10 @@ use std::process::Command;
 fn main() {
     tauri_build::build();
 
+    // Propagate the updater pubkey state from tauri.conf.json into a rustc
+    // env var so install_update can fail fast when signing isn't configured.
+    propagate_updater_pubkey();
+
     #[cfg(target_os = "macos")]
     {
         compile_swift_landmarker();
@@ -12,6 +16,20 @@ fn main() {
         // the future doesn't silently break the cursor.
         println!("cargo:rustc-link-lib=framework=CoreGraphics");
     }
+}
+
+fn propagate_updater_pubkey() {
+    let conf_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json");
+    println!("cargo:rerun-if-changed={}", conf_path.display());
+    let pubkey = std::fs::read_to_string(&conf_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.pointer("/plugins/updater/pubkey").and_then(|p| p.as_str()).map(|s| s.to_string()))
+        .unwrap_or_default();
+    // The pubkey can contain quotes / multi-line minisign content; only
+    // its emptiness affects install_update behavior, so emit the trimmed
+    // length-bearing value.
+    println!("cargo:rustc-env=LUNA_UPDATER_PUBKEY={}", pubkey);
 }
 
 #[cfg(target_os = "macos")]

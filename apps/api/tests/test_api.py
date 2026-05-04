@@ -128,6 +128,34 @@ def test_read_users_me(db_session, test_user_token):
     assert "email" in response.json()
     assert "id" in response.json()
 
+
+def test_refresh_token_with_valid_bearer(db_session, test_user_token):
+    response = client.post(
+        "/api/v1/auth/refresh",
+        headers={"Authorization": f"Bearer {test_user_token}"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token_type"] == "bearer"
+    assert isinstance(body["access_token"], str) and body["access_token"]
+
+    # Decode both tokens to confirm the refreshed one carries the same
+    # identity claims and an `exp` not earlier than the original.
+    import jwt as _jwt
+    from app.core.config import settings as _settings
+
+    old = _jwt.decode(test_user_token, _settings.SECRET_KEY, algorithms=[_settings.ALGORITHM])
+    new = _jwt.decode(body["access_token"], _settings.SECRET_KEY, algorithms=[_settings.ALGORITHM])
+    assert new["sub"] == old["sub"]
+    assert new.get("user_id") == old.get("user_id")
+    assert new.get("tenant_id") == old.get("tenant_id")
+    assert new["exp"] >= old["exp"]
+
+
+def test_refresh_token_rejects_unauthenticated(db_session):
+    response = client.post("/api/v1/auth/refresh")
+    assert response.status_code in (401, 403)
+
 def test_get_analytics_summary(db_session, test_user_token):
     response = client.get(
         "/api/v1/analytics/summary",

@@ -194,12 +194,37 @@ async fn gesture_get_cursor_global() -> Result<bool, String> {
     Ok(gesture::global_mode())
 }
 
+/// Whether the updater is configured with a non-empty signing pubkey. When
+/// false, `download_and_install` would fail at the verification step after
+/// a wasteful full DMG download — `tauri-plugin-updater` calls
+/// `verify_signature` unconditionally and an empty pubkey decodes to an
+/// error. So we fail fast with a clear message and let the React banner
+/// fall back to opening the GitHub Releases page.
+///
+/// The pubkey value is read from `tauri.conf.json` at build time via
+/// `build.rs`, which sets `LUNA_UPDATER_PUBKEY` as a rustc env var.
+fn updater_signing_configured() -> bool {
+    !env!("LUNA_UPDATER_PUBKEY").trim().is_empty()
+}
+
+#[tauri::command]
+async fn updater_signing_status() -> Result<bool, String> {
+    Ok(updater_signing_configured())
+}
+
 /// Download and apply the latest available update, then restart the app.
-/// The updater plugin verifies each chunk against the configured pubkey;
-/// if verification is disabled (empty pubkey) only HTTPS to GitHub Releases
-/// guards integrity.
+/// Requires updater signing to be configured (non-empty pubkey + matching
+/// `TAURI_SIGNING_PRIVATE_KEY` GitHub secret signing each release).
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    if !updater_signing_configured() {
+        return Err(
+            "auto-install requires updater signing to be configured \
+             (set TAURI_SIGNING_PRIVATE_KEY secret and embed pubkey in \
+             tauri.conf.json). Falling back to manual download."
+                .to_string(),
+        );
+    }
     use tauri_plugin_updater::UpdaterExt;
     let updater = app.updater().map_err(|e| format!("updater init: {e}"))?;
     let update = updater
@@ -725,6 +750,7 @@ pub fn run() {
             gesture_set_cursor_global,
             gesture_get_cursor_global,
             install_update,
+            updater_signing_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Luna");

@@ -98,19 +98,26 @@ function useUpdateBanner() {
   }, []);
   const dismiss = useCallback(() => setUpdateVersion(null), []);
   const restart = useCallback(async () => {
+    let signingOk = false;
     try {
       const tauri = await import('@tauri-apps/api/core');
-      // install_update downloads, verifies, applies, and restarts the app.
-      // If it fails (e.g. signature mismatch, network error), fall back to
-      // opening the GitHub Releases page so the user can install manually.
-      await tauri.invoke('install_update');
+      signingOk = await tauri.invoke('updater_signing_status');
+      if (signingOk) {
+        // install_update downloads, verifies, applies, restarts. Only call
+        // this when the bundle was built with a non-empty updater pubkey;
+        // otherwise tauri-plugin-updater fails at verify_signature *after*
+        // downloading the full DMG, which is wasteful and confusing.
+        await tauri.invoke('install_update');
+        return;
+      }
     } catch (e) {
       console.warn('[Luna] install_update failed; opening releases page', e);
-      window.open(
-        'https://github.com/nomad3/servicetsunami-agents/releases/latest',
-        '_blank',
-      );
     }
+    // Fallback: signing not configured, or install_update threw.
+    window.open(
+      'https://github.com/nomad3/servicetsunami-agents/releases/latest',
+      '_blank',
+    );
   }, []);
   return { updateVersion, dismiss, restart };
 }
