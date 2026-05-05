@@ -8,6 +8,16 @@ use crate::gesture::types::{Pose, WakeState};
 const ARM_HOLD_MS: i64 = 500;
 const IDLE_TIMEOUT_MS: i64 = 5000;
 const ARM_CONFIDENCE: f32 = 0.85;
+// While Arming, a brief pose flicker (OpenPalm → Three → OpenPalm) used to
+// drop the machine back to Sleeping immediately because the catch-all
+// `Arming` arm slept unconditionally. Real cameras + the pose classifier
+// flicker frame-to-frame as fingers settle, so the user's hand never
+// stayed cleanly OpenPalm for 500ms. We now only abandon Arming when the
+// hand DISAPPEARS or confidence collapses below this threshold — chosen
+// at half ARM_CONFIDENCE so a "user lowered hand" event (confidence ~0)
+// still exits, but a frame that classifies as Three at confidence 1.0
+// keeps the hold counter ticking. Bug fix 2026-05-05.
+const ARM_ABORT_CONFIDENCE: f32 = ARM_CONFIDENCE * 0.5;
 
 #[derive(Debug, Clone, Copy)]
 pub enum WakeInput {
@@ -67,7 +77,26 @@ impl WakeMachine {
                     }
                 }
             }
+            // Hand still visible at decent confidence but classifier flickered
+            // to a non-OpenPalm pose — keep counting toward the hold instead
+            // of resetting to Sleeping. Real users can't hold an exact pose
+            // for 500ms at 30fps without ANY misclassified frames; the old
+            // catch-all aborted the hold every single time. Bug fix 2026-05-05.
+            (
+                WakeState::Arming,
+                WakeInput::Pose { pose: Some(_), confidence },
+            ) if confidence >= ARM_ABORT_CONFIDENCE => {
+                // No-op: stay in Arming. The next OpenPalm frame will check
+                // whether the hold time has elapsed.
+            }
+            // Hand disappeared OR confidence collapsed — real abort signal.
             (WakeState::Arming, WakeInput::Pose { .. }) => {
+                self.state = WakeState::Sleeping;
+                self.arming_started_at = None;
+            }
+            // Idle tick during Arming — same abort path so the wake gesture
+            // doesn't stick around indefinitely without pose input.
+            (WakeState::Arming, WakeInput::Idle) => {
                 self.state = WakeState::Sleeping;
                 self.arming_started_at = None;
             }
