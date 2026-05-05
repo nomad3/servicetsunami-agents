@@ -5,6 +5,18 @@
 
 use crate::gesture::types::{Pose, WakeState};
 
+// Wake-arming accepts any "open-hand" classification — OpenPalm, Three, or
+// Four — not just a strict 5-finger OpenPalm. The pose classifier in
+// pose.rs requires every finger's tip-to-wrist distance to exceed the
+// PIP-to-wrist distance, which means a relaxed pinky (very common on a
+// real open hand) gets classified as Three (29 of 54 events in the live
+// 2026-05-05 diagnostic — vs only 8 actual OpenPalm). Treating any of
+// these three as a wake gesture matches user intent ("I raised an open
+// hand") and recovers the wake path from the classifier's strictness.
+fn is_wake_pose(pose: Pose) -> bool {
+    matches!(pose, Pose::OpenPalm | Pose::Three | Pose::Four)
+}
+
 const ARM_HOLD_MS: i64 = 500;
 const IDLE_TIMEOUT_MS: i64 = 5000;
 const ARM_CONFIDENCE: f32 = 0.85;
@@ -60,14 +72,14 @@ impl WakeMachine {
 
     pub fn tick(&mut self, input: WakeInput, now_ms: i64) {
         match (self.state, input) {
-            (WakeState::Sleeping, WakeInput::Pose { pose: Some(Pose::OpenPalm), confidence })
-                if confidence >= ARM_CONFIDENCE =>
+            (WakeState::Sleeping, WakeInput::Pose { pose: Some(p), confidence })
+                if confidence >= ARM_CONFIDENCE && is_wake_pose(p) =>
             {
                 self.state = WakeState::Arming;
                 self.arming_started_at = Some(now_ms);
             }
-            (WakeState::Arming, WakeInput::Pose { pose: Some(Pose::OpenPalm), confidence })
-                if confidence >= ARM_CONFIDENCE =>
+            (WakeState::Arming, WakeInput::Pose { pose: Some(p), confidence })
+                if confidence >= ARM_CONFIDENCE && is_wake_pose(p) =>
             {
                 if let Some(start) = self.arming_started_at {
                     if now_ms - start >= ARM_HOLD_MS {

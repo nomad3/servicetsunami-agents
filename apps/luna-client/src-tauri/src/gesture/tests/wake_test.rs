@@ -29,6 +29,59 @@ fn open_palm_500ms_arms() {
 }
 
 #[test]
+fn three_pose_500ms_arms() {
+    // The pose classifier often labels a relaxed open hand as Three
+    // (pinky droops, fails the strict tip-to-wrist > pip-to-wrist test).
+    // Wake should accept Three / Four / OpenPalm interchangeably so
+    // a real user's open hand reliably arms the machine. Bug fix
+    // 2026-05-05 (post-0.1.62 live diagnostic).
+    let mut m = WakeMachine::new();
+    m.tick(
+        WakeInput::Pose { pose: Some(Pose::Three), confidence: 0.95 },
+        0,
+    );
+    assert_eq!(m.state(), WakeState::Arming);
+    m.tick(
+        WakeInput::Pose { pose: Some(Pose::Three), confidence: 0.95 },
+        600,
+    );
+    assert_eq!(m.state(), WakeState::Armed);
+}
+
+#[test]
+fn four_pose_also_arms() {
+    let mut m = WakeMachine::new();
+    m.tick(
+        WakeInput::Pose { pose: Some(Pose::Four), confidence: 0.95 },
+        0,
+    );
+    assert_eq!(m.state(), WakeState::Arming);
+}
+
+#[test]
+fn fist_pose_does_not_wake() {
+    // A closed fist is a deliberate dismiss gesture, not a wake — must
+    // not start the wake hold.
+    let mut m = WakeMachine::new();
+    m.tick(
+        WakeInput::Pose { pose: Some(Pose::Fist), confidence: 0.95 },
+        0,
+    );
+    assert_eq!(m.state(), WakeState::Sleeping);
+}
+
+#[test]
+fn point_pose_does_not_wake() {
+    // Point is for cursor steering, not waking the machine.
+    let mut m = WakeMachine::new();
+    m.tick(
+        WakeInput::Pose { pose: Some(Pose::Point), confidence: 0.95 },
+        0,
+    );
+    assert_eq!(m.state(), WakeState::Sleeping);
+}
+
+#[test]
 fn pose_flicker_during_arming_does_not_reset() {
     // Real cameras + the pose classifier flicker frame-to-frame as the
     // user's fingers settle into position. The old behaviour reset the

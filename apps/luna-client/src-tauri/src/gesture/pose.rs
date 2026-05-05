@@ -19,7 +19,15 @@ fn dist(a: Landmark, b: Landmark) -> f32 {
 }
 
 fn finger_extended(lm: &[Landmark; 21], tip_idx: usize, pip_idx: usize) -> bool {
-    dist(lm[tip_idx], lm[WRIST]) > dist(lm[pip_idx], lm[WRIST])
+    // A finger is "extended" when tip-to-wrist exceeds 95% of
+    // PIP-to-wrist. The 5% slack biases toward "extended" so a
+    // relaxed pinky on a real open hand reliably classifies — without
+    // it, the live 2026-05-05 diagnostic showed 29 Three vs only 8
+    // OpenPalm (a slightly curled pinky kept losing the strict
+    // tip-to-wrist > pip-to-wrist comparison by a hair).
+    let tip_to_wrist = dist(lm[tip_idx], lm[WRIST]);
+    let pip_to_wrist = dist(lm[pip_idx], lm[WRIST]);
+    tip_to_wrist > pip_to_wrist * 0.95
 }
 
 pub fn classify(frame: &HandFrame) -> (Pose, FingersExtended) {
