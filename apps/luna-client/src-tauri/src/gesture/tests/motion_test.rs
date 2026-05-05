@@ -140,3 +140,69 @@ fn detects_tap() {
     let m = a.classify().expect("tap must classify");
     assert_eq!(m.kind, MotionKind::Tap);
 }
+
+// ── Bug fix 2026-05-05 — buffer-windowing for swipe / pinch / rotate ──
+//
+// At steady state, the 30-sample ring buffer holds ~1 s of history. The
+// old classifiers compared `samples.front()` to `samples.back()` and
+// then required `dur ≤ 350 / 600 / 600 ms` — once the buffer was full
+// the front-to-back duration was always ~1000 ms and these classifiers
+// could NEVER match. Live diagnostic on Luna 0.1.61 (45 emitted
+// gesture events, all `motion.kind: None`) confirmed it. The fix uses
+// `window_start` to walk back from the newest sample to the oldest
+// sample within the per-classifier duration ceiling.
+
+#[test]
+fn detects_swipe_right_after_idle_history() {
+    let mut a = MotionAnalyzer::new();
+    let base: i64 = 1_700_000_000_000;
+    // 700ms of "hand sitting still" history (frames at 30fps ≈ 33ms)
+    for i in 0..21 {
+        a.push(&frame_with_palm_at(0.10, 0.5), base + i * 33);
+    }
+    // Now ~10 frames of right-swipe spanning ~270ms.
+    for i in 0..10 {
+        let x = 0.10 + (i as f32 + 1.0) * 0.05;
+        a.push(&frame_with_palm_at(x, 0.5), base + 700 + i * 30);
+    }
+    // With the buffer-spanning bug, the classifier saw dur ≈ 970ms and
+    // bailed because dur > SWIPE_MAX_DURATION_MS. With the fix it sees
+    // only the trailing 270ms swipe.
+    let m = a.classify().expect("swipe must still classify with idle history in buffer");
+    assert_eq!(m.kind, MotionKind::Swipe);
+    assert_eq!(m.direction, Some(Direction::Right));
+}
+
+#[test]
+fn detects_pinch_in_after_idle_history() {
+    let mut a = MotionAnalyzer::new();
+    let base: i64 = 1_700_000_000_000;
+    for i in 0..15 {
+        a.push(&frame_with_pinch(0.30, 0.5, 0.5), base + i * 33);
+    }
+    // Now pinch from 0.30 down to 0.05 over ~300ms.
+    for i in 0..10 {
+        let d = 0.30 - (i as f32 + 1.0) * 0.027;
+        a.push(&frame_with_pinch(d, 0.5, 0.5), base + 500 + i * 30);
+    }
+    let m = a.classify().expect("pinch must still classify with idle history in buffer");
+    assert_eq!(m.kind, MotionKind::Pinch);
+    assert_eq!(m.direction, Some(Direction::In));
+}
+
+#[test]
+fn detects_rotate_cw_after_idle_history() {
+    let mut a = MotionAnalyzer::new();
+    let base: i64 = 1_700_000_000_000;
+    for i in 0..15 {
+        a.push(&frame_with_palm_angle(0.0), base + i * 33);
+    }
+    // Rotate from 0 → ~60° over ~300ms.
+    for i in 0..10 {
+        let angle = (i as f32 + 1.0) * 0.12;
+        a.push(&frame_with_palm_angle(angle), base + 500 + i * 30);
+    }
+    let m = a.classify().expect("rotate must still classify with idle history in buffer");
+    assert_eq!(m.kind, MotionKind::Rotate);
+    assert_eq!(m.direction, Some(Direction::Cw));
+}

@@ -87,13 +87,18 @@ impl MotionAnalyzer {
     }
 
     fn classify_swipe(&self) -> Option<Motion> {
-        let start = self.samples.front()?;
         let end = self.samples.back()?;
+        // Walk back from the newest sample to the oldest one whose age is
+        // still within SWIPE_MAX_DURATION_MS. Without this windowing, once
+        // the 30-frame ring buffer fills (~1 s of history at 30 fps) the
+        // front-to-back duration permanently exceeds 350 ms and swipes can
+        // never classify at steady state. Bug fix 2026-05-05.
+        let start = self.window_start(end.ts, SWIPE_MAX_DURATION_MS)?;
         let dx = end.palm.x - start.palm.x;
         let dy = end.palm.y - start.palm.y;
         let mag = (dx * dx + dy * dy).sqrt();
         let dur = end.ts - start.ts;
-        if mag >= SWIPE_MIN_MAGNITUDE && dur > 0 && dur <= SWIPE_MAX_DURATION_MS {
+        if mag >= SWIPE_MIN_MAGNITUDE && dur > 0 {
             let dir = if dx.abs() > dy.abs() {
                 if dx > 0.0 { Direction::Right } else { Direction::Left }
             } else if dy > 0.0 {
@@ -112,10 +117,11 @@ impl MotionAnalyzer {
     }
 
     fn classify_pinch(&self) -> Option<Motion> {
-        let start = self.samples.front()?;
         let end = self.samples.back()?;
+        // Same fix as classify_swipe — see Bug fix 2026-05-05 note above.
+        let start = self.window_start(end.ts, PINCH_MAX_DURATION_MS)?;
         let dur = end.ts - start.ts;
-        if dur <= 0 || dur > PINCH_MAX_DURATION_MS {
+        if dur <= 0 {
             return None;
         }
         let d_start = pinch_distance(start);
@@ -191,10 +197,11 @@ impl MotionAnalyzer {
     }
 
     fn classify_rotate(&self) -> Option<Motion> {
-        let start = self.samples.front()?;
         let end = self.samples.back()?;
+        // Same fix as classify_swipe — see Bug fix 2026-05-05 note above.
+        let start = self.window_start(end.ts, ROTATE_MAX_DURATION_MS)?;
         let dur = end.ts - start.ts;
-        if dur <= 0 || dur > ROTATE_MAX_DURATION_MS {
+        if dur <= 0 {
             return None;
         }
         let angle_start = palm_angle(start);
@@ -217,6 +224,26 @@ impl MotionAnalyzer {
 
     pub fn clear(&mut self) {
         self.samples.clear();
+    }
+
+    // Find the OLDEST sample in the buffer whose age is still within
+    // `max_age_ms` from `end_ts`. Returns `None` when there's no such
+    // strictly-older sample, so callers can use `?` to bail out cleanly
+    // before computing deltas. Iterates front-to-back (oldest first), so
+    // the first sample inside the window is exactly the oldest valid one.
+    // Used by swipe / pinch / rotate to scope the duration check to the
+    // last N ms of motion instead of the entire ring buffer (which fills
+    // to ~1 s and then permanently exceeds the per-classifier ceilings).
+    fn window_start(&self, end_ts: i64, max_age_ms: i64) -> Option<&Sample> {
+        let candidate = self
+            .samples
+            .iter()
+            .find(|s| end_ts - s.ts <= max_age_ms)?;
+        if candidate.ts < end_ts {
+            Some(candidate)
+        } else {
+            None
+        }
     }
 }
 
