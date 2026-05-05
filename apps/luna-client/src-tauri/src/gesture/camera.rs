@@ -9,12 +9,25 @@ use nokhwa::pixel_format::RgbFormat;
 use nokhwa::utils::{ApiBackend, CameraIndex, RequestedFormat, RequestedFormatType};
 use nokhwa::Camera;
 
+// Manual Debug impl so the enclosing `CameraEvent::Frame(Frame)` (which
+// derives Debug) compiles, without dumping the entire RGB buffer in logs.
 #[derive(Clone)]
 pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub rgb: Vec<u8>,
     pub ts_ms: i64,
+}
+
+impl std::fmt::Debug for Frame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Frame")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("rgb_len", &self.rgb.len())
+            .field("ts_ms", &self.ts_ms)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]

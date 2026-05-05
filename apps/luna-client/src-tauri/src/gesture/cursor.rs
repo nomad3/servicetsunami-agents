@@ -33,8 +33,31 @@ const FRONTMOST_TTL_MS: i64 = 1_000;
 static DISPLAY_W: AtomicI64 = AtomicI64::new(-1);
 static DISPLAY_H: AtomicI64 = AtomicI64::new(-1);
 
+// `Enigo` on macOS holds a `NonNull<CGEventSource>` which is `!Send` because
+// the raw pointer marker is conservative. Wrap it in a newtype that asserts
+// `Send` so we can park it inside a `Lazy<Mutex<...>>` static. Safety: the
+// surrounding `tokio::sync::Mutex` serializes all access to a single thread
+// at a time, and Apple documents `CGEventCreate*` / `CGEventPost` family as
+// thread-safe (the type is `!Send` only because rustc can't prove it).
 #[cfg(target_os = "macos")]
-static ENIGO: Lazy<Mutex<Option<Enigo>>> = Lazy::new(|| Mutex::new(None));
+struct SendEnigo(Enigo);
+
+#[cfg(target_os = "macos")]
+unsafe impl Send for SendEnigo {}
+
+#[cfg(target_os = "macos")]
+impl std::ops::Deref for SendEnigo {
+    type Target = Enigo;
+    fn deref(&self) -> &Enigo { &self.0 }
+}
+
+#[cfg(target_os = "macos")]
+impl std::ops::DerefMut for SendEnigo {
+    fn deref_mut(&mut self) -> &mut Enigo { &mut self.0 }
+}
+
+#[cfg(target_os = "macos")]
+static ENIGO: Lazy<Mutex<Option<SendEnigo>>> = Lazy::new(|| Mutex::new(None));
 
 pub fn set_global_mode(v: bool) {
     GLOBAL_MODE.store(v, Ordering::SeqCst);
@@ -161,7 +184,7 @@ pub async fn move_abs(x: f32, y: f32) {
 
     let mut guard = ENIGO.lock().await;
     if guard.is_none() {
-        *guard = Enigo::new(&Settings::default()).ok();
+        *guard = Enigo::new(&Settings::default()).ok().map(SendEnigo);
     }
     if let Some(e) = guard.as_mut() {
         let _ = e.move_mouse(px, py, Coordinate::Abs);
@@ -175,7 +198,7 @@ pub async fn click() {
 
     let mut guard = ENIGO.lock().await;
     if guard.is_none() {
-        *guard = Enigo::new(&Settings::default()).ok();
+        *guard = Enigo::new(&Settings::default()).ok().map(SendEnigo);
     }
     if let Some(e) = guard.as_mut() {
         let _ = e.button(Button::Left, Direction::Click);
