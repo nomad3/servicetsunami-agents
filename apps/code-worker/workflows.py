@@ -18,6 +18,62 @@ from temporalio.common import RetryPolicy
 logger = logging.getLogger(__name__)
 
 
+def _safe_cli_error_snippet(stderr: str, stdout: str, max_len: int = 800) -> str:
+    """Build a useful error snippet from a CLI subprocess that exited non-zero.
+
+    Why this exists: several CLIs (GitHub Copilot CLI, OpenCode, Codex,
+    Gemini) emit *streaming JSON* on stdout. When the CLI exits 1 with
+    no stderr but a stdout full of `{"type": "session.skills_loaded", ...}`
+    style events, the old `result.stderr or result.stdout` pattern picks
+    up the streaming JSON, packs it into the error message, and that
+    error text eventually surfaces to the user as the chat reply
+    (`CLI exit 1: {"type":"session.skills_loaded",...}`). 2026-05-05
+    incident: every chat turn whose primary CLI hit any failure showed
+    raw JSON to the user instead of a graceful fallback.
+
+    Strategy:
+      1. Prefer stderr — it's almost never streaming JSON.
+      2. If stderr is empty, scan stdout for an `error`-shaped event
+         (most CLIs emit `{"type":"error","message":"..."}` on failure)
+         and return its message.
+      3. Otherwise return a generic "no error detail available" so the
+         routing layer's classifier can still bucket the failure into
+         exception/quota/auth without echoing the JSON to the user.
+    """
+    err = (stderr or "").strip()
+    if err:
+        return err[:max_len]
+    out = (stdout or "").strip()
+    if not out:
+        return ""
+    # Detect streaming-JSON output (Copilot / OpenCode / Codex / Gemini all
+    # share this shape) — first non-empty line starts with `{` and parses
+    # as JSON with a `type` field.
+    first_nonblank = next((ln for ln in out.splitlines() if ln.strip()), "")
+    if first_nonblank.startswith("{") and '"type"' in first_nonblank:
+        # Parse line-by-line looking for an error event.
+        for line in out.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            etype = obj.get("type", "")
+            # Common shapes across the CLIs we ship.
+            if etype in ("error", "exception", "session.error", "result.error"):
+                msg = obj.get("message") or obj.get("data", {}).get("message") or str(obj)
+                return msg[:max_len]
+            if etype == "result" and obj.get("error"):
+                return str(obj["error"])[:max_len]
+        # Found streaming JSON but no error event — return a generic
+        # "see logs" message so we don't leak the stream into chat.
+        return f"<{len(out)} bytes of streaming JSON, no error event>"
+    # Plain text — safe to return as-is.
+    return out[:max_len]
+
+
 def _build_allowed_tools_from_mcp(mcp_config_json: str = "", extra: str = "") -> str:
     """Derive --allowedTools from MCP config JSON.
 
@@ -1160,7 +1216,7 @@ def _execute_claude_chat(task_input: ChatCliInput, session_dir: str) -> ChatCliR
         cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
     )
     if result.returncode != 0:
-        err = (result.stderr or result.stdout or "")[:1000]
+        err = _safe_cli_error_snippet(result.stderr, result.stdout, 1000)
         return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
 
     raw = result.stdout.strip()
@@ -1247,7 +1303,7 @@ def _execute_codex_chat(task_input: ChatCliInput, session_dir: str, image_path: 
         cwd=WORKSPACE if os.path.isdir(WORKSPACE) else session_dir,
     )
     if result.returncode != 0:
-        err = (result.stderr or result.stdout or "")[:2000]
+        err = _safe_cli_error_snippet(result.stderr, result.stdout, 2000)
         return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
 
     response_text = ""
@@ -1631,7 +1687,7 @@ def _execute_gemini_chat(task_input: ChatCliInput, session_dir: str, image_path:
             })
 
     if result.returncode != 0:
-        err = (result.stderr or result.stdout or "")[:2000]
+        err = _safe_cli_error_snippet(result.stderr, result.stdout, 2000)
         return ChatCliResult(
             response_text="",
             success=False,
@@ -1855,7 +1911,7 @@ def _execute_copilot_chat(task_input: ChatCliInput, session_dir: str) -> ChatCli
     )
 
     if result.returncode != 0:
-        err = (result.stderr or result.stdout or "")[:1000]
+        err = _safe_cli_error_snippet(result.stderr, result.stdout, 1000)
         return ChatCliResult(response_text="", success=False, error=f"CLI exit {result.returncode}: {err}")
 
     raw = (result.stdout or "").strip()
@@ -2108,10 +2164,11 @@ def _execute_opencode_chat_cli(task_input: ChatCliInput, session_dir: str) -> Ch
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
+            err = _safe_cli_error_snippet(result.stderr, result.stdout, 1000)
             return ChatCliResult(
                 response_text="",
                 success=False,
-                error=f"OpenCode CLI failed: {result.stderr or result.stdout}",
+                error=f"OpenCode CLI failed: {err}",
             )
 
         data = json.loads(result.stdout)
