@@ -2054,16 +2054,33 @@ def _execute_opencode_chat(task_input: ChatCliInput, session_dir: str) -> ChatCl
             )
             prompt = context_prefix + prompt
 
-        # Send message to OpenCode server
+        # Send message to OpenCode server.
+        #
+        # OpenCode adopted a multipart message schema. The body must be
+        # `{"parts": [{"type": "text", "text": "..."}]}`, not the old
+        # `{"message": "..."}`. The mismatch caused every fallback to
+        # 400 with `expected array, received undefined` on `parts`,
+        # which surfaced to users as `OpenCode server failed (400 Bad
+        # Request)` and the CLI fallback (also broken) emitted raw
+        # JSON like `CLI exit 1: {"type":"session.skills_loaded",...}`
+        # into chat. Live diagnostic 2026-05-05.
         resp = httpx.post(
             f"{base_url}/session/{session_id}/message",
-            json={"message": prompt},
+            json={"parts": [{"type": "text", "text": prompt}]},
             timeout=120,  # Local LLM can be slow
         )
         resp.raise_for_status()
         data = resp.json()
 
-        text = data.get("response", "")
+        # Response shape also moved to multipart. Try the new shape first
+        # (parts[].text concatenated), fall back to the legacy `response`
+        # field if the server downgraded for compatibility.
+        text = ""
+        for part in (data.get("parts") or []):
+            if isinstance(part, dict) and part.get("type") == "text":
+                text += part.get("text", "")
+        if not text:
+            text = data.get("response", "")
         meta = {
             "platform": "opencode",
             "session_id": session_id,
