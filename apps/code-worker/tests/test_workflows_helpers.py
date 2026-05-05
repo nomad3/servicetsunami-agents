@@ -226,3 +226,62 @@ class TestConsensusCheck:
         )
         assert "[A]" in report
         assert "[B]" in report
+
+
+class TestSafeCliErrorSnippet:
+    """`_safe_cli_error_snippet` strips streaming-JSON output from CLI
+    error messages so it never leaks into chat replies (2026-05-05
+    incident: copilot CLI exited 1 with empty stderr but a stdout full
+    of `{"type":"session.skills_loaded",...}` events; the old
+    `result.stderr or result.stdout` pattern dumped the whole stream
+    into the user's chat message)."""
+
+    def test_prefers_stderr_over_stdout(self):
+        out = wf._safe_cli_error_snippet("real error here", "stdout content", 100)
+        assert out == "real error here"
+
+    def test_falls_back_to_stdout_when_stderr_blank(self):
+        out = wf._safe_cli_error_snippet("", "plain text error\n", 100)
+        assert out == "plain text error"
+
+    def test_strips_streaming_json_to_generic_msg(self):
+        # Real captured Copilot CLI streaming JSON shape from the
+        # 2026-05-05 incident.
+        stream = "\n".join([
+            '{"type":"session.skills_loaded","data":{"skills":[]},"id":"x"}',
+            '{"type":"session.tools_updated","data":{"model":"copilot"}}',
+            '{"type":"session.completed","data":{}}',
+        ])
+        out = wf._safe_cli_error_snippet("", stream, 1000)
+        # Must NOT contain the raw JSON
+        assert "session.skills_loaded" not in out
+        assert "session.tools_updated" not in out
+        # Should produce a generic placeholder
+        assert "streaming JSON" in out
+
+    def test_extracts_error_message_from_streaming_event(self):
+        stream = "\n".join([
+            '{"type":"session.started","data":{}}',
+            '{"type":"error","message":"quota exceeded"}',
+            '{"type":"session.aborted","data":{}}',
+        ])
+        out = wf._safe_cli_error_snippet("", stream, 1000)
+        assert out == "quota exceeded"
+
+    def test_extracts_error_from_result_event(self):
+        stream = '{"type":"result","error":"auth failed: token expired"}'
+        out = wf._safe_cli_error_snippet("", stream, 1000)
+        assert out == "auth failed: token expired"
+
+    def test_truncates_to_max_len(self):
+        out = wf._safe_cli_error_snippet("a" * 5000, "", 100)
+        assert len(out) == 100
+
+    def test_empty_inputs_return_empty(self):
+        assert wf._safe_cli_error_snippet("", "", 100) == ""
+        assert wf._safe_cli_error_snippet(None, None, 100) == ""
+
+    def test_keeps_plain_text_stdout_when_no_stderr(self):
+        # Common case: a CLI that writes a usage error to stdout.
+        out = wf._safe_cli_error_snippet("", "Usage: cli COMMAND [OPTS]", 100)
+        assert "Usage:" in out
