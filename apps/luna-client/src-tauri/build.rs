@@ -1,12 +1,12 @@
 use std::process::Command;
 
 fn main() {
-    tauri_build::build();
-
-    // Propagate the updater pubkey state from tauri.conf.json into a rustc
-    // env var so install_update can fail fast when signing isn't configured.
-    propagate_updater_pubkey();
-
+    // IMPORTANT: compile the Swift dylib BEFORE `tauri_build::build()`.
+    // tauri_build validates `bundle.macOS.frameworks` paths at config-load
+    // time and aborts the whole build with "Library not found" if any
+    // referenced file is missing. The dylib is produced inside this
+    // build.rs (compile_swift_landmarker), so it must exist before the
+    // tauri config validator runs.
     #[cfg(target_os = "macos")]
     {
         compile_swift_landmarker();
@@ -16,6 +16,12 @@ fn main() {
         // the future doesn't silently break the cursor.
         println!("cargo:rustc-link-lib=framework=CoreGraphics");
     }
+
+    tauri_build::build();
+
+    // Propagate the updater pubkey state from tauri.conf.json into a rustc
+    // env var so install_update can fail fast when signing isn't configured.
+    propagate_updater_pubkey();
 }
 
 fn propagate_updater_pubkey() {
