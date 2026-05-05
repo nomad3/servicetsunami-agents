@@ -62,7 +62,8 @@
     ],
     "macOS": {
       "minimumSystemVersion": "11.0",
-      "infoPlist": "Info.plist"
+      "infoPlist": "Info.plist",
+      "frameworks": ["target/lib/libluna_hand_landmarker.dylib"]
     },
     "iOS": {
       "minimumSystemVersion": "16.0",

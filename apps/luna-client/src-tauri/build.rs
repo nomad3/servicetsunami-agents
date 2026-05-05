@@ -38,6 +38,14 @@ fn compile_swift_landmarker() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
     let swift_src = format!("{}/swift/HandLandmarker.swift", manifest_dir);
     let lib_path = format!("{}/libluna_hand_landmarker.dylib", out_dir);
+    // Stable copy for the Tauri bundler — OUT_DIR is a per-build hash
+    // path that tauri.conf.json's `bundle.macOS.frameworks` can't predict,
+    // so we mirror the dylib into `target/lib/` and reference that there.
+    // Without this, Luna.app ships without the dylib and crashes at
+    // launch with `Library not loaded: @rpath/libluna_hand_landmarker.dylib`
+    // (incident 2026-05-04, v0.1.57).
+    let stable_lib_dir = format!("{}/target/lib", manifest_dir);
+    let stable_lib_path = format!("{}/libluna_hand_landmarker.dylib", stable_lib_dir);
 
     println!("cargo:rerun-if-changed={}", swift_src);
     println!("cargo:rerun-if-changed=build.rs");
@@ -74,6 +82,13 @@ fn compile_swift_landmarker() {
     if !status.success() {
         panic!("swiftc failed to compile HandLandmarker.swift");
     }
+
+    // Mirror the freshly-built dylib to the stable location so the Tauri
+    // bundler can find it via tauri.conf.json's `bundle.macOS.frameworks`.
+    std::fs::create_dir_all(&stable_lib_dir)
+        .unwrap_or_else(|e| panic!("create_dir_all {stable_lib_dir}: {e}"));
+    std::fs::copy(&lib_path, &stable_lib_path)
+        .unwrap_or_else(|e| panic!("copy {lib_path} -> {stable_lib_path}: {e}"));
 
     println!("cargo:rustc-link-search=native={}", out_dir);
     println!("cargo:rustc-link-lib=dylib=luna_hand_landmarker");
