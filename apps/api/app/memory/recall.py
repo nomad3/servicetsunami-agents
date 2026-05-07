@@ -89,15 +89,40 @@ def _get_grpc_stub():
             logger.warning("gRPC generated code not found for memory-core. Rust memory disabled.")
             return None
 
+        # Service-config retry policy for transient UNAVAILABLE errors.
+        # The Python gRPC client uses C-Ares for DNS resolution which can
+        # intermittently fail to resolve a hostname even when getent works
+        # (most often right after a docker-compose redeploy when the
+        # DNS cache hasn't warmed). Without retries, every such hiccup
+        # immediately fails over to the Python recall path — slower and
+        # missing Rust-only fields. With 3 retries × exponential backoff
+        # capped at 500ms, transient resolution / connection issues
+        # transparently recover within ~350ms.
+        import json as _json
+        retry_service_config = _json.dumps({
+            "methodConfig": [{
+                "name": [{"service": "memory.MemoryCore"}],
+                "retryPolicy": {
+                    "maxAttempts": 3,
+                    "initialBackoff": "0.05s",
+                    "maxBackoff": "0.5s",
+                    "backoffMultiplier": 2.0,
+                    "retryableStatusCodes": ["UNAVAILABLE"],
+                },
+            }],
+        })
+
         options = [
             ('grpc.keepalive_time_ms', 30000),
             ('grpc.keepalive_timeout_ms', 5000),
             ('grpc.keepalive_permit_without_calls', 1),
             ('grpc.max_receive_message_length', 16 * 1024 * 1024),
+            ('grpc.enable_retries', 1),
+            ('grpc.service_config', retry_service_config),
         ]
         _grpc_channel = _grpc.insecure_channel(url, options=options)
         _grpc_stub = memory_pb2_grpc.MemoryCoreStub(_grpc_channel)
-        logger.info("Connected to Rust memory-core at %s", url)
+        logger.info("Connected to Rust memory-core at %s (retries enabled)", url)
         return _grpc_stub
     except Exception as e:
         logger.warning("Failed to connect to Rust memory-core at %s: %s", url, e)
