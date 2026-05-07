@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import KnowledgeNebula from './KnowledgeNebula';
+import HandPortraitVisualizer from '../gestures/HandPortraitVisualizer';
 import { apiJson } from '../../api';
 import { useGesture } from '../../hooks/useGesture';
 import './SpatialHUD.css';
@@ -166,6 +167,25 @@ export default function SpatialHUD() {
     <div className={`spatial-hud-container ${consensus >= 90 ? 'consensus-glow' : ''}`}>
       <KnowledgeNebula nodes={nodes} agents={agents} beams={beams} />
       <SpatialHudGestureSync onSyncChange={setTrackingActive} />
+
+      {/* Live portrait of the user's hand with detected MediaPipe
+          landmarks overlaid. Top-right corner, 240×320 portrait — gives
+          the user immediate visual feedback on what Vision is seeing
+          and which pose the classifier returns. Added 2026-05-07 after
+          repeated 'gestures aren't working' reports where the engine
+          was firing silently and the user couldn't tell if it was
+          detection, classification, or wake-state. */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 16,
+          right: 16,
+          zIndex: 50,
+        }}
+      >
+        <HandPortraitVisualizer width={240} height={320} />
+      </div>
+
 
       <header className="hud-top">
         <div className="hud-group">

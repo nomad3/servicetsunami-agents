@@ -231,6 +231,40 @@ async fn run_engine_loop(app: AppHandle) -> Result<(), String> {
                     last_hand_log_ms = now_ms;
                     hands_seen_total = 0;
                 }
+                // Emit landmarks for the React-side hand portrait
+                // visualizer. Payload is small (~600 bytes per frame for
+                // 1 hand of 21 landmarks × 3 floats), and we only emit
+                // when at least one hand is detected so we don't spam
+                // an idle stream of empties. The React side overlays
+                // these on its own getUserMedia <video> at GPU speed —
+                // no JPEG round-trip over Tauri IPC.
+                if !hands.is_empty() {
+                    let payload: Vec<serde_json::Value> = hands
+                        .iter()
+                        .map(|h| {
+                            serde_json::json!({
+                                "landmarks": h.landmarks
+                                    .iter()
+                                    .map(|p| serde_json::json!([p.x, p.y, p.z]))
+                                    .collect::<Vec<_>>(),
+                                "handedness": format!("{:?}", h.handedness),
+                                "confidence": h.confidence,
+                                "pose": primary_pose.map(|p| format!("{:?}", p)),
+                            })
+                        })
+                        .collect();
+                    let _ = app.emit(
+                        "hand-landmarks",
+                        serde_json::json!({
+                            "ts_ms": now_ms,
+                            "frame_w": frame.width,
+                            "frame_h": frame.height,
+                            "hands": payload,
+                            "wake_state": format!("{:?}", wake.state()),
+                        }),
+                    );
+                }
+
                 wake.tick(
                     WakeInput::Pose {
                         pose: primary_pose,
