@@ -253,6 +253,9 @@ async fn updater_signing_status() -> Result<bool, String> {
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     if !updater_signing_configured() {
+        log::error!(
+            "update: signing not configured — install_update will not run"
+        );
         return Err(
             "auto-install requires updater signing to be configured \
              (set TAURI_SIGNING_PRIVATE_KEY secret and embed pubkey in \
@@ -260,24 +263,47 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
                 .to_string(),
         );
     }
+    log::info!("update: install_update invoked");
     use tauri_plugin_updater::UpdaterExt;
-    let updater = app.updater().map_err(|e| format!("updater init: {e}"))?;
-    let update = updater
-        .check()
-        .await
-        .map_err(|e| format!("check: {e}"))?
-        .ok_or_else(|| "no update available".to_string())?;
+    let updater = app.updater().map_err(|e| {
+        log::error!("update: updater init failed: {e}");
+        format!("updater init: {e}")
+    })?;
+    let update = match updater.check().await {
+        Ok(Some(u)) => {
+            log::info!("update: check returned version {}", u.version);
+            u
+        }
+        Ok(None) => {
+            log::info!("update: no update available");
+            return Err("no update available".to_string());
+        }
+        Err(e) => {
+            log::error!("update: check failed: {e}");
+            return Err(format!("check: {e}"));
+        }
+    };
     let mut downloaded: usize = 0;
-    update
+    if let Err(e) = update
         .download_and_install(
             |chunk_len, _content_length| {
                 downloaded += chunk_len;
                 log::debug!("update: downloaded {} bytes", downloaded);
             },
-            || log::info!("update: download complete; restarting"),
+            || log::info!("update: download complete; installing"),
         )
         .await
-        .map_err(|e| format!("install: {e}"))?;
+    {
+        // The previous version returned this error to the frontend
+        // silently — that's why the user saw the button "do nothing":
+        // download_and_install repeatedly succeeds at downloading but
+        // the install step fails (typically code-signing mismatch on
+        // macOS, or a permissions issue on /Applications/Luna.app).
+        // Log it so the failure mode is visible in Luna.log.
+        log::error!("update: download_and_install failed: {e}");
+        return Err(format!("install: {e}"));
+    }
+    log::info!("update: install completed; restarting");
     app.restart();
 }
 
