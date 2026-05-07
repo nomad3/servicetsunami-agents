@@ -205,28 +205,32 @@ async fn run_engine_loop(app: AppHandle) -> Result<(), String> {
                 frame_count += 1;
                 let hands = extractor.extract(&frame.rgb, frame.width, frame.height);
                 hands_seen_total += hands.len() as u64;
-
-                // Heartbeat once per second so we can tell from the log
-                // whether the engine is alive AND whether Vision is
-                // detecting any hands.
-                if now_ms - last_hand_log_ms >= HAND_LOG_INTERVAL_MS {
-                    let primary_conf_log = hands.first().map(|h| h.confidence).unwrap_or(0.0);
-                    log::info!(
-                        "gesture: heartbeat frames={} hands_in_last_window={} hands_now={} confidence={:.3} frame_size={}x{}",
-                        frame_count,
-                        hands_seen_total,
-                        hands.len(),
-                        primary_conf_log,
-                        frame.width,
-                        frame.height,
-                    );
-                    last_hand_log_ms = now_ms;
-                    hands_seen_total = 0;
-                }
                 let primary_pose = hands
                     .first()
                     .map(|h| crate::gesture::pose::classify(h).0);
                 let primary_conf = hands.first().map(|h| h.confidence).unwrap_or(0.0);
+
+                // Heartbeat once per second so we can tell from the log
+                // whether the engine is alive AND whether Vision is
+                // detecting any hands. Now also includes the classified
+                // pose + wake state so we can diagnose why wake isn't
+                // promoting (e.g. classifier returns Custom even when
+                // hand looks like an open palm).
+                if now_ms - last_hand_log_ms >= HAND_LOG_INTERVAL_MS {
+                    log::info!(
+                        "gesture: heartbeat frames={} hands_in_last_window={} hands_now={} confidence={:.3} frame_size={}x{} pose={:?} wake_state={:?}",
+                        frame_count,
+                        hands_seen_total,
+                        hands.len(),
+                        primary_conf,
+                        frame.width,
+                        frame.height,
+                        primary_pose,
+                        wake.state(),
+                    );
+                    last_hand_log_ms = now_ms;
+                    hands_seen_total = 0;
+                }
                 wake.tick(
                     WakeInput::Pose {
                         pose: primary_pose,
