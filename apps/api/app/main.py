@@ -166,6 +166,69 @@ async def startup_whatsapp():
 
 
 @app.on_event("startup")
+async def startup_whatsapp_readonly_auto_restore():
+    """Auto-recover from the neonize 'attempt to write a readonly database'
+    failure mode by hooking the whatsmeow.Client logger.
+
+    History (4× over 30 hours, 2026-05-05 → 2026-05-06): the neonize
+    SQLite session goes silently read-only after a few hours of uptime.
+    Symptoms: incoming WhatsApp messages can't be decrypted/stored, no
+    new chat_messages rows appear, the DB still shows status=connected.
+    Manual fix is `docker compose restart api` which re-runs
+    restore_connections() — neonize cleanly re-opens the session file.
+
+    This hook attaches a logging Handler to the whatsmeow.Client logger.
+    When a 'readonly database' record fires, it schedules a single
+    restore_connections() call. Rate-limited to one trigger per 120s so
+    a burst of decrypt failures doesn't cascade.
+    """
+    import asyncio
+    import logging
+    import time
+
+    log = logging.getLogger(__name__)
+
+    class _ReadonlyDetectingHandler(logging.Handler):
+        def __init__(self, loop):
+            super().__init__(level=logging.WARNING)
+            self._last_trigger = 0.0
+            self._loop = loop
+
+        def emit(self, record):
+            try:
+                msg = record.getMessage()
+            except Exception:
+                return
+            if "readonly database" not in msg:
+                return
+            now = time.monotonic()
+            if now - self._last_trigger < 120.0:
+                return  # cooldown — already recovering
+            self._last_trigger = now
+            log.warning(
+                "WhatsApp readonly-DB pattern detected — auto-restoring "
+                "connections (rate-limited: 120s cooldown)"
+            )
+            asyncio.run_coroutine_threadsafe(_do_restore(), self._loop)
+
+    async def _do_restore():
+        try:
+            from app.services.whatsapp_service import whatsapp_service
+            await whatsapp_service.restore_connections()
+            log.info("WhatsApp auto-restore: completed successfully")
+        except Exception as e:
+            log.warning("WhatsApp auto-restore failed: %s", e)
+
+    try:
+        loop = asyncio.get_running_loop()
+        handler = _ReadonlyDetectingHandler(loop)
+        logging.getLogger("whatsmeow.Client").addHandler(handler)
+        log.info("WhatsApp readonly-DB auto-restore handler installed")
+    except Exception as e:
+        log.warning("Failed to install WhatsApp auto-restore handler: %s", e)
+
+
+@app.on_event("startup")
 async def startup_teams_monitor_reconcile():
     """Re-spawn TeamsMonitorWorkflow for every enabled Teams account.
 
