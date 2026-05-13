@@ -133,7 +133,7 @@ Previously a Turborepo monorepo managed with `pnpm` workspaces:
 1. `POST /api/v1/auth/register` creates tenant + admin user
 2. `POST /api/v1/auth/login` returns JWT access token
 3. All protected endpoints require `Authorization: Bearer <token>` header
-4. Demo credentials: `test@example.com` / `DemoPass123!`
+4. Demo credentials (local dev only — `seed_demo_data` is gated to `ENVIRONMENT ∈ {local, dev}`): `test@example.com` / `DemoPass123!`
 
 **Database initialization**: On API startup, `apps/api/app/main.py` calls `init_db()` which creates tables and seeds demo data.
 

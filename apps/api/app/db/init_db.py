@@ -66,7 +66,17 @@ def init_db(db: Session) -> None:
 
     seed_llm_providers(db)
     seed_llm_models(db)
-    seed_demo_data(db)
+    # N5-3 (security review round 5): seed_demo_data creates a real
+    # `test@example.com / DemoPass123!` account with is_active=True.
+    # Running this on production startup ships every prod
+    # environment with a documented working credential — a
+    # classic anti-pattern. Gate behind ENVIRONMENT ∈ {local, dev}
+    # so prod / staging boot without the demo user. Existing rows
+    # from previous deploys are NOT touched (no DELETE here — that
+    # belongs to an operator runbook).
+    from app.core.config import settings as _settings
+    if _settings.ENVIRONMENT.lower() in ("local", "dev"):
+        seed_demo_data(db)
     seed_system_skills(db)
 
 

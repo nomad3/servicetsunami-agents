@@ -481,17 +481,32 @@ def _cookie_should_be_secure() -> bool:
     plain HTTP — the browser silently drops the Set-Cookie and the
     reset confirm endlessly 400s with the same-browser hint.
 
-    Auto-detect by looking at PUBLIC_BASE_URL: localhost / 127.0.0.1
-    over http → allow non-secure cookies so dev works without
-    config; everything else → secure required.
+    Auto-detect by looking at PUBLIC_BASE_URL: localhost/127.0.0.1/
+    0.0.0.0/[::1] over http → allow non-secure cookies so dev works
+    without config; everything else → secure required.
+
+    N5-1 (round 5): hostname check is parser-based (not startswith)
+    so a misconfigured `PUBLIC_BASE_URL=http://localhost.attacker.com`
+    can't trick the helper into emitting a non-secure cookie in prod.
+    Matches the URL-allowlist style in email_sender.py.
+    N5-4 (round 5): also accept `0.0.0.0` and `::1` so dev binding
+    to any of the loopback forms works without re-toggling config.
     """
-    base = (settings.PUBLIC_BASE_URL or "").strip().lower()
+    base = (settings.PUBLIC_BASE_URL or "").strip()
     if not base:
         # No PUBLIC_BASE_URL configured — assume prod posture
         # (better to ship the flow broken in dev than ship it
         # quietly insecure in any unconfigured env).
         return True
-    if base.startswith("http://localhost") or base.startswith("http://127.0.0.1"):
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(base)
+    except Exception:
+        return True
+    if parsed.scheme != "http":
+        return True  # https → secure required, period
+    host = (parsed.hostname or "").lower()
+    if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
         return False
     return True
 
@@ -527,12 +542,25 @@ def _log_safe_email_id(email: str) -> str:
 # Redis-less local dev environment doesn't crash on import; the
 # per-call helper catches connection failures and fails open per I-5.
 _redis_client = None
+# N5-2 (round 5): proper circuit-breaker. After a Redis failure we
+# set a "don't retry until" timestamp so concurrent requests during
+# a sustained outage don't all independently re-build a Redis client
+# and re-hit the broken socket. Skip reconnect attempts for 60s.
+_redis_disabled_until: float = 0.0
+_REDIS_CIRCUIT_BREAKER_SECONDS = 60
 
 
 def _get_redis_client():
+    """Return a cached Redis client. None when the breaker is open
+    (recent failure) or when the client can't be constructed at all."""
     global _redis_client
     if _redis_client is not None:
         return _redis_client
+    # N5-2: don't even try to reconstruct during the breaker window.
+    # Concurrent requests during a sustained Redis outage thus pay
+    # at most one connect attempt per 60s rather than one per call.
+    if _redis_disabled_until and time.monotonic() < _redis_disabled_until:
+        return None
     try:
         import redis as _redis
         _redis_client = _redis.from_url(
@@ -581,13 +609,19 @@ def _check_per_email_rate_limit(email: str) -> bool:
         # so the import-time WARNING in `_get_redis_client` never
         # fires on the realistic outage scenario (Redis unreachable
         # over TCP). Log here so a silently-disabled per-email cap
-        # surfaces in monitoring + circuit-break by nulling the
-        # module-level client so the NEXT call attempts a fresh
-        # connection rather than reusing a wedged pool.
+        # surfaces in monitoring.
+        #
+        # N5-2 (round-5): proper circuit-breaker — null the client AND
+        # set a 60s "don't try again" timestamp so concurrent requests
+        # during a sustained outage don't all independently reconnect.
+        global _redis_disabled_until
         logger.warning(
-            "pwreset: redis incr failed, per-email cap bypassed: %s", exc
+            "pwreset: redis incr failed, per-email cap bypassed for %ds: %s",
+            _REDIS_CIRCUIT_BREAKER_SECONDS,
+            exc,
         )
-        _redis_client = None  # circuit-break — fresh attempt next call
+        _redis_client = None
+        _redis_disabled_until = time.monotonic() + _REDIS_CIRCUIT_BREAKER_SECONDS
         return True
 
 

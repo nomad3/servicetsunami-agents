@@ -152,7 +152,7 @@ Interactive Chart + Export Buttons
 ## 7. Testing Plan
 
 ### 7.1 Critical Flows to Test
-1. **Login**: `test@example.com` / `DemoPass123!`
+1. **Login** (local dev only — demo seed gated to `ENVIRONMENT ∈ {local, dev}`): `test@example.com` / `DemoPass123!`
 2. **Create Agent**: Navigate to `/agents`, create "ReportBot"
 3. **Start Chat Session**: Select "ReportBot" + "Revenue Performance" dataset
 4. **Generate Report**: Ask "Show me a bar chart of revenue by customer segment"
