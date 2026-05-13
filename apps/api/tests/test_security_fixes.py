@@ -206,34 +206,19 @@ def test_password_recovery_same_message_for_existing_and_missing_email():
 # refactor that regresses the behaviour fails CI loudly.
 
 
-def test_reset_password_without_csrf_cookie_400s_same_browser_message():
-    """B-5: a reset POST without the requester-confirmer cookie must
-    400 AND surface the 'same browser' detail (I-N1) so the SPA can
-    map it to a clearer UX message. Even with a valid-shape token +
-    matching email + Pydantic-valid password, no cookie = no reset."""
-    import uuid
-    import hashlib
-    from datetime import datetime, timedelta
+def _make_reset_test_client(mock_user_or_none):
+    """Build a test client whose db.query(User).filter(...).with_for_update().first()
+    returns `mock_user_or_none`. Used by the cookie-binding regression
+    tests to exercise both the user-exists and user-missing paths."""
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from app.api import deps
     import app.api.v1.auth as auth_module
-    from app.models.user import User
-
-    # Mock user with a populated reset state so the handler reaches
-    # the cookie check (rather than short-circuiting on "no user").
-    mock_user = MagicMock(spec=User)
-    mock_user.id = uuid.uuid4()
-    mock_user.email = "victim@example.com"
-    mock_user.password_reset_token = hashlib.sha256(b"correcttoken").hexdigest()
-    mock_user.password_reset_csrf_hash = hashlib.sha256(b"correctcsrf").hexdigest()
-    mock_user.password_reset_expires = datetime.utcnow() + timedelta(hours=1)
-    mock_user.password_reset_attempts = 0
 
     class _StubQuery:
         def filter(self, *_a, **_k): return self
         def with_for_update(self): return self
-        def first(self): return mock_user
+        def first(self): return mock_user_or_none
 
     class _StubDb:
         def query(self, *_a, **_k): return _StubQuery()
@@ -247,8 +232,86 @@ def test_reset_password_without_csrf_cookie_400s_same_browser_message():
     test_app = FastAPI()
     test_app.dependency_overrides[deps.get_db] = _stub_db_dep
     test_app.include_router(auth_module.router, prefix="/api/v1/auth")
-    client = TestClient(test_app, raise_server_exceptions=False)
+    return TestClient(test_app, raise_server_exceptions=False)
 
+
+def test_reset_password_without_csrf_cookie_returns_same_browser_email_agnostic():
+    """B3-1 (round-3 review): missing-cookie check fires BEFORE the
+    user-lookup, so the same-browser detail is email-agnostic. An
+    attacker without a cookie cannot use the response detail to
+    enumerate which emails have active in-flight resets — every
+    cookie-less request returns the same friendly hint regardless
+    of whether the email exists in the DB at all.
+
+    This test asserts both halves of the property:
+      a) Cookie-less + valid user → same-browser detail
+      b) Cookie-less + non-existent user → ALSO same-browser detail
+    """
+    import uuid
+    import hashlib
+    from datetime import datetime, timedelta
+    from app.models.user import User
+
+    # (a) User exists with active reset state.
+    mock_user = MagicMock(spec=User)
+    mock_user.id = uuid.uuid4()
+    mock_user.email = "victim@example.com"
+    mock_user.password_reset_token = hashlib.sha256(b"correcttoken").hexdigest()
+    mock_user.password_reset_csrf_hash = hashlib.sha256(b"correctcsrf").hexdigest()
+    mock_user.password_reset_expires = datetime.utcnow() + timedelta(hours=1)
+    mock_user.password_reset_attempts = 0
+
+    client_a = _make_reset_test_client(mock_user)
+    resp_a = client_a.post(
+        "/api/v1/auth/reset-password",
+        json={
+            "email": "victim@example.com",
+            "token": "correcttoken",
+            "new_password": "ValidPass123",
+        },
+    )
+    assert resp_a.status_code == 400
+    detail_a = (resp_a.json() or {}).get("detail", "")
+    assert "same browser" in detail_a.lower()
+
+    # (b) No user found — response detail MUST be identical.
+    client_b = _make_reset_test_client(None)
+    resp_b = client_b.post(
+        "/api/v1/auth/reset-password",
+        json={
+            "email": "ghost@example.com",
+            "token": "correcttoken",
+            "new_password": "ValidPass123",
+        },
+    )
+    assert resp_b.status_code == 400
+    detail_b = (resp_b.json() or {}).get("detail", "")
+    assert detail_a == detail_b, (
+        f"B3-1: missing-cookie detail must be email-agnostic to close "
+        f"the enumeration oracle; got user-exists={detail_a!r} vs "
+        f"user-missing={detail_b!r}"
+    )
+
+
+def test_reset_password_with_wrong_cookie_returns_generic_error():
+    """B-5: cookie-present-but-wrong is the attacker-bypass signal —
+    must return the GENERIC error so the attacker can't distinguish
+    'I forged a cookie' from 'I have a stale token'."""
+    import uuid
+    import hashlib
+    from datetime import datetime, timedelta
+    from app.models.user import User
+
+    mock_user = MagicMock(spec=User)
+    mock_user.id = uuid.uuid4()
+    mock_user.email = "victim@example.com"
+    mock_user.password_reset_token = hashlib.sha256(b"correcttoken").hexdigest()
+    mock_user.password_reset_csrf_hash = hashlib.sha256(b"correctcsrf").hexdigest()
+    mock_user.password_reset_expires = datetime.utcnow() + timedelta(hours=1)
+    mock_user.password_reset_attempts = 0
+
+    client = _make_reset_test_client(mock_user)
+    client.cookies.set("ap_reset_csrf", "wrong-cookie-value")
     resp = client.post(
         "/api/v1/auth/reset-password",
         json={
@@ -257,13 +320,13 @@ def test_reset_password_without_csrf_cookie_400s_same_browser_message():
             "new_password": "ValidPass123",
         },
     )
-    assert resp.status_code == 400, (
-        f"Reset without csrf cookie must 400; got {resp.status_code}: {resp.text}"
-    )
+    assert resp.status_code == 400
     detail = (resp.json() or {}).get("detail", "")
-    assert "same browser" in detail.lower(), (
-        f"I-N1: missing-cookie detail must be the same-browser hint; got {detail!r}"
+    assert "same browser" not in detail.lower(), (
+        "Wrong cookie must NOT return the same-browser hint — only "
+        "missing-cookie does. Wrong cookie = potential attack."
     )
+    assert "invalid" in detail.lower() or "expired" in detail.lower()
 
 
 def test_password_complexity_rejected_at_schema_layer():

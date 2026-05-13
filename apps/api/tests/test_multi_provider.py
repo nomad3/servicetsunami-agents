@@ -55,7 +55,7 @@ def auth_headers_fixture(db_session, client):
         json={
             "user_in": {
                 "email": "test@example.com",
-                "password": "testpassword",
+                "password": "TestPass123!",
                 "full_name": "Test User"
             },
             "tenant_in": {
@@ -69,7 +69,7 @@ def auth_headers_fixture(db_session, client):
         "/api/v1/auth/login",
         data={
             "username": "test@example.com",
-            "password": "testpassword"
+            "password": "TestPass123!"
         },
         headers={
             "Content-Type": "application/x-www-form-urlencoded"

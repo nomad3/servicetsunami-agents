@@ -39,7 +39,7 @@ def db_session_fixture():
 @pytest.fixture(name="auth_headers")
 def auth_headers_fixture(db_session):
     email = f"podium-{uuid.uuid4().hex[:8]}@example.com"
-    pw = "testpassword"
+    pw = "TestPass123!"
     client.post(
         "/api/v1/auth/register",
         json={

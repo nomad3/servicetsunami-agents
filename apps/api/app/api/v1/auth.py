@@ -2,12 +2,11 @@ from datetime import timedelta, datetime
 import hashlib
 import hmac
 import json
-import re
 import secrets
 import logging
 import time
 import uuid
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Path, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Path, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -483,18 +482,20 @@ def _hash_token(t: str) -> str:
 
 
 def _log_safe_email_id(email: str) -> str:
-    """N-N3: HMAC-SHA256 of an email under SECRET_KEY for log lines.
+    """N-N3: HMAC-SHA256 of an email under a derived sub-key for log
+    lines. Plain SHA-256 of an email is reversible against a wordlist
+    (anyone with log read access + a customer-export dump can confirm
+    which addresses hit a given log event).
 
-    Plain SHA-256 of an email is reversible against a wordlist (anyone
-    with log access + a customer-export dump can confirm which addresses
-    hit a given log event). HMAC under our server-side SECRET_KEY makes
-    the digest only useful to someone who ALSO has the secret — which
-    is the same trust boundary as the JWT signing key. Truncate to
-    16 hex chars (64 bits) for log readability; collision risk for the
-    handful of accounts that hit the cap in any given window is nil.
+    N3-2 (round 3): derive a dedicated sub-key by prefixing SECRET_KEY
+    with a fixed purpose-label string. Same trust boundary (compromise
+    of SECRET_KEY trivially yields this key too) but a future log-id
+    leak can't be cross-applied to JWT analytics — different inputs
+    to the same HMAC primitive produce uncorrelated outputs.
     """
+    _PWRESET_LOG_KEY = (settings.SECRET_KEY + "|pwreset-log|").encode()
     return hmac.new(
-        settings.SECRET_KEY.encode(),
+        _PWRESET_LOG_KEY,
         email.lower().encode(),
         hashlib.sha256,
     ).hexdigest()[:16]
@@ -516,7 +517,12 @@ def _get_redis_client():
         _redis_client = _redis.from_url(
             settings.REDIS_URL, decode_responses=True, socket_timeout=2
         )
-    except Exception:
+    except Exception as exc:
+        # N3-3: surface the failure once at module-init time so a
+        # silently-disabled per-email cap shows up in monitoring.
+        # The fail-open per-call behaviour stays — better to allow
+        # a legit user through than to deny on a Redis blip.
+        logger.warning("pwreset: redis client unavailable, per-email cap disabled: %s", exc)
         _redis_client = None
     return _redis_client
 
@@ -559,6 +565,7 @@ def _check_per_email_rate_limit(email: str) -> bool:
 def recover_password(
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     email: str = Path(..., min_length=3, max_length=254, pattern=_EMAIL_PATH_RE),
     db: Session = Depends(deps.get_db),
 ):
@@ -620,9 +627,18 @@ def recover_password(
     # Best-effort; send_password_reset_email never raises. N-7: do
     # NOT log the email plaintext on the hit path — anyone with log
     # access could otherwise enumerate registered accounts.
+    #
+    # I3-2 (round-3 review): SMTP send happens in a BackgroundTasks
+    # so the request returns in roughly constant time on both hit
+    # and miss paths. The previous synchronous-send version leaked
+    # account existence via timing (miss = few ms; hit = 100ms-2s
+    # SMTP RTT). BackgroundTasks runs AFTER the response body is
+    # flushed to the client, so an enumerator watching response time
+    # can't distinguish hit/miss any more.
     from app.services.email_sender import send_password_reset_email
 
-    send_password_reset_email(
+    background_tasks.add_task(
+        send_password_reset_email,
         to=user.email,
         reset_token=token,
         public_base_url=settings.PUBLIC_BASE_URL,
@@ -670,18 +686,25 @@ def reset_password(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Invalid or expired token",
     )
-    # I-N1 (review 2026-05-12 round 2): cross-device email-link
-    # redemption fails with SameSite=Strict — the cookie set on
-    # device A doesn't travel to device B when the user clicks the
-    # email link there. We surface that with a SPECIFIC detail code
-    # the SPA can map to a clearer UX message, while the wire shape
-    # stays uniform enough that a network observer can't tell the
-    # missing-cookie path from the bad-token path (both 400, both
-    # carry only `detail`).
+    # I-N1: cross-device email-link redemption fails with
+    # SameSite=Strict — the cookie set on device A doesn't travel to
+    # device B. We surface that with a SPECIFIC detail the SPA can
+    # map to a clearer message.
     same_browser_required_error = HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Open this link in the same browser where you requested the reset",
     )
+
+    # B3-1 (round-3 security review): missing-cookie check FIRST,
+    # BEFORE any DB lookup. Otherwise the friendlier message becomes
+    # an enumeration oracle: an attacker without a cookie can POST
+    # against a target email and learn whether that account has an
+    # active in-flight reset (active → same-browser hint, no-active
+    # → generic error). Email-agnostic refusal here closes the
+    # oracle — cookie-less callers always see the same-browser hint
+    # regardless of whether the email exists or has a pending reset.
+    if not ap_reset_csrf:
+        raise same_browser_required_error
 
     # I-7: `with_for_update` takes a row lock so two simultaneous
     # confirm requests can't both pass the compare. Released on commit.
@@ -698,16 +721,11 @@ def reset_password(
     if user.password_reset_expires < datetime.utcnow():
         raise generic_error
 
-    # B-5: cookie binding. The cookie is set by the recovery endpoint
-    # SameSite=Strict so it only travels on same-site POSTs. A
-    # leaked-link attacker has the token but not the cookie.
-    #
-    # I-N1: distinguish "cookie missing" (most likely cross-device or
-    # incognito) from "cookie present but wrong" (looks like an
-    # attempted bypass). The first gets a friendlier message; the
-    # second gets the generic error so the attacker can't enumerate.
-    if not ap_reset_csrf:
-        raise same_browser_required_error
+    # B-5: cookie binding — verify the cookie matches what we stored
+    # when the recovery email was minted. Cookie-present-but-wrong is
+    # an attack signal, NOT a cross-device user; surface as the
+    # generic error so attackers can't tell their forged cookie
+    # apart from a stale-token redemption.
     if not user.password_reset_csrf_hash:
         raise generic_error
     if not hmac.compare_digest(

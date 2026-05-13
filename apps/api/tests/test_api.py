@@ -46,7 +46,7 @@ def db_session_fixture():
 def test_user_data_fixture():
     return {
         "email": f"test-{uuid.uuid4().hex[:8]}@example.com",
-        "password": "testpassword",
+        "password": "TestPass123!",
         "full_name": "Test User",
         "tenant_name": "Test Tenant"
     }
