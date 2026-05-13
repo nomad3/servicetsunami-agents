@@ -288,11 +288,19 @@ def send_password_reset_email(
     reset_url = f"{base}/reset-password?email={safe_email}#token={safe_token}"
 
     subject = "Reset your AgentProvision password"
+    # I-N1: call out the same-browser requirement in the body. The
+    # cookie binding refuses cross-device redemption, so a user who
+    # requested the reset on their laptop and clicks the link on
+    # their phone will hit the friendlier error from /reset-password
+    # — but it's nicer if they don't have to fail through first.
     text_body = (
         "Hi,\n\n"
         "You (or someone using your email) requested a password reset for\n"
         "your AgentProvision account.\n\n"
         f"Reset link: {reset_url}\n\n"
+        "Important: for your security, open this link in the same browser\n"
+        "and device where you requested the reset. Clicking it from another\n"
+        "device or a private/incognito tab won't work.\n\n"
         "The link expires in 24 hours. If you didn't request this, you can\n"
         "safely ignore this email — your password won't change.\n\n"
         "— AgentProvision\n"
@@ -312,7 +320,12 @@ def send_password_reset_email(
         'text-decoration:none;display:inline-block">Reset your password</a></p>'
         '<p style="font-size:12px;color:#64748b">Or copy this link: <br>'
         f'<a href="{safe_url_attr}" style="color:#2b7de9">{safe_url_text}</a></p>'
-        '<p style="font-size:12px;color:#64748b;margin-top:24px">'
+        '<p style="font-size:12px;color:#64748b;margin-top:24px;'
+        'background:#fef9e7;border-left:3px solid #ca8a04;padding:8px 12px">'
+        "<strong>Important:</strong> for your security, open this link in the "
+        "same browser and device where you requested the reset. Clicking it "
+        "from another device or a private/incognito tab won't work.</p>"
+        '<p style="font-size:12px;color:#64748b">'
         "The link expires in 24 hours. If you didn't request this, you can "
         "safely ignore this email — your password won't change.</p>"
         '<p style="font-size:12px;color:#64748b">— AgentProvision</p>'

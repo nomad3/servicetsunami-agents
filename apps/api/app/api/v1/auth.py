@@ -482,6 +482,45 @@ def _hash_token(t: str) -> str:
     return hashlib.sha256(t.encode()).hexdigest()
 
 
+def _log_safe_email_id(email: str) -> str:
+    """N-N3: HMAC-SHA256 of an email under SECRET_KEY for log lines.
+
+    Plain SHA-256 of an email is reversible against a wordlist (anyone
+    with log access + a customer-export dump can confirm which addresses
+    hit a given log event). HMAC under our server-side SECRET_KEY makes
+    the digest only useful to someone who ALSO has the secret — which
+    is the same trust boundary as the JWT signing key. Truncate to
+    16 hex chars (64 bits) for log readability; collision risk for the
+    handful of accounts that hit the cap in any given window is nil.
+    """
+    return hmac.new(
+        settings.SECRET_KEY.encode(),
+        email.lower().encode(),
+        hashlib.sha256,
+    ).hexdigest()[:16]
+
+
+# N-N5: module-level Redis client so the per-email cap doesn't open a
+# fresh connection on every recovery request. Lazy-initialised so a
+# Redis-less local dev environment doesn't crash on import; the
+# per-call helper catches connection failures and fails open per I-5.
+_redis_client = None
+
+
+def _get_redis_client():
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    try:
+        import redis as _redis
+        _redis_client = _redis.from_url(
+            settings.REDIS_URL, decode_responses=True, socket_timeout=2
+        )
+    except Exception:
+        _redis_client = None
+    return _redis_client
+
+
 def _check_per_email_rate_limit(email: str) -> bool:
     """I-5: outbound-spam dampener. slowapi's 3/hour limit is keyed on
     client IP; an attacker rotating IPs (CGNAT/IPv6) can still hit
@@ -498,9 +537,10 @@ def _check_per_email_rate_limit(email: str) -> bool:
     per-IP limit + the no-enumeration response shape are still in
     force.
     """
+    client = _get_redis_client()
+    if client is None:
+        return True  # fail-open per the docstring
     try:
-        import redis as _redis
-        client = _redis.from_url(settings.REDIS_URL, decode_responses=True)
         key = f"pwreset:email:{email.lower()}"
         # 24h sliding window (set + expire).
         n = client.incr(key)
@@ -533,7 +573,9 @@ def recover_password(
     # Silently behaves like the miss path when over the cap so an
     # observer can't enumerate which addresses are being targeted.
     if not _check_per_email_rate_limit(email):
-        logger.info("pwreset.over_email_cap email_sha=%s", _hash_token(email))
+        # N-N3: HMAC under SECRET_KEY so the digest isn't dictionary-
+        # reversible by anyone with just log read access.
+        logger.info("pwreset.over_email_cap email_id=%s", _log_safe_email_id(email))
         return {"message": _PASSWORD_RESET_MESSAGE}
 
     user = user_service.get_user_by_email(db, email=email)
@@ -602,6 +644,7 @@ _RESET_MAX_ATTEMPTS = 3
 @limiter.limit("5/hour")
 def reset_password(
     request: Request,
+    response: Response,
     body: auth_schema.PasswordResetConfirm,
     db: Session = Depends(deps.get_db),
     ap_reset_csrf: str | None = Cookie(default=None),
@@ -627,6 +670,18 @@ def reset_password(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="Invalid or expired token",
     )
+    # I-N1 (review 2026-05-12 round 2): cross-device email-link
+    # redemption fails with SameSite=Strict — the cookie set on
+    # device A doesn't travel to device B when the user clicks the
+    # email link there. We surface that with a SPECIFIC detail code
+    # the SPA can map to a clearer UX message, while the wire shape
+    # stays uniform enough that a network observer can't tell the
+    # missing-cookie path from the bad-token path (both 400, both
+    # carry only `detail`).
+    same_browser_required_error = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Open this link in the same browser where you requested the reset",
+    )
 
     # I-7: `with_for_update` takes a row lock so two simultaneous
     # confirm requests can't both pass the compare. Released on commit.
@@ -646,7 +701,14 @@ def reset_password(
     # B-5: cookie binding. The cookie is set by the recovery endpoint
     # SameSite=Strict so it only travels on same-site POSTs. A
     # leaked-link attacker has the token but not the cookie.
-    if not ap_reset_csrf or not user.password_reset_csrf_hash:
+    #
+    # I-N1: distinguish "cookie missing" (most likely cross-device or
+    # incognito) from "cookie present but wrong" (looks like an
+    # attempted bypass). The first gets a friendlier message; the
+    # second gets the generic error so the attacker can't enumerate.
+    if not ap_reset_csrf:
+        raise same_browser_required_error
+    if not user.password_reset_csrf_hash:
         raise generic_error
     if not hmac.compare_digest(
         user.password_reset_csrf_hash, _hash_token(ap_reset_csrf)
@@ -693,11 +755,13 @@ def reset_password(
     except Exception:
         pass
 
-    # Clear the cookie so a follow-up confirm with the same cookie
-    # can't be re-played (defense-in-depth — token is also nulled).
-    response = JSONResponse(content={"message": "Password updated successfully"})
+    # I-N2: use the injected `Response` to clear the cookie so the
+    # FastAPI response_model validation still applies (returning a
+    # raw JSONResponse here bypassed the typed contract — N-4 was
+    # supposed to lock it down). Token is also nulled above so
+    # cookie replay can't redeem anyway; this is defense-in-depth.
     response.delete_cookie(_RESET_CSRF_COOKIE, path="/api/v1/auth")
-    return response
+    return {"message": "Password updated successfully"}
 
 
 # ---------------------------------------------------------------------------

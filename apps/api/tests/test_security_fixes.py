@@ -199,3 +199,180 @@ def test_password_recovery_same_message_for_existing_and_missing_email():
         "HTTP status must be identical for existing and missing emails"
     assert resp_missing.json().get("message") == resp_existing.json().get("message"), \
         "Response messages must be identical to prevent user enumeration"
+
+
+# ── Password recovery security hardening tests (2026-05-12 review) ───
+# Each test pins one of the BLOCKER/IMPORTANT fixes so a future
+# refactor that regresses the behaviour fails CI loudly.
+
+
+def test_reset_password_without_csrf_cookie_400s_same_browser_message():
+    """B-5: a reset POST without the requester-confirmer cookie must
+    400 AND surface the 'same browser' detail (I-N1) so the SPA can
+    map it to a clearer UX message. Even with a valid-shape token +
+    matching email + Pydantic-valid password, no cookie = no reset."""
+    import uuid
+    import hashlib
+    from datetime import datetime, timedelta
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api import deps
+    import app.api.v1.auth as auth_module
+    from app.models.user import User
+
+    # Mock user with a populated reset state so the handler reaches
+    # the cookie check (rather than short-circuiting on "no user").
+    mock_user = MagicMock(spec=User)
+    mock_user.id = uuid.uuid4()
+    mock_user.email = "victim@example.com"
+    mock_user.password_reset_token = hashlib.sha256(b"correcttoken").hexdigest()
+    mock_user.password_reset_csrf_hash = hashlib.sha256(b"correctcsrf").hexdigest()
+    mock_user.password_reset_expires = datetime.utcnow() + timedelta(hours=1)
+    mock_user.password_reset_attempts = 0
+
+    class _StubQuery:
+        def filter(self, *_a, **_k): return self
+        def with_for_update(self): return self
+        def first(self): return mock_user
+
+    class _StubDb:
+        def query(self, *_a, **_k): return _StubQuery()
+        def add(self, *_a, **_k): pass
+        def commit(self): pass
+        def refresh(self, *_a, **_k): pass
+
+    def _stub_db_dep():
+        yield _StubDb()
+
+    test_app = FastAPI()
+    test_app.dependency_overrides[deps.get_db] = _stub_db_dep
+    test_app.include_router(auth_module.router, prefix="/api/v1/auth")
+    client = TestClient(test_app, raise_server_exceptions=False)
+
+    resp = client.post(
+        "/api/v1/auth/reset-password",
+        json={
+            "email": "victim@example.com",
+            "token": "correcttoken",
+            "new_password": "ValidPass123",
+        },
+    )
+    assert resp.status_code == 400, (
+        f"Reset without csrf cookie must 400; got {resp.status_code}: {resp.text}"
+    )
+    detail = (resp.json() or {}).get("detail", "")
+    assert "same browser" in detail.lower(), (
+        f"I-N1: missing-cookie detail must be the same-browser hint; got {detail!r}"
+    )
+
+
+def test_password_complexity_rejected_at_schema_layer():
+    """N-1: 12+ chars + ≥3 of {upper, lower, digit, symbol}. Weak
+    passwords are rejected at the Pydantic validator BEFORE reaching
+    any handler logic — protects both the reset path and (via N-N6)
+    the user-create path."""
+    from app.schemas.auth import PasswordResetConfirm
+
+    # Too short
+    with pytest.raises(ValidationError):
+        PasswordResetConfirm(
+            email="x@y.com", token="abcd1234", new_password="short"
+        )
+    # Long enough but only 1 class (all lower).
+    with pytest.raises(ValidationError):
+        PasswordResetConfirm(
+            email="x@y.com", token="abcd1234", new_password="onlylowercase"
+        )
+    # 2 classes — still rejected
+    with pytest.raises(ValidationError):
+        PasswordResetConfirm(
+            email="x@y.com", token="abcd1234", new_password="lowercase1234"
+        )
+    # 3 classes — accepted
+    ok = PasswordResetConfirm(
+        email="x@y.com", token="abcd1234", new_password="ValidPass123"
+    )
+    assert ok.new_password == "ValidPass123"
+
+
+def test_jwt_iat_floor_rejects_token_issued_before_password_change():
+    """B-4: a JWT whose `iat` predates `user.password_changed_at` is
+    rejected by `_jwt_iat_before_password_change`. Locks out an
+    attacker already inside the account after a successful reset."""
+    from datetime import datetime, timezone
+    from app.api.deps import _jwt_iat_before_password_change
+
+    user = MagicMock()
+    # Password changed RIGHT NOW.
+    user.password_changed_at = datetime.utcnow()
+
+    # JWT issued 10 minutes ago — predates the password change.
+    old_iat = (datetime.now(timezone.utc).timestamp()) - 600
+    old_payload = {"iat": old_iat, "sub": "x@y.com"}
+    assert _jwt_iat_before_password_change(old_payload, user) is True
+
+    # JWT issued 10 seconds AFTER the password change — valid.
+    new_iat = (datetime.now(timezone.utc).timestamp()) + 10
+    new_payload = {"iat": new_iat, "sub": "x@y.com"}
+    assert _jwt_iat_before_password_change(new_payload, user) is False
+
+    # Missing iat or missing password_changed_at → don't reject
+    # (fail-open so we don't break legacy tokens that lack iat or
+    # users whose row predates migration 130).
+    assert _jwt_iat_before_password_change({"sub": "x@y.com"}, user) is False
+    user.password_changed_at = None
+    assert _jwt_iat_before_password_change(old_payload, user) is False
+
+
+def test_email_sender_rejects_attacker_smtp_host():
+    """B-7: EMAIL_SMTP_HOST allowlist refuses to ship credentials to
+    an arbitrary host even if the env-var is set maliciously."""
+    from unittest.mock import patch as _patch
+    from app.services import email_sender
+
+    with _patch.object(email_sender.settings, "EMAIL_SMTP_HOST", "attacker.example.com"), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_USERNAME", "u"), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_PASSWORD", "p"):
+        ok = email_sender.send_email(
+            to="x@y.com",
+            subject="test",
+            text_body="hi",
+        )
+    assert ok is False, "Sending to a non-allowlisted SMTP host must refuse"
+
+
+def test_email_sender_rejects_attacker_link_hostname():
+    """B-3: the password-reset email refuses to send if
+    PUBLIC_BASE_URL points anywhere outside the link-hostname
+    allowlist."""
+    from app.services import email_sender
+
+    ok = email_sender.send_password_reset_email(
+        to="x@y.com",
+        reset_token="xyz",
+        public_base_url="https://attacker.example.com",
+    )
+    assert ok is False, "Sending with attacker base URL must refuse"
+
+    # Valid base URL produces True (dry-run path: EMAIL_SMTP_HOST
+    # is unset in tests, so send_email returns True without doing
+    # network IO).
+    ok2 = email_sender.send_password_reset_email(
+        to="x@y.com",
+        reset_token="xyz",
+        public_base_url="https://agentprovision.com",
+    )
+    assert ok2 is True
+
+
+def test_email_sender_strips_crlf_from_headers():
+    """B-2: CRLF / NUL injection into header values must be stripped
+    before reaching the SMTP layer. Combined with the path-param
+    regex on /password-recovery/{email}, this is belt-and-suspenders."""
+    from app.services.email_sender import _sanitize_header
+
+    assert "\n" not in _sanitize_header("hi\nBcc: attacker@evil.com")
+    assert "\r" not in _sanitize_header("hi\r\nFrom: spoof@evil.com")
+    assert "\0" not in _sanitize_header("hi\0bye")
+    # Length cap (998 default)
+    assert len(_sanitize_header("a" * 5000)) == 998

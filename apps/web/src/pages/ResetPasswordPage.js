@@ -143,7 +143,18 @@ const ResetPasswordPage = () => {
       await authService.resetPassword(email, token, password);
       setSuccess(true);
     } catch (err) {
-      setError(err?.response?.data?.detail || t('reset.error'));
+      // I-N1 (security review 2026-05-12 round 2): the server returns
+      // a SPECIFIC detail when the cross-browser-binding cookie is
+      // missing (very common with mobile email clients that open the
+      // link in a different browser than the one that initiated the
+      // reset). Map to a clearer error so users don't bounce through
+      // 3 attempts and burn their token.
+      const detail = err?.response?.data?.detail || '';
+      if (detail.startsWith('Open this link in the same browser')) {
+        setError(t('reset.sameBrowserRequired'));
+      } else {
+        setError(detail || t('reset.error'));
+      }
     } finally {
       setLoading(false);
     }
