@@ -11,7 +11,10 @@ Usage:
         --api-base http://localhost:8000/api/v1 \
         --temporal https://localhost:7233 \
         --email test@example.com \
-        --password password
+        --password DemoPass123!
+
+Note: the demo account is only seeded when ENVIRONMENT ∈ {local, dev}
+(see init_db.py). Production deploys fail-closed (no demo seed).
 """
 
 from __future__ import annotations
@@ -28,7 +31,10 @@ from app.services import workflows
 
 
 DEMO_EMAIL = "test@example.com"
-DEMO_PASSWORD = "password"
+# Must match the seed in apps/api/app/db/init_db.py:seed_demo_data().
+# Bumped 2026-05-10 to satisfy the password-complexity validator
+# (12+ chars, ≥3 of {upper, lower, digit, symbol}).
+DEMO_PASSWORD = "DemoPass123!"
 DEFAULT_DATASET_PAYLOAD = {
     "name": "Workflow Demo",
     "description": "Synthetic dataset ingested during demo workflow run.",
