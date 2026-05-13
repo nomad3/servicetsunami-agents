@@ -449,3 +449,114 @@ def test_email_sender_strips_crlf_from_headers():
     assert "\0" not in _sanitize_header("hi\0bye")
     # Length cap (998 default)
     assert len(_sanitize_header("a" * 5000)) == 998
+
+
+def test_cookie_should_be_secure_parser_semantics():
+    """N5-1 (round 5): the localhost helper must use exact hostname
+    match (not startswith) so a misconfigured
+    PUBLIC_BASE_URL=http://localhost.attacker.com cannot trick the
+    helper into emitting a non-secure cookie in prod."""
+    from unittest.mock import patch as _patch
+    from app.api.v1.auth import _cookie_should_be_secure
+    from app.core.config import settings
+
+    # localhost / 127.0.0.1 / 0.0.0.0 / [::1] over http → non-secure OK
+    for base in (
+        "http://localhost",
+        "http://localhost:8000",
+        "http://127.0.0.1",
+        "http://127.0.0.1:8000",
+        "http://0.0.0.0:8000",
+        "http://[::1]:8000",
+    ):
+        with _patch.object(settings, "PUBLIC_BASE_URL", base):
+            assert _cookie_should_be_secure() is False, (
+                f"loopback over http must allow non-secure cookies: {base}"
+            )
+
+    # https anything → secure required
+    with _patch.object(settings, "PUBLIC_BASE_URL", "https://agentprovision.com"):
+        assert _cookie_should_be_secure() is True
+    with _patch.object(settings, "PUBLIC_BASE_URL", "https://localhost"):
+        assert _cookie_should_be_secure() is True  # https beats localhost
+
+    # http but NOT loopback → secure required (defends against the
+    # startswith() bypass: localhost.attacker.com, localhostfoo.com)
+    for base in (
+        "http://localhost.attacker.com",
+        "http://localhostfoo.com",
+        "http://127.0.0.1.attacker.com",
+        "http://attacker.com",
+    ):
+        with _patch.object(settings, "PUBLIC_BASE_URL", base):
+            assert _cookie_should_be_secure() is True, (
+                f"non-loopback http MUST require secure cookies: {base}"
+            )
+
+    # Empty / unset → fail-closed (secure required)
+    with _patch.object(settings, "PUBLIC_BASE_URL", ""):
+        assert _cookie_should_be_secure() is True
+
+
+def test_redis_circuit_breaker_skips_reconnect_during_window():
+    """N5-2 (round 5): after a Redis failure the circuit-breaker
+    timestamp must short-circuit reconnect attempts for 60s, so
+    concurrent requests during a sustained outage don't all
+    independently re-build a Redis client."""
+    import time as _time
+    from unittest.mock import patch as _patch
+    import app.api.v1.auth as auth_module
+
+    # Manually open the breaker (simulate just-failed state).
+    auth_module._redis_client = None
+    auth_module._redis_disabled_until = _time.monotonic() + 60
+
+    # _get_redis_client should refuse to reconnect during the window.
+    # We don't want the test to actually hit Redis even if it's up,
+    # so patch the redis import to confirm it's never reached.
+    with _patch("redis.from_url") as mock_from_url:
+        client = auth_module._get_redis_client()
+        assert client is None, (
+            "Circuit-breaker must keep client None during the disabled window"
+        )
+        assert not mock_from_url.called, (
+            "Circuit-breaker must not attempt to reconnect during window"
+        )
+
+    # Reset state so we don't leak into other tests.
+    auth_module._redis_disabled_until = 0.0
+    auth_module._redis_client = None
+
+
+def test_seed_demo_data_skipped_in_production():
+    """N5-3 (round 5): seed_demo_data must NOT run when
+    ENVIRONMENT=production. Default is "production" so the gate is
+    fail-closed against unconfigured environments."""
+    from unittest.mock import patch as _patch, MagicMock
+    from app.core.config import settings
+    import app.db.init_db as init_db_mod
+
+    # Patch the actual schema-creation call (base.Base.metadata.create_all)
+    # so the test doesn't try to spin up a real DB.
+    with _patch.object(settings, "ENVIRONMENT", "production"), \
+         _patch.object(init_db_mod, "seed_demo_data") as mock_seed_demo, \
+         _patch.object(init_db_mod, "seed_llm_providers"), \
+         _patch.object(init_db_mod, "seed_llm_models"), \
+         _patch.object(init_db_mod, "seed_system_skills"), \
+         _patch.object(init_db_mod.base.Base.metadata, "create_all"):
+        init_db_mod.init_db(MagicMock())
+        assert not mock_seed_demo.called, (
+            "seed_demo_data must NOT run when ENVIRONMENT=production"
+        )
+
+    # And ENVIRONMENT=local DOES seed.
+    with _patch.object(settings, "ENVIRONMENT", "local"), \
+         _patch.object(init_db_mod, "seed_demo_data") as mock_seed_demo, \
+         _patch.object(init_db_mod, "seed_llm_providers"), \
+         _patch.object(init_db_mod, "seed_llm_models"), \
+         _patch.object(init_db_mod, "seed_system_skills"), \
+         _patch.object(init_db_mod.base.Base.metadata, "create_all"):
+        init_db_mod.init_db(MagicMock())
+        assert mock_seed_demo.called, (
+            "seed_demo_data must run when ENVIRONMENT=local"
+        )

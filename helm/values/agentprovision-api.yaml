@@ -111,6 +111,12 @@ configMap:
     GOOGLE_REDIRECT_URI: "https://agentprovision.com/api/v1/oauth/google/callback"
     GITHUB_REDIRECT_URI: "https://agentprovision.com/api/v1/oauth/github/callback"
     LINKEDIN_REDIRECT_URI: "https://agentprovision.com/api/v1/oauth/linkedin/callback"
+    # Belt-and-suspenders for N5-3 / B6-1: even though the
+    # `Settings.ENVIRONMENT` field defaults to "production"
+    # (fail-closed), set it explicitly here so the demo-seed gate in
+    # init_db.py can never run silently against this cluster — and
+    # so the value is visible in `kubectl describe configmap`.
+    ENVIRONMENT: "production"
 
 # External Secrets - pulls from GCP Secret Manager
 externalSecret:

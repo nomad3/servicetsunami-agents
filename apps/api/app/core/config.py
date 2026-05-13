@@ -127,7 +127,13 @@ class Settings(BaseSettings):
     # Values: "local" / "dev" / "staging" / "production". Anything
     # outside the {local, dev} set is treated as production-shape
     # (no demo seed, no debug toggles).
-    ENVIRONMENT: str = "local"
+    #
+    # FAIL-CLOSED DEFAULT (security review round 6, B6-1): the
+    # default is "production" so a deploy that forgets to set
+    # ENVIRONMENT does NOT silently seed `test@example.com /
+    # DemoPass123!` into the production database. Local dev sets
+    # ENVIRONMENT=local in apps/api/.env (already done).
+    ENVIRONMENT: str = "production"
 
 
     # Transactional email (password recovery, invitations, system
