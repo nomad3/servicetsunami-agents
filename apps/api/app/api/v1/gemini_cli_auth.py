@@ -132,12 +132,23 @@ _GEMINI_BUNDLE_SEARCH_PATHS = (
     "/opt/homebrew/lib/node_modules/@google/gemini-cli/bundle",
 )
 
+# Anchored to the `OAUTH_CLIENT_ID = "…"` literal that gemini-cli's bundle
+# declares (currently the installed-app client `681255809395-…`). The
+# previous regex matched the first `*.apps.googleusercontent.com` in the
+# chunk, which is `CLOUD_SDK_CLIENT_ID = 764086051850-…` re-exported from
+# google-auth-library. Signing the authorization URL with that client_id
+# combined with `redirect_uri=https://codeassist.google.com/authcode`
+# trips Google's "redirect_uri_mismatch" (the codeassist paste-back URI
+# is only registered on the gemini-cli client, not on the cloud-sdk one).
 _GEMINI_CLIENT_ID_RE = re.compile(
-    r'(?P<v>\d{4,}-[a-z0-9]+\.apps\.googleusercontent\.com)'
+    r'OAUTH_CLIENT_ID\s*=\s*["\'](?P<v>\d{4,}-[a-z0-9]+\.apps\.googleusercontent\.com)["\']'
 )
 # Google's "installed application" client secrets are always
-# `GOCSPX-` + a 28-char url-safe-ish trailing run.
-_GEMINI_CLIENT_SECRET_RE = re.compile(r'GOCSPX-[A-Za-z0-9_\-]{20,}')
+# `GOCSPX-` + a 28-char url-safe-ish trailing run. Anchored to
+# `OAUTH_CLIENT_SECRET = "…"` for the same first-match-wrong reason.
+_GEMINI_CLIENT_SECRET_RE = re.compile(
+    r'OAUTH_CLIENT_SECRET\s*=\s*["\'](?P<v>GOCSPX-[A-Za-z0-9_\-]{20,})["\']'
+)
 
 
 @functools.lru_cache(maxsize=1)
@@ -173,7 +184,7 @@ def _load_gemini_oauth_client() -> Tuple[str, str]:
             id_match = _GEMINI_CLIENT_ID_RE.search(text)
             secret_match = _GEMINI_CLIENT_SECRET_RE.search(text)
             if id_match and secret_match:
-                return id_match.group("v"), secret_match.group(0)
+                return id_match.group("v"), secret_match.group("v")
 
     raise RuntimeError(
         "Could not locate the @google/gemini-cli OAuth client_id+secret. "
