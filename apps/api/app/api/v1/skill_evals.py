@@ -22,8 +22,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -149,23 +147,12 @@ def _json_dumps(obj) -> str:
     return json.dumps(obj, sort_keys=False, default=str)
 
 
-def _resolve_outputs_path(outputs_field) -> Optional[Path]:
-    """Outputs in the DB are a manifest dict, but the grader expects a Path.
-
-    Phase 1 honors the convention that the outputs directory lives at the
-    iteration root next to ``transcript.md`` (see Phase 2 workspace layout
-    in the design doc). Until Phase 2 ships, callers that don't write any
-    file outputs leave this null and the grader proceeds without a manifest.
-    """
-    if not outputs_field:
-        return None
-    if isinstance(outputs_field, dict):
-        path = outputs_field.get("path") or outputs_field.get("dir")
-        if path:
-            return Path(str(path))
-    if isinstance(outputs_field, str):
-        return Path(outputs_field)
-    return None
+# NOTE: ``skill_eval_runs.outputs`` is a manifest dict of the shape
+# ``{path: {size_bytes, mime}}`` per schemas.md / migration 136. Phase 1
+# doesn't write any outputs, so the grader is always called with
+# ``outputs_dir=None``. Phase 2 will add a resolver that maps the manifest
+# back to the on-disk iteration directory (workspaces volume) — the shape
+# isn't a stable string-or-dict, so we don't pre-write one here.
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -193,12 +180,12 @@ def grade_run(
     _verify_tenant_owns_skill(db, skill_id, current_user.tenant_id)
     ctx = _load_run_context(db, skill_id, payload.run_id)
 
-    outputs_path = _resolve_outputs_path(ctx["outputs"])
-
     try:
         result = grade(
             transcript=ctx["transcript"],
-            outputs_dir=outputs_path,
+            # Phase 1 doesn't write file outputs; the grader handles None
+            # cleanly. Phase 2 will resolve the manifest into a real path.
+            outputs_dir=None,
             expectations=ctx["expectations"],
             tenant_id=current_user.tenant_id,
             session_id=current_user.id,
