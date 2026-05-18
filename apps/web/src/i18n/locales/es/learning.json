@@ -1,47 +1,73 @@
 {
   "title": "Aprendizaje",
+  "subtitle": "Cómo tus agentes de IA mejoran con el tiempo a través de retroalimentación y experiencia",
+  "loading": "Cargando datos de aprendizaje...",
+  "tabs": {
+    "overview": "Resumen",
+    "decisionPoints": "Puntos de decisión",
+    "experiments": "Experimentos",
+    "reviews": "Revisiones",
+    "settings": "Configuración"
+  },
   "overview": {
-    "title": "Resumen",
-    "totalExperiences": "Experiencias Totales",
-    "avgReward": "Recompensa Prom. (30d)",
-    "explorationRate": "Tasa de Exploración",
-    "policyVersion": "Versión de Política"
+    "metricsLabel": "Métricas clave",
+    "totalExperiences": "Experiencias totales",
+    "avgReward": "Recompensa prom. (30d)",
+    "explorationRate": "Tasa de exploración",
+    "policyVersion": "Versión de política",
+    "allTime": "histórico",
+    "last30d": "últimos 30 días",
+    "epsilonGreedy": "epsilon-greedy",
+    "lastUpdated": "actualizado {{date}}",
+    "topDecisionPoints": "Puntos de decisión destacados",
+    "experienceCount": "{{count}} experiencias",
+    "avgRewardLabel": "recompensa prom.",
+    "errorLoad": "No se pudo cargar el resumen de aprendizaje"
   },
   "decisionPoints": {
-    "title": "Puntos de Decisión",
-    "name": "Punto de Decisión",
-    "score": "Puntuación",
-    "experiences": "Experiencias",
-    "explorationRatio": "% Exploración"
+    "colName": "Punto de decisión",
+    "colScoreVersion": "Puntuación / Versión",
+    "colExperienceCount": "Experiencias",
+    "colExplorationRate": "% Exploración",
+    "noDescription": "Sin descripción disponible",
+    "empty": "Aún no hay puntos de decisión. Comienza a chatear con tus agentes para generar datos de aprendizaje.",
+    "errorLoad": "No se pudieron cargar los puntos de decisión"
   },
   "experiments": {
-    "title": "Experimentos"
+    "decisionPoint": "Punto de decisión",
+    "reward": "recompensa",
+    "empty": "Aún no hay experimentos. Las acciones de exploración aparecerán aquí cuando los agentes prueben estrategias alternativas.",
+    "errorLoad": "No se pudieron cargar los experimentos"
   },
   "reviews": {
-    "title": "Revisiones",
-    "pending": "Revisiones Pendientes",
+    "decisionPoint": "Punto de decisión",
+    "outcome": "Resultado",
     "good": "Buena",
     "acceptable": "Aceptable",
-    "poor": "Mala"
+    "poor": "Mala",
+    "rated": "Calificado",
+    "empty": "¡Todo al día! No hay revisiones pendientes.",
+    "errorLoad": "No se pudieron cargar las revisiones pendientes"
   },
   "settings": {
-    "title": "Configuración",
-    "explorationRate": "Tasa de Exploración",
-    "globalBaseline": "Usar Línea Base Global",
-    "optInGlobal": "Contribuir al Aprendizaje Global",
-    "rewardWeights": "Pesos de Recompensa",
-    "implicit": "Implícito",
-    "explicit": "Explícito",
-    "admin": "Administrador",
-    "save": "Guardar Configuración"
+    "explorationTitle": "Exploración",
+    "explorationRate": "Tasa de exploración",
+    "behaviorTitle": "Comportamiento de aprendizaje",
+    "useGlobalBaseline": "Usar línea base global de todos los tenants",
+    "contributeGlobal": "Contribuir experiencias al grupo de aprendizaje global",
+    "rewardWeightsTitle": "Pesos de recompensa",
+    "weightImplicit": "Implícito (comportamiento)",
+    "weightExplicit": "Explícito (retroalimentación)",
+    "weightAdmin": "Admin (revisiones)",
+    "save": "Guardar configuración",
+    "saved": "Configuración guardada con éxito",
+    "errorSave": "No se pudo guardar la configuración"
   },
   "feedback": {
     "thumbsUp": "Útil",
     "thumbsDown": "No útil",
     "wrongAgent": "Agente incorrecto",
     "irrelevantMemory": "Memoria irrelevante",
-    "incorrectInfo": "Información incorrecta",
-    "tooSlow": "Muy lento",
     "flagIssue": "Reportar problema",
     "submitted": "Enviado"
   }

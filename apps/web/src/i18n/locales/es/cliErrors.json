@@ -1,5 +1,8 @@
 {
   "cli.errors.needs_auth": "Vuelve a conectar esta CLI en Configuración → Integraciones para seguir usándola.",
+  "cli.errors.needs_auth.claude_code": "Tu suscripción de Claude Code necesita reconectarse en Configuración → Integraciones.",
+  "cli.errors.needs_auth.gemini_cli": "Tu cuenta de Gemini CLI necesita reconectarse en Configuración → Integraciones.",
+  "cli.errors.needs_auth.copilot_cli": "Tu asiento de GitHub Copilot CLI necesita reconectarse en Configuración → Integraciones.",
   "cli.errors.workspace_untrusted": "Este espacio de trabajo no está marcado como de confianza para la CLI seleccionada. Ejecuta el flujo de autenticación una vez.",
   "cli.errors.api_disabled": "La API en la nube de la CLI seleccionada no está habilitada para tu cuenta.",
   "cli.errors.quota_exhausted": "Tu suscripción CLI alcanzó su límite; probamos otras CLIs de tu cadena.",

@@ -53,7 +53,7 @@
   "mcp": {
     "connectExternal": "Usar vía MCP",
     "modalTitle": "Exponer Skills vía MCP",
-    "intro": "Permite que clientes externos — Claude Code, Gemini CLI, VS Code Copilot — descubran y llamen los skills de este tenant vía el protocolo MCP. Esto es para consumir skills desde fuera de AgentProvision, no para agregar un agente a tu fleet (usa Agent Fleet → Import Agent para eso).",
+    "intro": "Permite que clientes externos — Claude Code, Gemini CLI, VS Code Copilot — descubran y llamen los skills de este tenant vía el protocolo MCP. Esto es para consumir skills desde fuera de AgentProvision, no para agregar un agente a tu flota (usa Agent Fleet → Import Agent para eso).",
     "serverUrl": "URL del Servidor MCP",
     "toolsAvailable": "{{count}} skill(s) disponibles como herramientas MCP para tu tenant.",
     "tokenMissing": "No has iniciado sesión, por lo que las configuraciones siguientes usan un placeholder para Authorization. Inicia sesión y vuelve a abrir este modal — tu token real se rellenará automáticamente.",

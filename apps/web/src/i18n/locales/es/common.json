@@ -7,20 +7,20 @@
     "pricing": "Comenzar"
   },
   "cta": {
-    "startFree": "Comienza Gratis",
-    "signIn": "Iniciar Sesion",
+    "startFree": "Comenzar gratis",
+    "signIn": "Iniciar sesión",
     "explorePlatform": "Explorar Plataforma",
     "getStarted": "Comenzar"
   },
   "language": {
     "label": "Idioma",
-    "english": "Ingles",
-    "spanish": "Espanol"
+    "english": "Inglés",
+    "spanish": "Español"
   },
   "layout": {
     "welcome": "Bienvenido, {{name}}",
     "guest": "Invitado",
-    "logout": "Cerrar sesion"
+    "logout": "Cerrar sesión"
   },
   "sidebar": {
     "dashboard": "Dashboard",

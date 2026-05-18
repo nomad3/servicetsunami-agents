@@ -3,6 +3,7 @@
   "subtitle": "Apps conectadas, conectores, fuentes de datos y datasets en un solo lugar",
   "tabs": {
     "integrations": "Integraciones",
+    "devices": "Dispositivos",
     "connectors": "Conectores",
     "dataSources": "Fuentes de Datos",
     "datasets": "Datasets",
@@ -15,7 +16,7 @@
     "total": "Conectores",
     "active": "Activos",
     "activeSyncs": "Syncs Activos",
-    "needAttention": "Requieren Atención",
+    "needAttention": "Requieren atención",
     "loading": "Cargando conectores...",
     "noConnectors": "Aún no hay conectores",
     "noConnectorsDesc": "Conecta tu primer sistema para empezar a sincronizar datos",
@@ -145,10 +146,6 @@
       "actions": "Acciones"
     },
     "loading": "Cargando datasets...",
-    "noDatasets": "A\u00fan no se han subido datasets.",
-    "noGroups": "A\u00fan no se han creado grupos.",
-    "noPreview": "No hay vista previa disponible",
-    "noSummary": "No hay estad\u00edsticas de resumen",
     "preview": "Vista previa",
     "syncing": "Sincronizando...",
     "sync": "Sync",
