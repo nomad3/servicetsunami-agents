@@ -50,6 +50,7 @@ _PAID_CLI_FAST_PIN_SET = frozenset({
     "copilot_cli",
     "qwen_code",
     "kimi_k2",
+    "aider",
 })
 
 
@@ -285,6 +286,8 @@ _CLI_DISPLAY_LABELS: Dict[str, str] = {
     "codex": "Codex CLI",
     "gemini_cli": "Gemini CLI",
     "qwen_code": "Qwen Code",
+    "kimi_k2": "Kimi K2",
+    "aider": "Aider",
     "opencode": "OpenCode (local)",
     "local_gemma": "Local model",
     "template": "Template (no LLM)",

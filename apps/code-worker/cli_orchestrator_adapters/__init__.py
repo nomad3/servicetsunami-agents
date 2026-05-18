@@ -24,6 +24,7 @@ call — Phase 1.6 surface).
 adapter sanity test. The worker's own ``execute_chat_cli`` activity is
 NOT rewritten to use a ResilientExecutor in Phase 2 — that's Phase 3+.
 """
+from .aider import AiderAdapter
 from .claude_code import ClaudeCodeAdapter
 from .codex import CodexAdapter
 from .copilot_cli import CopilotCliAdapter
@@ -34,6 +35,7 @@ from .qwen_code import QwenCodeAdapter
 from .shell import ShellAdapter
 
 __all__ = [
+    "AiderAdapter",
     "ClaudeCodeAdapter",
     "CodexAdapter",
     "CopilotCliAdapter",

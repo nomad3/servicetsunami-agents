@@ -39,6 +39,7 @@ from cli_runtime import (
 # Each executor's lazy imports (``from workflows import _fetch_..., ...``)
 # fire only on call, breaking the workflows <-> cli_executors cycle at
 # module-load time and preserving test monkeypatches on those helpers.
+from cli_executors.aider import execute_aider_chat as _execute_aider_chat
 from cli_executors.claude import execute_claude_chat as _execute_claude_chat
 from cli_executors.codex import execute_codex_chat as _execute_codex_chat
 from cli_executors.gemini import execute_gemini_chat as _execute_gemini_chat
@@ -324,6 +325,10 @@ _INTEGRATION_NOT_CONNECTED_MESSAGES = {
     "kimi_k2": (
         "Kimi K2 is not connected. "
         "Please connect your Moonshot account in Settings → Integrations."
+    ),
+    "aider": (
+        "Aider is not connected. "
+        "Please connect your Aider account in Settings → Integrations."
     ),
 }
 
@@ -1186,6 +1191,10 @@ def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
         if task_input.platform == "qwen_code":
             logger.info("Using platform: qwen_code")
             return _execute_qwen_chat(task_input, session_dir)
+
+        if task_input.platform == "aider":
+            logger.info("Using platform: aider")
+            return _execute_aider_chat(task_input, session_dir)
 
         return ChatCliResult(response_text="", success=False, error=f"Unsupported platform: {task_input.platform}")
 

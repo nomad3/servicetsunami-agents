@@ -4,6 +4,7 @@
   "cli.errors.needs_auth.gemini_cli": "Tu cuenta de Gemini CLI necesita reconectarse en Configuración → Integraciones.",
   "cli.errors.needs_auth.copilot_cli": "Tu asiento de GitHub Copilot CLI necesita reconectarse en Configuración → Integraciones.",
   "cli.errors.needs_auth.qwen_code": "Qwen Code no está conectado. Añade tu API key de DashScope en Configuración → Integraciones para activar el enrutamiento a Qwen.",
+  "cli.errors.needs_auth.aider": "Aider no está conectado. Añade tu API key del proveedor (Anthropic / OpenAI / DeepSeek / etc.) en Configuración → Integraciones.",
   "cli.errors.workspace_untrusted": "Este espacio de trabajo no está marcado como de confianza para la CLI seleccionada. Ejecuta el flujo de autenticación una vez.",
   "cli.errors.api_disabled": "La API en la nube de la CLI seleccionada no está habilitada para tu cuenta.",
   "cli.errors.quota_exhausted": "Tu suscripción CLI alcanzó su límite; probamos otras CLIs de tu cadena.",

@@ -408,3 +408,60 @@ def test_kimi_k2_not_connected_message_classifies_as_missing_credential():
         "Please connect your Moonshot account in Settings → Integrations."
     )
     assert r.classify_error(msg) == "missing_credential"
+
+
+# ── Aider (Wave 2c) ──────────────────────────────────────────────────
+
+
+def test_chain_aider_via_integration(monkeypatch):
+    """A tenant with the Aider integration connected gets ``aider`` in
+    the resolver chain. Mirrors the kimi_k2 1:1 integration mapping —
+    Aider has no piggy-back paths because it's BYOK to any provider."""
+    _stub_connected(monkeypatch, {"aider"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert "aider" in chain
+    assert chain[-1] == "opencode"
+    # The established CLIs must NOT appear because their creds aren't wired.
+    assert set(chain).isdisjoint({"claude_code", "codex", "gemini_cli", "copilot_cli"})
+
+
+def test_aider_ranks_below_subscription_and_byok_clis(monkeypatch):
+    """With every CLI connected, ``aider`` sits below the four
+    established subscription CLIs AND below qwen_code / kimi_k2 (the
+    earlier BYOK alternates), and above the opencode floor. Locks in
+    the Wave 2c ranking decision so a future re-shuffle is an explicit
+    edit, not an accident."""
+    _stub_connected(
+        monkeypatch,
+        {"gemini_cli", "codex", "github", "claude_code", "qwen_code", "kimi_k2", "aider"},
+    )
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert chain.index("aider") > chain.index("claude_code")
+    assert chain.index("aider") > chain.index("kimi_k2")
+    assert chain.index("aider") < chain.index("opencode")
+
+
+def test_chain_aider_explicit_platform_wins(monkeypatch):
+    """An agent with preferred_cli=aider leads the chain when the
+    integration is wired, ahead of any other connected CLIs."""
+    _stub_connected(monkeypatch, {"aider", "claude_code"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform="aider")
+    assert chain[0] == "aider"
+    assert "claude_code" in chain
+    assert chain.index("aider") < chain.index("claude_code")
+
+
+def test_aider_not_connected_message_classifies_as_missing_credential():
+    """The worker-side not-connected message for ``aider`` MUST be
+    classified as ``missing_credential`` so the orchestrator chain-walks
+    past Aider WITHOUT a 10-minute cooldown. A quick reconnect should
+    be picked up on the next chat turn, not masked by cooldown.
+
+    Mirrors the kimi_k2 regression test — the friendly message has to
+    hit one of the alternation branches in
+    ``packages/cli_orchestrator/classifier.py``."""
+    msg = (
+        "Aider is not connected. "
+        "Please connect your Aider account in Settings → Integrations."
+    )
+    assert r.classify_error(msg) == "missing_credential"

@@ -290,6 +290,36 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
     # subscriptions only — Claude Code, Gemini CLI, GitHub Copilot CLI,
     # Codex CLI — not raw API keys. The AI Models tab in the UI handles
     # any remaining provider-key flows.
+    "aider": {
+        # Wave 2c of the CLI integration catalog (#272). Aider
+        # (https://aider.chat — paul-gauthier/aider, Apache 2.0) is a
+        # Python CLI binary (``pip install aider-chat``) that wraps
+        # LiteLLM and pair-programs against ANY provider you give it a
+        # key for: Anthropic, OpenAI, DeepSeek, Gemini, Mistral, Ollama,
+        # Bedrock, etc. The executor lives in
+        # ``apps/code-worker/cli_executors/aider.py`` and derives the
+        # right env var name (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)
+        # from the ``model`` slug's LiteLLM provider prefix.
+        "display_name": "Aider",
+        "description": (
+            "Connect Aider with your Anthropic / OpenAI / DeepSeek API key. "
+            "Aider is BYOK to any provider — pick the model slug below and "
+            "paste the matching provider key. Calls are billed against the "
+            "provider account you choose, not against us."
+        ),
+        "icon": "FaTools",
+        "auth_type": "api_key",
+        "credentials": [
+            {"key": "model", "label": "Model", "type": "text", "required": True,
+             "help": "LiteLLM-style slug. Examples: anthropic/claude-3-5-sonnet-20241022, "
+                     "openai/gpt-4o, deepseek/deepseek-chat, gemini/gemini-2.0-flash. "
+                     "Defaults to anthropic/claude-3-5-sonnet-20241022."},
+            {"key": "api_key", "label": "Aider API Key", "type": "password", "required": True,
+             "help": "API key for the provider matching your model slug above. "
+                     "anthropic/* → Anthropic console key; openai/* → OpenAI console key; "
+                     "deepseek/* → DeepSeek console key; etc. Aider is BYOK to any LiteLLM-supported provider."},
+        ],
+    },
     "kimi_k2": {
         # Moonshot AI's Kimi K2 coding-tuned model — Wave 1c Lane B
         # (Apache 2.0 weights, commercial resale permitted; see

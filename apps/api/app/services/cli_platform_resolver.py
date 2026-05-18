@@ -52,18 +52,20 @@ _DEFAULT_PRIORITY: tuple[str, ...] = (
     # have Google integrations connected (gmail / calendar / drive
     # auto-grant gemini_cli access for free), then codex / copilot_cli /
     # claude_code for tenants that pay for those CLI subscriptions, then
-    # ``qwen_code`` (Wave 1b — Tongyi Qwen-Coder via BYOK API key) and
-    # ``kimi_k2`` (Moonshot AI — Wave 1c Lane B Chinese OSS coding model)
-    # slotted below the established subscriptions so a tenant who's
-    # connected several CLIs gets the most-capable subscription first
-    # and the BYOK alternates as fallbacks, and finally opencode as
-    # the always-available local-Gemma floor.
+    # ``qwen_code`` (Wave 1b — Tongyi Qwen-Coder via BYOK API key),
+    # ``kimi_k2`` (Moonshot AI — Wave 1c Lane B Chinese OSS coding model),
+    # and ``aider`` (Wave 2c — paul-gauthier/aider, Apache 2.0 BYOK to
+    # ANY LiteLLM provider) slotted below the established subscriptions
+    # so a tenant who's connected several CLIs gets the most-capable
+    # subscription first and the BYOK alternates as fallbacks, and
+    # finally opencode as the always-available local-Gemma floor.
     "gemini_cli",
     "codex",
     "copilot_cli",
     "claude_code",
     "qwen_code",
     "kimi_k2",
+    "aider",
     "opencode",
 )
 
@@ -80,6 +82,7 @@ _CLI_TO_INTEGRATIONS: dict[str, tuple[str, ...]] = {
     "gemini_cli": ("gemini_cli", "gmail", "google_drive", "google_calendar"),
     "qwen_code": ("qwen_code",),
     "kimi_k2": ("kimi_k2",),
+    "aider": ("aider",),
     "opencode": (),  # local
 }
 
