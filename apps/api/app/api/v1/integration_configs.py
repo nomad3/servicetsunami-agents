@@ -319,6 +319,35 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
              "help": "Defaults to kimi-k2-0905-preview. Override only if Moonshot publishes a newer coding-tuned variant."},
         ],
     },
+    "goose": {
+        # Wave 2d — Goose (Block) joins the catalog as an Apache-2.0
+        # Rust binary baked into the code-worker image. MCP-native:
+        # Goose auto-discovers MCP servers from
+        # ``~/.config/goose/mcp.json`` and the executor materialises
+        # the tenant's existing MCP source list there at chat time.
+        # BYOK to any provider — the tenant picks which provider Goose
+        # talks to (Anthropic, OpenAI, Databricks, Ollama, …) plus the
+        # API key for that provider, and Goose handles the rest.
+        "display_name": "Goose",
+        "description": (
+            "Connect Goose, Block's open-source agent CLI. MCP-native, "
+            "BYOK to any provider."
+        ),
+        "icon": "FaFeather",
+        "auth_type": "api_key",
+        "credentials": [
+            {"key": "provider", "label": "Provider", "type": "text", "required": True,
+             "help": "Which LLM provider Goose talks to. One of: anthropic, openai, "
+                     "google, groq, databricks, openrouter, ollama. Default: anthropic."},
+            {"key": "api_key", "label": "Provider API Key", "type": "password", "required": False,
+             "help": "API key for the chosen provider. Optional if the operator has "
+                     "wired a shared key into the worker container env. For ``ollama`` "
+                     "(local), leave blank."},
+            {"key": "model", "label": "Model", "type": "text", "required": False,
+             "help": "Override the default model for the chosen provider. Default: "
+                     "claude-3-5-sonnet-latest (anthropic)."},
+        ],
+    },
 }
 
 

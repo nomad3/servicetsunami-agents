@@ -1,8 +1,8 @@
 FROM python:3.11-slim
 
-# Install system deps: git, gh CLI, Node.js 22
+# Install system deps: git, gh CLI, Node.js 22, bzip2 (for Goose tarball)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl gnupg ca-certificates socat && \
+    git curl gnupg ca-certificates socat bzip2 && \
     # Node.js 22
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
@@ -36,6 +36,24 @@ RUN npm install -g \
         @qwen-code/qwen-code@0.15.11 \
         opencode-ai \
         @github/copilot
+
+# Goose (Block) — Wave 2d. Apache-2.0 Rust agent CLI. Block ships
+# pre-built binaries on GitHub releases; we pin to v1.34.1 because
+# upstream releases frequently and a floating tag = surprise breakage
+# (their JSON output / command surface has shifted across minor
+# versions in the past). NOTE: github.com/block/goose 301-redirects to
+# github.com/aaif-goose/goose in this environment (the project moved
+# under Block's AAIF org). curl --location follows the redirect so the
+# canonical block/goose URL keeps working in CI; if the redirect ever
+# breaks, the resolved URL is on aaif-goose/goose at the same path.
+ARG GOOSE_VERSION=v1.34.1
+RUN curl -fsSL --retry 3 --location \
+        -o /tmp/goose.tar.bz2 \
+        "https://github.com/block/goose/releases/download/${GOOSE_VERSION}/goose-x86_64-unknown-linux-gnu.tar.bz2" && \
+    tar -xjf /tmp/goose.tar.bz2 -C /usr/local/bin && \
+    rm /tmp/goose.tar.bz2 && \
+    chmod +x /usr/local/bin/goose && \
+    goose --version
 
 # Python deps
 WORKDIR /app

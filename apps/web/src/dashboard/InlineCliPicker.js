@@ -37,6 +37,7 @@ const CLI_OPTIONS = [
   { value: 'copilot_cli', label: 'Copilot CLI' },
   { value: 'qwen_code', label: 'Qwen Code' },
   { value: 'kimi_k2', label: 'Kimi K2' },
+  { value: 'goose', label: 'Goose' },
 ];
 
 // How long the "saved ✓" affordance stays on screen after a successful

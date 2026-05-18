@@ -45,6 +45,7 @@ from cli_executors.gemini import execute_gemini_chat as _execute_gemini_chat
 from cli_executors.copilot import execute_copilot_chat as _execute_copilot_chat
 from cli_executors.qwen import execute_qwen_chat as _execute_qwen_chat
 from cli_executors.kimi import execute_kimi_chat as _execute_kimi_chat
+from cli_executors.goose import execute_goose_chat as _execute_goose_chat
 from cli_executors.opencode import (
     execute_opencode_chat as _execute_opencode_chat,
     _execute_opencode_chat_cli,
@@ -324,6 +325,10 @@ _INTEGRATION_NOT_CONNECTED_MESSAGES = {
     "kimi_k2": (
         "Kimi K2 is not connected. "
         "Please connect your Moonshot account in Settings → Integrations."
+    ),
+    "goose": (
+        "Goose is not connected. "
+        "Please connect your Goose account in Settings → Integrations."
     ),
 }
 
@@ -1186,6 +1191,10 @@ def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
         if task_input.platform == "qwen_code":
             logger.info("Using platform: qwen_code")
             return _execute_qwen_chat(task_input, session_dir)
+
+        if task_input.platform == "goose":
+            logger.info("Using platform: goose")
+            return _execute_goose_chat(task_input, session_dir)
 
         return ChatCliResult(response_text="", success=False, error=f"Unsupported platform: {task_input.platform}")
 
