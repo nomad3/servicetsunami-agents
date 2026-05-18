@@ -5,7 +5,12 @@ from typing import Dict, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user, require_superuser
+from app.api.deps import (
+    get_db,
+    get_current_user,
+    get_current_active_user,
+    require_superuser,
+)
 from app.core.config import settings
 from app.models.tenant_features import TenantFeatures as TenantFeaturesModel
 from app.models.user import User
@@ -39,26 +44,24 @@ def get_features(
 def update_features(
     features_in: TenantFeaturesUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_active_user),
 ):
-    """Update current tenant's feature flags.
+    """Update tenant features.
 
-    Any authenticated tenant member can change tenant-scoped preferences
-    (default_cli_platform, github_primary_account, cpa_export_format,
-    rl_enabled/rl_settings, cli_orchestrator_enabled, the *_enabled
-    feature toggles). Plan/billing limits (max_agents, max_agent_groups,
-    monthly_token_limit, storage_limit_gb, plan_type,
-    hide_agentprovision_branding) remain superuser-only and are filtered
-    server-side rather than rejecting the whole request — that lets the
-    InlineCliPicker save the user's CLI choice without ever needing to
-    learn about plan-limit fields.
+    Any active tenant member can change a small allowlist of
+    user-preference fields (see ``_MEMBER_WRITABLE_FIELDS`` in the
+    service). Every other field — including the tenant-wide ``*_enabled``
+    toggles, ``active_llm_provider``, and plan/billing limits — remains
+    superuser-only and is silently dropped from a non-superuser PUT
+    payload rather than rejecting the whole request. The drop is logged
+    at WARNING so audit and on-call can see elevation probes.
     """
     service.get_or_create_features(db, current_user.tenant_id)
     features = service.update_features(
         db,
         current_user.tenant_id,
         features_in,
-        is_superuser=bool(getattr(current_user, "is_superuser", False)),
+        is_superuser=bool(current_user.is_superuser),
     )
     return features
 

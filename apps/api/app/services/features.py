@@ -1,10 +1,28 @@
 """Feature flags service for tenant feature management."""
-from sqlalchemy.orm import Session
-from typing import Optional
+import logging
 import uuid
+from typing import Optional
+
+from sqlalchemy.orm import Session
 
 from app.models.tenant_features import TenantFeatures
 from app.schemas.tenant_features import TenantFeaturesCreate, TenantFeaturesUpdate
+
+logger = logging.getLogger(__name__)
+
+
+# Default-deny allowlist of fields any active tenant member may set on
+# their own tenant. Everything else (the ``*_enabled`` toggles,
+# ``active_llm_provider``, plan/billing limits, removed branding) stays
+# superuser-only and is silently dropped from a non-superuser update.
+_MEMBER_WRITABLE_FIELDS = frozenset({
+    "default_cli_platform",
+    "github_primary_account",
+    "cpa_export_format",
+    "rl_enabled",
+    "rl_settings",
+    "cli_orchestrator_enabled",
+})
 
 
 def get_features(db: Session, tenant_id: uuid.UUID) -> Optional[TenantFeatures]:
@@ -30,20 +48,6 @@ def create_features(
     return features
 
 
-# Fields that affect billing / plan limits / removed branding — only
-# superusers may change these. Everything else (default_cli_platform,
-# rl toggles, github_primary_account, etc.) is a tenant-scoped UX
-# preference any tenant member can set.
-_SUPERUSER_ONLY_FIELDS = frozenset({
-    "max_agents",
-    "max_agent_groups",
-    "monthly_token_limit",
-    "storage_limit_gb",
-    "plan_type",
-    "hide_agentprovision_branding",
-})
-
-
 def update_features(
     db: Session,
     tenant_id: uuid.UUID,
@@ -53,11 +57,12 @@ def update_features(
 ) -> Optional[TenantFeatures]:
     """Update tenant features.
 
-    `is_superuser=False` (default) silently drops any attempt to touch
-    plan-limit fields. The PUT /features endpoint is called by the
-    InlineCliPicker, which only ever sends `default_cli_platform`, so a
-    silent drop is safer than a 403 that would block the legitimate
-    tenant-preference change.
+    With ``is_superuser=False`` (default) only the
+    ``_MEMBER_WRITABLE_FIELDS`` allowlist is honored — any other field
+    in ``features_in`` is silently dropped. Silent so the PUT can still
+    succeed for the member's intended preference change instead of a
+    422 that blocks unrelated payloads. The dropped fields are logged
+    at WARNING so audit / on-call can see elevation probes.
     """
     features = get_features(db, tenant_id)
     if not features:
@@ -65,10 +70,19 @@ def update_features(
 
     update_data = features_in.model_dump(exclude_unset=True)
     if not is_superuser:
-        update_data = {
-            k: v for k, v in update_data.items()
-            if k not in _SUPERUSER_ONLY_FIELDS
-        }
+        dropped = sorted(
+            k for k in update_data if k not in _MEMBER_WRITABLE_FIELDS
+        )
+        if dropped:
+            logger.warning(
+                "update_features: dropped superuser-only fields %s for tenant=%s",
+                dropped,
+                tenant_id,
+            )
+            update_data = {
+                k: v for k, v in update_data.items()
+                if k in _MEMBER_WRITABLE_FIELDS
+            }
     for field, value in update_data.items():
         setattr(features, field, value)
 
