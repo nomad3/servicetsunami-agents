@@ -66,6 +66,10 @@ _DEFAULT_PRIORITY: tuple[str, ...] = (
     "qwen_code",
     "kimi_k2",
     "deepseek",
+    # ``glm`` (Zhipu AI GLM-4.6 — Wave 2b Lane B Apache 2.0 OSS) slots
+    # next to the other BYOK coding models, ahead of the always-on
+    # local-Gemma opencode floor.
+    "glm",
     "opencode",
 )
 
@@ -83,6 +87,7 @@ _CLI_TO_INTEGRATIONS: dict[str, tuple[str, ...]] = {
     "qwen_code": ("qwen_code",),
     "kimi_k2": ("kimi_k2",),
     "deepseek": ("deepseek",),
+    "glm": ("glm",),
     "opencode": (),  # local
 }
 

@@ -46,6 +46,7 @@ from cli_executors.copilot import execute_copilot_chat as _execute_copilot_chat
 from cli_executors.qwen import execute_qwen_chat as _execute_qwen_chat
 from cli_executors.kimi import execute_kimi_chat as _execute_kimi_chat
 from cli_executors.deepseek import execute_deepseek_chat as _execute_deepseek_chat
+from cli_executors.glm import execute_glm_chat as _execute_glm_chat
 from cli_executors.opencode import (
     execute_opencode_chat as _execute_opencode_chat,
     _execute_opencode_chat_cli,
@@ -329,6 +330,10 @@ _INTEGRATION_NOT_CONNECTED_MESSAGES = {
     "deepseek": (
         "DeepSeek is not connected. "
         "Please connect your DeepSeek account in Settings → Integrations."
+    ),
+    "glm": (
+        "GLM (Zhipu AI) is not connected. "
+        "Please connect your Zhipu account in Settings → Integrations."
     ),
 }
 
@@ -1187,6 +1192,11 @@ def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
         if task_input.platform == "deepseek":
             logger.info("Using platform: deepseek")
             return _execute_deepseek_chat(task_input, session_dir)
+
+        if task_input.platform == "glm":
+            logger.info("Using platform: glm")
+            return _execute_glm_chat(task_input, session_dir)
+
 
         if task_input.platform == "opencode":
             logger.info("Using platform: opencode")

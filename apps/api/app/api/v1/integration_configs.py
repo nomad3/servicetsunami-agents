@@ -345,6 +345,31 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
              "help": "Defaults to deepseek-chat (V3.5 coding-tuned). Set to deepseek-reasoner for the R1 chain-of-thought variant."},
         ],
     },
+    "glm": {
+        # Zhipu AI's GLM-4.6 coding-tuned model — Wave 2b Lane B
+        # (Apache 2.0 weights, commercial resale permitted; see
+        # ``docs/plans/2026-05-18-cli-integration-catalog.md``). The
+        # executor talks to Zhipu's OpenAI-compatible BigModel HTTP
+        # endpoint directly from ``cli_executors/glm.py`` — there is no
+        # local CLI binary involved (Zhipu's developer CLI is not a
+        # runtime dependency). Default base URL is
+        # ``https://open.bigmodel.cn/api/paas/v4``.
+        "display_name": "GLM (Zhipu AI)",
+        "description": (
+            "Connect your Zhipu API key for GLM-4.6. "
+            "Calls are billed against your Zhipu BigModel account."
+        ),
+        "icon": "FaCloud",
+        "auth_type": "manual",
+        "credentials": [
+            {"key": "api_key", "label": "Zhipu API Key", "type": "password", "required": True,
+             "help": "ZHIPU_API_KEY from https://open.bigmodel.cn/usercenter/apikeys."},
+            {"key": "base_url", "label": "Base URL", "type": "text", "required": False,
+             "help": "Defaults to https://open.bigmodel.cn/api/paas/v4. Override only for a self-hosted Zhipu-compatible gateway."},
+            {"key": "model", "label": "Model", "type": "text", "required": False,
+             "help": "Defaults to glm-4.6. Override to pin glm-4-air / glm-4-flash for cheaper tiers."},
+        ],
+    },
 }
 
 

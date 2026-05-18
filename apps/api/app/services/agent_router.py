@@ -51,6 +51,7 @@ _PAID_CLI_FAST_PIN_SET = frozenset({
     "qwen_code",
     "kimi_k2",
     "deepseek",
+    "glm",
 })
 
 

@@ -470,3 +470,52 @@ def test_deepseek_not_connected_message_classifies_as_missing_credential():
         "Please connect your DeepSeek account in Settings → Integrations."
     )
     assert r.classify_error(msg) == "missing_credential"
+
+
+# ── GLM (Wave 2b Lane B) ─────────────────────────────────────────────
+
+
+def test_chain_glm_via_integration(monkeypatch):
+    """A tenant with the Zhipu GLM integration connected gets glm in
+    the resolver chain. Mirrors the kimi_k2-via-integration piggy-back
+    test for the simpler 1:1 integration mapping."""
+    _stub_connected(monkeypatch, {"glm"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert "glm" in chain
+    assert chain[-1] == "opencode"
+
+
+def test_chain_glm_explicit_platform_wins(monkeypatch):
+    """An agent with preferred_cli=glm leads the chain when the
+    integration is wired, ahead of any other connected CLIs."""
+    _stub_connected(monkeypatch, {"glm", "claude_code", "github"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform="glm")
+    assert chain[0] == "glm"
+    # Default-priority fallbacks still appear after.
+    assert "claude_code" in chain
+    assert "copilot_cli" in chain
+
+
+def test_connected_clis_for_tenant_surfaces_glm(monkeypatch):
+    """``connected_clis_for_tenant`` (the public list driving the
+    InlineCliPicker) MUST include glm when wired — NOT hidden the
+    way opencode is."""
+    _stub_connected(monkeypatch, {"glm"})
+    listed = r.connected_clis_for_tenant(None, uuid.uuid4())
+    assert "glm" in listed
+    # opencode stays hidden — it's the routing floor, not user-pickable.
+    assert "opencode" not in listed
+
+
+def test_glm_not_connected_message_classifies_as_missing_credential():
+    """The worker-side not-connected message for glm (returned both
+    by ``_fetch_integration_credentials`` 404 path and the executor's
+    empty-api-key path) MUST be classified as ``missing_credential``
+    so the orchestrator chain-walks past glm WITHOUT a 10-minute
+    cooldown. Quick reconnect should be picked up on the next chat
+    turn, not masked by cooldown."""
+    msg = (
+        "GLM (Zhipu AI) is not connected. "
+        "Please connect your Zhipu account in Settings → Integrations."
+    )
+    assert r.classify_error(msg) == "missing_credential"
