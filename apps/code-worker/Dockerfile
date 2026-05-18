@@ -74,16 +74,23 @@ ARG GOOSE_VERSION=v1.34.1
 # triple suffix so the same Dockerfile produces a working image on
 # both arches.
 ARG TARGETARCH
+# The python:3.11-slim base ships GNU tar with gzip baked in but does
+# NOT include `bzip2`, so `tar -xjf` (= -j = bzip2) silently aborts
+# with "Cannot exec: No such file or directory" → goose binary never
+# lands at /usr/local/bin/goose → `goose --version` exits 127 →
+# build fails. We grab the `.tar.gz` release variant instead (goose
+# publishes both for every triple) so gzip in the base image is
+# enough; no extra apt package required.
 RUN case "${TARGETARCH}" in \
         amd64) GOOSE_TRIPLE="x86_64-unknown-linux-gnu" ;; \
         arm64) GOOSE_TRIPLE="aarch64-unknown-linux-gnu" ;; \
         *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac && \
     curl -fsSL --retry 3 --location \
-        -o /tmp/goose.tar.bz2 \
-        "https://github.com/block/goose/releases/download/${GOOSE_VERSION}/goose-${GOOSE_TRIPLE}.tar.bz2" && \
-    tar -xjf /tmp/goose.tar.bz2 -C /usr/local/bin && \
-    rm /tmp/goose.tar.bz2 && \
+        -o /tmp/goose.tar.gz \
+        "https://github.com/block/goose/releases/download/${GOOSE_VERSION}/goose-${GOOSE_TRIPLE}.tar.gz" && \
+    tar -xzf /tmp/goose.tar.gz -C /usr/local/bin && \
+    rm /tmp/goose.tar.gz && \
     chmod +x /usr/local/bin/goose && \
     goose --version && \
     # Wave 2d B1 build-time contract guard — fail the image build if
