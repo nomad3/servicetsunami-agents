@@ -10,7 +10,7 @@ from typing import Any, Dict
 from temporalio import activity
 
 from app.db.session import SessionLocal
-from app.services.embedding_service import embed_text, embed_and_store
+from app.services.embedding_service import embed_and_store, try_embed_text
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,10 @@ async def backfill_memory_embeddings(tenant_id: str) -> Dict[str, Any]:
 
             for row in rows:
                 text_content = f"{row.memory_type}: {row.content}"
-                vector = embed_text(text_content)
+                # try_embed_text returns None on EmbeddingServiceUnavailable
+                # so a transient Rust-service outage skips the row instead of
+                # aborting the whole batch (embed_text now raises).
+                vector = try_embed_text(text_content)
                 if vector is not None:
                     vector_literal = "[" + ",".join(str(v) for v in vector) + "]"
                     update_sql = text("""
@@ -164,7 +167,10 @@ async def backfill_observation_embeddings(tenant_id: str) -> Dict[str, Any]:
 
             for row in rows:
                 text_content = f"{row.observation_type}: {row.observation_text}"
-                vector = embed_text(text_content)
+                # try_embed_text returns None on EmbeddingServiceUnavailable
+                # so a transient Rust-service outage skips the row instead of
+                # aborting the whole batch (embed_text now raises).
+                vector = try_embed_text(text_content)
                 if vector is not None:
                     vector_literal = "[" + ",".join(str(v) for v in vector) + "]"
                     update_sql = text("""
