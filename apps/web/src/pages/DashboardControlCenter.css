@@ -97,7 +97,7 @@
    clamped by the Pro-mode "leave room for terminal" calc above. */
 .dcc-mode-simple .dcc-chat-row {
   height: calc(100vh - 200px);
-  min-height: 480px;
+  min-height: min(480px, calc(100vh - 160px));
 }
 /* ── Outer column split (Pro mode only): chat-row over terminal ──
    When the chat row sits inside the outer column ResizableSplit
@@ -275,8 +275,10 @@
   .dcc-chat-row > [class*="col-"],
   .dcc-chat-row > .col,
   .dcc-chat-row .ap-card,
-  .dcc-outer-col {
+  .dcc-outer-col,
+  .dcc-mode-simple .dcc-chat-row {
     height: auto;
+    min-height: 0;
   }
   .dcc-chat-row .dcc-thread-card {
     height: clamp(360px, calc(100vh - 280px), 540px);
