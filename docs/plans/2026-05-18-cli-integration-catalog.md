@@ -86,14 +86,36 @@ These are the legitimate arbitrage lane. Every model below is openly licensed fo
 
 | Candidate | Models | License | CLI form | Lane? |
 |-----------|--------|--------:|---------:|------:|
-| **Higgsfield** | Sora 2, Kling 3.0, Veo 3, Nano Banana Pro, Cinema Studio 3.5, +25 | proprietary, per-credit | MCP server + CLI ("Turn Claude into a creative engine") | A (BYOK to Higgsfield) — resale terms unknown, needs research |
+| **Higgsfield** | Sora 2, Kling 3.0, Veo 3, Nano Banana Pro, Cinema Studio 3.5, Soul, Flux, Seedream, Seedance, Minimax Hailuo (30+) | proprietary, credit-metered | MCP server + `@higgsfield/cli` (npm) | A (BYO Higgsfield account) — multi-tenant ToS not publicly disclosed |
 | **Runway** | Gen-3 Alpha, Gen-4 | proprietary | API + early CLI | A (BYOK) |
 | **Pika** | Pika 1.5 | proprietary | API only today | A (BYOK) |
 | **Suno** | Suno V4 | proprietary | API beta | A (BYOK) |
 | **ElevenLabs** | TTS + sound effects | proprietary | mature CLI/SDK | A (BYOK) |
 | **Replicate** (aggregator) | thousands | varies per model | mature CLI | A (BYOK to Replicate, mixed per-model resale) |
 
-**Higgsfield integration vector:** their CLI exposes MCP tools that any MCP client can call. Alpha's marketing/sales specialist agent would gain ad-creative generation. Add as an MCP source per tenant (BYO Higgsfield account), not as a chat surface. ~80 LOC for the MCP registration + credential vault entry.
+### Higgsfield CLI — confirmed integration spec (2026-05-18)
+
+Sourced from https://higgsfield.ai/cli :
+
+- **Install:** `npm install -g @higgsfield/cli`
+- **Auth:** `higgsfield auth login` — browser-based OAuth (≈5 s, no API key required). Same paste-back / popup pattern we already implement for Gemini CLI in `apps/api/app/api/v1/gemini_cli_auth.py`.
+- **Capabilities exposed via MCP:**
+  - **Image:** Soul, Cinema Studio, Flux, Seedream, Nano Banana — up to 4K
+  - **Video:** Seedance, Kling, Veo, Minimax Hailuo — up to 15 s
+  - **Higher-order tools:** Soul Characters (character training), brand-kit management, Marketing Studio presets, **Ad Engine** (marketing automation), **virality prediction**
+- **Pricing:** credit-metered per generation; "existing Higgsfield plan credits work seamlessly through any connected agent."
+- **MCP endpoint URL:** referenced as "add the Higgsfield MCP server URL" but the URL itself isn't on the public CLI page — get it from `higgsfield auth login` output or their docs link once auth completes.
+- **Skill bundle:** they ship a Claude-Code-style skills package — `npx skills add higgsfield-ai/skills`. Means we could also import their skills into our [Skills Marketplace](../plans/) (per [[skills_marketplace_v2]]) as a tenant-installable bundle, separate from the MCP source.
+- **Multi-tenant ToS:** not published. The "use Alpha's founder Higgsfield account to serve every tenant" pattern is unverified — must confirm with Higgsfield commercial before scaling past friends-and-family.
+
+### Higgsfield integration vector — chosen shape
+
+Two complementary surfaces, both worth wiring:
+
+1. **MCP source (Wave 1a)** — Alpha registers Higgsfield as a per-tenant MCP server. Marketing/Sales specialist agent discovers the 30+ image/video tools and calls them via `call_mcp_tool`. Tenant credentials: Higgsfield OAuth blob in the encrypted vault, same shape as Gemini's `oauth_creds.json`. Founder's top-tier account funds early/dogfood usage; per-tenant BYO-Higgsfield-account is the upgrade path.
+2. **Skill bundle (Wave 1c, optional)** — `npx skills add higgsfield-ai/skills` brings their pre-built workflows (Ad Engine, virality prediction, character training) into our `_bundled/` skills tree. Tenants get their proven creative playbooks the moment they connect.
+
+Implementation estimate: ~150 LOC for #1 (OAuth flow + MCP registration + integration card + Marketing/Sales agent tool-group binding) + ~50 LOC for #2 (skills import via the existing community-skills import path).
 
 ## Candidate — Specialist-MCP servers (SPECIALIST-MCP)
 
@@ -118,8 +140,9 @@ Not chat surfaces — pure tool sources. Wire as MCP per-tenant.
 User prioritization 2026-05-18: Higgsfield moves into Wave 1 because it unlocks marketing-agent use cases AND powers Alpha's own marketing content pipeline. The Lane B code-CLI work runs in parallel; they touch different code paths (chat-turn executor vs MCP source registration).
 
 **Wave 1 — Marketing creative + Lane B foothold (parallel, 1-2 weeks):**
-- **1a — Higgsfield MCP source.** Register Higgsfield's MCP server as a per-tenant tool source in the existing credential vault + MCP registry. Wire the Marketing/Sales specialist agent to discover its tools (Sora 2 video, Nano Banana image, Cinema Studio, Storyboard Generator) and call them via `call_mcp_tool`. ~120 LOC: credential schema entry + MCP server config + agent tool-group binding + integration card on the integrations page. BYOK to Higgsfield until commercial terms are confirmed.
+- **1a — Higgsfield MCP source.** Install `@higgsfield/cli` in the api / code-worker images. Mirror the Gemini CLI OAuth flow (api-owned PKCE → store `oauth_creds` in the encrypted vault) at `apps/api/app/api/v1/higgsfield_auth.py`. Register Higgsfield as a per-tenant MCP server in the existing registry; bind its 30+ tools (Soul, Cinema Studio, Flux, Seedream, Nano Banana, Seedance, Kling, Veo, Minimax Hailuo, plus Ad Engine + virality prediction) to the Marketing/Sales specialist agent's tool_groups. Integration card on `/integrations`. Founder funds top-tier Higgsfield account for early-tenant pool; confirm Higgsfield ToS allows shared-account use before scaling past ~10 tenants — otherwise flip to BYO-Higgsfield-account-per-tenant only. ~150 LOC.
 - **1b — Qwen Code executor.** First Lane B code-CLI executor as the reference. ~200 LOC in `apps/code-worker/cli_executors/qwen.py` mirroring the existing claude/codex pattern. Apache 2.0, no resale gate. Default-on for new tenants on a `starter / open-weights` plan tier.
+- **1c (optional, parallel) — Higgsfield skills bundle.** `npx skills add higgsfield-ai/skills` imported into `apps/api/app/skills/_bundled/` via the existing community-skills import path. Brings their Ad Engine + virality + character-training workflows as tenant-installable skills. ~50 LOC.
 
 **Wave 2 — OSS code CLI parity + Lane B breadth (1-2 weeks):**
 - DeepSeek + GLM executors (mirrors Qwen executor; different model endpoints).
