@@ -319,6 +319,32 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
              "help": "Defaults to kimi-k2-0905-preview. Override only if Moonshot publishes a newer coding-tuned variant."},
         ],
     },
+    "deepseek": {
+        # DeepSeek V3 / DeepSeek R1 coding + reasoning models — Wave 2a
+        # Lane B (MIT-licensed weights, commercial resale permitted; see
+        # ``docs/plans/2026-05-18-cli-integration-catalog.md``). The
+        # executor talks to DeepSeek's OpenAI-compatible HTTP endpoint
+        # directly from ``cli_executors/deepseek.py`` — there is no
+        # local CLI binary. Default base URL is
+        # ``https://api.deepseek.com/v1`` (the hosted DeepSeek service);
+        # self-hosters can point ``base_url`` at any OpenAI-compatible
+        # endpoint serving the MIT weights.
+        "display_name": "DeepSeek",
+        "description": (
+            "Connect your DeepSeek API key for DeepSeek-V3 / DeepSeek-R1. "
+            "Calls are billed against your DeepSeek account."
+        ),
+        "icon": "FaRobot",
+        "auth_type": "manual",
+        "credentials": [
+            {"key": "api_key", "label": "DeepSeek API Key", "type": "password", "required": True,
+             "help": "DEEPSEEK_API_KEY from https://platform.deepseek.com/api_keys."},
+            {"key": "base_url", "label": "Base URL", "type": "text", "required": False,
+             "help": "Defaults to https://api.deepseek.com/v1. Override only if pointing at a self-hosted DeepSeek deployment serving the MIT-licensed weights."},
+            {"key": "model", "label": "Model", "type": "text", "required": False,
+             "help": "Defaults to deepseek-chat (V3.5 coding-tuned). Set to deepseek-reasoner for the R1 chain-of-thought variant."},
+        ],
+    },
 }
 
 

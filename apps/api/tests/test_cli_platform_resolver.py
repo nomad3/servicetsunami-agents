@@ -408,3 +408,65 @@ def test_kimi_k2_not_connected_message_classifies_as_missing_credential():
         "Please connect your Moonshot account in Settings → Integrations."
     )
     assert r.classify_error(msg) == "missing_credential"
+
+
+# ── DeepSeek (Wave 2a Lane B) ────────────────────────────────────────
+
+
+def test_chain_deepseek_via_integration(monkeypatch):
+    """A tenant with the DeepSeek integration connected gets deepseek
+    in the resolver chain. Mirrors the kimi-via-integration test for
+    the simpler 1:1 integration mapping."""
+    _stub_connected(monkeypatch, {"deepseek"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert "deepseek" in chain
+    assert chain[-1] == "opencode"
+
+
+def test_chain_deepseek_explicit_platform_wins(monkeypatch):
+    """An agent with preferred_cli=deepseek leads the chain when the
+    integration is wired, ahead of any other connected CLIs."""
+    _stub_connected(monkeypatch, {"deepseek", "claude_code", "github"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform="deepseek")
+    assert chain[0] == "deepseek"
+    # Default-priority fallbacks still appear after.
+    assert "claude_code" in chain
+    assert "copilot_cli" in chain
+
+
+def test_connected_clis_for_tenant_surfaces_deepseek(monkeypatch):
+    """``connected_clis_for_tenant`` (the public list driving the
+    InlineCliPicker) MUST include deepseek when wired — NOT hidden the
+    way opencode is."""
+    _stub_connected(monkeypatch, {"deepseek"})
+    listed = r.connected_clis_for_tenant(None, uuid.uuid4())
+    assert "deepseek" in listed
+    assert "opencode" not in listed
+
+
+def test_chain_deepseek_cooldown_respected(monkeypatch):
+    """A quota'd deepseek is filtered from the chain just like the
+    other CLIs (only opencode is exempt from cooldown)."""
+    tid = uuid.uuid4()
+    _stub_connected(monkeypatch, {"deepseek", "claude_code"})
+    r.mark_cooldown(tid, "deepseek", reason="quota")
+    chain = r.resolve_cli_chain(None, tid, explicit_platform="deepseek")
+    assert "deepseek" not in chain
+    assert "claude_code" in chain
+
+
+def test_deepseek_not_connected_message_classifies_as_missing_credential():
+    """The worker-side not-connected message for deepseek (returned
+    both by ``_fetch_integration_credentials`` 404 path and the
+    executor's empty-api-key path) MUST be classified as
+    ``missing_credential`` so the orchestrator chain-walks past
+    deepseek WITHOUT a 10-minute cooldown. A quick reconnect should be
+    picked up on the next chat turn, not masked by cooldown.
+
+    Hits the ``please connect your`` arm of the chain-walker regex in
+    ``packages/cli_orchestrator/classifier.py``."""
+    msg = (
+        "DeepSeek is not connected. "
+        "Please connect your DeepSeek account in Settings → Integrations."
+    )
+    assert r.classify_error(msg) == "missing_credential"

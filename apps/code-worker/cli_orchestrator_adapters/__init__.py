@@ -27,6 +27,7 @@ NOT rewritten to use a ResilientExecutor in Phase 2 — that's Phase 3+.
 from .claude_code import ClaudeCodeAdapter
 from .codex import CodexAdapter
 from .copilot_cli import CopilotCliAdapter
+from .deepseek import DeepSeekAdapter
 from .gemini_cli import GeminiCliAdapter
 from .kimi_k2 import KimiK2Adapter
 from .opencode import OpencodeAdapter
@@ -37,6 +38,7 @@ __all__ = [
     "ClaudeCodeAdapter",
     "CodexAdapter",
     "CopilotCliAdapter",
+    "DeepSeekAdapter",
     "GeminiCliAdapter",
     "KimiK2Adapter",
     "OpencodeAdapter",

@@ -1,0 +1,134 @@
+"""DeepSeekAdapter — wraps cli_executors.deepseek.execute_deepseek_chat.
+
+Phase 2 worker-side ProviderAdapter for the ``deepseek`` platform
+(Wave 2a). Like Kimi K2 (Wave 1c), DeepSeek has no local CLI binary:
+the executor talks to DeepSeek's OpenAI-compatible HTTP endpoint
+directly via httpx. (DeepSeek's hosted ``api.deepseek.com`` is the
+default; the MIT-licensed model weights can also be self-hosted, but
+that's a tenant-side concern surfaced via the ``base_url`` override
+on the integration card.)
+
+That means preflight collapses to a single check: do we have a
+DeepSeek API key in the tenant vault (or a shared env-var fallback)?
+Cloud reachability is not probed up-front — DeepSeek surfaces
+billing/quota errors as HTTP 4xx at request time, which
+``classify_error`` maps into the canonical Status enum.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import uuid
+from dataclasses import dataclass
+from typing import Optional
+
+from cli_orchestrator.adapters.base import (
+    ExecutionRequest,
+    ExecutionResult,
+    PreflightResult,
+)
+from cli_orchestrator.classifier import classify
+from cli_orchestrator.redaction import redact
+from cli_orchestrator.status import Status
+
+from cli_executors.deepseek import execute_deepseek_chat
+
+from ._common import (
+    check_credential_for_platform,
+    map_chat_cli_result_to_execution_result,
+    time_preflight_helper,
+    truncate,
+)
+from .preflight_deps import PreflightDeps
+
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _MinimalChatCliInput:
+    platform: str
+    message: str
+    tenant_id: str
+    instruction_md_content: str = ""
+    mcp_config: str = ""
+    image_b64: str = ""
+    image_mime: str = ""
+    session_id: str = ""
+    model: str = ""
+    allowed_tools: str = ""
+
+
+class DeepSeekAdapter:
+    name = "deepseek"
+
+    def preflight(self, req: ExecutionRequest) -> PreflightResult:
+        # 1. Credentials present in the tenant vault. The shared
+        # ``DEEPSEEK_API_KEY`` operator env var acts as a fallback —
+        # if either path resolves, preflight passes.
+        tenant_id = req.tenant_id or (req.payload or {}).get("tenant_id") or ""
+        if tenant_id:
+            with time_preflight_helper(self.name, "credentials_present"):
+                cr = check_credential_for_platform(
+                    PreflightDeps.get(), tenant_id, self.name,
+                )
+            if not cr.ok:
+                if os.environ.get("DEEPSEEK_API_KEY"):
+                    return PreflightResult.succeed()
+                return cr
+
+        # 2. Cloud API reachability — not probed at preflight.
+        # DeepSeek surfaces billing/quota errors as HTTP 4xx at
+        # request time; ``classify_error`` maps them downstream.
+
+        return PreflightResult.succeed()
+
+    def classify_error(
+        self,
+        stderr: Optional[str],
+        exit_code: Optional[int],
+        exc: Optional[BaseException],
+    ) -> Status:
+        return classify(stderr, exit_code, exc)
+
+    def run(self, req: ExecutionRequest) -> ExecutionResult:
+        run_id = req.run_id or str(uuid.uuid4())
+        payload = req.payload or {}
+        session_dir = payload.get("session_dir") or "/tmp"
+        task_input = _MinimalChatCliInput(
+            platform=self.name,
+            message=payload.get("message", ""),
+            tenant_id=req.tenant_id or payload.get("tenant_id", ""),
+            instruction_md_content=payload.get("instruction_md_content", ""),
+            mcp_config=payload.get("mcp_config", ""),
+            image_b64=payload.get("image_b64", ""),
+            image_mime=payload.get("image_mime", ""),
+            session_id=payload.get("session_id", ""),
+            model=payload.get("model", ""),
+            allowed_tools=payload.get("allowed_tools", ""),
+        )
+        try:
+            cli_result = execute_deepseek_chat(task_input, session_dir)
+        except BaseException as exc:  # noqa: BLE001
+            status = self.classify_error(stderr=None, exit_code=None, exc=exc)
+            err = redact(str(exc) or exc.__class__.__name__)
+            logger.warning(
+                "DeepSeekAdapter.run raised — classified as %s: %s",
+                status.value, err,
+            )
+            return ExecutionResult(
+                status=status,
+                platform=self.name,
+                response_text="",
+                error_message=err,
+                stderr_summary=truncate(err),
+                platform_attempted=[self.name],
+                attempt_count=1,
+                run_id=run_id,
+            )
+        return map_chat_cli_result_to_execution_result(
+            cli_result=cli_result, platform=self.name, run_id=run_id,
+        )
+
+
+__all__ = ["DeepSeekAdapter"]
