@@ -8,29 +8,29 @@
     "getStarted": "Comenzar"
   },
   "hero": {
-    "badge": "Plataforma de Orquestacion de Agentes IA",
-    "title": "Equipos de IA que Piensan, Aprenden y Ejecutan",
-    "lead": "agentprovision.com es la plataforma empresarial para operaciones autonomas con IA. Orquesta equipos de agentes que escriben codigo, monitorean competidores, gestionan campanas publicitarias, clasifican tu inbox y automatizan flujos de negocio — todo con memoria persistente.",
-    "subtext": "Deja de construir chatbots desechables. Despliega equipos de agentes que codean de forma autonoma, rastrean senales del mercado y ejecutan workflows reales en tu empresa.",
-    "subHighlight": "La plataforma de IA agentica que escala con tu ambicion.",
+    "badge": "Alpha — el OS de agentes",
+    "title": "Alpha: el sistema operativo de agentes para tu negocio",
+    "lead": "Alpha es el OS de agentes que corre sobre AgentProvision. Una sola CLI es el kernel — nativa de terminal, scriptable, automatizable — y un escritorio Tauri lleva el mismo control plane a cada workstation. Por debajo, una red coordinada de especialistas opera codigo, ventas, marketing, datos y comunicaciones, compartiendo memoria y enrutando tareas automaticamente.",
+    "subtext": "Desde `alpha` en tu terminal o la app de escritorio, un comando abre toda la red de agentes. Construye, observa y despliega — sin soltar el teclado.",
+    "subHighlight": "AgentProvision es la plataforma. Alpha es el OS que realmente usas.",
     "socialProof": "De confianza en equipos de",
-    "socialProofFallback": "Más de 500 equipos usando AgentProvision",
+    "socialProofFallback": "Más de 500 equipos corriendo Alpha sobre AgentProvision",
     "spotlight": {
-      "heading": "Construido para Equipos AI-First",
+      "heading": "Una CLI. Cada Agente.",
       "badge": "Listo para Produccion"
     },
     "highlights": {
       "governedDataProducts": {
-        "title": "Orquestacion Multi-Agente",
-        "description": "Equipos jerarquicos de agentes con supervisores, especialistas y agentes hoja. Cada equipo maneja un dominio — asistente personal, coding autonomo, data science, marketing, ventas — coordinados por un supervisor raiz."
+        "title": "CLI-first, por diseno",
+        "description": "Cada funcionalidad pasa por Alpha CLI. Frontend, escritorio, automatizaciones e integraciones llaman al mismo kernel — `alpha agent run`, `alpha workspace clone`, `alpha sync push`. Lo que scripteas hoy sigue funcionando manana."
       },
       "unifiedLakehouseFabric": {
-        "title": "Memoria Persistente y Grafo de Conocimiento",
-        "description": "Tus agentes recuerdan. Extraccion de entidades, mapeo de relaciones, lead scoring y recall contextual en cada conversacion. Luna aprende tus contactos, preferencias y contexto de negocio automaticamente."
+        "title": "Memoria compartida entre cada agente",
+        "description": "Un solo grafo de conocimiento, compartido por toda la red. Contactos, preferencias, deals y decisiones se extraen automaticamente y estan disponibles para cada especialista — en cada sesion, cada canal, cada conversacion."
       },
       "agenticAutomation": {
-        "title": "Motor de Ejecucion Autonoma",
-        "description": "Workflows durables con Temporal en 4 colas: orquestacion, postgres, codigo y negocios. Desde deal pipelines hasta monitoreo de competidores y coding autonomo — ejecucion confiable con trazabilidad completa."
+        "title": "Ejecucion durable en cada capa",
+        "description": "Workflows con Temporal mantienen a cada agente corriendo de forma confiable. Desde deal pipelines hasta monitoreo de competidores y coding autonomo — cada tarea corre hasta completarse con trazabilidad completa y cero pelotas caidas."
       }
     }
   },
@@ -280,7 +280,7 @@
     "codeAgent": { "title": "Agente de Código", "desc": "Programación autónoma con Claude Code CLI. Crea PRs con trazas de auditoría completas." }
   },
   "footer": {
-    "tagline": "Orquestación de IA empresarial, creada para equipos que entregan.",
+    "tagline": "Alpha — el OS de agentes para AgentProvision. CLI-first, escritorio listo, creado para equipos que entregan.",
     "links": {
       "platform": "Plataforma",
       "features": "Funciones",
@@ -306,8 +306,8 @@
     ]
   },
   "cta": {
-    "heading": "Listo para Desplegar tu Equipo de Agentes IA?",
-    "subtext": "Empieza a construir sistemas multi-agente hoy. Crea tu cuenta y ten a Luna, tu co-piloto IA, funcionando en minutos.",
+    "heading": "Instala Alpha. Corre el OS.",
+    "subtext": "Consigue la CLI y el escritorio de Alpha sobre AgentProvision en minutos. Luna, tu persona supervisora, se conecta apenas inicias sesion — y toda la red de especialistas la sigue.",
     "button": "Comenzar Gratis"
   }
 }

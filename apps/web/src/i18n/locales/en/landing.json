@@ -8,28 +8,28 @@
     "getStarted": "Get Started"
   },
   "hero": {
-    "badge": "Distributed Agent Network",
-    "title": "A Network of AI Agents That Runs Your Business",
-    "lead": "AgentProvision deploys a coordinated network of specialized AI agents across your operations. Each agent owns a domain — code, sales, marketing, data, communications — sharing memory, routing tasks automatically, and getting smarter together.",
-    "subtext": "Stop managing one chatbot. Run a network of AI specialists that coordinate in real time, across your entire stack.",
-    "subHighlight": "The distributed agent network built for modern enterprises.",
+    "badge": "Alpha — the Agent OS",
+    "title": "Alpha: the agent operating system for your business",
+    "lead": "Alpha is the agent OS that runs on top of AgentProvision. A single CLI is the kernel — terminal-native, scriptable, automatable — and a Tauri desktop puts the same control plane on every workstation. Underneath, a coordinated network of specialists owns code, sales, marketing, data, and communications, sharing memory and routing tasks automatically.",
+    "subtext": "From `alpha` in your terminal or the desktop app, one command opens the whole agent network. Build, observe, and ship — without leaving the keyboard.",
+    "subHighlight": "AgentProvision is the platform. Alpha is the OS you actually use.",
     "socialProof": "Trusted by teams at",
-    "socialProofFallback": "500+ teams using AgentProvision",
+    "socialProofFallback": "500+ teams running Alpha on AgentProvision",
     "spotlight": {
-      "heading": "One Network. Every Domain.",
+      "heading": "One CLI. Every Agent.",
       "badge": "Enterprise Ready"
     },
     "highlights": {
       "governedDataProducts": {
-        "title": "Specialized Agents, Each Owning a Domain",
-        "description": "Code agents ship features. Sales agents close deals. Marketing agents track competitors. Every specialist operates autonomously in their domain — all coordinated by a root supervisor with full visibility across the network."
+        "title": "CLI-first, by design",
+        "description": "Every feature flows through Alpha CLI. Frontend, desktop, automations, and integrations all call the same kernel — `alpha agent run`, `alpha workspace clone`, `alpha sync push`. What you script today still works tomorrow."
       },
       "unifiedLakehouseFabric": {
-        "title": "Shared Memory Across Every Agent",
-        "description": "One knowledge graph, shared by the entire network. Contacts, preferences, deals, and decisions are extracted automatically and available to every agent — across every session, every channel, every conversation."
+        "title": "Shared memory across every agent",
+        "description": "One knowledge graph, shared by the entire network. Contacts, preferences, deals, and decisions are extracted automatically and available to every specialist — across every session, every channel, every conversation."
       },
       "agenticAutomation": {
-        "title": "Durable Execution at Every Layer",
+        "title": "Durable execution at every layer",
         "description": "Temporal-powered workflows keep every agent running reliably. From deal pipelines to competitor monitoring to autonomous coding — each task runs to completion with full audit trails and zero dropped balls."
       }
     }
@@ -280,7 +280,7 @@
     "codeAgent": { "title": "Code Agent", "desc": "Autonomous coding powered by Claude Code CLI. Creates PRs with full audit trails." }
   },
   "footer": {
-    "tagline": "Enterprise AI orchestration, built for teams that ship.",
+    "tagline": "Alpha — the agent OS for AgentProvision. CLI-first, desktop-ready, built for teams that ship.",
     "links": {
       "platform": "Platform",
       "features": "Features",
@@ -306,8 +306,8 @@
     ]
   },
   "cta": {
-    "heading": "Ready to Deploy Your Agent Network?",
-    "subtext": "Launch a coordinated network of AI specialists today. Create your account and have Luna, your AI chief of staff, running in minutes.",
+    "heading": "Install Alpha. Run the OS.",
+    "subtext": "Get the Alpha CLI and desktop on AgentProvision in minutes. Luna, your supervisor persona, comes online the moment you log in — and the whole specialist network follows.",
     "button": "Get Started Free"
   }
 }
