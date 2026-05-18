@@ -270,16 +270,26 @@ def transcribe_bytes_sync(
 ) -> Optional[str]:
     """Sync wrapper around ``transcribe_async``.
 
-    Used by the robot + WhatsApp inbound paths where the request handler
-    is sync and the caller wants a transcript-or-None. Swallows
-    ``TranscriptionUnavailable`` and returns ``None`` to preserve the
-    pre-migration error-tolerant contract — those callers already log on
-    None and route to fallback prompts.
+    INTENDED for sync FastAPI handlers ONLY — e.g. ``apps/api/app/api/v1/
+    robot.py`` whose ``def`` (not ``async def``) handlers run on the
+    FastAPI threadpool and therefore have no running event loop on the
+    calling thread.
+
+    DO NOT call from ``async def`` code. Use ``await transcribe_async(...)``
+    there — the loop-detected ``ThreadPoolExecutor`` + ``.result(timeout)``
+    fallback below blocks the calling event loop for the duration of the
+    workflow. Callers in async contexts that need a transcript-or-None
+    shape should resolve the transcript themselves and pass it through
+    ``build_media_parts(precomputed_transcript=...)``.
+
+    Swallows ``TranscriptionUnavailable`` and returns ``None`` to preserve
+    the pre-migration error-tolerant contract — those callers already log
+    on None and route to fallback prompts.
     """
     try:
-        # Reuse an existing loop when one is running (FastAPI worker
-        # threadpool calls these helpers from within asyncio.to_thread
-        # which has no loop on the thread).
+        # Detect a running event loop. If one is running, the caller is
+        # async and is misusing this helper — fall back to a worker-thread
+        # bridge but log loudly so we catch it in code review.
         try:
             asyncio.get_running_loop()
             in_loop = True
@@ -287,8 +297,14 @@ def transcribe_bytes_sync(
             in_loop = False
 
         if in_loop:
-            # We're inside an event loop — cannot use asyncio.run.
-            # Schedule onto a new loop in a worker thread.
+            logger.error(
+                "transcribe_bytes_sync called from a running event loop — "
+                "this blocks the loop. Switch the caller to "
+                "`await transcribe_async(...)` instead."
+            )
+            # Schedule onto a new loop in a worker thread. Kept as a soft
+            # fallback so a stray caller doesn't crash, but the log line
+            # above is the contract violation.
             import concurrent.futures
 
             def _run() -> Optional[str]:

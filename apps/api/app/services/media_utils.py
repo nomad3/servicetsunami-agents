@@ -84,9 +84,17 @@ def build_media_parts(
     mime_type: str,
     caption: str = "",
     filename: str = "",
+    *,
+    precomputed_transcript: Optional[str] = None,
 ) -> Tuple[List[Dict], Dict]:
     """
     Convert raw media bytes into LLM-compatible message parts.
+
+    For audio: if ``precomputed_transcript`` is supplied the function will
+    NOT call ``transcribe_bytes_sync`` (which blocks the event loop and is
+    only safe from sync handlers). Async callers MUST resolve the
+    transcript via ``await transcription_client.transcribe_async(...)``
+    first and pass it through.
 
     Returns:
         (parts, attachment_meta)
@@ -123,7 +131,12 @@ def build_media_parts(
     if media_class == "image":
         parts = _build_image_parts(media_bytes, clean_mime, caption)
     elif media_class == "audio":
-        parts = _build_audio_parts(media_bytes, clean_mime, caption)
+        parts = _build_audio_parts(
+            media_bytes,
+            clean_mime,
+            caption,
+            precomputed_transcript=precomputed_transcript,
+        )
     elif media_class == "pdf":
         parts = _build_pdf_parts(media_bytes, caption, filename)
     elif media_class == "spreadsheet":
@@ -162,15 +175,24 @@ def _build_audio_parts(
     audio_bytes: bytes,
     mime_type: str,
     caption: str,
+    *,
+    precomputed_transcript: Optional[str] = None,
 ) -> List[Dict]:
-    """Transcribe audio via the code-worker transcription workflow; fall back to inline_data."""
-    transcript: Optional[str] = None
-    try:
-        from app.services.transcription_client import transcribe_bytes_sync
+    """Transcribe audio via the code-worker transcription workflow; fall back to inline_data.
 
-        transcript = transcribe_bytes_sync(audio_bytes)
-    except Exception:
-        logger.exception("Inline audio transcription dispatch failed; falling back to inline_data")
+    When ``precomputed_transcript`` is provided we skip the sync workflow
+    dispatch entirely — the async caller already resolved the transcript
+    via ``transcribe_async``. This avoids blocking the event loop with
+    ``transcribe_bytes_sync``'s ThreadPoolExecutor bridge.
+    """
+    transcript: Optional[str] = precomputed_transcript
+    if transcript is None:
+        try:
+            from app.services.transcription_client import transcribe_bytes_sync
+
+            transcript = transcribe_bytes_sync(audio_bytes)
+        except Exception:
+            logger.exception("Inline audio transcription dispatch failed; falling back to inline_data")
 
     if transcript:
         prompt = f"[Voice message transcription]: {transcript}"

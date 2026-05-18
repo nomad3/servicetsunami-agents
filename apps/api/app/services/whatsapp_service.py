@@ -764,11 +764,25 @@ class WhatsAppService:
                 except Exception:
                     pass
             elif media_bytes and media_type == "audio":
-                # Audio (voice notes): transcribe locally with Whisper first
+                # Audio (voice notes): transcribe via the code-worker
+                # workflow. _handle_inbound is async, so we MUST go through
+                # transcribe_async — transcribe_bytes_sync's ThreadPoolExecutor
+                # bridge blocks the event loop. See transcription_client.py.
                 try:
                     from app.services.media_utils import build_media_parts
-                    from app.services.transcription_client import transcribe_bytes_sync
-                    transcript = transcribe_bytes_sync(media_bytes)
+                    from app.services.transcription_client import (
+                        TranscriptionUnavailable,
+                        transcribe_async,
+                    )
+                    transcript = None
+                    try:
+                        tr = await transcribe_async(media_bytes)
+                        if tr.status == "completed":
+                            transcript = tr.transcript
+                    except TranscriptionUnavailable as exc:
+                        logger.warning(
+                            f"Transcription unavailable for {sender_phone}: {exc}"
+                        )
                     if transcript:
                         logger.info(f"Whisper transcript ({len(transcript)} chars) for {sender_phone}")
                         doc_text = transcript
@@ -780,6 +794,7 @@ class WhatsAppService:
                             mime_type=media_mime,
                             caption=media_caption or "",
                             filename="",
+                            precomputed_transcript="",  # already resolved; skip sync dispatch
                         )
                 except Exception as e:
                     logger.warning(f"Audio processing failed for {sender_phone}: {e}")
