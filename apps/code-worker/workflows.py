@@ -318,7 +318,7 @@ _INTEGRATION_NOT_CONNECTED_MESSAGES = {
     ),
     "kimi_k2": (
         "Kimi K2 is not connected. "
-        "Please paste a MOONSHOT_API_KEY in Settings → Integrations."
+        "Please connect your Moonshot account in Settings → Integrations."
     ),
 }
 

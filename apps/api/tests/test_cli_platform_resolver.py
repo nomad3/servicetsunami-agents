@@ -328,3 +328,22 @@ def test_chain_kimi_k2_cooldown_respected(monkeypatch):
     chain = r.resolve_cli_chain(None, tid, explicit_platform="kimi_k2")
     assert "kimi_k2" not in chain
     assert "claude_code" in chain
+
+
+def test_kimi_k2_not_connected_message_classifies_as_missing_credential():
+    """The worker-side not-connected message for kimi_k2 (returned both
+    by ``_fetch_integration_credentials`` 404 path and the executor's
+    empty-api-key path) MUST be classified as ``missing_credential`` so
+    the orchestrator chain-walks past kimi_k2 WITHOUT a 10-minute
+    cooldown. A quick reconnect should be picked up on the next chat
+    turn, not masked by cooldown.
+
+    Regression for B1 in the superpowers review of PR #552: the prior
+    phrasing ("Please paste a MOONSHOT_API_KEY in Settings → Integrations")
+    didn't hit any branch of the missing-credential alternation in
+    ``packages/cli_orchestrator/classifier.py``."""
+    msg = (
+        "Kimi K2 is not connected. "
+        "Please connect your Moonshot account in Settings → Integrations."
+    )
+    assert r.classify_error(msg) == "missing_credential"

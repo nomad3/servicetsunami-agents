@@ -28,6 +28,7 @@ from .claude_code import ClaudeCodeAdapter
 from .codex import CodexAdapter
 from .copilot_cli import CopilotCliAdapter
 from .gemini_cli import GeminiCliAdapter
+from .kimi_k2 import KimiK2Adapter
 from .opencode import OpencodeAdapter
 from .shell import ShellAdapter
 
@@ -36,6 +37,7 @@ __all__ = [
     "CodexAdapter",
     "CopilotCliAdapter",
     "GeminiCliAdapter",
+    "KimiK2Adapter",
     "OpencodeAdapter",
     "ShellAdapter",
 ]

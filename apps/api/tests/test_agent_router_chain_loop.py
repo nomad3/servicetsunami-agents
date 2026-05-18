@@ -335,3 +335,27 @@ def test_routing_summary_no_leak_invariant_end_to_end(monkeypatch):
     # Inside routing_summary
     if isinstance(meta.get("routing_summary"), dict):
         assert forbidden.isdisjoint(meta["routing_summary"].keys())
+
+
+# ── Paid-CLI fast-pin set membership ────────────────────────────────
+
+
+def test_paid_cli_fast_pin_set_includes_oss_lane_b_clis():
+    """Wave 1c review I1: the explicit-platform fast-pin set must
+    include the Lane B OSS coding CLIs (``qwen_code`` and ``kimi_k2``)
+    alongside the original four. Missing entries cause a paid /
+    integration-wired tenant to silently downgrade to local Gemma 4 on
+    a transient resolver hiccup — the very regression PR #245 review
+    C5 closed for the original four CLIs.
+
+    Pinning the set membership here means a future edit that drops one
+    of these names has to do so deliberately."""
+    expected = {
+        "gemini_cli",
+        "claude_code",
+        "codex",
+        "copilot_cli",
+        "qwen_code",
+        "kimi_k2",
+    }
+    assert agent_router._PAID_CLI_FAST_PIN_SET == expected

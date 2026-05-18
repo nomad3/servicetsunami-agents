@@ -278,7 +278,8 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
         "display_name": "Kimi K2 (Moonshot AI)",
         "description": (
             "Route chat agents to Moonshot AI's Kimi K2 coding model. "
-            "OpenAI-compatible API; paste your MOONSHOT_API_KEY to enable."
+            "OpenAI-compatible API; paste your MOONSHOT_API_KEY to enable. "
+            "Calls are billed against your Moonshot account."
         ),
         "icon": "FaRobot",
         "auth_type": "manual",
