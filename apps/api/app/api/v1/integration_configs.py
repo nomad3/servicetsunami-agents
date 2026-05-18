@@ -268,17 +268,17 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
         # Moonshot AI's Kimi K2 coding-tuned model — Wave 1c Lane B
         # (Apache 2.0 weights, commercial resale permitted; see
         # ``docs/plans/2026-05-18-cli-integration-catalog.md``). The
-        # ``kimi-cli`` package (``@moonshotai/kimi-cli``) is installed
-        # globally in the code-worker image and routed to via the
-        # ``kimi_k2`` platform name in ``cli_platform_resolver.py`` and
-        # ``cli_executors/kimi.py``. The API is OpenAI-compatible at
-        # ``https://api.moonshot.ai/v1`` (international) or
-        # ``https://api.moonshot.cn/v1`` (Chinese tier) — override via
-        # the optional ``base_url`` credential below.
+        # executor talks to Moonshot's OpenAI-compatible HTTP endpoint
+        # directly from ``cli_executors/kimi.py`` — there is no local
+        # CLI binary involved (Moonshot's developer CLI is not a
+        # runtime dependency). Default base URL is
+        # ``https://api.moonshot.ai/v1`` (international); switch to
+        # ``https://api.moonshot.cn/v1`` for the Chinese tier via the
+        # optional ``base_url`` credential below.
         "display_name": "Kimi K2 (Moonshot AI)",
         "description": (
             "Route chat agents to Moonshot AI's Kimi K2 coding model. "
-            "OpenAI-compatible API; paste your MOONSHOT_API_KEY to enable. "
+            "OpenAI-compatible HTTP API; paste your MOONSHOT_API_KEY to enable. "
             "Calls are billed against your Moonshot account."
         ),
         "icon": "FaRobot",
@@ -290,7 +290,7 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
             {"key": "base_url", "label": "Base URL", "type": "text", "required": False,
              "help": "Defaults to https://api.moonshot.ai/v1. Set to https://api.moonshot.cn/v1 for the Chinese-region tier."},
             {"key": "model", "label": "Model", "type": "text", "required": False,
-             "help": "Defaults to kimi-k2-instruct. Override only if Moonshot publishes a newer coding-tuned variant."},
+             "help": "Defaults to kimi-k2-0905-preview. Override only if Moonshot publishes a newer coding-tuned variant."},
         ],
     },
 }

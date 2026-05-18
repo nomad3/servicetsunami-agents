@@ -1,45 +1,50 @@
-"""Kimi K2 (Moonshot AI) CLI chat executor — Wave 1c.
+"""Kimi K2 (Moonshot AI) chat executor — Wave 1c, HTTP-direct.
 
-Kimi K2 is Moonshot AI's coding-tuned model. The model weights ship under
-Apache 2.0 (Lane B per ``docs/plans/2026-05-18-cli-integration-catalog.md``
-— commercial resale permitted). The API surface is OpenAI-compatible:
+Kimi K2 is Moonshot AI's coding-tuned model. Weights ship under Apache
+2.0 (Lane B per ``docs/plans/2026-05-18-cli-integration-catalog.md`` —
+commercial resale permitted). The wire surface is OpenAI-compatible:
 
   * Base URL: ``https://api.moonshot.ai/v1`` (international tier; the
     Chinese tier is ``https://api.moonshot.cn/v1``).
-  * Auth: ``MOONSHOT_API_KEY`` bearer token.
-  * Default model: ``kimi-k2-instruct``.
+  * Auth: ``Authorization: Bearer <MOONSHOT_API_KEY>``.
+  * Default model: ``kimi-k2-0905-preview``.
 
-The official CLI is ``kimi-cli`` (npm: ``@moonshotai/kimi-cli``). The
-code-worker Dockerfile globally installs the package alongside the other
-``npm install -g`` CLIs (Claude Code / Codex / Gemini / Copilot), so the
-binary is on PATH at runtime. The executor falls back to
-``npx @moonshotai/kimi-cli`` if the binary isn't resolvable — useful for
-local dev shells that haven't run the global install.
+History note: an earlier draft of this executor tried to shell out to
+a local Moonshot CLI installed via npm. No such npm package exists;
+Moonshot's developer CLI is a Python tool hosted on GitHub, not on
+npm. Rather than chase a moving CLI target, we talk to the
+OpenAI-compatible HTTP endpoint directly via httpx (already a
+code-worker dependency). Zero binary on disk, zero docker image
+bloat, stable wire shape.
 
-The shape mirrors ``cli_executors.gemini`` and ``cli_executors.codex``:
+The executor uses the OpenAI Chat Completions streaming protocol
+(``stream=true``), parses Server-Sent Events (``data: {...}`` lines),
+extracts ``choices[0].delta.content`` chunks, and feeds them into the
+existing ``SessionEventEmitter`` so the terminal/Den surfaces see live
+tokens just like the other CLIs.
 
-  * Credentials fetched via ``_fetch_integration_credentials("kimi_k2", ...)``
-    from the tenant vault (the integration card on the Integrations page
-    stores ``api_key``).
-  * ``MOONSHOT_API_KEY`` falls back to the process env if no per-tenant
-    credential is wired, which lets a single shared MOONSHOT_API_KEY
-    operator-provisioned at container start work for every tenant.
-  * Tenant HOME redirected onto the workspaces volume (task #267 Phase 1).
-  * cwd resolved against the tenant workspace projects dir (task #259).
-  * Streaming pump uses the passthrough parser — kimi-cli's JSONL stream
-    shape is not yet stable enough to write a typed mapper for. Once it
-    settles we can promote it to a dedicated stream parser like
-    ``gemini_stream_parser`` without changing the executor body.
+Credentials flow mirrors the rest of the suite:
+
+  * Vault lookup via ``_fetch_integration_credentials("kimi_k2", ...)``;
+    the integration card stores ``api_key`` (+ optional ``base_url`` /
+    ``model`` overrides).
+  * Env-var fallback (``MOONSHOT_API_KEY``) so an operator-shared key
+    works without per-tenant wiring.
+  * Tenant HOME redirected onto the workspaces volume — kept for
+    parity even though we no longer spawn a subprocess; future tool
+    handlers may write into HOME and we want them rooted on the
+    tenant-scoped volume.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
-import shutil
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+import httpx
 
 import cli_runtime
-from cli_executors import passthrough_stream_parser
 from session_event_emitter import SessionEventEmitter
 
 logger = logging.getLogger(__name__)
@@ -50,22 +55,80 @@ logger = logging.getLogger(__name__)
 # container by setting ``KIMI_MODEL`` / ``MOONSHOT_BASE_URL`` env vars.
 # International endpoint is the default — switch to ``api.moonshot.cn``
 # only for tenants who need the Chinese-region tier.
-_DEFAULT_MODEL = os.environ.get("KIMI_MODEL", "kimi-k2-instruct")
+_DEFAULT_MODEL = os.environ.get("KIMI_MODEL", "kimi-k2-0905-preview")
 _DEFAULT_BASE_URL = os.environ.get("MOONSHOT_BASE_URL", "https://api.moonshot.ai/v1")
 
+# Overall request budget. Moonshot completions occasionally take 30-60s
+# for long coding turns; cap at 20 minutes to match the subprocess-era
+# 1500s timeout the other CLIs use.
+_REQUEST_TIMEOUT_SECS = 1200.0
 
-def _resolve_cli_binary() -> list[str]:
-    """Return the argv prefix for invoking kimi-cli.
 
-    Prefers the globally installed ``kimi`` binary (installed by
-    ``apps/code-worker/Dockerfile`` via ``npm install -g
-    @moonshotai/kimi-cli``). Falls back to ``npx @moonshotai/kimi-cli``
-    when the global install isn't on PATH — useful in local dev shells
-    and in tests that don't bake the npm package into the image.
+def _parse_sse_stream(
+    lines: Iterable[bytes],
+) -> Iterable[Dict[str, Any]]:
+    """Yield decoded JSON payloads from an OpenAI-style SSE stream.
+
+    OpenAI/Moonshot stream chunks look like::
+
+        data: {"id":"...","choices":[{"delta":{"content":"hel"}}]}
+        data: {"id":"...","choices":[{"delta":{"content":"lo"}}]}
+        data: [DONE]
+
+    Blank lines separate events; ``[DONE]`` terminates the stream.
+    Anything that isn't a ``data:`` line is ignored (comments, retries,
+    keepalives).
     """
-    if shutil.which("kimi"):
-        return ["kimi"]
-    return ["npx", "--yes", "@moonshotai/kimi-cli"]
+    for raw in lines:
+        if not raw:
+            continue
+        if isinstance(raw, bytes):
+            try:
+                line = raw.decode("utf-8", errors="replace")
+            except Exception:
+                continue
+        else:
+            line = raw
+        line = line.strip()
+        if not line or not line.startswith("data:"):
+            continue
+        payload = line[len("data:"):].strip()
+        if payload == "[DONE]":
+            return
+        try:
+            yield json.loads(payload)
+        except json.JSONDecodeError:
+            logger.debug("Kimi SSE: undecodable payload %r", payload[:120])
+            continue
+
+
+def _extract_delta(
+    chunk: Dict[str, Any],
+) -> Tuple[str, str, Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]]]:
+    """Pull (content, reasoning, tool_calls, usage) from one SSE chunk.
+
+    Moonshot keeps strict OpenAI compatibility, so the shape is:
+
+      choices[0].delta = {
+          "content": "...",            # streamed assistant tokens
+          "reasoning_content": "...",  # K2 "thinking" stream (when enabled)
+          "tool_calls": [...],         # streamed function call args
+      }
+      usage = {prompt_tokens, completion_tokens, total_tokens}
+                                       # only on the final chunk
+    """
+    content = ""
+    reasoning = ""
+    tool_calls: Optional[List[Dict[str, Any]]] = None
+    choices = chunk.get("choices") or []
+    if choices:
+        delta = (choices[0] or {}).get("delta") or {}
+        content = delta.get("content") or ""
+        reasoning = delta.get("reasoning_content") or ""
+        if delta.get("tool_calls"):
+            tool_calls = delta["tool_calls"]
+    usage = chunk.get("usage")
+    return content, reasoning, tool_calls, usage
 
 
 def execute_kimi_chat(task_input, session_dir: str):
@@ -73,14 +136,12 @@ def execute_kimi_chat(task_input, session_dir: str):
         _fetch_integration_credentials,
         _INTEGRATION_NOT_CONNECTED_MESSAGES,
         ChatCliResult,
-        WORKSPACE,
     )
 
     # ── credential resolution ─────────────────────────────────────────
-    # Order: env var (operator shared key) → tenant vault (per-tenant key).
-    # Vault wins when both are present — a tenant that bothered to wire
-    # their own MOONSHOT_API_KEY into the Integrations page expects it
-    # to be used.
+    # Order: tenant vault wins; env var is a fall-back so an operator
+    # can wire a shared MOONSHOT_API_KEY into the container without
+    # touching every tenant.
     api_key = ""
     base_url = _DEFAULT_BASE_URL
     model = _DEFAULT_MODEL
@@ -90,9 +151,6 @@ def execute_kimi_chat(task_input, session_dir: str):
         base_url = creds.get("base_url", "") or base_url
         model = creds.get("model", "") or model
     except Exception as exc:
-        # Vault miss is the common-case "tenant didn't connect Kimi yet"
-        # path; fall back to the shared env var. Only return a friendly
-        # not-connected error if BOTH paths are empty.
         logger.info("Kimi vault lookup failed (%s); falling back to env", exc)
 
     if not api_key:
@@ -109,7 +167,16 @@ def execute_kimi_chat(task_input, session_dir: str):
             ),
         )
 
-    # ── tenant HOME on workspaces volume (task #267 Phase 1) ─────────
+    # Allow per-tenant override of the model via ChatCliInput.model — same
+    # convention the other executors use when an agent pins a specific
+    # variant.
+    requested_model = getattr(task_input, "model", "") or ""
+    if requested_model:
+        model = requested_model
+
+    # ── tenant HOME on workspaces volume (kept for parity with the
+    # subprocess executors — no fork here, but future tool handlers may
+    # write transient files and should land on the tenant volume).
     try:
         tenant_home = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
     except (ValueError, OSError) as exc:
@@ -118,43 +185,44 @@ def execute_kimi_chat(task_input, session_dir: str):
             task_input.tenant_id, exc, session_dir,
         )
         tenant_home = session_dir
+    # Touch so the dir exists even if no tool fires; harmless if it does.
+    os.makedirs(tenant_home, exist_ok=True)
 
-    prompt = task_input.message
-    if task_input.instruction_md_content.strip():
-        prompt = (
-            f"{task_input.instruction_md_content.strip()}"
-            f"\n\n# User Request\n\n{task_input.message}"
-        )
+    # ── compose the request body ──────────────────────────────────────
+    system_prompt = (task_input.instruction_md_content or "").strip()
+    user_message = task_input.message or ""
 
-    # ── build argv ────────────────────────────────────────────────────
-    # kimi-cli mirrors the qwen-code / gemini-cli shape: prompt is passed
-    # via ``-p`` (or stdin), and ``--output-format json`` produces a
-    # single end-of-run JSON blob we can parse.
-    cmd = _resolve_cli_binary() + [
-        "-p", prompt,
-        "--model", model,
-        "--output-format", "json",
-        "-y",
-    ]
+    messages: List[Dict[str, Any]] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": user_message})
 
-    # ── env propagation ───────────────────────────────────────────────
-    # kimi-cli reads MOONSHOT_API_KEY and (optionally) MOONSHOT_BASE_URL
-    # from env. Some forks read OPENAI_API_KEY / OPENAI_BASE_URL because
-    # the wire shape is OpenAI-compatible; we export both pairs so the
-    # CLI picks whichever convention it's compiled against. Stripping
-    # any existing OPENAI_* avoids a stray ChatGPT key leaking into a
-    # Kimi request.
-    env = os.environ.copy()
-    env["HOME"] = tenant_home
-    env["MOONSHOT_API_KEY"] = api_key
-    env["MOONSHOT_BASE_URL"] = base_url
-    env["OPENAI_API_KEY"] = api_key
-    env["OPENAI_BASE_URL"] = base_url
+    body: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
 
-    # ── tenant workspace cwd (task #259) ─────────────────────────────
-    _cwd_fallback = WORKSPACE if os.path.isdir(WORKSPACE) else session_dir
-    cli_cwd = cli_runtime.resolve_cli_cwd(task_input, _cwd_fallback)
-    env["WORKSPACE"] = cli_cwd
+    # Tool/function specs — defensive: the field is not currently on
+    # ChatCliInput, but the orchestrator layer may attach it at dispatch
+    # time. Accept either an already-list-of-dicts or a JSON-encoded
+    # string.
+    tool_specs = getattr(task_input, "tool_specs", None)
+    if isinstance(tool_specs, str) and tool_specs.strip():
+        try:
+            tool_specs = json.loads(tool_specs)
+        except json.JSONDecodeError:
+            logger.warning("Kimi: ignoring malformed tool_specs JSON")
+            tool_specs = None
+    if isinstance(tool_specs, list) and tool_specs:
+        body["tools"] = tool_specs
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
 
     # ── streaming emitter ────────────────────────────────────────────
     emitter = SessionEventEmitter(
@@ -163,66 +231,152 @@ def execute_kimi_chat(task_input, session_dir: str):
         platform="kimi_k2",
         attempt=getattr(task_input, "attempt", 1) or 1,
     )
-    on_chunk = passthrough_stream_parser.build_parser(emitter) if emitter.enabled else None
-    try:
-        result = cli_runtime.run_cli_with_heartbeat(
-            cmd,
-            label="Kimi K2 CLI",
-            timeout=1500,
-            env=env,
-            cwd=cli_cwd,
-            on_chunk=on_chunk,
+
+    # Lifecycle: subprocess_started equivalent — surfaces in the Den as
+    # the "CLI booted" marker for the kimi tab.
+    if emitter.enabled:
+        emitter.emit_chunk(
+            "lifecycle",
+            f"→ Kimi K2 HTTP request: {model}\n",
+            raw={"event": "request_started", "platform": "kimi_k2", "model": model},
         )
-    finally:
+
+    completion_url = f"{base_url.rstrip('/')}/chat/completions"
+
+    full_text_parts: List[str] = []
+    usage_block: Optional[Dict[str, Any]] = None
+    pending_tool_calls: List[Dict[str, Any]] = []
+
+    try:
+        with httpx.Client(timeout=_REQUEST_TIMEOUT_SECS) as client:
+            with client.stream(
+                "POST", completion_url, headers=headers, json=body,
+            ) as resp:
+                if resp.status_code >= 400:
+                    # Drain so we can include the error body in the
+                    # ChatCliResult (Moonshot returns structured JSON).
+                    err_body = b"".join(resp.iter_bytes()).decode(
+                        "utf-8", errors="replace",
+                    )
+                    snippet = err_body[:2000]
+                    logger.warning(
+                        "Kimi HTTP %s on %s: %s",
+                        resp.status_code, completion_url, snippet[:500],
+                    )
+                    emitter.emit_chunk(
+                        "lifecycle_error",
+                        f"✗ Kimi HTTP {resp.status_code}\n",
+                        raw={"event": "http_error", "status": resp.status_code},
+                    )
+                    return ChatCliResult(
+                        response_text="",
+                        success=False,
+                        error=f"Kimi HTTP {resp.status_code}: {snippet}",
+                        metadata={"platform": "kimi_k2", "model": model},
+                    )
+
+                for chunk in _parse_sse_stream(resp.iter_lines()):
+                    content, reasoning, tool_calls, usage = _extract_delta(chunk)
+                    if reasoning:
+                        emitter.emit_chunk("reasoning", reasoning)
+                    if content:
+                        full_text_parts.append(content)
+                        emitter.emit_chunk("text", content)
+                    if tool_calls:
+                        # OpenAI streams tool_calls as deltas with
+                        # incremental ``arguments``. We surface each
+                        # arrival as a ``tool_use`` chunk and aggregate
+                        # the raw payload for the final result metadata.
+                        for tc in tool_calls:
+                            name = ((tc or {}).get("function") or {}).get("name") or ""
+                            args = ((tc or {}).get("function") or {}).get("arguments") or ""
+                            label = name or f"call#{(tc or {}).get('index', '?')}"
+                            emitter.emit_chunk(
+                                "tool_use",
+                                f"→ Tool({label}) {args[:240]}\n",
+                                raw={"tool_call_delta": tc},
+                            )
+                            pending_tool_calls.append(tc)
+                    if usage:
+                        usage_block = usage
+    except httpx.HTTPError as exc:
+        msg = f"Kimi HTTP error: {exc}"
+        logger.warning(msg)
+        if emitter.enabled:
+            emitter.emit_chunk(
+                "lifecycle_error",
+                f"✗ {msg}\n",
+                raw={"event": "http_error", "kind": exc.__class__.__name__},
+            )
         emitter.close()
-
-    logger.info("Kimi CLI exit code: %s", result.returncode)
-    if result.stdout:
-        logger.info("Kimi CLI stdout: %s", result.stdout[:500])
-    if result.stderr:
-        logger.warning("Kimi CLI stderr: %s", result.stderr[:500])
-
-    if result.returncode != 0:
-        err = cli_runtime.safe_cli_error_snippet(result.stderr, result.stdout, 2000)
         return ChatCliResult(
             response_text="",
             success=False,
-            error=f"CLI exit {result.returncode}: {err}",
-            metadata={"platform": "kimi_k2"},
+            error=msg,
+            metadata={"platform": "kimi_k2", "model": model},
+        )
+    except Exception as exc:  # noqa: BLE001 — final defensive net
+        msg = f"Kimi unexpected error: {exc}"
+        logger.exception(msg)
+        if emitter.enabled:
+            emitter.emit_chunk(
+                "lifecycle_error",
+                f"✗ {msg}\n",
+                raw={"event": "unexpected_error", "kind": exc.__class__.__name__},
+            )
+        emitter.close()
+        return ChatCliResult(
+            response_text="",
+            success=False,
+            error=msg,
+            metadata={"platform": "kimi_k2", "model": model},
         )
 
-    raw = (result.stdout or "").strip()
-    if not raw:
+    full_text = "".join(full_text_parts).strip()
+
+    metadata: Dict[str, Any] = {
+        "platform": "kimi_k2",
+        "model": model,
+    }
+    if usage_block:
+        metadata["input_tokens"] = (
+            usage_block.get("prompt_tokens")
+            or usage_block.get("input_tokens")
+            or 0
+        )
+        metadata["output_tokens"] = (
+            usage_block.get("completion_tokens")
+            or usage_block.get("output_tokens")
+            or 0
+        )
+    if pending_tool_calls:
+        metadata["tool_calls"] = pending_tool_calls
+
+    # Closing lifecycle event mirrors cli_subprocess_finished for
+    # downstream cost/quality scoring.
+    if emitter.enabled:
+        emitter.emit_chunk(
+            "lifecycle",
+            "✓ Kimi K2 request complete\n",
+            raw={
+                "event": "request_finished",
+                "platform": "kimi_k2",
+                "model": model,
+                "usage": usage_block or {},
+            },
+        )
+    emitter.close()
+
+    if not full_text and not pending_tool_calls:
         return ChatCliResult(
             response_text="",
             success=False,
             error="Kimi K2 produced no output",
-            metadata={"platform": "kimi_k2"},
+            metadata=metadata,
         )
 
-    # kimi-cli emits the same OpenAI-shape JSON wrappers as the other
-    # OpenAI-compatible CLIs (gemini --output-format=json, qwen-code).
-    # Try the common keys before falling back to the raw text.
-    try:
-        data = json.loads(raw)
-        text = (
-            data.get("result")
-            or data.get("response")
-            or data.get("content")
-            or data.get("text")
-            or raw
-        )
-        usage = data.get("usage") or {}
-        meta = {
-            "platform": "kimi_k2",
-            "input_tokens": usage.get("input_tokens") or usage.get("prompt_tokens") or 0,
-            "output_tokens": usage.get("output_tokens") or usage.get("completion_tokens") or 0,
-            "model": data.get("model", model),
-        }
-        return ChatCliResult(response_text=text, success=True, metadata=meta)
-    except json.JSONDecodeError:
-        return ChatCliResult(
-            response_text=raw,
-            success=True,
-            metadata={"platform": "kimi_k2", "model": model},
-        )
+    return ChatCliResult(
+        response_text=full_text,
+        success=True,
+        metadata=metadata,
+    )

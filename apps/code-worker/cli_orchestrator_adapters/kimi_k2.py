@@ -1,22 +1,22 @@
 """KimiK2Adapter — wraps cli_executors.kimi.execute_kimi_chat.
 
 Phase 2 worker-side ProviderAdapter for the ``kimi_k2`` platform (Wave
-1c). The binary on $PATH is ``kimi`` (the ``@moonshotai/kimi-cli`` npm
-package installs the binary named ``kimi``). The executor falls back
-to ``npx @moonshotai/kimi-cli`` when the global binary isn't on PATH;
-preflight here only checks for the globally-installed binary, since
-the npx fallback is a local-dev convenience rather than a production
-runtime path — production images install the CLI globally in the
-worker Dockerfile.
+1c). Unlike the other adapters in this directory, Kimi has no local
+CLI binary: the executor talks to Moonshot's OpenAI-compatible HTTP
+endpoint directly via httpx. (Moonshot publishes a Python developer
+CLI on GitHub, but it is not a runtime dependency and we do not bake
+it into the image.)
 
-Phase 2 doesn't use this adapter at runtime yet (Phase 3's
-ResilientExecutor flip is what actually consults the adapter map), but
-registering it now ensures the Kimi platform shows up in the chain at
-flip-time instead of silently dropping out.
+That means preflight collapses to a single check: do we have a
+Moonshot API key in the tenant vault (or a shared env-var fallback)?
+Cloud reachability is not probed up-front — Moonshot surfaces
+billing/quota errors as HTTP 4xx at request time, which
+``classify_error`` maps into the canonical Status enum.
 """
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from dataclasses import dataclass
 from typing import Optional
@@ -32,12 +32,7 @@ from cli_orchestrator.status import Status
 
 from cli_executors.kimi import execute_kimi_chat
 
-from cli_orchestrator.preflight import (
-    check_binary_on_path,
-)
-
 from ._common import (
-    binary_on_path,
     check_credential_for_platform,
     map_chat_cli_result_to_execution_result,
     time_preflight_helper,
@@ -67,13 +62,9 @@ class KimiK2Adapter:
     name = "kimi_k2"
 
     def preflight(self, req: ExecutionRequest) -> PreflightResult:
-        # 1. Binary on $PATH
-        with time_preflight_helper(self.name, "binary_on_path"):
-            br = check_binary_on_path("kimi")
-        if not br.ok:
-            return br
-
-        # 2. Credentials present
+        # 1. Credentials present in the tenant vault. The shared
+        # ``MOONSHOT_API_KEY`` operator env var acts as a fallback —
+        # if either path resolves, preflight passes.
         tenant_id = req.tenant_id or (req.payload or {}).get("tenant_id") or ""
         if tenant_id:
             with time_preflight_helper(self.name, "credentials_present"):
@@ -81,11 +72,15 @@ class KimiK2Adapter:
                     PreflightDeps.get(), tenant_id, self.name,
                 )
             if not cr.ok:
+                # Vault miss — accept ONLY if the operator wired a
+                # shared key into the worker container env.
+                if os.environ.get("MOONSHOT_API_KEY"):
+                    return PreflightResult.succeed()
                 return cr
 
-        # 3. Cloud API enabled — not probed at preflight. Moonshot's API
-        # returns billing/quota errors at request time; the classifier
-        # surfaces them from subprocess stderr on the runtime path.
+        # 2. Cloud API reachability — not probed at preflight.
+        # Moonshot surfaces billing/quota errors as HTTP 4xx at
+        # request time; ``classify_error`` maps them downstream.
 
         return PreflightResult.succeed()
 
