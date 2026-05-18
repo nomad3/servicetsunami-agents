@@ -41,6 +41,13 @@
 --     of precision. Enough to distinguish 0.6666 from 0.6667 (the
 --     2-of-3 vs 2-of-3-rounded edge); NUMERIC instead of FLOAT so the
 --     analyzer's aggregate arithmetic is bit-stable across replicas.
+--
+-- Wrapped in BEGIN/COMMIT (same pattern as migration 133) so a failure
+-- on any index/comment after a successful CREATE TABLE doesn't leave a
+-- half-applied state when run via `docker exec psql` per
+-- ~/.claude/.../migration_apply_pattern.md.
+
+BEGIN;
 
 CREATE TABLE IF NOT EXISTS skill_evals (
     id            UUID PRIMARY KEY,
@@ -102,3 +109,5 @@ COMMENT ON COLUMN skill_eval_grading.grading IS
 
 INSERT INTO _migrations(filename) VALUES ('136_skill_evals_tables.sql')
 ON CONFLICT DO NOTHING;
+
+COMMIT;
