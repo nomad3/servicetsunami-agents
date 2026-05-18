@@ -67,6 +67,7 @@ def _completed(returncode=0, stdout="", stderr=""):
 
 
 class TestEnvVarForModel:
+    # Prefixed slugs — LiteLLM-style ``provider/model``.
     def test_anthropic_prefix(self):
         assert aider_mod._env_var_for_model("anthropic/claude-3-5-sonnet-20241022") == "ANTHROPIC_API_KEY"
 
@@ -79,13 +80,62 @@ class TestEnvVarForModel:
     def test_gemini_prefix(self):
         assert aider_mod._env_var_for_model("gemini/gemini-2.0-flash") == "GEMINI_API_KEY"
 
-    def test_unknown_prefix_falls_back_to_openai(self):
-        """LiteLLM treats unprefixed / unknown-prefix slugs as OpenAI."""
-        assert aider_mod._env_var_for_model("some-future-model") == "OPENAI_API_KEY"
-        assert aider_mod._env_var_for_model("vendor-x/model-y") == "OPENAI_API_KEY"
+    # Bare slugs — tenant pastes the model name without the LiteLLM
+    # prefix. Each vendor token must route to the right provider env
+    # var, NOT silently fall through to OPENAI_API_KEY.
+    def test_bare_anthropic_claude_slug(self):
+        assert aider_mod._env_var_for_model("claude-3-5-sonnet-20241022") == "ANTHROPIC_API_KEY"
 
-    def test_empty_model_returns_openai(self):
-        assert aider_mod._env_var_for_model("") == "OPENAI_API_KEY"
+    def test_bare_openai_gpt_slug(self):
+        assert aider_mod._env_var_for_model("gpt-4o") == "OPENAI_API_KEY"
+
+    def test_bare_openai_o3_slug(self):
+        assert aider_mod._env_var_for_model("o3-mini") == "OPENAI_API_KEY"
+
+    def test_bare_deepseek_slug(self):
+        assert aider_mod._env_var_for_model("deepseek-chat") == "DEEPSEEK_API_KEY"
+
+    def test_bare_gemini_slug(self):
+        assert aider_mod._env_var_for_model("gemini-2.0-flash-exp") == "GEMINI_API_KEY"
+
+    def test_bare_kimi_slug(self):
+        assert aider_mod._env_var_for_model("kimi-k2-0905-preview") == "MOONSHOT_API_KEY"
+
+    def test_bare_glm_slug(self):
+        assert aider_mod._env_var_for_model("glm-4.6") == "ZHIPU_API_KEY"
+
+    def test_bare_mistral_slug(self):
+        assert aider_mod._env_var_for_model("mistral-large-latest") == "MISTRAL_API_KEY"
+
+    def test_bare_command_slug(self):
+        assert aider_mod._env_var_for_model("command-r-plus") == "COHERE_API_KEY"
+
+    def test_bare_groq_llama_instruct_slug(self):
+        assert aider_mod._env_var_for_model("llama-3.3-70b-instruct") == "GROQ_API_KEY"
+
+    # Unknown / unrecognised slugs MUST return ``None`` — silent fall-
+    # through to OPENAI_API_KEY masks misconfigured tenants as opaque
+    # auth failures further downstream.
+    def test_unknown_bare_slug_returns_none(self):
+        assert aider_mod._env_var_for_model("random-unknown-model") is None
+
+    def test_unknown_prefixed_slug_returns_none(self):
+        assert aider_mod._env_var_for_model("vendor-x/model-y") is None
+
+    def test_empty_model_returns_none(self):
+        assert aider_mod._env_var_for_model("") is None
+
+    # Dropped from the provider table (multi-credential providers) —
+    # they now return ``None`` instead of pretending one env var is
+    # enough.
+    def test_dropped_bedrock_returns_none(self):
+        assert aider_mod._env_var_for_model("bedrock/anthropic.claude-3-sonnet-20240229-v1:0") is None
+
+    def test_dropped_azure_returns_none(self):
+        assert aider_mod._env_var_for_model("azure/gpt-4o") is None
+
+    def test_dropped_ollama_returns_none(self):
+        assert aider_mod._env_var_for_model("ollama/qwen2.5-coder") is None
 
 
 # ── executor tests ───────────────────────────────────────────────────────
@@ -180,8 +230,11 @@ class TestExecuteAiderChat:
         # anthropic/* prefix. Generic alias also set for diagnostics.
         assert captured["env"].get("ANTHROPIC_API_KEY") == "sk-ant-FAKE"
         assert captured["env"].get("AIDER_MODEL_API_KEY") == "sk-ant-FAKE"
-        # Telemetry disabled.
-        assert captured["env"].get("AIDER_ANALYTICS") == "false"
+        # Telemetry and gitignore are disabled via documented CLI flags,
+        # NOT env vars (Aider does not honour AIDER_ANALYTICS /
+        # AIDER_GITIGNORE).
+        assert "--analytics-disable" in captured["cmd"]
+        assert "--no-gitignore" in captured["cmd"]
 
     def test_happy_path_env_fallback_anthropic(self, monkeypatch, tmp_path, wf):
         """No vault credentials, but ANTHROPIC_API_KEY is in the
@@ -228,6 +281,54 @@ class TestExecuteAiderChat:
         assert captured["env"].get("DEEPSEEK_API_KEY") == "sk-ds-FAKE"
         # ANTHROPIC_API_KEY must NOT be polluted with the deepseek key.
         assert captured["env"].get("ANTHROPIC_API_KEY") != "sk-ds-FAKE"
+
+    def test_unknown_model_slug_returns_clear_error(self, monkeypatch, tmp_path, wf):
+        """Bare-slug models that don't match any provider rule must
+        produce a clear "Unknown model — use provider/model format"
+        error instead of silently binding to OpenAI and surfacing a
+        confusing auth error several seconds later."""
+        monkeypatch.setattr(
+            wf, "_fetch_integration_credentials",
+            lambda i, t: {"model": "random-unknown-model", "api_key": "sk-FAKE"},
+        )
+        # If we reach run_cli_with_heartbeat we've failed the contract.
+        def boom(*a, **kw):
+            raise AssertionError("subprocess should not be spawned for unknown models")
+        monkeypatch.setattr(cli_runtime, "run_cli_with_heartbeat", boom)
+
+        out = aider_mod.execute_aider_chat(
+            _make_input(),
+            session_dir=str(tmp_path),
+        )
+        assert out.success is False
+        assert "Unknown model" in out.error
+        assert "provider/model" in out.error
+
+    def test_stderr_redaction_strips_api_key_prefix(self, monkeypatch, tmp_path, wf):
+        """LiteLLM error messages routinely echo the bad API key back.
+        The redactor must scrub ``sk-ant-…`` / ``sk-…`` substrings
+        before the snippet lands in ``ChatCliResult.error`` — otherwise
+        the secret leaks into the UI and downstream logs."""
+        monkeypatch.setattr(
+            wf, "_fetch_integration_credentials",
+            lambda i, t: {"model": "anthropic/claude-3-5-sonnet-20241022", "api_key": "sk-ant-FAKE"},
+        )
+        monkeypatch.setattr(
+            cli_runtime, "run_cli_with_heartbeat",
+            lambda cmd, **kw: _completed(
+                returncode=1,
+                stdout="",
+                stderr="Invalid API key: sk-ant-abc123def456ghi789-this-is-secret",
+            ),
+        )
+        out = aider_mod.execute_aider_chat(
+            _make_input(),
+            session_dir=str(tmp_path),
+        )
+        assert out.success is False
+        # The secret prefix MUST NOT appear in the surfaced error.
+        assert "sk-ant-abc123def456" not in out.error
+        assert "sk-ant-abc" not in out.error
 
     def test_non_zero_exit_returns_friendly_error(self, monkeypatch, tmp_path, wf):
         monkeypatch.setattr(
@@ -361,3 +462,30 @@ class TestExtractResponse:
         text, meta = aider_mod._extract_response("")
         assert text == ""
         assert meta == {}
+
+    def test_strips_banner_without_repo_map_or_rule(self):
+        """With ``--no-pretty`` Aider emits no ``─`` rule; if cwd isn't
+        a git repo there's no ``Repo-map:`` line either. The parser
+        must still strip the banner cleanly. Regression for the prior
+        delimiter-scan-only implementation that left the banner intact
+        whenever neither marker appeared."""
+        stdout = (
+            "Aider v0.78.0\n"
+            "Model: gpt-4o with diff edit format\n"
+            "Hello, this is the body.\n"
+            "Tokens: 100 sent, 50 received.\n"
+        )
+        text, meta = aider_mod._extract_response(stdout)
+        assert text == "Hello, this is the body."
+        assert "Aider v0.78.0" not in text
+        assert "Model:" not in text
+        assert meta.get("output_tokens") == 50
+
+    def test_empty_body_returns_empty_not_banner(self):
+        """When the body slice is empty (banner-only output), the
+        parser must return ``""`` — NOT fall back to the banner. The
+        executor's ``if not response_text:`` branch then surfaces a
+        clean "no output" error so the resolver can chain."""
+        stdout = "Aider v0.65.0\nTokens: 100 sent, 50 received.\n"
+        text, _ = aider_mod._extract_response(stdout)
+        assert text == ""

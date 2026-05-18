@@ -451,6 +451,18 @@ def test_chain_aider_explicit_platform_wins(monkeypatch):
     assert chain.index("aider") < chain.index("claude_code")
 
 
+def test_chain_aider_cooldown_respected(monkeypatch):
+    """A quota'd Aider is filtered from the chain just like the other
+    CLIs (only opencode is exempt from cooldown). Mirrors the kimi_k2 /
+    qwen_code cooldown contract."""
+    tid = uuid.uuid4()
+    _stub_connected(monkeypatch, {"aider", "claude_code"})
+    r.mark_cooldown(tid, "aider", reason="quota")
+    chain = r.resolve_cli_chain(None, tid, explicit_platform="aider")
+    assert "aider" not in chain
+    assert "claude_code" in chain
+
+
 def test_aider_not_connected_message_classifies_as_missing_credential():
     """The worker-side not-connected message for ``aider`` MUST be
     classified as ``missing_credential`` so the orchestrator chain-walks

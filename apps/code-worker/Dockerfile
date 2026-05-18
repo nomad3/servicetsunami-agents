@@ -43,6 +43,10 @@ RUN npm install -g \
 # releases ~weekly and minor releases occasionally rename flags or shift
 # stdout formatting (the executor's stdout parser depends on the banner
 # / footer shape). Bump deliberately, not by accident on image rebuild.
+#
+# TODO: 0.65.0 is the Wave-2c rollout pin; bump to a current Aider
+# release in a follow-up PR once the executor's stdout parser is
+# re-verified against the newer banner/footer shape.
 RUN pip install --no-cache-dir aider-chat==0.65.0
 
 # Python deps

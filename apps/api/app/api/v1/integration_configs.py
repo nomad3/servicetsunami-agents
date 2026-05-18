@@ -286,26 +286,30 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
         ],
     },
     # NOTE: Direct-API LLM cards (`anthropic_llm`, `gemini_llm`) were
-    # removed. The platform routes chat agents through CLI OAuth
-    # subscriptions only — Claude Code, Gemini CLI, GitHub Copilot CLI,
-    # Codex CLI — not raw API keys. The AI Models tab in the UI handles
-    # any remaining provider-key flows.
+    # removed for the chat path — chat agents routed through CLI OAuth
+    # subscriptions (Claude Code, Gemini CLI, GitHub Copilot CLI, Codex
+    # CLI). The cards below (``aider``, ``kimi_k2``) are BYOK API-key
+    # surfaces for CLI-binary integrations that don't have an OAuth
+    # subscription path — they coexist with the subscription cards
+    # rather than replacing them. The AI Models tab in the UI handles
+    # any remaining provider-key flows outside this registry.
     "aider": {
         # Wave 2c of the CLI integration catalog (#272). Aider
         # (https://aider.chat — paul-gauthier/aider, Apache 2.0) is a
         # Python CLI binary (``pip install aider-chat``) that wraps
-        # LiteLLM and pair-programs against ANY provider you give it a
-        # key for: Anthropic, OpenAI, DeepSeek, Gemini, Mistral, Ollama,
-        # Bedrock, etc. The executor lives in
-        # ``apps/code-worker/cli_executors/aider.py`` and derives the
-        # right env var name (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)
-        # from the ``model`` slug's LiteLLM provider prefix.
+        # LiteLLM and pair-programs against any single-API-key provider.
+        # The executor lives in ``apps/code-worker/cli_executors/aider.py``
+        # and derives the right env var name (ANTHROPIC_API_KEY,
+        # OPENAI_API_KEY, etc.) from the ``model`` slug. Multi-credential
+        # providers (Bedrock / Azure / Ollama) are NOT supported by this
+        # card — they need dedicated cards in a future wave.
         "display_name": "Aider",
         "description": (
-            "Connect Aider with your Anthropic / OpenAI / DeepSeek API key. "
-            "Aider is BYOK to any provider — pick the model slug below and "
-            "paste the matching provider key. Calls are billed against the "
-            "provider account you choose, not against us."
+            "Connect Aider with a provider API key. Supported providers: "
+            "Anthropic, OpenAI, DeepSeek, Google (Gemini), Moonshot (Kimi), "
+            "Zhipu (GLM), Mistral, Cohere, Groq. Pick a model slug below "
+            "and paste the matching provider key. Calls are billed against "
+            "the provider account you choose, not against us."
         ),
         "icon": "FaTools",
         "auth_type": "api_key",
