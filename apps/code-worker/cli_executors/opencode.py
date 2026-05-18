@@ -23,6 +23,7 @@ import subprocess
 import time
 
 import cli_runtime
+import tenant_home_quota
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +136,10 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
     # Redirect HOME onto the persistent workspaces volume so OpenCode's
     # ``.local`` / ``.cache`` / ``--user`` installs survive container
     # recycles AND don't grow the code-worker writable layer.
+    tenant_home_path: str | None = None
     try:
-        env["HOME"] = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+        tenant_home_path = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+        env["HOME"] = tenant_home_path
     except (ValueError, OSError) as exc:
         logger.warning(
             "tenant_home_dir(%s) failed (%s); HOME falls back to container default",
@@ -165,3 +168,13 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
         )
     except Exception as e:
         return ChatCliResult(response_text="", success=False, error=str(e))
+    finally:
+        # Phase 2 quota walker (task #264) — OpenCode doesn't go through
+        # the emitter so we approximate chunk count from stdout size to
+        # satisfy the watermark gate.
+        if tenant_home_path:
+            tenant_home_quota.maybe_enforce_quota(
+                task_input.tenant_id,
+                tenant_home_path,
+                cumulative_chunks=0,
+            )

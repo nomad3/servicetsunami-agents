@@ -14,6 +14,7 @@ import logging
 import os
 
 import cli_runtime
+import tenant_home_quota
 from cli_executors import passthrough_stream_parser
 from session_event_emitter import SessionEventEmitter
 
@@ -126,8 +127,10 @@ def execute_copilot_chat(task_input, session_dir: str):
     # and ``--user`` installs. Redirect HOME onto the persistent
     # workspaces volume so that growth doesn't land on the code-worker
     # writable layer.
+    tenant_home_path: str | None = None
     try:
-        env["HOME"] = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+        tenant_home_path = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+        env["HOME"] = tenant_home_path
     except (ValueError, OSError) as exc:
         logger.warning(
             "tenant_home_dir(%s) failed (%s); HOME falls back to container default",
@@ -153,7 +156,14 @@ def execute_copilot_chat(task_input, session_dir: str):
             on_chunk=on_chunk,
         )
     finally:
-        emitter.close()
+        _stats = emitter.close()
+        # Phase 2 quota walker (task #264) — see claude.py for rationale.
+        if tenant_home_path:
+            tenant_home_quota.maybe_enforce_quota(
+                task_input.tenant_id,
+                tenant_home_path,
+                cumulative_chunks=int(_stats.get("emitted", 0)) if isinstance(_stats, dict) else 0,
+            )
 
     if result.returncode != 0:
         err = cli_runtime.safe_cli_error_snippet(result.stderr, result.stdout, 1000)

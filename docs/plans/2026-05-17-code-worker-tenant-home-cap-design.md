@@ -179,3 +179,59 @@ pip-install corruption symptom.
   image itself (~7.8 GB virtual size) — separate concern, slow churn.
 - Cross-tenant package cache deduplication (every tenant still gets
   its own `.local/lib` because credential isolation is paramount).
+
+## Phase 2 shipped
+
+Tracking PR: feat(code-worker): tenant HOME quota walker (#264 Phase 2)
+
+Files added / changed:
+
+- `apps/code-worker/tenant_home_quota.py` (new) — `enforce_quota`,
+  `should_walk`, `maybe_enforce_quota`. Pure-Python `os.scandir` walk,
+  four prune tiers (`.cache/*` → stale site-packages → other stale
+  `.local/lib/*` → stale `.local/*`), never-touch invariants for
+  oauth_creds / credentials / google_accounts / `*.lock` / `.config/`
+  / `projects/` / `.git/`. Non-blocking `fcntl.flock` on
+  `<home>/.quota-walker.lock` so two concurrent CLI turns can't
+  double-walk.
+- `apps/code-worker/cli_executors/claude.py`,
+  `apps/code-worker/cli_executors/codex.py`,
+  `apps/code-worker/cli_executors/gemini.py`,
+  `apps/code-worker/cli_executors/copilot.py`,
+  `apps/code-worker/cli_executors/opencode.py` — wire
+  `tenant_home_quota.maybe_enforce_quota` into each executor's
+  `finally:` block after `run_cli_with_heartbeat` returns. Pass the
+  `SessionEventEmitter` emitted-events count so the watermark gate
+  can skip walks for quiet turns.
+- `apps/code-worker/tests/test_tenant_home_quota.py` (new) — 16 unit
+  tests covering under-budget no-op, tiered pruning order,
+  never-touch invariants, watermark gating, and best-effort partial
+  state.
+
+Soft cap is 2 GiB per tenant home dir; watermark gate skips walks
+that happen <10 min apart with <10 emitted chunk events between
+them. Both knobs are module-level constants in
+`tenant_home_quota.py` for easy override in a hotfix.
+
+What's still open:
+
+- **Phase 3 — pre-#540 tenant rsync.** Any tenant whose `.gemini/`
+  was rescued by `_rescue_legacy_gemini_home` still has bulky
+  `.local/`, `.cache/` content sitting in the legacy
+  `/home/codeworker/st_sessions/<tenant>/` path. That growth is
+  contained (code-worker writable layer recycle catches it) but the
+  warm package cache is wasted. Phase 3 rsyncs the remaining
+  prunable subtrees across in an init container, then deletes the
+  legacy path.
+- **Phase 4 — legacy path removal.** Once Phase 3 has soaked for 14
+  days and no tenant lookup is hitting the legacy path, delete the
+  `_LEGACY_SESSIONS_ROOT` codepath from `cli_runtime.py` and the
+  initial rescue logic. Drops ~50 LOC and removes the dual-path
+  cognitive overhead.
+- **`pip install --user` race (design §"Open risk for Phase 2").**
+  The quota walker doesn't address this — two concurrent CLI turns
+  for the same tenant can still corrupt a half-installed
+  site-package. The flock added here is only on the walker, not on
+  install. If we see install-corruption symptoms in real traffic,
+  add a sibling `.install.lock` flock around the CLI subprocess
+  itself.

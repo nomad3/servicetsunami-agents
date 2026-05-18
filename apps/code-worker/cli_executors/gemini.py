@@ -18,6 +18,7 @@ import os
 import re
 
 import cli_runtime
+import tenant_home_quota
 from cli_executors import gemini_stream_parser
 from session_event_emitter import SessionEventEmitter
 
@@ -171,7 +172,17 @@ def execute_gemini_chat(task_input, session_dir: str, image_path: str):
             on_chunk=on_chunk,
         )
     finally:
-        emitter.close()
+        _stats = emitter.close()
+        # Phase 2 quota walker (task #264) — see claude.py for rationale.
+        # ``tenant_home`` is set above (falls back to ``session_dir`` when
+        # the workspaces volume isn't mounted, in which case the walker
+        # would be a no-op anyway since session_dir is the worker scratch).
+        if tenant_home and tenant_home != session_dir:
+            tenant_home_quota.maybe_enforce_quota(
+                task_input.tenant_id,
+                tenant_home,
+                cumulative_chunks=int(_stats.get("emitted", 0)) if isinstance(_stats, dict) else 0,
+            )
     logger.info("Gemini CLI exit code: %s", result.returncode)
     if result.stdout:
         logger.info("Gemini CLI stdout: %s", result.stdout[:500])
