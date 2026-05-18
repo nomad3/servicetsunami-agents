@@ -343,3 +343,68 @@ def test_qwen_code_is_public_in_connected_clis_list(monkeypatch):
     public = r.connected_clis_for_tenant(None, uuid.uuid4())
     assert "qwen_code" in public
     assert "opencode" not in public
+
+
+# ── Kimi K2 (Wave 1c Lane B) ─────────────────────────────────────────
+
+
+def test_chain_kimi_k2_via_integration(monkeypatch):
+    """A tenant with the Moonshot AI integration connected gets kimi_k2
+    in the resolver chain. Mirrors the gemini-via-gmail piggy-back test
+    for the simpler 1:1 integration mapping."""
+    _stub_connected(monkeypatch, {"kimi_k2"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert "kimi_k2" in chain
+    assert chain[-1] == "opencode"
+
+
+def test_chain_kimi_k2_explicit_platform_wins(monkeypatch):
+    """An agent with preferred_cli=kimi_k2 leads the chain when the
+    integration is wired, ahead of any other connected CLIs."""
+    _stub_connected(monkeypatch, {"kimi_k2", "claude_code", "github"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform="kimi_k2")
+    assert chain[0] == "kimi_k2"
+    # Default-priority fallbacks still appear after.
+    assert "claude_code" in chain
+    assert "copilot_cli" in chain
+
+
+def test_connected_clis_for_tenant_surfaces_kimi(monkeypatch):
+    """``connected_clis_for_tenant`` (the public list driving the
+    InlineCliPicker) MUST include kimi_k2 when wired — NOT hidden the
+    way opencode is."""
+    _stub_connected(monkeypatch, {"kimi_k2"})
+    listed = r.connected_clis_for_tenant(None, uuid.uuid4())
+    assert "kimi_k2" in listed
+    # opencode stays hidden — it's the routing floor, not user-pickable.
+    assert "opencode" not in listed
+
+
+def test_chain_kimi_k2_cooldown_respected(monkeypatch):
+    """A quota'd kimi_k2 is filtered from the chain just like the other
+    CLIs (only opencode is exempt from cooldown)."""
+    tid = uuid.uuid4()
+    _stub_connected(monkeypatch, {"kimi_k2", "claude_code"})
+    r.mark_cooldown(tid, "kimi_k2", reason="quota")
+    chain = r.resolve_cli_chain(None, tid, explicit_platform="kimi_k2")
+    assert "kimi_k2" not in chain
+    assert "claude_code" in chain
+
+
+def test_kimi_k2_not_connected_message_classifies_as_missing_credential():
+    """The worker-side not-connected message for kimi_k2 (returned both
+    by ``_fetch_integration_credentials`` 404 path and the executor's
+    empty-api-key path) MUST be classified as ``missing_credential`` so
+    the orchestrator chain-walks past kimi_k2 WITHOUT a 10-minute
+    cooldown. A quick reconnect should be picked up on the next chat
+    turn, not masked by cooldown.
+
+    Regression for B1 in the superpowers review of PR #552: the prior
+    phrasing ("Please paste a MOONSHOT_API_KEY in Settings → Integrations")
+    didn't hit any branch of the missing-credential alternation in
+    ``packages/cli_orchestrator/classifier.py``."""
+    msg = (
+        "Kimi K2 is not connected. "
+        "Please connect your Moonshot account in Settings → Integrations."
+    )
+    assert r.classify_error(msg) == "missing_credential"

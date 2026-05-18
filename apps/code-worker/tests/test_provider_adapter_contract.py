@@ -37,6 +37,7 @@ from cli_orchestrator_adapters.claude_code import ClaudeCodeAdapter
 from cli_orchestrator_adapters.codex import CodexAdapter
 from cli_orchestrator_adapters.copilot_cli import CopilotCliAdapter
 from cli_orchestrator_adapters.gemini_cli import GeminiCliAdapter
+from cli_orchestrator_adapters.kimi_k2 import KimiK2Adapter
 from cli_orchestrator_adapters.opencode import OpencodeAdapter
 from cli_orchestrator_adapters.qwen_code import QwenCodeAdapter
 from cli_orchestrator_adapters.shell import ShellAdapter
@@ -47,6 +48,7 @@ ADAPTER_FACTORIES = [
     ("codex", CodexAdapter),
     ("copilot_cli", CopilotCliAdapter),
     ("gemini_cli", GeminiCliAdapter),
+    ("kimi_k2", KimiK2Adapter),
     ("opencode", OpencodeAdapter),
     ("qwen_code", QwenCodeAdapter),
     ("shell", ShellAdapter),
@@ -107,6 +109,7 @@ def test_adapter_imports_do_not_drag_workflows():
     importlib.import_module("cli_orchestrator_adapters.codex")
     importlib.import_module("cli_orchestrator_adapters.gemini_cli")
     importlib.import_module("cli_orchestrator_adapters.copilot_cli")
+    importlib.import_module("cli_orchestrator_adapters.kimi_k2")
     importlib.import_module("cli_orchestrator_adapters.opencode")
     importlib.import_module("cli_orchestrator_adapters.qwen_code")
     importlib.import_module("cli_orchestrator_adapters.shell")

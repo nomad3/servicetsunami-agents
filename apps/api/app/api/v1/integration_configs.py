@@ -290,6 +290,35 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
     # subscriptions only — Claude Code, Gemini CLI, GitHub Copilot CLI,
     # Codex CLI — not raw API keys. The AI Models tab in the UI handles
     # any remaining provider-key flows.
+    "kimi_k2": {
+        # Moonshot AI's Kimi K2 coding-tuned model — Wave 1c Lane B
+        # (Apache 2.0 weights, commercial resale permitted; see
+        # ``docs/plans/2026-05-18-cli-integration-catalog.md``). The
+        # executor talks to Moonshot's OpenAI-compatible HTTP endpoint
+        # directly from ``cli_executors/kimi.py`` — there is no local
+        # CLI binary involved (Moonshot's developer CLI is not a
+        # runtime dependency). Default base URL is
+        # ``https://api.moonshot.ai/v1`` (international); switch to
+        # ``https://api.moonshot.cn/v1`` for the Chinese tier via the
+        # optional ``base_url`` credential below.
+        "display_name": "Kimi K2 (Moonshot AI)",
+        "description": (
+            "Route chat agents to Moonshot AI's Kimi K2 coding model. "
+            "OpenAI-compatible HTTP API; paste your MOONSHOT_API_KEY to enable. "
+            "Calls are billed against your Moonshot account."
+        ),
+        "icon": "FaRobot",
+        "auth_type": "manual",
+        "credentials": [
+            {"key": "api_key", "label": "Moonshot API Key", "type": "password", "required": True,
+             "help": "MOONSHOT_API_KEY from https://platform.moonshot.ai/console/api-keys (international) "
+                     "or https://platform.moonshot.cn/console/api-keys (Chinese tier)."},
+            {"key": "base_url", "label": "Base URL", "type": "text", "required": False,
+             "help": "Defaults to https://api.moonshot.ai/v1. Set to https://api.moonshot.cn/v1 for the Chinese-region tier."},
+            {"key": "model", "label": "Model", "type": "text", "required": False,
+             "help": "Defaults to kimi-k2-0905-preview. Override only if Moonshot publishes a newer coding-tuned variant."},
+        ],
+    },
 }
 
 
