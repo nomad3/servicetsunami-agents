@@ -52,12 +52,13 @@ const ResetPasswordPage = () => {
   //     pixel on this page can't leak the token)
   //   - server access logs (nginx, Cloudflare tunnel, Sentry)
   //   - document.referrer for the next-navigated page
-  // The email STAYS in the query string — it's not the secret.
   //
-  // After we capture the token into React state, immediately scrub
-  // `window.location.hash` via `replaceState` so it disappears from
-  // browser history. Anyone shoulder-surfing the address bar after
-  // this fires sees a clean `/reset-password?email=…` URL.
+  // NIT-5 (round-7 review): even though the email isn't the secret,
+  // leaving it in the address bar after we pull it into state means
+  // a shoulder-surfer / screen-share / browser-extension snapshot of
+  // the URL still leaks the user identity. After capturing both
+  // token (from fragment) and email (from query), replaceState to
+  // a clean `/reset-password` URL — same scrub pattern as the token.
   useEffect(() => {
     const eFromUrl = searchParams.get('email');
     if (eFromUrl) setEmail(eFromUrl);
@@ -71,16 +72,23 @@ const ResetPasswordPage = () => {
         setToken(tFromHash);
         setTokenFromUrl(true);
         setStage('confirm');
-        // Scrub the fragment from the URL bar + history. The current
-        // search-string is preserved (it has the email, not the secret).
-        try {
-          const cleanUrl =
-            window.location.pathname + window.location.search;
-          window.history.replaceState({}, '', cleanUrl);
-        } catch (_e) {
-          // replaceState can throw in privacy/sandboxed contexts;
-          // failing closed (leave the hash alone) is harmless.
-        }
+      }
+    }
+
+    // NIT-5: scrub BOTH the fragment (token) and the search-string
+    // (email) from the address bar once they're in state. Even if the
+    // user landed without a fragment (manual visit), we still drop the
+    // email query param to avoid leaking it via screenshots / address
+    // bar / browser history.
+    if (
+      typeof window !== 'undefined' &&
+      (window.location.hash || window.location.search)
+    ) {
+      try {
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch (_e) {
+        // replaceState can throw in privacy/sandboxed contexts; failing
+        // closed (leave the URL alone) is harmless.
       }
     }
   }, [searchParams]);

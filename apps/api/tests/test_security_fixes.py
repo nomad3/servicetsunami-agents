@@ -211,14 +211,12 @@ def _make_reset_test_client(mock_user_or_none):
     returns `mock_user_or_none`. Used by the cookie-binding regression
     tests to exercise both the user-exists and user-missing paths.
 
-    N3-5 (security review round 3): the stub's `_StubDb.commit` is
-    intentionally a no-op. Tests using this client cannot verify
-    post-commit STATE on the user row (e.g. that the attempt-counter
-    actually persisted). The current tests only assert response shape,
-    so this is fine — but if a future test needs to verify post-commit
-    persistence (e.g. attempt-counter > 0 after 1 wrong attempt),
-    it'll need a real Session or a smarter stub that mutates
-    `mock_user_or_none` in place. Filed for visibility, not blocking.
+    Round-7 IMP-4(d) update: stub now PERSISTS attribute mutations on
+    the in-memory user object across commits, so tests can assert that
+    e.g. the attempt counter is incremented and the token is burned
+    after the I-1 threshold. The handler mutates `mock_user_or_none`
+    directly via SQLAlchemy attribute set, and our stub `commit()`
+    just no-ops — Python attribute writes already stuck.
     """
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -228,6 +226,9 @@ def _make_reset_test_client(mock_user_or_none):
     class _StubQuery:
         def filter(self, *_a, **_k): return self
         def with_for_update(self): return self
+        # IMP-4(d): always return the SAME user instance so attribute
+        # mutations made by one request handler are visible to the
+        # next one (attempt counter, token burn, etc.).
         def first(self): return mock_user_or_none
 
     class _StubDb:
@@ -389,12 +390,19 @@ def test_jwt_iat_floor_rejects_token_issued_before_password_change():
     new_payload = {"iat": new_iat, "sub": "x@y.com"}
     assert _jwt_iat_before_password_change(new_payload, user) is False
 
-    # Missing iat or missing password_changed_at → don't reject
-    # (fail-open so we don't break legacy tokens that lack iat or
-    # users whose row predates migration 130).
-    assert _jwt_iat_before_password_change({"sub": "x@y.com"}, user) is False
+    # IMP-2 (round-7 review): when password_changed_at is non-null
+    # (i.e. migration 130 has run — the prod state for every row),
+    # a JWT MISSING `iat` is REJECTED. create_access_token always
+    # stamps iat, so an absent iat means a hand-crafted token or a
+    # pre-iat legacy token — either way the safer call is to invalidate.
+    user.password_changed_at = datetime.utcnow()
+    assert _jwt_iat_before_password_change({"sub": "x@y.com"}, user) is True
+
+    # Legacy fallback: if password_changed_at is None (row predates
+    # migration 130), fail OPEN so we don't lock out pre-migration users.
     user.password_changed_at = None
     assert _jwt_iat_before_password_change(old_payload, user) is False
+    assert _jwt_iat_before_password_change({"sub": "x@y.com"}, user) is False
 
 
 def test_email_sender_rejects_attacker_smtp_host():
@@ -560,3 +568,368 @@ def test_seed_demo_data_skipped_in_production():
         assert mock_seed_demo.called, (
             "seed_demo_data must run when ENVIRONMENT=local"
         )
+
+
+# ── Round-7 review tests (IMP-1..4 fixups) ───────────────────────────
+
+
+def test_email_sender_rejects_malformed_email_from():
+    """IMP-3: a misconfigured EMAIL_FROM (no `@`) must refuse to send
+    BEFORE opening any SMTP socket. Caller's contract is best-effort,
+    so we return False (not raise) but the SMTP client must never be
+    instantiated."""
+    from unittest.mock import patch as _patch
+    from app.services import email_sender
+
+    with _patch.object(email_sender.settings, "EMAIL_FROM", "not-an-email-address"), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_HOST", "smtp.sendgrid.net"), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_PORT", 465), \
+         _patch("smtplib.SMTP_SSL") as mock_smtps, \
+         _patch("smtplib.SMTP") as mock_smtp:
+        ok = email_sender.send_email(
+            to="user@example.com",
+            subject="test",
+            text_body="hi",
+        )
+    assert ok is False, "Malformed EMAIL_FROM must cause send to refuse"
+    assert not mock_smtps.called, (
+        "SMTP_SSL must NOT be instantiated when EMAIL_FROM is malformed"
+    )
+    assert not mock_smtp.called, (
+        "SMTP must NOT be instantiated when EMAIL_FROM is malformed"
+    )
+
+
+def test_email_sender_uses_smtp_ssl_on_465():
+    """IMP-4(a): port 465 → smtplib.SMTP_SSL with a verified context.
+    Implicit-TLS port can't be STARTTLS-stripped."""
+    from unittest.mock import patch as _patch, MagicMock as _MagicMock
+    from app.services import email_sender
+
+    fake_server = _MagicMock()
+    fake_server.__enter__ = lambda self: self
+    fake_server.__exit__ = lambda *a: False
+
+    with _patch.object(email_sender.settings, "EMAIL_SMTP_HOST", "smtp.sendgrid.net"), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_PORT", 465), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_USERNAME", "u"), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_PASSWORD", "p"), \
+         _patch.object(email_sender.settings, "EMAIL_FROM", "noreply@agentprovision.com"), \
+         _patch("smtplib.SMTP_SSL", return_value=fake_server) as mock_smtps, \
+         _patch("smtplib.SMTP") as mock_smtp_plain:
+        ok = email_sender.send_email(
+            to="user@example.com",
+            subject="test",
+            text_body="hi",
+        )
+    assert ok is True
+    assert mock_smtps.called, "Port 465 must instantiate SMTP_SSL"
+    assert not mock_smtp_plain.called, (
+        "Port 465 must NOT use the plaintext SMTP class"
+    )
+    # Verify context kwarg is a verified default context.
+    import ssl as _ssl
+    ctx_arg = mock_smtps.call_args.kwargs.get("context")
+    assert isinstance(ctx_arg, _ssl.SSLContext)
+    assert ctx_arg.verify_mode == _ssl.CERT_REQUIRED
+    assert ctx_arg.check_hostname is True
+
+
+def test_email_sender_refuses_login_when_starttls_did_not_upgrade():
+    """IMP-4(a): port 587 path must call starttls() and verify the
+    socket is an SSLSocket before login(). If the post-upgrade socket
+    is NOT TLS-wrapped, login() must NOT be called (fail closed)."""
+    from unittest.mock import patch as _patch, MagicMock as _MagicMock
+    from app.services import email_sender
+
+    fake_server = _MagicMock()
+    fake_server.__enter__ = lambda self: self
+    fake_server.__exit__ = lambda *a: False
+    fake_server.has_extn.return_value = True
+    # Simulate starttls() that didn't actually produce an SSLSocket.
+    fake_server.sock = object()  # NOT an ssl.SSLSocket
+
+    with _patch.object(email_sender.settings, "EMAIL_SMTP_HOST", "smtp.sendgrid.net"), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_PORT", 587), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_USE_TLS", True), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_USERNAME", "u"), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_PASSWORD", "p"), \
+         _patch.object(email_sender.settings, "EMAIL_FROM", "noreply@agentprovision.com"), \
+         _patch("smtplib.SMTP", return_value=fake_server):
+        ok = email_sender.send_email(
+            to="user@example.com",
+            subject="test",
+            text_body="hi",
+        )
+    assert ok is False, (
+        "Non-TLS socket after starttls must refuse to login (fail closed)"
+    )
+    assert not fake_server.login.called, (
+        "login() must NEVER be called when socket isn't SSLSocket"
+    )
+
+
+def test_email_sender_uses_starttls_on_587():
+    """IMP-4(a): port 587 happy path — starttls() must be called with
+    a verified context, and login() proceeds once sock is SSLSocket."""
+    import ssl as _ssl
+    from unittest.mock import patch as _patch, MagicMock as _MagicMock
+    from app.services import email_sender
+
+    fake_server = _MagicMock()
+    fake_server.__enter__ = lambda self: self
+    fake_server.__exit__ = lambda *a: False
+    fake_server.has_extn.return_value = True
+    # Pass the isinstance(server.sock, ssl.SSLSocket) check.
+    fake_server.sock = _MagicMock(spec=_ssl.SSLSocket)
+
+    with _patch.object(email_sender.settings, "EMAIL_SMTP_HOST", "smtp.sendgrid.net"), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_PORT", 587), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_USE_TLS", True), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_USERNAME", "u"), \
+         _patch.object(email_sender.settings, "EMAIL_SMTP_PASSWORD", "p"), \
+         _patch.object(email_sender.settings, "EMAIL_FROM", "noreply@agentprovision.com"), \
+         _patch("smtplib.SMTP", return_value=fake_server) as mock_smtp:
+        ok = email_sender.send_email(
+            to="user@example.com",
+            subject="test",
+            text_body="hi",
+        )
+    assert ok is True
+    assert mock_smtp.called, "Port 587 must instantiate plaintext SMTP"
+    # starttls must have been called with a context kwarg
+    assert fake_server.starttls.called
+    ctx_arg = fake_server.starttls.call_args.kwargs.get("context")
+    assert isinstance(ctx_arg, _ssl.SSLContext)
+    assert ctx_arg.verify_mode == _ssl.CERT_REQUIRED
+    assert fake_server.login.called, "login() runs once sock is SSLSocket"
+
+
+def test_email_sender_refuses_non_allowlisted_host_without_opening_socket():
+    """IMP-4(a): the host allowlist check fires BEFORE any socket is
+    opened. Reinforces the existing B-7 test by asserting smtplib is
+    never even instantiated."""
+    from unittest.mock import patch as _patch
+    from app.services import email_sender
+
+    with _patch.object(email_sender.settings, "EMAIL_SMTP_HOST", "attacker.example.com"), \
+         _patch.object(email_sender.settings, "EMAIL_FROM", "noreply@agentprovision.com"), \
+         _patch("smtplib.SMTP") as mock_smtp, \
+         _patch("smtplib.SMTP_SSL") as mock_smtps:
+        ok = email_sender.send_email(
+            to="user@example.com",
+            subject="test",
+            text_body="hi",
+        )
+    assert ok is False
+    assert not mock_smtp.called, "Disallowed host must not open SMTP"
+    assert not mock_smtps.called, "Disallowed host must not open SMTP_SSL"
+
+
+def test_password_recovery_sets_csrf_cookie_with_scoped_path():
+    """IMP-4(b): the `ap_reset_csrf` cookie set on /password-recovery
+    must be HttpOnly, SameSite=Strict, and Path=/api/v1/auth/reset-password
+    (tightened in IMP-1)."""
+    import uuid
+    from app.models.user import User
+    from app.services import users as user_service
+
+    mock_user = MagicMock(spec=User)
+    mock_user.id = uuid.uuid4()
+    mock_user.email = "existing@example.com"
+    mock_user.password_reset_token = None
+    mock_user.password_reset_csrf_hash = None
+    mock_user.password_reset_expires = None
+    mock_user.password_reset_attempts = 0
+
+    with patch.object(user_service, "get_user_by_email", return_value=mock_user):
+        client = _make_auth_test_client()
+        resp = client.post("/api/v1/auth/password-recovery/existing@example.com")
+
+    assert resp.status_code == 200
+    set_cookie = resp.headers.get("set-cookie", "")
+    assert "ap_reset_csrf=" in set_cookie, "CSRF cookie must be set"
+    assert "HttpOnly" in set_cookie, "Cookie must be HttpOnly"
+    # SameSite check is case-flexible (Starlette emits "samesite=strict")
+    assert "samesite=strict" in set_cookie.lower(), "Cookie must be SameSite=Strict"
+    assert "path=/api/v1/auth/reset-password" in set_cookie.lower(), (
+        f"IMP-1: cookie path must be scoped to /api/v1/auth/reset-password, "
+        f"got Set-Cookie={set_cookie!r}"
+    )
+
+
+def test_password_recovery_decoy_cookie_also_uses_scoped_path():
+    """IMP-1: even on the user-missing path the decoy cookie must use
+    the tightened scope, so an attacker can't distinguish hit/miss by
+    the Path attribute on the Set-Cookie header."""
+    from app.services import users as user_service
+
+    with patch.object(user_service, "get_user_by_email", return_value=None):
+        client = _make_auth_test_client()
+        resp = client.post("/api/v1/auth/password-recovery/ghost@example.com")
+
+    assert resp.status_code == 200
+    set_cookie = resp.headers.get("set-cookie", "")
+    assert "path=/api/v1/auth/reset-password" in set_cookie.lower(), (
+        f"IMP-1: decoy cookie path must also be scoped tightly so the "
+        f"hit/miss path attribute is identical; got Set-Cookie={set_cookie!r}"
+    )
+
+
+def test_jwt_iat_floor_rejects_token_without_iat_when_pwc_set():
+    """IMP-2: a JWT MISSING the `iat` claim against a user with a
+    real `password_changed_at` must be REJECTED.
+
+    Migration 130 backfills password_changed_at=NOW() for every row,
+    so in any deployed environment pwc is always non-null. The previous
+    fail-open semantics meant an attacker who could mint an iat-less
+    JWT (e.g. via a forged signature) bypassed the B-4 floor entirely.
+    """
+    from datetime import datetime
+    from app.api.deps import _jwt_iat_before_password_change
+
+    user = MagicMock()
+    user.password_changed_at = datetime.utcnow()
+    # No `iat` claim — must reject.
+    assert _jwt_iat_before_password_change({"sub": "x@y.com"}, user) is True
+
+
+def test_get_current_user_rejects_iat_less_token_with_real_pwc():
+    """IMP-4(c) end-to-end: mint a JWT WITHOUT an `iat` claim, set a
+    real password_changed_at on the user row, and assert
+    get_current_user raises 401."""
+    import uuid
+    from datetime import datetime
+    from jose import jwt as _jwt
+    from app.api import deps
+    from app.core.config import settings
+    from app.core.security import ALGORITHM
+    from app.models.user import User
+    from fastapi import HTTPException
+
+    user_id = uuid.uuid4()
+    user = MagicMock(spec=User)
+    user.id = user_id
+    user.is_active = True
+    user.is_superuser = False
+    user.password_changed_at = datetime.utcnow()
+
+    # Hand-roll a token with NO iat claim.
+    token = _jwt.encode(
+        {"sub": str(user_id)},  # no "iat", no "exp"
+        settings.SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+    class _StubQ:
+        def filter(self, *_a, **_k): return self
+        def first(self): return user
+
+    class _StubDb:
+        def query(self, *_a, **_k): return _StubQ()
+
+    with pytest.raises(HTTPException) as exc_info:
+        deps.get_current_user(db=_StubDb(), token=token)
+    assert exc_info.value.status_code == 401
+
+
+def test_get_current_user_rejects_jwt_issued_before_password_change_e2e():
+    """IMP-4(c) end-to-end: mint a real JWT at t0, bump
+    password_changed_at to t0+1s, hit get_current_user, assert 401."""
+    import uuid
+    import time as _time
+    from datetime import datetime, timezone
+    from app.api import deps
+    from app.core.security import create_access_token
+    from app.models.user import User
+    from fastapi import HTTPException
+
+    user_id = uuid.uuid4()
+    user = MagicMock(spec=User)
+    user.id = user_id
+    user.is_active = True
+    user.is_superuser = False
+
+    # Mint the token (iat = now).
+    iat_now = int(_time.time())
+    token = create_access_token(subject=str(user_id), iat=iat_now)
+
+    # Password changed 5 seconds AFTER iat — must invalidate.
+    user.password_changed_at = datetime.fromtimestamp(
+        iat_now + 5, tz=timezone.utc
+    ).replace(tzinfo=None)
+
+    class _StubQ:
+        def filter(self, *_a, **_k): return self
+        def first(self): return user
+
+    class _StubDb:
+        def query(self, *_a, **_k): return _StubQ()
+
+    with pytest.raises(HTTPException) as exc_info:
+        deps.get_current_user(db=_StubDb(), token=token)
+    assert exc_info.value.status_code == 401
+
+
+def test_reset_password_burns_token_after_three_wrong_attempts():
+    """IMP-4(d) / I-1: three consecutive WRONG-token reset submissions
+    must increment the attempt counter and BURN the token hash on the
+    third miss, so a subsequent valid attempt also 401s."""
+    import uuid
+    import hashlib
+    from datetime import datetime, timedelta
+    from app.models.user import User
+    from app.core.rate_limit import limiter
+
+    # Reset the slowapi limiter — prior tests in this file hit
+    # /reset-password and the 5/hour key is per-IP (same 127.0.0.1
+    # for the entire TestClient suite).
+    try:
+        limiter.reset()
+    except Exception:
+        pass
+
+    mock_user = MagicMock(spec=User)
+    mock_user.id = uuid.uuid4()
+    mock_user.email = "victim@example.com"
+    mock_user.password_reset_token = hashlib.sha256(b"correcttoken").hexdigest()
+    mock_user.password_reset_csrf_hash = hashlib.sha256(b"correctcsrf").hexdigest()
+    mock_user.password_reset_expires = datetime.utcnow() + timedelta(hours=1)
+    mock_user.password_reset_attempts = 0
+
+    client = _make_reset_test_client(mock_user)
+    client.cookies.set("ap_reset_csrf", "correctcsrf")
+
+    # Three wrong-token submissions.
+    for i in range(3):
+        resp = client.post(
+            "/api/v1/auth/reset-password",
+            json={
+                "email": "victim@example.com",
+                "token": "WRONGtoken12345",
+                "new_password": "ValidPass1234",
+            },
+        )
+        assert resp.status_code == 400, f"Attempt {i + 1}: expected 400"
+
+    # On the 3rd miss the token must have been BURNED (set to None).
+    assert mock_user.password_reset_token is None, (
+        "I-1: after 3 wrong attempts the token hash must be cleared"
+    )
+    assert mock_user.password_reset_csrf_hash is None
+    assert mock_user.password_reset_expires is None
+
+    # A subsequent submission with the originally-correct token must
+    # also 401-equivalent (400, "Invalid or expired token") because
+    # the token was burned.
+    resp_after = client.post(
+        "/api/v1/auth/reset-password",
+        json={
+            "email": "victim@example.com",
+            "token": "correcttoken",
+            "new_password": "ValidPass1234",
+        },
+    )
+    assert resp_after.status_code == 400, (
+        "After burn, even the originally-correct token must be rejected"
+    )

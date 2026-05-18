@@ -33,6 +33,17 @@ ALTER TABLE users
 -- the JWT-iat check doesn't lock everyone out on the next deploy.
 -- This is a one-time grandfather; new JWTs minted after deploy will
 -- pass the floor check trivially.
+--
+-- NIT-2 (round-7 review): this is a single full-table UPDATE. On a
+-- multi-million-row `users` table that would acquire a long row-level
+-- write lock and stall logins during deploy. Current tenant scale
+-- (< 10k users platform-wide as of 2026-05-17) makes the simple form
+-- safe — the UPDATE completes in well under a second. If/when this
+-- migration is re-run on a much larger dataset (or a fresh tenant
+-- merge balloons row count past ~500k), refactor to a batched UPDATE
+-- with a `WHERE id IN (SELECT id ... LIMIT 10000)` loop and an
+-- explicit transaction per batch. Today the one-shot is the right
+-- call for operational simplicity.
 UPDATE users
 SET password_changed_at = now()
 WHERE password_changed_at IS NULL;

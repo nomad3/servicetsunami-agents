@@ -125,6 +125,20 @@ def send_email(
         logger.warning("email_sender: refused — bad/empty recipient address")
         return False
 
+    # IMP-3: same sanity check on the configured From: address. A bare
+    # token (no `@`) means EMAIL_FROM was set to a display-name-only
+    # value or another mis-configuration; smtplib will produce a
+    # malformed envelope sender that some MTAs reject silently. Refuse
+    # before opening the socket so the failure surfaces in WARNING logs
+    # (same fail-closed contract — caller treats this as best-effort).
+    if not from_addr or "@" not in from_addr:
+        logger.warning(
+            "email_sender: refused — EMAIL_FROM has no @ (got %r); "
+            "fix the EMAIL_FROM env-var",
+            from_addr,
+        )
+        return False
+
     if not settings.EMAIL_SMTP_HOST:
         # N-3: WARNING (not INFO) so a prod deploy without SMTP config
         # surfaces in any log-volume-by-severity alerting. Body NEVER

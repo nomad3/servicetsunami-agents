@@ -33,8 +33,20 @@ def _jwt_iat_before_password_change(payload: dict, user: User) -> bool:
     conservative default for a security hardening rollout)."""
     iat = payload.get("iat")
     pwc = user.password_changed_at
-    if iat is None or pwc is None:
+    # IMP-2: when the user has NO password_changed_at (only possible on
+    # rows that pre-date migration 130 in environments where the
+    # migration hasn't run yet), fail open — there's nothing to compare
+    # against. Migration 130 backfills every existing row with NOW(),
+    # so in any deployed environment this branch should be unreachable.
+    if pwc is None:
         return False
+    # IMP-2: a token that's missing `iat` against a user with a real
+    # password_changed_at is suspicious — `create_access_token` always
+    # stamps iat, so an absent iat means either a hand-crafted token
+    # or a legacy token from before iat existed. Either way the safer
+    # choice is to invalidate (reject), not fail open.
+    if iat is None:
+        return True
     # iat is unix seconds (jose stamps it as int); pwc is a naive
     # UTC datetime per the migration. Convert to comparable units.
     try:

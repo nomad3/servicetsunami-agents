@@ -669,7 +669,9 @@ def recover_password(
             httponly=True,
             secure=_cookie_should_be_secure(),
             samesite="strict",
-            path="/api/v1/auth",
+            # IMP-1: tighten cookie path so the CSRF token only travels
+            # to the confirm endpoint, not the entire auth router.
+            path="/api/v1/auth/reset-password",
         )
         return {"message": _PASSWORD_RESET_MESSAGE}
 
@@ -689,7 +691,9 @@ def recover_password(
         httponly=True,
         secure=_cookie_should_be_secure(),
         samesite="strict",
-        path="/api/v1/auth",
+        # IMP-1: tighten cookie path so the CSRF token only travels
+        # to the confirm endpoint, not the entire auth router.
+        path="/api/v1/auth/reset-password",
     )
 
     # Best-effort; send_password_reset_email never raises. N-7: do
@@ -846,7 +850,9 @@ def reset_password(
     # raw JSONResponse here bypassed the typed contract — N-4 was
     # supposed to lock it down). Token is also nulled above so
     # cookie replay can't redeem anyway; this is defense-in-depth.
-    response.delete_cookie(_RESET_CSRF_COOKIE, path="/api/v1/auth")
+    # IMP-1: path must match the tightened cookie scope set on issue
+    # (the recovery endpoint) so the browser can find and clear it.
+    response.delete_cookie(_RESET_CSRF_COOKIE, path="/api/v1/auth/reset-password")
     return {"message": "Password updated successfully"}
 
 
