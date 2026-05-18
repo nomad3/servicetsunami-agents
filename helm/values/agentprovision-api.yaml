@@ -111,6 +111,22 @@ configMap:
     GOOGLE_REDIRECT_URI: "https://agentprovision.com/api/v1/oauth/google/callback"
     GITHUB_REDIRECT_URI: "https://agentprovision.com/api/v1/oauth/github/callback"
     LINKEDIN_REDIRECT_URI: "https://agentprovision.com/api/v1/oauth/linkedin/callback"
+    # Belt-and-suspenders for N5-3 / B6-1: even though the
+    # `Settings.ENVIRONMENT` field defaults to "production"
+    # (fail-closed), set it explicitly here so the demo-seed gate in
+    # init_db.py can never run silently against this cluster — and
+    # so the value is visible in `kubectl describe configmap`.
+    ENVIRONMENT: "production"
+    # Transactional email (password recovery, invitations).
+    # EMAIL_SMTP_HOST + USERNAME + PASSWORD are pulled from the
+    # external secret (below). Non-sensitive defaults live here so a
+    # deploy that forgets the secret hooks falls back to log-only
+    # rather than crashing. Set EMAIL_SMTP_HOST in the secret to
+    # activate real delivery; leave unset to keep the log-only stub.
+    EMAIL_SMTP_PORT: "587"
+    EMAIL_SMTP_USE_TLS: "true"
+    EMAIL_FROM: "noreply@agentprovision.com"
+    EMAIL_FROM_NAME: "AgentProvision"
 
 # External Secrets - pulls from GCP Secret Manager
 externalSecret:
@@ -162,6 +178,22 @@ externalSecret:
     - secretKey: LINKEDIN_CLIENT_SECRET
       remoteRef:
         key: agentprovision-linkedin-oauth-client-secret
+    # Transactional email relay credentials. Provisioner: create
+    # these three GCP Secret Manager entries with your SMTP provider
+    # creds (SendGrid api-key / Postmark server-token / SES SMTP
+    # creds / Mailgun smtp / etc) before merging the PR that ships
+    # this block, otherwise external secret sync will spin on missing
+    # remote keys. Leave EMAIL_SMTP_HOST set to empty string in
+    # Secret Manager to keep the API in log-only mode (no delivery).
+    - secretKey: EMAIL_SMTP_HOST
+      remoteRef:
+        key: agentprovision-email-smtp-host
+    - secretKey: EMAIL_SMTP_USERNAME
+      remoteRef:
+        key: agentprovision-email-smtp-username
+    - secretKey: EMAIL_SMTP_PASSWORD
+      remoteRef:
+        key: agentprovision-email-smtp-password
 
 # Additional environment variables
 env:

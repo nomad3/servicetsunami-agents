@@ -112,27 +112,43 @@ const getCurrentUser = () => {
 
 const requestPasswordReset = async (email) => {
   // Backend route is `POST /auth/password-recovery/{email}` (email in
-  // path, not body). The earlier `password-reset` URL never existed
-  // and would 404 silently before the response landed at this layer.
-  // slowapi-rate-limited to 3/hr per IP, response is identical for
-  // existing vs missing emails (no enumeration). See
-  // apps/api/app/api/v1/auth.py::recover_password.
+  // path, not body). slowapi-rate-limited to 3/hr per IP; the path
+  // param is server-side regex-validated against an RFC-loose email
+  // pattern + length-capped at 254 chars (B-2 from 2026-05-12 review).
+  // Response is identical for existing vs missing emails so callers
+  // can't enumerate registered accounts.
+  //
+  // B-5: `withCredentials: true` is REQUIRED — the server sets a
+  // SameSite=Strict HTTP-only cookie (`ap_reset_csrf`) here that the
+  // reset endpoint will verify. Without this flag axios drops the
+  // Set-Cookie and the reset call always fails with "Invalid or
+  // expired token".
   const response = await axios.post(
     API_URL + 'password-recovery/' + encodeURIComponent(email),
+    null,
+    { withCredentials: true },
   );
   return response.data;
 };
 
 const resetPassword = async (email, token, newPassword) => {
-  // Backend route is `POST /auth/reset-password`. Earlier URL
-  // `password-reset/confirm` was wrong shape and would 404.
-  // slowapi-rate-limited to 5/hr per IP; the server only inspects
-  // the SHA-256 hash of the token via hmac.compare_digest.
-  const response = await axios.post(API_URL + 'reset-password', {
-    email,
-    token,
-    new_password: newPassword,
-  });
+  // Backend route is `POST /auth/reset-password`. slowapi-rate-limited
+  // to 5/hr per IP. After 3 wrong tokens per user the server burns the
+  // stored hash and requires a fresh /password-recovery (I-1).
+  //
+  // B-5: `withCredentials: true` ships the `ap_reset_csrf` cookie set
+  // by the recovery endpoint. The server compares its SHA-256 hash
+  // against the value stored when the token was minted; a leaked
+  // link alone is not enough to redeem (browser binding).
+  const response = await axios.post(
+    API_URL + 'reset-password',
+    {
+      email,
+      token,
+      new_password: newPassword,
+    },
+    { withCredentials: true },
+  );
   return response.data;
 };
 

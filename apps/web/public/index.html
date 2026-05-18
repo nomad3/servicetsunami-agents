@@ -5,6 +5,14 @@
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0a1628" />
+    <!-- B-1 (security review 2026-05-12): defense-in-depth against
+         token-in-URL leaks. The reset-password flow puts the token in
+         the URL fragment (never sent in Referer by definition), but
+         `strict-origin-when-cross-origin` also caps the query-string
+         leak risk for any future flow that accidentally moves a
+         secret back into `?...`. Stripped down from no-referrer so
+         marketing analytics still gets the bare origin. -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta
       name="description"
       content="agentprovision.com — A network of specialized AI agents running your operations. Code, sales, marketing, data, and communications specialists — coordinated automatically, sharing memory, getting smarter together."

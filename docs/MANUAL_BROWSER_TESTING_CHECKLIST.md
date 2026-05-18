@@ -1,8 +1,15 @@
 # Manual Browser Testing Checklist
 
-## Test Environment
-- **URL**: https://agentprovision.com
-- **Credentials**: test@example.com / password
+> **Local-dev only.** The demo credentials below are seeded by
+> `apps/api/app/db/init_db.py::seed_demo_data` which only runs when
+> `ENVIRONMENT ∈ {local, dev}` (N5-3 gate, 2026-05-12). Against a
+> staging/prod URL these creds will NOT exist — use your real
+> tenant account. Run this checklist against `http://localhost:8000`
+> or a fresh ephemeral dev stack.
+
+## Test Environment (local dev)
+- **URL**: http://localhost:8000
+- **Credentials**: test@example.com / DemoPass123!
 - **Date**: 2025-11-28
 
 ---
@@ -10,7 +17,7 @@
 ## 1. Authentication & Onboarding
 - [x] **Login Flow** (Verified via API)
   - [x] Navigate to `/login`.
-  - [x] Enter `test@example.com` / `password`.
+  - [x] Enter `test@example.com` / `DemoPass123!`.
   - [x] Click "Login".
   - [x] Verify redirection to Dashboard.
 

@@ -22,6 +22,41 @@ def get_db() -> Generator:
     finally:
         db.close()
 
+def _jwt_iat_before_password_change(payload: dict, user: User) -> bool:
+    """B-4: a JWT whose `iat` predates the user's last password change
+    must be rejected. Without this, an attacker already inside the
+    victim's account stays authenticated even after the password is
+    reset (the very thing a user resets their password to prevent).
+    Migration 130 stamps `password_changed_at` on every existing user
+    so legacy tokens issued before the migration are also covered
+    (a fresh deploy invalidates all tokens — that's the right
+    conservative default for a security hardening rollout)."""
+    iat = payload.get("iat")
+    pwc = user.password_changed_at
+    # IMP-2: when the user has NO password_changed_at (only possible on
+    # rows that pre-date migration 130 in environments where the
+    # migration hasn't run yet), fail open — there's nothing to compare
+    # against. Migration 130 backfills every existing row with NOW(),
+    # so in any deployed environment this branch should be unreachable.
+    if pwc is None:
+        return False
+    # IMP-2: a token that's missing `iat` against a user with a real
+    # password_changed_at is suspicious — `create_access_token` always
+    # stamps iat, so an absent iat means either a hand-crafted token
+    # or a legacy token from before iat existed. Either way the safer
+    # choice is to invalidate (reject), not fail open.
+    if iat is None:
+        return True
+    # iat is unix seconds (jose stamps it as int); pwc is a naive
+    # UTC datetime per the migration. Convert to comparable units.
+    try:
+        from datetime import timezone
+        pwc_unix = pwc.replace(tzinfo=timezone.utc).timestamp()
+    except Exception:
+        return False
+    return float(iat) < pwc_unix
+
+
 def get_current_user(
     db: Session = Depends(get_db),
     token: str = Depends(oauth2_scheme)
@@ -44,6 +79,9 @@ def get_current_user(
         raise credentials_exception
     user = db.query(User).filter(User.email == payload.get("sub")).first()
     if user is None:
+        raise credentials_exception
+    # B-4: invalidate JWTs issued before the user's last password change.
+    if _jwt_iat_before_password_change(payload, user):
         raise credentials_exception
     return user
 
@@ -75,6 +113,9 @@ def get_current_user_optional(
         return None
     user = db.query(User).filter(User.email == email).first()
     if user and not user.is_active:
+        return None
+    # B-4: same JWT-iat floor as the required path.
+    if user and _jwt_iat_before_password_change(payload, user):
         return None
     return user
 

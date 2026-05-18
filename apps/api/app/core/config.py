@@ -122,6 +122,38 @@ class Settings(BaseSettings):
     # Rollback is one env-var flip — the stub stays as the fallback.
     USE_REAL_FANOUT_WORKFLOW: bool = False
 
+    # Deployment environment. Used to gate dev-only side-effects
+    # (most notably the demo-user seed at startup; see init_db.py).
+    # Values: "local" / "dev" / "staging" / "production". Anything
+    # outside the {local, dev} set is treated as production-shape
+    # (no demo seed, no debug toggles).
+    #
+    # FAIL-CLOSED DEFAULT (security review round 6, B6-1): the
+    # default is "production" so a deploy that forgets to set
+    # ENVIRONMENT does NOT silently seed `test@example.com /
+    # DemoPass123!` into the production database. Local dev sets
+    # ENVIRONMENT=local in apps/api/.env (already done).
+    ENVIRONMENT: str = "production"
+
+
+    # Transactional email (password recovery, invitations, system
+    # notifications). Set EMAIL_SMTP_HOST + the four companions to a
+    # real relay (Gmail SMTP, AWS SES, Postmark, Mailgun) in production.
+    # When unset, `email_sender.send_email` falls back to log-only so
+    # local dev keeps working without secrets. EMAIL_FROM_NAME is
+    # cosmetic; EMAIL_FROM must be a deliverable address.
+    EMAIL_SMTP_HOST: str | None = None
+    EMAIL_SMTP_PORT: int = 587
+    EMAIL_SMTP_USERNAME: str | None = None
+    EMAIL_SMTP_PASSWORD: str | None = None
+    EMAIL_FROM: str = "noreply@agentprovision.com"
+    EMAIL_FROM_NAME: str = "AgentProvision"
+    # STARTTLS is the default on port 587 (msa). Set to false only when
+    # talking to localhost:25 in tests; SSL-from-the-start (port 465)
+    # is uncommon enough we don't model it here yet.
+    EMAIL_SMTP_USE_TLS: bool = True
+
+
     class Config:
         env_file = ".env"
         extra = "ignore"

@@ -6,7 +6,7 @@ import secrets
 import logging
 import time
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Path, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -462,67 +462,397 @@ def read_users_me(
     """
     return current_user
 
-@router.post("/password-recovery/{email}")
+# RFC-5322-ish loose check for the path param. The full grammar is
+# absurd; this catches everything Python's email.utils.parseaddr would
+# reasonably consider an address while keeping the regex small. Length
+# capped to 254 (the practical max per RFC 5321 + RFC 5322 errata).
+_EMAIL_PATH_RE = r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$"
+
+# B-5: requester-confirmer binding. The recovery endpoint sets this
+# cookie; the reset endpoint refuses to redeem a token without it.
+# Defeats the leaked-link → anyone-can-redeem class.
+_RESET_CSRF_COOKIE = "ap_reset_csrf"
+_RESET_CSRF_COOKIE_TTL = 60 * 60 * 24  # 24h; matches token expiry
+
+
+def _cookie_should_be_secure() -> bool:
+    """N4-5: `secure=True` is correct for prod (cookie only travels
+    over HTTPS) but blocks the entire flow when local dev runs over
+    plain HTTP — the browser silently drops the Set-Cookie and the
+    reset confirm endlessly 400s with the same-browser hint.
+
+    Auto-detect by looking at PUBLIC_BASE_URL: localhost/127.0.0.1/
+    0.0.0.0/[::1] over http → allow non-secure cookies so dev works
+    without config; everything else → secure required.
+
+    N5-1 (round 5): hostname check is parser-based (not startswith)
+    so a misconfigured `PUBLIC_BASE_URL=http://localhost.attacker.com`
+    can't trick the helper into emitting a non-secure cookie in prod.
+    Matches the URL-allowlist style in email_sender.py.
+    N5-4 (round 5): also accept `0.0.0.0` and `::1` so dev binding
+    to any of the loopback forms works without re-toggling config.
+    """
+    base = (settings.PUBLIC_BASE_URL or "").strip()
+    if not base:
+        # No PUBLIC_BASE_URL configured — assume prod posture
+        # (better to ship the flow broken in dev than ship it
+        # quietly insecure in any unconfigured env).
+        return True
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(base)
+    except Exception:
+        return True
+    if parsed.scheme != "http":
+        return True  # https → secure required, period
+    host = (parsed.hostname or "").lower()
+    if host in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
+        return False
+    return True
+
+
+def _hash_token(t: str) -> str:
+    """SHA-256 hex digest — shared helper for both the reset token and
+    the CSRF correlation cookie. Both are stored hashed in the DB."""
+    return hashlib.sha256(t.encode()).hexdigest()
+
+
+def _log_safe_email_id(email: str) -> str:
+    """N-N3: HMAC-SHA256 of an email under a derived sub-key for log
+    lines. Plain SHA-256 of an email is reversible against a wordlist
+    (anyone with log read access + a customer-export dump can confirm
+    which addresses hit a given log event).
+
+    N3-2 (round 3): derive a dedicated sub-key by prefixing SECRET_KEY
+    with a fixed purpose-label string. Same trust boundary (compromise
+    of SECRET_KEY trivially yields this key too) but a future log-id
+    leak can't be cross-applied to JWT analytics — different inputs
+    to the same HMAC primitive produce uncorrelated outputs.
+    """
+    _PWRESET_LOG_KEY = (settings.SECRET_KEY + "|pwreset-log|").encode()
+    return hmac.new(
+        _PWRESET_LOG_KEY,
+        email.lower().encode(),
+        hashlib.sha256,
+    ).hexdigest()[:16]
+
+
+# N-N5: module-level Redis client so the per-email cap doesn't open a
+# fresh connection on every recovery request. Lazy-initialised so a
+# Redis-less local dev environment doesn't crash on import; the
+# per-call helper catches connection failures and fails open per I-5.
+_redis_client = None
+# N5-2 (round 5): proper circuit-breaker. After a Redis failure we
+# set a "don't retry until" timestamp so concurrent requests during
+# a sustained outage don't all independently re-build a Redis client
+# and re-hit the broken socket. Skip reconnect attempts for 60s.
+_redis_disabled_until: float = 0.0
+_REDIS_CIRCUIT_BREAKER_SECONDS = 60
+
+
+def _get_redis_client():
+    """Return a cached Redis client. None when the breaker is open
+    (recent failure) or when the client can't be constructed at all."""
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    # N5-2: don't even try to reconstruct during the breaker window.
+    # Concurrent requests during a sustained Redis outage thus pay
+    # at most one connect attempt per 60s rather than one per call.
+    if _redis_disabled_until and time.monotonic() < _redis_disabled_until:
+        return None
+    try:
+        import redis as _redis
+        _redis_client = _redis.from_url(
+            settings.REDIS_URL, decode_responses=True, socket_timeout=2
+        )
+    except Exception as exc:
+        # N3-3: surface the failure once at module-init time so a
+        # silently-disabled per-email cap shows up in monitoring.
+        # The fail-open per-call behaviour stays — better to allow
+        # a legit user through than to deny on a Redis blip.
+        logger.warning("pwreset: redis client unavailable, per-email cap disabled: %s", exc)
+        _redis_client = None
+    return _redis_client
+
+
+def _check_per_email_rate_limit(email: str) -> bool:
+    """I-5: outbound-spam dampener. slowapi's 3/hour limit is keyed on
+    client IP; an attacker rotating IPs (CGNAT/IPv6) can still hit
+    `POST /password-recovery/{email}` for any registered email and
+    AgentProvision becomes a soft-spam cannon out of `noreply@…`.
+
+    This second-tier limit is keyed on the email itself, backed by
+    Redis. Max 10 password-recovery emails per email-address per
+    24h regardless of source IP. Returns True when allowed, False
+    when this email has hit its cap.
+
+    Best-effort: if Redis is unreachable we ALLOW (fail-open) rather
+    than deny a real user trying to recover their account. The slowapi
+    per-IP limit + the no-enumeration response shape are still in
+    force.
+    """
+    global _redis_client
+    client = _get_redis_client()
+    if client is None:
+        return True  # fail-open per the docstring
+    try:
+        key = f"pwreset:email:{email.lower()}"
+        # 24h sliding window (set + expire).
+        n = client.incr(key)
+        if n == 1:
+            client.expire(key, 60 * 60 * 24)
+        return n <= 10
+    except Exception as exc:
+        # I4-1 (round-4 review): `redis-py.from_url` is lazy — it
+        # builds a connection-pool client without touching the wire,
+        # so the import-time WARNING in `_get_redis_client` never
+        # fires on the realistic outage scenario (Redis unreachable
+        # over TCP). Log here so a silently-disabled per-email cap
+        # surfaces in monitoring.
+        #
+        # N5-2 (round-5): proper circuit-breaker — null the client AND
+        # set a 60s "don't try again" timestamp so concurrent requests
+        # during a sustained outage don't all independently reconnect.
+        global _redis_disabled_until
+        logger.warning(
+            "pwreset: redis incr failed, per-email cap bypassed for %ds: %s",
+            _REDIS_CIRCUIT_BREAKER_SECONDS,
+            exc,
+        )
+        _redis_client = None
+        _redis_disabled_until = time.monotonic() + _REDIS_CIRCUIT_BREAKER_SECONDS
+        return True
+
+
+@router.post(
+    "/password-recovery/{email}",
+    response_model=auth_schema.PasswordResetMessage,
+)
 @limiter.limit("3/hour")
-def recover_password(request: Request, email: str, db: Session = Depends(deps.get_db)):
+def recover_password(
+    request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    email: str = Path(..., min_length=3, max_length=254, pattern=_EMAIL_PATH_RE),
+    db: Session = Depends(deps.get_db),
+):
+    """Password recovery.
+
+    Always returns the same generic message (no enumeration). Sets a
+    `SameSite=Strict` HTTP-only cookie containing a random correlation
+    ID; the reset endpoint will only accept a token whose stored
+    `password_reset_csrf_hash` matches the cookie's hash (B-5).
     """
-    Password recovery
-    """
+    # I-5: per-email cap (Redis-backed) on top of slowapi's per-IP.
+    # Silently behaves like the miss path when over the cap so an
+    # observer can't enumerate which addresses are being targeted.
+    if not _check_per_email_rate_limit(email):
+        # N-N3: HMAC under SECRET_KEY so the digest isn't dictionary-
+        # reversible by anyone with just log read access.
+        logger.info("pwreset.over_email_cap email_id=%s", _log_safe_email_id(email))
+        return {"message": _PASSWORD_RESET_MESSAGE}
+
     user = user_service.get_user_by_email(db, email=email)
 
     if not user:
-        # Identical message for missing user — prevents email enumeration
+        # Identical message + same cookie set so a network observer
+        # can't distinguish hit/miss by the presence of the cookie.
+        # The cookie is meaningless without a matching DB row, so
+        # setting it on a miss is functionally a no-op for the user
+        # but prevents enumeration via response-header diff.
+        decoy = secrets.token_urlsafe(32)
+        response.set_cookie(
+            _RESET_CSRF_COOKIE,
+            decoy,
+            max_age=_RESET_CSRF_COOKIE_TTL,
+            httponly=True,
+            secure=_cookie_should_be_secure(),
+            samesite="strict",
+            # IMP-1: tighten cookie path so the CSRF token only travels
+            # to the confirm endpoint, not the entire auth router.
+            path="/api/v1/auth/reset-password",
+        )
         return {"message": _PASSWORD_RESET_MESSAGE}
 
     token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-    user.password_reset_token = token_hash
+    csrf = secrets.token_urlsafe(32)
+    user.password_reset_token = _hash_token(token)
+    user.password_reset_csrf_hash = _hash_token(csrf)
     user.password_reset_expires = datetime.utcnow() + timedelta(hours=24)
+    user.password_reset_attempts = 0  # reset attempt counter on new request
     db.add(user)
     db.commit()
 
-    # In a real app, send an email here. For now, log it.
-    logger.info(f"Password reset token generated for {email}")
+    response.set_cookie(
+        _RESET_CSRF_COOKIE,
+        csrf,
+        max_age=_RESET_CSRF_COOKIE_TTL,
+        httponly=True,
+        secure=_cookie_should_be_secure(),
+        samesite="strict",
+        # IMP-1: tighten cookie path so the CSRF token only travels
+        # to the confirm endpoint, not the entire auth router.
+        path="/api/v1/auth/reset-password",
+    )
+
+    # Best-effort; send_password_reset_email never raises. N-7: do
+    # NOT log the email plaintext on the hit path — anyone with log
+    # access could otherwise enumerate registered accounts.
+    #
+    # I3-2 (round-3 review): SMTP send happens in a BackgroundTasks
+    # so the request returns in roughly constant time on both hit
+    # and miss paths. The previous synchronous-send version leaked
+    # account existence via timing (miss = few ms; hit = 100ms-2s
+    # SMTP RTT). BackgroundTasks runs AFTER the response body is
+    # flushed to the client, so an enumerator watching response time
+    # can't distinguish hit/miss any more.
+    from app.services.email_sender import send_password_reset_email
+
+    background_tasks.add_task(
+        send_password_reset_email,
+        to=user.email,
+        reset_token=token,
+        public_base_url=settings.PUBLIC_BASE_URL,
+    )
+    logger.info("pwreset.dispatched user_id=%s", user.id)
 
     return {"message": _PASSWORD_RESET_MESSAGE}
 
-@router.post("/reset-password")
+
+# I-1: max failed reset attempts before token is invalidated. Per-user
+# (not per-IP like slowapi) so two IPs can't share 10 attempts.
+_RESET_MAX_ATTEMPTS = 3
+
+
+@router.post(
+    "/reset-password",
+    response_model=auth_schema.PasswordResetMessage,
+)
 @limiter.limit("5/hour")
 def reset_password(
     request: Request,
+    response: Response,
     body: auth_schema.PasswordResetConfirm,
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    ap_reset_csrf: str | None = Cookie(default=None),
 ):
+    """Reset password using the token + new password.
+
+    Enforces:
+      - B-5: requester-confirmer binding via `ap_reset_csrf` cookie
+        (must hash-match `password_reset_csrf_hash` stored on the user)
+      - I-1: per-user attempt counter — after 3 wrong tokens we null
+        the stored hash and force a fresh /password-recovery
+      - I-7: row-level lock on the user during compare+update so two
+        racing reset attempts can't both succeed with different
+        passwords
+      - I-9: user is looked up by `body.email` then the token+csrf
+        are verified against THAT user; mismatched email rejects
+        with the same generic error
+      - B-4: bumps `password_changed_at` so any existing JWT issued
+        before the reset is rejected by `deps.get_current_active_user`
+      - I-8: writes an audit log row (actor, ip, ua) for forensics
     """
-    Reset password
-    """
-    user = user_service.get_user_by_email(db, email=body.email)
+    generic_error = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Invalid or expired token",
+    )
+    # I-N1: cross-device email-link redemption fails with
+    # SameSite=Strict — the cookie set on device A doesn't travel to
+    # device B. We surface that with a SPECIFIC detail the SPA can
+    # map to a clearer message.
+    same_browser_required_error = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Open this link in the same browser where you requested the reset",
+    )
+
+    # B3-1 (round-3 security review): missing-cookie check FIRST,
+    # BEFORE any DB lookup. Otherwise the friendlier message becomes
+    # an enumeration oracle: an attacker without a cookie can POST
+    # against a target email and learn whether that account has an
+    # active in-flight reset (active → same-browser hint, no-active
+    # → generic error). Email-agnostic refusal here closes the
+    # oracle — cookie-less callers always see the same-browser hint
+    # regardless of whether the email exists or has a pending reset.
+    if not ap_reset_csrf:
+        raise same_browser_required_error
+
+    # I-7: `with_for_update` takes a row lock so two simultaneous
+    # confirm requests can't both pass the compare. Released on commit.
+    from app.models.user import User
+    user = (
+        db.query(User)
+        .filter(User.email == body.email)
+        .with_for_update()
+        .first()
+    )
 
     if not user or not user.password_reset_token or not user.password_reset_expires:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired token",
-        )
-
+        raise generic_error
     if user.password_reset_expires < datetime.utcnow():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired token",
-        )
+        raise generic_error
 
-    submitted_hash = hashlib.sha256(body.token.encode()).hexdigest()
+    # B-5: cookie binding — verify the cookie matches what we stored
+    # when the recovery email was minted. Cookie-present-but-wrong is
+    # an attack signal, NOT a cross-device user; surface as the
+    # generic error so attackers can't tell their forged cookie
+    # apart from a stale-token redemption.
+    if not user.password_reset_csrf_hash:
+        raise generic_error
+    if not hmac.compare_digest(
+        user.password_reset_csrf_hash, _hash_token(ap_reset_csrf)
+    ):
+        raise generic_error
+
+    # Token hash compare with attempt-counter on failure (I-1).
+    submitted_hash = _hash_token(body.token)
     if not hmac.compare_digest(user.password_reset_token, submitted_hash):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired token",
-        )
+        attempts = (user.password_reset_attempts or 0) + 1
+        user.password_reset_attempts = attempts
+        if attempts >= _RESET_MAX_ATTEMPTS:
+            # Burn the token — force a fresh /password-recovery.
+            user.password_reset_token = None
+            user.password_reset_csrf_hash = None
+            user.password_reset_expires = None
+            user.password_reset_attempts = 0
+        db.add(user)
+        db.commit()
+        raise generic_error
 
+    # All checks passed. Commit the new password + clear all reset
+    # state + stamp password_changed_at so existing JWTs are invalid.
     user.hashed_password = security.get_password_hash(body.new_password)
     user.password_reset_token = None
+    user.password_reset_csrf_hash = None
     user.password_reset_expires = None
+    user.password_reset_attempts = 0
+    user.password_changed_at = datetime.utcnow()  # B-4
     db.add(user)
     db.commit()
 
+    # I-8: audit-log the reset. Best-effort; a logging failure must
+    # not block the actual password update from sticking.
+    try:
+        client_ip = request.client.host if request.client else "unknown"
+        ua = (request.headers.get("user-agent") or "")[:200]
+        logger.info(
+            "pwreset.success user_id=%s ip=%s ua=%r",
+            user.id,
+            client_ip,
+            ua,
+        )
+    except Exception:
+        pass
+
+    # I-N2: use the injected `Response` to clear the cookie so the
+    # FastAPI response_model validation still applies (returning a
+    # raw JSONResponse here bypassed the typed contract — N-4 was
+    # supposed to lock it down). Token is also nulled above so
+    # cookie replay can't redeem anyway; this is defense-in-depth.
+    # IMP-1: path must match the tightened cookie scope set on issue
+    # (the recovery endpoint) so the browser can find and clear it.
+    response.delete_cookie(_RESET_CSRF_COOKIE, path="/api/v1/auth/reset-password")
     return {"message": "Password updated successfully"}
 
 

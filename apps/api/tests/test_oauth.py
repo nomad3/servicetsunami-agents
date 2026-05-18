@@ -42,7 +42,7 @@ def db_session_fixture():
 def test_user_data_fixture():
     return {
         "email": "oauth-test@example.com",
-        "password": "testpassword",
+        "password": "TestPass1234!",
         "full_name": "OAuth Test User",
         "tenant_name": "OAuth Test Tenant",
     }

@@ -66,7 +66,17 @@ def init_db(db: Session) -> None:
 
     seed_llm_providers(db)
     seed_llm_models(db)
-    seed_demo_data(db)
+    # N5-3 (security review round 5): seed_demo_data creates a real
+    # `test@example.com / DemoPass123!` account with is_active=True.
+    # Running this on production startup ships every prod
+    # environment with a documented working credential — a
+    # classic anti-pattern. Gate behind ENVIRONMENT ∈ {local, dev}
+    # so prod / staging boot without the demo user. Existing rows
+    # from previous deploys are NOT touched (no DELETE here — that
+    # belongs to an operator runbook).
+    from app.core.config import settings as _settings
+    if _settings.ENVIRONMENT.lower() in ("local", "dev"):
+        seed_demo_data(db)
     seed_system_skills(db)
 
 
@@ -83,7 +93,14 @@ def seed_demo_data(db: Session) -> None:
     demo_user = User(
         email=demo_email,
         full_name="Demo Operator",
-        hashed_password=get_password_hash("password"),
+        # N4-1 (security review round 4): demo password lifted to the
+        # post-N-N6 policy (12+ chars, ≥3 of {upper, lower, digit,
+        # symbol}). The previous "password" worked at seed time
+        # because Pydantic isn't on the path here, but a docs-reader
+        # who tried to reset the demo account to that string via the
+        # public API got a 422. Same string used in the login-screen
+        # demo-credential hint + tests/test_api.py fixture.
+        hashed_password=get_password_hash("DemoPass123!"),
         tenant_id=demo_tenant.id,
         is_active=True,
     )
