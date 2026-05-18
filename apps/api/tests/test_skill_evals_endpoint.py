@@ -325,3 +325,51 @@ def test_grade_grader_outage_returns_503():
     # No grading row persisted on outage.
     insert_sqls = [r for r in db.executed if "INSERT INTO skill_eval_grading" in r["sql"]]
     assert insert_sqls == []
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Persistence failure
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_grade_persist_failure_returns_500_and_rolls_back():
+    """If the commit raises, the endpoint must NOT return a 200 — the
+    contract is side-effect-on-success only. Rollback + 500 is the right
+    outcome so the caller can retry and any half-written transaction state
+    is discarded.
+    """
+    tenant_id = uuid.uuid4()
+    skill_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    eval_id = uuid.uuid4()
+
+    run_row = (
+        str(run_id), str(eval_id), "Hello!", None,
+        [{"id": "e1", "description": "Has greeting"}],
+        str(skill_id),
+    )
+
+    user = _user(tenant_id=tenant_id)
+    db = _StubDB(skill_tenant_id=tenant_id, run_row=run_row)
+
+    # Make commit blow up — simulates a DB error mid-flush.
+    def _boom():
+        raise RuntimeError("simulated DB error on commit")
+
+    db.commit = _boom  # type: ignore[assignment]
+    client = _build_client(user, db)
+
+    fake = _verdicts_json(
+        {"id": "e1", "passed": True, "reasoning": "Says hello."},
+    )
+
+    with patch("app.services.local_inference.generate_sync", return_value=fake):
+        resp = client.post(
+            f"/api/v1/skills/{skill_id}/evals/grade",
+            json={"run_id": str(run_id)},
+        )
+
+    assert resp.status_code == 500
+    assert db.rolled_back is True
+    body = resp.json()
+    assert "persist" in body.get("detail", "").lower()

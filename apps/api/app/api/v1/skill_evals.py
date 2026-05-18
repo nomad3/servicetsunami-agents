@@ -219,13 +219,18 @@ def grade_run(
     try:
         _persist_grading(db, payload.run_id, result)
     except Exception as exc:  # noqa: BLE001
-        # Persistence failure shouldn't lose the grading payload — the
-        # caller still gets the result so they can retry the save later
-        # (or display it without persisting in CLI/notebook callers).
+        # The endpoint contract is side-effect-on-success only (see docstring
+        # above): a 200 must mean a grading row exists. If the commit fails
+        # we MUST rollback and surface a 500 — returning the payload with a
+        # 200 would lie about persistence and break re-grade idempotency.
         logger.warning(
             "grade_run: persist failed — run_id=%s: %s",
             payload.run_id, exc,
         )
         db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="failed to persist grading row",
+        )
 
     return result
