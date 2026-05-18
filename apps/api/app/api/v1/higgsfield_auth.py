@@ -78,12 +78,29 @@ HIGGSFIELD_AUTH_URL = os.environ.get(
 HIGGSFIELD_TOKEN_URL = os.environ.get(
     "HIGGSFIELD_TOKEN_URL", "https://higgsfield.ai/oauth/token"
 )
-HIGGSFIELD_OAUTH_REDIRECT_URI = os.environ.get(
-    "HIGGSFIELD_OAUTH_REDIRECT_URI", "https://higgsfield.ai/cli/authcode"
-)
 HIGGSFIELD_OAUTH_SCOPE = os.environ.get(
     "HIGGSFIELD_OAUTH_SCOPE", "mcp.read mcp.write generate"
 )
+
+
+def _load_higgsfield_redirect_uri() -> str:
+    """Return the operator-registered Higgsfield OAuth redirect URI.
+
+    No default — the value MUST match what was registered against the
+    Higgsfield OAuth client, otherwise the user hits
+    `redirect_uri_mismatch` at the token exchange step. Forcing the
+    env var ensures the registered value and the runtime value can't
+    silently drift. Raises RuntimeError when unset; the routes catch
+    that and surface a 503 with an actionable message.
+    """
+    value = os.environ.get("HIGGSFIELD_OAUTH_REDIRECT_URI")
+    if value:
+        return value
+    raise RuntimeError(
+        "HIGGSFIELD_OAUTH_REDIRECT_URI is not set. Register the redirect "
+        "URI when creating the Higgsfield OAuth client and stamp the "
+        "exact same value into this env var on the api container."
+    )
 
 # Server-side state TTL. Higgsfield's authorization codes are short-lived;
 # 10 minutes matches the gemini flow and gives the user enough time to
@@ -137,7 +154,6 @@ class HiggsfieldLoginState:
     login_id: str
     tenant_id: str
     code_verifier: str = field(repr=False, compare=False)
-    state_token: str = field(repr=False, compare=False)
     verification_url: Optional[str] = None
     status: str = "pending"
     error: Optional[str] = None
@@ -166,14 +182,12 @@ class HiggsfieldAuthManager:
         login_id = str(uuid.uuid4())
         code_verifier = secrets.token_urlsafe(64)
         code_challenge = _pkce_challenge(code_verifier)
-        state_token = secrets.token_hex(32)
-        auth_url = _build_auth_url(code_challenge, state_token)
+        auth_url = _build_auth_url(code_challenge)
 
         state = HiggsfieldLoginState(
             login_id=login_id,
             tenant_id=tenant_id,
             code_verifier=code_verifier,
-            state_token=state_token,
             verification_url=auth_url,
             status="pending",
         )
@@ -190,6 +204,17 @@ class HiggsfieldAuthManager:
         state.error = "Login cancelled"
         state.completed_at = datetime.utcnow().isoformat()
         return state
+
+    def clear_for_tenant(self, tenant_id: str) -> None:
+        """Drop any in-memory login state for `tenant_id`.
+
+        Used by `/disconnect` so re-clicking Connect after a revoke
+        starts a fresh PKCE dance instead of inheriting stale state.
+        Encapsulates the lock discipline so callers don't reach into
+        `_by_tenant` directly.
+        """
+        with self._lock:
+            self._by_tenant.pop(tenant_id, None)
 
     def submit_code(self, tenant_id: str, code: str) -> Optional[HiggsfieldLoginState]:
         """Exchange the user-pasted authorization code for OAuth tokens.
@@ -378,16 +403,19 @@ def _pkce_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
 
 
-def _build_auth_url(code_challenge: str, state_token: str) -> str:
+def _build_auth_url(code_challenge: str) -> str:
+    # Paste-back flow — `state` does not travel back via the user
+    # channel (the user types the code into our form), so we omit it.
+    # PKCE code_verifier provides the binding between /start and
+    # /submit-code instead.
     client_id, _ = _load_higgsfield_oauth_client()
     params = {
         "client_id": client_id,
-        "redirect_uri": HIGGSFIELD_OAUTH_REDIRECT_URI,
+        "redirect_uri": _load_higgsfield_redirect_uri(),
         "response_type": "code",
         "scope": HIGGSFIELD_OAUTH_SCOPE,
         "code_challenge_method": "S256",
         "code_challenge": code_challenge,
-        "state": state_token,
     }
     return f"{HIGGSFIELD_AUTH_URL}?{urlencode(params)}"
 
@@ -426,7 +454,7 @@ def _exchange_code_for_tokens(code: str, code_verifier: str) -> dict:
         "code_verifier": code_verifier,
         "client_id": client_id,
         "client_secret": client_secret,
-        "redirect_uri": HIGGSFIELD_OAUTH_REDIRECT_URI,
+        "redirect_uri": _load_higgsfield_redirect_uri(),
     }
     with httpx.Client(timeout=TOKEN_EXCHANGE_TIMEOUT) as client:
         resp = client.post(
@@ -471,11 +499,25 @@ def _build_oauth_blob(tokens: dict) -> dict:
     server URL specific to this tenant's account, we surface it so
     `higgsfield_mcp.register_for_tenant` can use the per-account
     endpoint instead of the canonical guess.
+
+    We also include `client_id`, `client_secret`, and `token_uri` so
+    that when the MCP runtime worker needs to refresh the access token
+    it can call HIGGSFIELD_TOKEN_URL with the matching client that
+    minted the original tokens. Without those, refresh fails and
+    tenants get logged out at the first token expiry. Mirrors the
+    gemini-cli blob (see `gemini_cli_auth._build_oauth_creds_blob`).
+    The blob is encrypted at rest by `store_credential`, so widening
+    it to include client_secret stays on the already-trusted decrypt
+    path.
     """
+    client_id, client_secret = _load_higgsfield_oauth_client()
     blob = {
         "access_token": tokens.get("access_token"),
         "token_type": tokens.get("token_type") or "Bearer",
         "scope": tokens.get("scope") or HIGGSFIELD_OAUTH_SCOPE,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "token_uri": HIGGSFIELD_TOKEN_URL,
     }
     if tokens.get("refresh_token"):
         blob["refresh_token"] = tokens["refresh_token"]
@@ -564,16 +606,20 @@ def start_higgsfield_auth(
     try:
         state = manager.start_login(str(current_user.tenant_id))
     except RuntimeError as exc:
-        # _load_higgsfield_oauth_client raises RuntimeError when env
-        # overrides aren't set. That's an operator-level config gap —
-        # surface as 503 with an actionable message.
+        # _load_higgsfield_oauth_client and _load_higgsfield_redirect_uri
+        # raise RuntimeError when env overrides aren't set. That's an
+        # operator-level config gap — surface as 503 with an actionable
+        # message.
         raise HTTPException(
             status_code=503,
             detail=(
                 "Higgsfield OAuth client is not configured on the api "
-                "container — set HIGGSFIELD_OAUTH_CLIENT_ID and "
-                "HIGGSFIELD_OAUTH_CLIENT_SECRET. Each tenant brings their "
-                "own Higgsfield account; calls bill against tenant credits."
+                "container — set HIGGSFIELD_OAUTH_CLIENT_ID, "
+                "HIGGSFIELD_OAUTH_CLIENT_SECRET, and "
+                "HIGGSFIELD_OAUTH_REDIRECT_URI (must match the URI you "
+                "registered with the Higgsfield OAuth client). Each tenant "
+                "brings their own Higgsfield account; calls bill against "
+                "tenant credits."
             ),
         ) from exc
     connected = _tenant_has_higgsfield_credential(db, current_user.tenant_id)
@@ -649,6 +695,7 @@ def disconnect_higgsfield_auth(
         db.commit()
 
     # Drop the per-tenant MCP source row so discovery stops listing it.
+    mcp_unregister_warning: Optional[str] = None
     try:
         from app.services import higgsfield_mcp
 
@@ -659,11 +706,11 @@ def disconnect_higgsfield_auth(
             "failed for tenant %s",
             str(tid)[:8],
         )
+        mcp_unregister_warning = "mcp connector remove failed"
 
-    with manager._lock:
-        manager._by_tenant.pop(str(tid), None)
+    manager.clear_for_tenant(str(tid))
 
-    return {
+    response = {
         "status": "idle",
         "connected": False,
         "verification_url": None,
@@ -673,3 +720,6 @@ def disconnect_higgsfield_auth(
         "completed_at": None,
         "revoked": revoked_count,
     }
+    if mcp_unregister_warning:
+        response["warning"] = mcp_unregister_warning
+    return response

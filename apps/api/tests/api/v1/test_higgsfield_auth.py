@@ -37,6 +37,7 @@ _TENANT = "22222222-2222-2222-2222-222222222222"
 
 _TEST_CLIENT_ID = "test-higgsfield-client-id"
 _TEST_CLIENT_SECRET = "test-higgsfield-client-secret"
+_TEST_REDIRECT_URI = "https://test.example/cli/authcode"
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +46,7 @@ def _pin_oauth_client(monkeypatch):
     tests so we don't depend on a real registration."""
     monkeypatch.setenv("HIGGSFIELD_OAUTH_CLIENT_ID", _TEST_CLIENT_ID)
     monkeypatch.setenv("HIGGSFIELD_OAUTH_CLIENT_SECRET", _TEST_CLIENT_SECRET)
+    monkeypatch.setenv("HIGGSFIELD_OAUTH_REDIRECT_URI", _TEST_REDIRECT_URI)
     yield
 
 
@@ -107,14 +109,40 @@ def test_pkce_challenge_is_s256_base64url_nopad():
     assert ha._pkce_challenge(verifier) == expected
 
 
-def test_build_auth_url_includes_pkce_state_and_higgsfield_client():
-    url = ha._build_auth_url("CHAL", "STATE")
+def test_build_auth_url_includes_pkce_and_higgsfield_client():
+    url = ha._build_auth_url("CHAL")
     assert url.startswith(ha.HIGGSFIELD_AUTH_URL + "?")
     assert _TEST_CLIENT_ID in url
     assert "code_challenge=CHAL" in url
     assert "code_challenge_method=S256" in url
-    assert "state=STATE" in url
     assert "response_type=code" in url
+    # Paste-back flow does not benefit from `state` (it doesn't travel
+    # back via the user channel). PKCE provides the binding.
+    assert "state=" not in url
+
+
+def test_build_auth_url_uses_env_redirect_uri():
+    url = ha._build_auth_url("CHAL")
+    # _TEST_REDIRECT_URI is url-encoded in the query string.
+    assert "redirect_uri=https%3A%2F%2Ftest.example%2Fcli%2Fauthcode" in url
+
+
+def test_build_oauth_blob_includes_client_id_secret_and_token_uri():
+    """B1 regression guard — the persisted blob MUST carry client_id,
+    client_secret, and token_uri so the MCP runtime worker can refresh
+    tokens with the same client that minted them. Without these,
+    refresh fails and tenants get logged out at the first token
+    expiry. Mirrors the gemini-cli blob shape."""
+    blob = ha._build_oauth_blob(
+        {
+            "access_token": "hf_at",
+            "refresh_token": "hf_rt",
+            "expires_in": 3600,
+        }
+    )
+    assert blob["client_id"] == _TEST_CLIENT_ID
+    assert blob["client_secret"] == _TEST_CLIENT_SECRET
+    assert blob["token_uri"] == ha.HIGGSFIELD_TOKEN_URL
 
 
 def test_build_oauth_blob_preserves_mcp_endpoint_when_present():
@@ -198,6 +226,10 @@ def test_submit_code_happy_path_writes_oauth_blob_and_registers_mcp(monkeypatch)
     blob = json.loads(blob_row["plaintext_value"])
     assert blob["access_token"] == "hf_at"
     assert blob["refresh_token"] == "hf_rt"
+    # B1: refresh-time client must survive persistence.
+    assert blob["client_id"] == _TEST_CLIENT_ID
+    assert blob["client_secret"] == _TEST_CLIENT_SECRET
+    assert blob["token_uri"] == ha.HIGGSFIELD_TOKEN_URL
 
     # MCP source registration must fire so the Marketing/Sales agent
     # picks up the Higgsfield connector on its next discover_mcp_tools.
@@ -347,3 +379,38 @@ def test_start_login_503_when_env_missing(monkeypatch):
     detail = resp.json().get("detail", "")
     assert "higgsfield" in detail.lower()
     assert "client_id" in detail.lower() or "configured" in detail.lower()
+    # 503 message must point operators at the redirect_uri env var too,
+    # so a redirect_uri_mismatch from Higgsfield surfaces the right
+    # config gap.
+    assert "redirect_uri" in detail.lower()
+
+
+def test_start_login_503_when_redirect_uri_missing(monkeypatch):
+    """I2: HIGGSFIELD_OAUTH_REDIRECT_URI MUST be set explicitly — no
+    default. Without it, _build_auth_url raises RuntimeError and the
+    route returns 503."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api import deps
+    from app.api.v1.higgsfield_auth import router as higgsfield_router
+
+    # Client id/secret stay set (autouse fixture); only redirect_uri is
+    # missing.
+    monkeypatch.delenv("HIGGSFIELD_OAUTH_REDIRECT_URI", raising=False)
+
+    user = MagicMock()
+    user.id = uuid.uuid4()
+    user.tenant_id = uuid.UUID(_TENANT)
+    user.is_active = True
+
+    app = FastAPI()
+    app.include_router(higgsfield_router, prefix="/api/v1/higgsfield-auth")
+    app.dependency_overrides[deps.get_db] = lambda: MagicMock()
+    app.dependency_overrides[deps.get_current_active_user] = lambda: user
+
+    client = TestClient(app)
+    resp = client.post("/api/v1/higgsfield-auth/start")
+    assert resp.status_code == 503, resp.text
+    detail = resp.json().get("detail", "")
+    assert "redirect_uri" in detail.lower()

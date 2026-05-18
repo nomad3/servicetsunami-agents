@@ -111,6 +111,11 @@ configMap:
     GOOGLE_REDIRECT_URI: "https://agentprovision.com/api/v1/oauth/google/callback"
     GITHUB_REDIRECT_URI: "https://agentprovision.com/api/v1/oauth/github/callback"
     LINKEDIN_REDIRECT_URI: "https://agentprovision.com/api/v1/oauth/linkedin/callback"
+    # Higgsfield OAuth redirect URI — MUST match the value registered
+    # in the Higgsfield OAuth client console. Without this, /start
+    # returns 503. Client_id/secret are sourced from the external
+    # secret block below.
+    HIGGSFIELD_OAUTH_REDIRECT_URI: "https://higgsfield.ai/cli/authcode"
     # Belt-and-suspenders for N5-3 / B6-1: even though the
     # `Settings.ENVIRONMENT` field defaults to "production"
     # (fail-closed), set it explicitly here so the demo-seed gate in
@@ -178,6 +183,17 @@ externalSecret:
     - secretKey: LINKEDIN_CLIENT_SECRET
       remoteRef:
         key: agentprovision-linkedin-oauth-client-secret
+    # Higgsfield OAuth client (CLI integration catalog Wave 1a, #270).
+    # BYO-account model — register a Higgsfield OAuth client for the
+    # AgentProvision deployment and seed these two GCP Secret Manager
+    # entries before the chart syncs, otherwise the /start route returns
+    # 503 with an actionable detail.
+    - secretKey: HIGGSFIELD_OAUTH_CLIENT_ID
+      remoteRef:
+        key: agentprovision-higgsfield-oauth-client-id
+    - secretKey: HIGGSFIELD_OAUTH_CLIENT_SECRET
+      remoteRef:
+        key: agentprovision-higgsfield-oauth-client-secret
     # Transactional email relay credentials. Provisioner: create
     # these three GCP Secret Manager entries with your SMTP provider
     # creds (SendGrid api-key / Postmark server-token / SES SMTP
