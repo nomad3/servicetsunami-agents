@@ -40,9 +40,13 @@ import errno
 import fnmatch
 import logging
 import os
-import shutil
 import time
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX (test envs without fcntl)
+    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -173,27 +177,97 @@ def _dir_size(root: Path) -> int:
     return _scan_size(root)
 
 
-def _safe_rm(path: Path) -> int:
-    """Delete a file or directory; return bytes freed.
-
-    Never raises — best-effort.
-    """
+def _safe_unlink(path: Path) -> int:
+    """Delete a single file/symlink; return bytes freed. Best-effort."""
     try:
-        if path.is_file() or path.is_symlink():
-            size = path.stat().st_size if path.is_file() else 0
-            path.unlink(missing_ok=True)
-            return size
-        if path.is_dir():
-            size = _dir_size(path)
-            shutil.rmtree(path, ignore_errors=True)
+        if path.is_symlink():
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                logger.debug("_safe_unlink(%s) symlink failed", path, exc_info=True)
+            return 0
+        if path.is_file():
+            try:
+                size = path.stat().st_size
+            except OSError:
+                size = 0
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                logger.debug("_safe_unlink(%s) failed", path, exc_info=True)
+                return 0
             return size
     except OSError:
-        logger.debug("_safe_rm(%s) failed", path, exc_info=True)
+        logger.debug("_safe_unlink(%s) failed", path, exc_info=True)
     return 0
 
 
+def _safe_rm_tree(path: Path, home: Path, pruned: list[str]) -> int:
+    """Recursively delete ``path``, re-checking never-touch on EVERY descendant.
+
+    For files/symlinks: delete iff not never-touch. Returns bytes freed.
+
+    For directories: descend via ``os.scandir``; delete each child via
+    recursive call, then ``os.rmdir(path)`` ONLY if the directory ended
+    up empty. A non-empty directory means we refused to delete something
+    inside (never-touch hit or an unlink failure), and the protecting
+    parent must survive.
+
+    Records each successfully-deleted file path into ``pruned`` (the list
+    accumulator). Directories that survive because of protected content
+    are NOT recorded. Never raises.
+
+    This is the security boundary: ``shutil.rmtree`` would skip the
+    never-touch check on nested files, which would destroy
+    ``.cache/foo/oauth_creds.json`` and similar. Do NOT replace with
+    ``shutil.rmtree``.
+    """
+    if _is_never_touch(path, home):
+        return 0
+    freed = 0
+    try:
+        # Handle symlinks (incl. symlinks-to-dirs) as a single unlink — do
+        # NOT follow into them and prune their target tree.
+        if path.is_symlink():
+            return _safe_unlink(path)
+        if path.is_file():
+            n = _safe_unlink(path)
+            if n > 0:
+                pruned.append(str(path))
+                logger.debug("tenant_home_quota: pruned %s (%d bytes)", path, n)
+            return n
+        if not path.is_dir():
+            return 0
+    except OSError:
+        return 0
+
+    # Directory case — descend.
+    try:
+        with os.scandir(path) as it:
+            children = list(it)
+    except OSError:
+        return 0
+    for child in children:
+        cpath = Path(child.path)
+        freed += _safe_rm_tree(cpath, home, pruned)
+
+    # Only remove the now-(maybe-)empty directory if it's actually empty.
+    try:
+        os.rmdir(path)
+    except OSError:
+        # Non-empty (something inside was never-touch) OR permission
+        # error — leave the directory in place.
+        pass
+    return freed
+
+
 def _prune_cache(home: Path, pruned: list[str]) -> int:
-    """Tier 1: anything under ``.cache/*`` — pip / hf / npm scratch."""
+    """Tier 1: anything under ``.cache/*`` — pip / hf / npm scratch.
+
+    Uses the recursive walker so nested protected files (e.g.
+    ``.cache/foo/oauth_creds.json``) survive even when the top-level
+    cache subdir is a candidate for deletion.
+    """
     cache = home / ".cache"
     if not cache.is_dir():
         return 0
@@ -201,13 +275,7 @@ def _prune_cache(home: Path, pruned: list[str]) -> int:
     try:
         for entry in os.scandir(cache):
             p = Path(entry.path)
-            if _is_never_touch(p, home):
-                continue
-            n = _safe_rm(p)
-            if n > 0:
-                freed += n
-                pruned.append(str(p))
-                logger.info("tenant_home_quota: pruned %s (%d bytes)", p, n)
+            freed += _safe_rm_tree(p, home, pruned)
     except OSError:
         pass
     return freed
@@ -231,20 +299,12 @@ def _prune_site_packages(home: Path, pruned: list[str], cutoff: float) -> int:
             try:
                 for pkg in os.scandir(site_pkgs):
                     p = Path(pkg.path)
-                    if _is_never_touch(p, home):
-                        continue
                     try:
                         if pkg.stat(follow_symlinks=False).st_mtime > cutoff:
                             continue
                     except OSError:
                         continue
-                    n = _safe_rm(p)
-                    if n > 0:
-                        freed += n
-                        pruned.append(str(p))
-                        logger.info(
-                            "tenant_home_quota: pruned %s (%d bytes)", p, n,
-                        )
+                    freed += _safe_rm_tree(p, home, pruned)
             except OSError:
                 continue
     except OSError:
@@ -267,18 +327,12 @@ def _prune_other_local_lib(home: Path, pruned: list[str], cutoff: float) -> int:
             p = Path(entry.path)
             if entry.is_dir(follow_symlinks=False) and entry.name.startswith("python"):
                 continue  # Tier 2 territory
-            if _is_never_touch(p, home):
-                continue
             try:
                 if entry.stat(follow_symlinks=False).st_mtime > cutoff:
                     continue
             except OSError:
                 continue
-            n = _safe_rm(p)
-            if n > 0:
-                freed += n
-                pruned.append(str(p))
-                logger.info("tenant_home_quota: pruned %s (%d bytes)", p, n)
+            freed += _safe_rm_tree(p, home, pruned)
     except OSError:
         pass
     return freed
@@ -287,9 +341,13 @@ def _prune_other_local_lib(home: Path, pruned: list[str], cutoff: float) -> int:
 def _prune_stale_local(home: Path, pruned: list[str], cutoff: float) -> int:
     """Tier 4: anything under ``.local/`` older than cutoff.
 
-    Catches stale ``.local/bin`` scripts, ``.local/share`` data dirs
-    nobody's read in two weeks, etc. Most aggressive tier — only fires
-    when the first three didn't get us under budget.
+    Catches stale ``.local/share`` data dirs nobody's read in two
+    weeks, etc. Most aggressive tier — only fires when the first three
+    didn't get us under budget.
+
+    Skips ``.local/bin/`` wholesale: tenants' user-installed CLI binaries
+    (e.g. ``pip install --user foo`` console scripts) live there and
+    deleting them silently breaks workflows even when stale by mtime.
     """
     local = home / ".local"
     if not local.is_dir():
@@ -304,6 +362,9 @@ def _prune_stale_local(home: Path, pruned: list[str], cutoff: float) -> int:
             continue
         for entry in entries:
             p = Path(entry.path)
+            # Skip user-installed binaries — see docstring.
+            if entry.is_dir(follow_symlinks=False) and p == local / "bin":
+                continue
             if _is_never_touch(p, home):
                 continue
             try:
@@ -315,21 +376,15 @@ def _prune_stale_local(home: Path, pruned: list[str], cutoff: float) -> int:
                     # Recent dir — descend rather than prune wholesale.
                     stack.append(p)
                     continue
-                n = _safe_rm(p)
-                if n > 0:
-                    freed += n
-                    pruned.append(str(p))
-                    logger.info(
-                        "tenant_home_quota: pruned %s (%d bytes)", p, n,
-                    )
+                freed += _safe_rm_tree(p, home, pruned)
             else:
                 if st.st_mtime > cutoff:
                     continue
-                n = _safe_rm(p)
+                n = _safe_unlink(p)
                 if n > 0:
                     freed += n
                     pruned.append(str(p))
-                    logger.info(
+                    logger.debug(
                         "tenant_home_quota: pruned %s (%d bytes)", p, n,
                     )
     return freed
@@ -352,35 +407,53 @@ def enforce_quota(
     """
     home = Path(tenant_home)
     if not home.is_dir():
-        return {"before": 0, "after": 0, "pruned": []}
+        return {"before": 0, "after": 0, "pruned": [], "skipped": False}
 
     # Acquire the per-tenant flock to prevent two concurrent walkers
     # from racing on the same tree. Non-blocking — if someone else has
     # it, this turn skips the walk.
     lock_path = home / ".quota-walker.lock"
     lock_fd: int | None = None
-    try:
-        import fcntl  # POSIX-only; code-worker always runs in Linux container
-        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY, 0o600)
+    if fcntl is not None:
         try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            if exc.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
+            lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY, 0o600)
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                if exc.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
+                    logger.debug(
+                        "tenant_home_quota: flock held by another walker for %s; skipping",
+                        home,
+                    )
+                    try:
+                        os.close(lock_fd)
+                    except OSError:
+                        pass
+                    # I2: do not _dir_size on the skipped path; it's
+                    # 80-1000ms of wasted I/O on a tree we won't walk.
+                    # I1: signal "skipped, do NOT advance watermark".
+                    return {"before": 0, "after": 0, "pruned": [], "skipped": True}
+                # Other OSError — bail without locking, walk anyway.
                 logger.debug(
-                    "tenant_home_quota: flock held by another walker for %s; skipping",
-                    home,
+                    "tenant_home_quota: flock errored for %s (%s); proceeding without lock",
+                    home, exc,
                 )
-                os.close(lock_fd)
-                return {"before": _dir_size(home), "after": _dir_size(home), "pruned": []}
-            raise
-    except ImportError:
-        # Non-POSIX (test on Windows-y CI?) — best-effort, skip the lock.
-        lock_fd = None
+                try:
+                    os.close(lock_fd)
+                except OSError:
+                    pass
+                lock_fd = None
+        except OSError as exc:
+            logger.debug(
+                "tenant_home_quota: lock file open failed for %s (%s); proceeding without lock",
+                home, exc,
+            )
+            lock_fd = None
 
     try:
         before = _scan_size(home)
         if before <= budget_bytes:
-            return {"before": before, "after": before, "pruned": []}
+            return {"before": before, "after": before, "pruned": [], "skipped": False}
 
         pruned: list[str] = []
         cutoff = time.time() - _STALE_AGE_SECONDS
@@ -389,19 +462,31 @@ def enforce_quota(
         _prune_cache(home, pruned)
         if _scan_size(home) <= budget_bytes:
             after = _scan_size(home)
-            return {"before": before, "after": after, "pruned": pruned}
+            logger.info(
+                "tenant_home_quota: %s pruned tier=1 before=%d after=%d files=%d",
+                home, before, after, len(pruned),
+            )
+            return {"before": before, "after": after, "pruned": pruned, "skipped": False}
 
         # Tier 2: stale site-packages
         _prune_site_packages(home, pruned, cutoff)
         if _scan_size(home) <= budget_bytes:
             after = _scan_size(home)
-            return {"before": before, "after": after, "pruned": pruned}
+            logger.info(
+                "tenant_home_quota: %s pruned tier=2 before=%d after=%d files=%d",
+                home, before, after, len(pruned),
+            )
+            return {"before": before, "after": after, "pruned": pruned, "skipped": False}
 
         # Tier 3: other stale .local/lib/*
         _prune_other_local_lib(home, pruned, cutoff)
         if _scan_size(home) <= budget_bytes:
             after = _scan_size(home)
-            return {"before": before, "after": after, "pruned": pruned}
+            logger.info(
+                "tenant_home_quota: %s pruned tier=3 before=%d after=%d files=%d",
+                home, before, after, len(pruned),
+            )
+            return {"before": before, "after": after, "pruned": pruned, "skipped": False}
 
         # Tier 4: anything stale under .local/
         _prune_stale_local(home, pruned, cutoff)
@@ -413,14 +498,19 @@ def enforce_quota(
                 "(before=%d after=%d budget=%d pruned=%d entries)",
                 home, before, after, budget_bytes, len(pruned),
             )
-        return {"before": before, "after": after, "pruned": pruned}
+        else:
+            logger.info(
+                "tenant_home_quota: %s pruned tier=4 before=%d after=%d files=%d",
+                home, before, after, len(pruned),
+            )
+        return {"before": before, "after": after, "pruned": pruned, "skipped": False}
     finally:
         if lock_fd is not None:
-            try:
-                import fcntl
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            except Exception:  # noqa: BLE001
-                pass
+            if fcntl is not None:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                except OSError:
+                    logger.debug("tenant_home_quota: flock unlock failed", exc_info=True)
             try:
                 os.close(lock_fd)
             except OSError:
@@ -443,7 +533,12 @@ def maybe_enforce_quota(
         if not should_walk(tenant_id, cumulative_chunks):
             return None
         result = enforce_quota(tenant_home, budget_bytes=budget_bytes)
-        _record_walk(tenant_id, cumulative_chunks)
+        # I1: do NOT advance the watermark when the walk was skipped
+        # because another process held the flock. Otherwise this process
+        # would think it "just walked" and refuse to walk again for 10
+        # minutes, even though no data was actually scanned here.
+        if not result.get("skipped"):
+            _record_walk(tenant_id, cumulative_chunks)
         return result
     except Exception:  # noqa: BLE001
         logger.warning(

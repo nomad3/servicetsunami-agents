@@ -62,7 +62,9 @@ class TestEnforceQuotaUnderBudget:
     def test_missing_home_returns_zero(self, tmp_path):
         ghost = tmp_path / "does-not-exist"
         result = tenant_home_quota.enforce_quota(ghost)
-        assert result == {"before": 0, "after": 0, "pruned": []}
+        assert result["before"] == 0
+        assert result["after"] == 0
+        assert result["pruned"] == []
 
 
 class TestEnforceQuotaOverBudget:
@@ -172,6 +174,77 @@ class TestNeverTouchInvariants:
         tenant_home_quota.enforce_quota(home, budget_bytes=512)
 
         assert (home / ".local" / "share" / "myrepo" / ".git" / "HEAD").exists()
+
+
+# ── nested never-touch survival (B2) ────────────────────────────────────
+#
+# These tests guard the security boundary: a top-level "prunable" entry
+# (e.g. ``.cache/foo``) must not destroy nested credential blobs / config
+# / lock files just because the *parent* is in a prunable tier. The
+# recursive walker has to re-check ``_is_never_touch`` on EVERY
+# descendant, not only on the top-level subdir. They fail with
+# ``shutil.rmtree`` and pass with the ``_safe_rm_tree`` walker.
+
+class TestNestedNeverTouchSurvival:
+    def test_nested_oauth_creds_in_cache_survives(self, tmp_path):
+        home = tmp_path / "home"
+        # Nested oauth blob hidden inside a normally-prunable cache subtree.
+        _write(home / ".cache" / "foo" / "oauth_creds.json", 100)
+        # Lots of prunable padding so the walker definitely fires on .cache.
+        _write(home / ".cache" / "foo" / "blob.bin", 10 * 1024)
+
+        tenant_home_quota.enforce_quota(home, budget_bytes=512)
+
+        assert (home / ".cache" / "foo" / "oauth_creds.json").exists()
+
+    def test_nested_credentials_in_cache_survives(self, tmp_path):
+        home = tmp_path / "home"
+        _write(home / ".cache" / "gcloud" / "credentials.json", 100)
+        _write(home / ".cache" / "gcloud" / "junk.bin", 10 * 1024)
+
+        tenant_home_quota.enforce_quota(home, budget_bytes=512)
+
+        assert (home / ".cache" / "gcloud" / "credentials.json").exists()
+
+    def test_nested_git_under_fully_stale_local_share_survives(self, tmp_path):
+        home = tmp_path / "home"
+        old = _ago(30)
+        # Back-date the ENTIRE ancestor chain so Tier 4 sees a stale dir.
+        head = home / ".local" / "share" / "myrepo" / ".git" / "HEAD"
+        _write(head, 200, mtime=old)
+        # Manually back-date every ancestor (the _write helper only does
+        # immediate parent). Tier 4 picks dirs to prune by mtime.
+        for ancestor in [
+            home / ".local",
+            home / ".local" / "share",
+            home / ".local" / "share" / "myrepo",
+            home / ".local" / "share" / "myrepo" / ".git",
+        ]:
+            os.utime(ancestor, (old, old))
+        # Force aggressive pruning past Tiers 1-3 by padding .cache.
+        _write(home / ".cache" / "padding", 10 * 1024)
+
+        tenant_home_quota.enforce_quota(home, budget_bytes=512)
+
+        assert (home / ".local" / "share" / "myrepo" / ".git" / "HEAD").exists()
+
+    def test_nested_lock_under_stale_site_packages_survives(self, tmp_path):
+        home = tmp_path / "home"
+        old = _ago(30)
+        # Stale site-packages dir with a lock file inside — the lock must
+        # survive even though its enclosing package is pruning-eligible.
+        sp = home / ".local" / "lib" / "python3.11" / "site-packages" / "stalepkg"
+        _write(sp / "x.py", 5 * 1024, mtime=old)
+        _write(sp / "poetry.lock", 200, mtime=old)
+        # Back-date the package dir itself too.
+        os.utime(sp, (old, old))
+        # Force the walker to reach Tier 2 by stuffing .cache.
+        _write(home / ".cache" / "padding", 10 * 1024)
+
+        tenant_home_quota.enforce_quota(home, budget_bytes=512)
+
+        assert (home / ".local" / "lib" / "python3.11" / "site-packages"
+                / "stalepkg" / "poetry.lock").exists()
 
 
 class TestBestEffortPartial:

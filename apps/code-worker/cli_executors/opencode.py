@@ -147,6 +147,7 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
         )
 
     cmd = ["opencode", "run", "-p", prompt, "-y", "--output-format", "json"]
+    result: subprocess.CompletedProcess | None = None
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=300,
@@ -170,11 +171,19 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
         return ChatCliResult(response_text="", success=False, error=str(e))
     finally:
         # Phase 2 quota walker (task #264) — OpenCode doesn't go through
-        # the emitter so we approximate chunk count from stdout size to
-        # satisfy the watermark gate.
+        # the SessionEventEmitter so there's no real chunk counter to
+        # pass. Approximate from stdout size (~256B per "chunk-ish unit")
+        # so the watermark gate's delta logic still kicks in for big
+        # outputs without spuriously firing on tiny ones.
         if tenant_home_path:
+            _stdout_len = 0
+            try:
+                if result is not None and result.stdout:
+                    _stdout_len = len(result.stdout)
+            except Exception:  # noqa: BLE001
+                _stdout_len = 0
             tenant_home_quota.maybe_enforce_quota(
                 task_input.tenant_id,
                 tenant_home_path,
-                cumulative_chunks=0,
+                cumulative_chunks=_stdout_len // 256,
             )
