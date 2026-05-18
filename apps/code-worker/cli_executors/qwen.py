@@ -60,7 +60,7 @@ def execute_qwen_chat(task_input, session_dir: str):
             # turn would bubble up as a hard failure.
             friendly = _INTEGRATION_NOT_CONNECTED_MESSAGES.get(
                 "qwen_code",
-                "Qwen Code is not connected. Please connect your Qwen API key in Settings -> Integrations.",
+                "Qwen Code is not connected. Please connect your Qwen API key in Settings → Integrations.",
             )
             logger.info("Qwen creds fetch failed: %s", exc)
             return ChatCliResult(response_text="", success=False, error=friendly)
@@ -71,7 +71,7 @@ def execute_qwen_chat(task_input, session_dir: str):
             success=False,
             error=_INTEGRATION_NOT_CONNECTED_MESSAGES.get(
                 "qwen_code",
-                "Qwen Code is not connected. Please connect your Qwen API key in Settings -> Integrations.",
+                "Qwen Code is not connected. Please connect your Qwen API key in Settings → Integrations.",
             ),
         )
 

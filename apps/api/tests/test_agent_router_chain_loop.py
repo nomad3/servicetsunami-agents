@@ -318,6 +318,34 @@ def test_routing_summary_attributes_first_failure_not_last_in_chain(monkeypatch)
     assert rs["fallback_explanation"] == "rate limit / quota exceeded"
 
 
+def test_paid_cli_fast_pin_sets_include_qwen_code():
+    """M5 conservative-pin lesson: the two paid-CLI sets in
+    `route_and_execute` decide whether an explicit `platform=qwen_code`
+    survives a transient resolver hiccup. If qwen_code is missing from
+    either set, a tenant who explicitly picked Qwen but whose resolver
+    probe transiently fails (DB blip) gets silently downgraded to local
+    Gemma instead of being pinned to Qwen.
+
+    Read the literal source lines to catch silent drift. Mirrors the
+    copilot_cli coverage that was added when copilot was promoted to
+    paid-CLI status — same trap, same fix.
+    """
+    import inspect
+    src = inspect.getsource(agent_router.route_and_execute)
+    # Fast-path set: when platform is explicitly one of the paid CLIs,
+    # skip the resolver probe and pin.
+    assert '"gemini_cli", "claude_code", "codex", "copilot_cli", "qwen_code"' in src, (
+        "qwen_code missing from the fast-path paid-CLI set; explicit "
+        "qwen_code requests will pay the resolver probe cost unnecessarily."
+    )
+    # Conservative set: when the resolver probe raises, pin only if the
+    # explicit platform LOOKS like a paid CLI.
+    assert '"gemini_cli", "claude_code", "codex", "copilot_cli", "qwen_code"' in src, (
+        "qwen_code missing from the conservative paid-CLI fallback set; "
+        "transient resolver failure will silently downgrade qwen to local Gemma."
+    )
+
+
 def test_routing_summary_no_leak_invariant_end_to_end(monkeypatch):
     """I3 from PR #256 review: the metadata returned to the caller (and
     thence to ChatMessage.context) must NOT contain forbidden keys

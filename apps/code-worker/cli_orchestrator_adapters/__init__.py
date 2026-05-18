@@ -29,6 +29,7 @@ from .codex import CodexAdapter
 from .copilot_cli import CopilotCliAdapter
 from .gemini_cli import GeminiCliAdapter
 from .opencode import OpencodeAdapter
+from .qwen_code import QwenCodeAdapter
 from .shell import ShellAdapter
 
 __all__ = [
@@ -37,5 +38,6 @@ __all__ = [
     "CopilotCliAdapter",
     "GeminiCliAdapter",
     "OpencodeAdapter",
+    "QwenCodeAdapter",
     "ShellAdapter",
 ]

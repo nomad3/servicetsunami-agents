@@ -163,7 +163,7 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
         # platform-key lane-B fallback lands in a follow-up PR once
         # adoption signals justify the secrets-manager work.
         "display_name": "Qwen Code",
-        "description": "Connect your Qwen API key for Tongyi Qwen-Coder agent chat",
+        "description": "Connect your Qwen API key for Tongyi Qwen-Coder agent chat. Calls are billed against your DashScope account.",
         "icon": "FaTerminal",
         "auth_type": "api_key",
         "credentials": [
