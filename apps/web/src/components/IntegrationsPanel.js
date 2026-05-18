@@ -18,6 +18,7 @@ import {
   FaEnvelope,
   FaGithub,
   FaGoogle,
+  FaFeather,
   FaKey,
   FaLink,
   FaLinkedin,
@@ -66,6 +67,7 @@ const ICON_MAP = {
   FaTerminal: FaTerminal,
   FaCloud: FaCloud,
   FaTools: FaTools,
+  FaFeather: FaFeather,
 };
 
 // Color accents per skill for visual distinction
@@ -88,6 +90,7 @@ const SKILL_COLORS = {
   deepseek: '#1c64f2',
   glm: '#3b82f6',
   aider: '#dc2626',
+  goose: '#10B981',
 };
 
 // Pinned order for the integration card grid. Anything not listed gets pushed
@@ -108,6 +111,7 @@ const INTEGRATION_ORDER = [
   'deepseek',
   'glm',
   'aider',
+  'goose',
   'gmail',
   'google_calendar',
   'google_drive',

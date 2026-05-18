@@ -20,6 +20,7 @@ from cli_executors.copilot import execute_copilot_chat
 from cli_executors.deepseek import execute_deepseek_chat
 from cli_executors.gemini import execute_gemini_chat
 from cli_executors.glm import execute_glm_chat
+from cli_executors.goose import execute_goose_chat
 from cli_executors.kimi import execute_kimi_chat
 from cli_executors.opencode import execute_opencode_chat
 
@@ -31,6 +32,7 @@ __all__ = [
     "execute_deepseek_chat",
     "execute_gemini_chat",
     "execute_glm_chat",
+    "execute_goose_chat",
     "execute_kimi_chat",
     "execute_opencode_chat",
 ]

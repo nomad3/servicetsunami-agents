@@ -31,6 +31,7 @@ from .copilot_cli import CopilotCliAdapter
 from .deepseek import DeepSeekAdapter
 from .gemini_cli import GeminiCliAdapter
 from .glm import GlmAdapter
+from .goose import GooseAdapter
 from .kimi_k2 import KimiK2Adapter
 from .opencode import OpencodeAdapter
 from .qwen_code import QwenCodeAdapter
@@ -44,6 +45,7 @@ __all__ = [
     "DeepSeekAdapter",
     "GeminiCliAdapter",
     "GlmAdapter",
+    "GooseAdapter",
     "KimiK2Adapter",
     "OpencodeAdapter",
     "QwenCodeAdapter",

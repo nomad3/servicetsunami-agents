@@ -48,6 +48,7 @@ from cli_executors.qwen import execute_qwen_chat as _execute_qwen_chat
 from cli_executors.kimi import execute_kimi_chat as _execute_kimi_chat
 from cli_executors.deepseek import execute_deepseek_chat as _execute_deepseek_chat
 from cli_executors.glm import execute_glm_chat as _execute_glm_chat
+from cli_executors.goose import execute_goose_chat as _execute_goose_chat
 from cli_executors.opencode import (
     execute_opencode_chat as _execute_opencode_chat,
     _execute_opencode_chat_cli,
@@ -339,6 +340,10 @@ _INTEGRATION_NOT_CONNECTED_MESSAGES = {
     "aider": (
         "Aider is not connected. "
         "Please connect your Aider account in Settings → Integrations."
+    ),
+    "goose": (
+        "Goose is not connected. "
+        "Please connect your Goose account in Settings → Integrations."
     ),
 }
 
@@ -1214,6 +1219,11 @@ def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
         if task_input.platform == "aider":
             logger.info("Using platform: aider")
             return _execute_aider_chat(task_input, session_dir)
+
+        if task_input.platform == "goose":
+            logger.info("Using platform: goose")
+            return _execute_goose_chat(task_input, session_dir)
+
 
         return ChatCliResult(response_text="", success=False, error=f"Unsupported platform: {task_input.platform}")
 

@@ -40,6 +40,7 @@ const CLI_OPTIONS = [
   { value: 'deepseek', label: 'DeepSeek' },
   { value: 'glm', label: 'GLM (Zhipu)' },
   { value: 'aider', label: 'Aider' },
+  { value: 'goose', label: 'Goose' },
 ];
 
 // How long the "saved ✓" affordance stays on screen after a successful

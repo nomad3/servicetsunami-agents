@@ -70,6 +70,12 @@ _DEFAULT_PRIORITY: tuple[str, ...] = (
     "deepseek",
     "glm",
     "aider",
+    # Wave 2d — Goose (Block) BYOK MCP-native Rust CLI. Slots below the
+    # established subscriptions and the BYOK alternates because it only
+    # works once the tenant has picked a provider on the goose card; if
+    # they haven't, the executor returns the "not connected" friendly
+    # message and the chain walks past without a cooldown.
+    "goose",
     "opencode",
 )
 
@@ -89,6 +95,7 @@ _CLI_TO_INTEGRATIONS: dict[str, tuple[str, ...]] = {
     "deepseek": ("deepseek",),
     "glm": ("glm",),
     "aider": ("aider",),
+    "goose": ("goose",),
     "opencode": (),  # local
 }
 

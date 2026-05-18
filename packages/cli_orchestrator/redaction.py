@@ -75,6 +75,16 @@ SENSITIVE_ENV_KEYS: frozenset[str] = frozenset({
     "COPILOT_GITHUB_TOKEN",
     "CODEX_AUTH_JSON",
     "GEMINI_CLI_TOKEN",
+    # Wave 2d N1 — provider keys flowing through goose's subprocess env
+    # for whichever LLM provider the tenant picked. Each one is the
+    # documented upstream env var for that provider.
+    "OPENAI_API_KEY",
+    "GROQ_API_KEY",
+    "DATABRICKS_TOKEN",
+    "OPENROUTER_API_KEY",
+    "GEMINI_API_KEY",
+    "XAI_API_KEY",
+    "DEEPSEEK_API_KEY",
 })
 
 

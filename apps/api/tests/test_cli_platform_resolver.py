@@ -391,6 +391,56 @@ def test_chain_kimi_k2_cooldown_respected(monkeypatch):
     assert "claude_code" in chain
 
 
+# ── Goose (Wave 2d) ──────────────────────────────────────────────────
+
+
+def test_chain_goose_via_integration(monkeypatch):
+    """A tenant with the Goose integration connected gets goose in the
+    resolver chain. Mirrors the 1:1 integration → CLI mapping the other
+    BYOK CLIs use."""
+    _stub_connected(monkeypatch, {"goose"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert "goose" in chain
+    assert chain[-1] == "opencode"
+
+
+def test_goose_ranks_below_subscription_clis_and_byok_alternates(monkeypatch):
+    """With every CLI connected, goose sits below qwen_code / kimi_k2
+    (the established BYOK alternates) and above the opencode floor.
+    Locks in the Wave 2d ranking — a future re-shuffle must be an
+    explicit edit to _DEFAULT_PRIORITY."""
+    _stub_connected(
+        monkeypatch,
+        {"gemini_cli", "codex", "github", "claude_code", "qwen_code", "kimi_k2", "goose"},
+    )
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert chain.index("goose") > chain.index("kimi_k2")
+    assert chain.index("goose") < chain.index("opencode")
+
+
+def test_goose_explicit_preference_wins_when_available(monkeypatch):
+    """An agent with preferred_cli=goose AND the goose integration wired
+    leads the chain ahead of any other connected CLIs."""
+    _stub_connected(monkeypatch, {"goose", "claude_code", "github"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform="goose")
+    assert chain[0] == "goose"
+    # Default-priority fallbacks still appear after.
+    assert "claude_code" in chain
+    assert "copilot_cli" in chain
+
+
+def test_goose_not_connected_message_classifies_as_missing_credential():
+    """The worker-side not-connected message for goose MUST classify as
+    ``missing_credential`` so the orchestrator chain-walks past goose
+    WITHOUT a 10-minute cooldown. Quick reconnect → next chat turn picks
+    it up; a cooldown would mask that."""
+    msg = (
+        "Goose is not connected. "
+        "Please connect your Goose account in Settings → Integrations."
+    )
+    assert r.classify_error(msg) == "missing_credential"
+
+
 def test_kimi_k2_not_connected_message_classifies_as_missing_credential():
     """The worker-side not-connected message for kimi_k2 (returned both
     by ``_fetch_integration_credentials`` 404 path and the executor's

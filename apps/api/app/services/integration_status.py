@@ -112,6 +112,8 @@ INTEGRATION_DISPLAY: Dict[str, Dict[str, str]] = {
     "codex": {"name": "Codex CLI", "icon": "FaTerminal"},
     "gemini_cli": {"name": "Gemini CLI", "icon": "FaGoogle"},
     "qwen_code": {"name": "Qwen Code", "icon": "FaTerminal"},
+    "kimi_k2": {"name": "Kimi K2", "icon": "FaRobot"},
+    "goose": {"name": "Goose", "icon": "FaFeather"},
     "brightlocal": {"name": "BrightLocal", "icon": "FaSearch"},
     "scribblevet": {"name": "ScribbleVet", "icon": "FaNotesMedical"},
     "covetrus_pulse": {"name": "Covetrus Pulse", "icon": "FaHeartbeat"},
