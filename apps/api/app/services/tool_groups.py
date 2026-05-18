@@ -99,6 +99,26 @@ TOOL_GROUPS: dict[str, list[str]] = {
         "start_competitor_monitor",
         "stop_competitor_monitor",
     ],
+    # Higgsfield creative-content tools — Wave 1a of the CLI catalog
+    # (#270). Per-tenant MCP source registered via
+    # apps/api/app/services/higgsfield_mcp.py after the OAuth dance
+    # completes. The list below is the static fallback used by the
+    # Marketing/Sales specialist agent before live discovery has run;
+    # discover_mcp_tools refreshes the real names against the tenant's
+    # MCP server. Tool names mirror higgsfield_mcp.HIGGSFIELD_TOOL_NAMES.
+    "higgsfield": [
+        "higgsfield_soul",
+        "higgsfield_cinema_studio",
+        "higgsfield_flux",
+        "higgsfield_seedream",
+        "higgsfield_nano_banana",
+        "higgsfield_seedance",
+        "higgsfield_kling",
+        "higgsfield_veo",
+        "higgsfield_minimax_hailuo",
+        "higgsfield_ad_engine",
+        "higgsfield_virality_prediction",
+    ],
     "ads": [
         "list_meta_campaigns",
         "list_google_campaigns",
