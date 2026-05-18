@@ -267,6 +267,7 @@ _CLI_DISPLAY_LABELS: Dict[str, str] = {
     "copilot_cli": "GitHub Copilot CLI",
     "codex": "Codex CLI",
     "gemini_cli": "Gemini CLI",
+    "qwen_code": "Qwen Code",
     "opencode": "OpenCode (local)",
     "local_gemma": "Local model",
     "template": "Template (no LLM)",
@@ -603,7 +604,7 @@ def route_and_execute(
     # an avoidable +1 DB query and ~4 Redis EXISTS per call. Holistic
     # 2026-05-02 review C4.
     cli_chain: Optional[List[str]] = None
-    if platform in {"gemini_cli", "claude_code", "codex", "copilot_cli"}:
+    if platform in {"gemini_cli", "claude_code", "codex", "copilot_cli", "qwen_code"}:
         # Fast path — explicit paid CLI is already pinned, skip the
         # resolver probe entirely (we'll still call it below for the
         # actual chain at dispatch time, but `_pin_to_cli` doesn't need it).
@@ -623,7 +624,7 @@ def route_and_execute(
             # don't silently downgrade a paid tenant to local Gemma on a
             # transient resolver hiccup.
             _pin_to_cli = platform in {
-                "gemini_cli", "claude_code", "codex", "copilot_cli",
+                "gemini_cli", "claude_code", "codex", "copilot_cli", "qwen_code",
             }
 
     # 2. Get trust profile
@@ -740,6 +741,11 @@ def route_and_execute(
             platform = "codex"
             routing_source = "exploration_codex"
         elif exploration_mode == "balanced":
+            # `qwen_code` is intentionally excluded from RL exploration
+            # until adoption signals justify training a per-tenant Q-table
+            # against it — most tenants haven't connected DashScope, so
+            # exploring into qwen would dead-end on missing-credential for
+            # the majority. Promote once N tenants > threshold ship keys.
             _VALID_EXPLORE = {"claude_code", "codex", "gemini_cli"}
             try:
                 from app.services.rl_routing import get_best_platform
@@ -761,6 +767,11 @@ def route_and_execute(
                 current_platform=platform,
                 current_agent=agent_slug,
             )
+            # Same exclusion rationale as `_VALID_EXPLORE` above —
+            # qwen_code stays out of RL-driven platform suggestions until
+            # tenant DashScope adoption is broad enough for the Q-table
+            # to learn anything useful. Explicit `platform=qwen_code`
+            # still wins via the fast-pin path (see line ~607).
             _VALID_CLI = {"claude_code", "codex", "gemini_cli"}
             if rl_rec.platform and rl_rec.platform in _VALID_CLI and rl_rec.platform_confidence >= 0.4:
                 platform = rl_rec.platform

@@ -28,6 +28,7 @@ RUN npm install -g \
         @anthropic-ai/claude-code \
         @openai/codex@0.130.0 \
         @google/gemini-cli \
+        @qwen-code/qwen-code@0.15.11 \
         opencode-ai \
         @github/copilot
 

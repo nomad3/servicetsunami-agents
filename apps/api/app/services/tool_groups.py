@@ -253,12 +253,14 @@ TIER_MODEL_MAP: dict[str, dict[str, str]] = {
         "claude_code": "haiku",
         "codex": "codex-mini",
         "gemini_cli": "gemini-2.5-flash",
+        "qwen_code": "qwen-coder-turbo",
         "opencode": "gemma4",
     },
     "full": {
         "claude_code": "sonnet",
         "codex": "codex",
         "gemini_cli": "gemini-2.5-pro",
+        "qwen_code": "qwen-coder",
         "opencode": "gemma4",
     },
 }

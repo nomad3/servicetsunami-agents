@@ -169,6 +169,20 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
         "auth_type": "device_auth",
         "device_auth_endpoint": "/higgsfield-auth",
     },
+    "qwen_code": {
+        # Wave 1b — Qwen Code (Tongyi Lab) joins the catalog via BYOK API
+        # key paste. OAuth dance is intentionally not wired yet; the
+        # platform-key lane-B fallback lands in a follow-up PR once
+        # adoption signals justify the secrets-manager work.
+        "display_name": "Qwen Code",
+        "description": "Connect your Qwen API key for Tongyi Qwen-Coder agent chat. Calls are billed against your DashScope account.",
+        "icon": "FaTerminal",
+        "auth_type": "api_key",
+        "credentials": [
+            {"key": "api_key", "label": "Qwen API Key", "type": "password", "required": True,
+             "help": "From DashScope console (dashscope.console.aliyun.com) > API-KEY. Used for both DashScope and OpenAI-compatible Qwen endpoints."},
+        ],
+    },
     "meta_ads": {
         "display_name": "Meta Ads",
         "description": "Manage Facebook & Instagram ad campaigns, view insights, monitor competitor ads",

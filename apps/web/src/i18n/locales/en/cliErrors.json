@@ -3,6 +3,7 @@
   "cli.errors.needs_auth.claude_code": "Your Claude Code subscription needs reconnecting in Settings → Integrations.",
   "cli.errors.needs_auth.gemini_cli": "Your Gemini CLI account needs reconnecting in Settings → Integrations.",
   "cli.errors.needs_auth.copilot_cli": "Your GitHub Copilot CLI seat needs reconnecting in Settings → Integrations.",
+  "cli.errors.needs_auth.qwen_code": "Qwen Code is not connected. Add your DashScope API key in Settings → Integrations to enable Qwen routing.",
   "cli.errors.workspace_untrusted": "This workspace isn't marked as trusted for the selected CLI. Run the CLI's auth flow once.",
   "cli.errors.api_disabled": "The selected CLI's cloud API isn't enabled for your account.",
   "cli.errors.quota_exhausted": "Your CLI subscription hit its rate limit; we tried other CLIs in your chain.",

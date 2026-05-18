@@ -77,6 +77,7 @@ const SKILL_COLORS = {
   codex: '#111827',
   gemini_cli: '#1A73E8',
   higgsfield: '#FF6B35',
+  qwen_code: '#6C2EB7',
 };
 
 // Pinned order for the integration card grid. Anything not listed gets pushed
@@ -92,6 +93,7 @@ const INTEGRATION_ORDER = [
   'github',
   'codex',
   'higgsfield',
+  'qwen_code',
   'gmail',
   'google_calendar',
   'google_drive',
