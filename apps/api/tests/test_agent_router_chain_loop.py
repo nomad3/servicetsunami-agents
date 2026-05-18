@@ -319,30 +319,22 @@ def test_routing_summary_attributes_first_failure_not_last_in_chain(monkeypatch)
 
 
 def test_paid_cli_fast_pin_sets_include_qwen_code():
-    """M5 conservative-pin lesson: the two paid-CLI sets in
-    `route_and_execute` decide whether an explicit `platform=qwen_code`
-    survives a transient resolver hiccup. If qwen_code is missing from
-    either set, a tenant who explicitly picked Qwen but whose resolver
-    probe transiently fails (DB blip) gets silently downgraded to local
-    Gemma instead of being pinned to Qwen.
+    """M5 conservative-pin lesson: the paid-CLI fast-pin set decides
+    whether an explicit `platform=qwen_code` survives a transient
+    resolver hiccup. If qwen_code is missing from the set, a tenant who
+    explicitly picked Qwen but whose resolver probe transiently fails
+    (DB blip) gets silently downgraded to local Gemma instead of being
+    pinned to Qwen.
 
-    Read the literal source lines to catch silent drift. Mirrors the
-    copilot_cli coverage that was added when copilot was promoted to
-    paid-CLI status — same trap, same fix.
+    Wave 1c consolidation collapsed the two inline literal sets into a
+    single module-level ``_PAID_CLI_FAST_PIN_SET`` frozenset (kimi-k2
+    review I1) — assert on the constant rather than the literal source
+    text so the test survives future refactors.
     """
-    import inspect
-    src = inspect.getsource(agent_router.route_and_execute)
-    # Fast-path set: when platform is explicitly one of the paid CLIs,
-    # skip the resolver probe and pin.
-    assert '"gemini_cli", "claude_code", "codex", "copilot_cli", "qwen_code"' in src, (
-        "qwen_code missing from the fast-path paid-CLI set; explicit "
-        "qwen_code requests will pay the resolver probe cost unnecessarily."
-    )
-    # Conservative set: when the resolver probe raises, pin only if the
-    # explicit platform LOOKS like a paid CLI.
-    assert '"gemini_cli", "claude_code", "codex", "copilot_cli", "qwen_code"' in src, (
-        "qwen_code missing from the conservative paid-CLI fallback set; "
-        "transient resolver failure will silently downgrade qwen to local Gemma."
+    assert "qwen_code" in agent_router._PAID_CLI_FAST_PIN_SET, (
+        "qwen_code missing from _PAID_CLI_FAST_PIN_SET; explicit "
+        "qwen_code requests will fall through to local Gemma on a "
+        "transient resolver hiccup."
     )
 
 
