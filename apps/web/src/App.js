@@ -140,18 +140,57 @@ export const useAuth = () => {
   return useContext(AuthContext);
 };
 
+// ── Chunk-load error boundary ──
+// When a deploy ships, the on-the-wire `index.html` points at fresh
+// chunk filenames (content-hashed). Any user with a stale tab open
+// will attempt to lazy-load a chunk that no longer exists at the CDN
+// → React surfaces an opaque white-screen. This boundary catches
+// ChunkLoadError, logs it once, and force-reloads the page so the
+// browser fetches the new index.html. Anything else rethrows so we
+// don't swallow real bugs.
+class ChunkLoadErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { reloading: false };
+  }
+  static getDerivedStateFromError(error) {
+    const isChunkError =
+      error?.name === 'ChunkLoadError' ||
+      /Loading chunk \S+ failed/i.test(error?.message || '') ||
+      /Loading CSS chunk \S+ failed/i.test(error?.message || '');
+    if (isChunkError) return { reloading: true };
+    throw error;
+  }
+  componentDidCatch(error) {
+    if (this.state.reloading) {
+      // eslint-disable-next-line no-console
+      console.warn('[chunk-reload] stale bundle detected, reloading', error);
+      // Defer one tick so React can paint the fallback before navigation.
+      setTimeout(() => window.location.reload(), 0);
+    }
+  }
+  render() {
+    if (this.state.reloading) {
+      return <LoadingSpinner fullScreen text="Updating…" />;
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
   useEffect(() => { initMarketingAnalytics(); }, []);
 
-  // ── Hot-route prefetch ──
+  // ── Hot-route prefetch (authenticated visitors only) ──
   // Once the eager bundle has painted, hint the browser to start
   // downloading the dashboard chunk. webpackPrefetch=true emits a
   // <link rel="prefetch"> which the browser fetches at idle priority —
   // zero impact on FCP but turns the login → dashboard hop into a
   // warm-cache load. The duplicate webpackChunkName is intentional and
   // matches the lazy() declaration above so webpack reuses the same
-  // chunk file instead of emitting a second copy.
+  // chunk file instead of emitting a second copy. Gated on auth so
+  // unauthenticated marketing-site visitors don't pay the bandwidth.
   useEffect(() => {
+    if (!authService.isAuthenticated?.()) return;
     // eslint-disable-next-line no-unused-expressions
     import(/* webpackPrefetch: true, webpackChunkName: "dashboard" */ './pages/DashboardControlCenter');
   }, []);
@@ -162,10 +201,13 @@ function App() {
         <AuthProvider>
           <LunaPresenceProvider>
             <ToastProvider>
-              {/* Suspense fallback covers the brief window between
+              {/* ChunkLoadErrorBoundary catches stale-chunk errors
+                  from rolling deploys and force-reloads. Suspense
+                  fallback below covers the brief window between
                   navigation and the lazy chunk's network fetch. Most
                   lazy chunks are <50 KB gzipped so the spinner is
                   usually a single frame on a warm connection. */}
+              <ChunkLoadErrorBoundary>
               <Suspense fallback={<LoadingSpinner fullScreen text="Loading…" />}>
               <Routes>
                 {/* Root: alpha.agentprovision.com renders the CLI
@@ -247,6 +289,7 @@ function App() {
                 <Route path="/branding" element={<ProtectedRoute><BrandingPage /></ProtectedRoute>} />
               </Routes>
               </Suspense>
+              </ChunkLoadErrorBoundary>
             </ToastProvider>
           </LunaPresenceProvider>
         </AuthProvider>
