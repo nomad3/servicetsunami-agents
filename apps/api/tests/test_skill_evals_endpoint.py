@@ -373,3 +373,50 @@ def test_grade_persist_failure_returns_500_and_rolls_back():
     assert db.rolled_back is True
     body = resp.json()
     assert "persist" in body.get("detail", "").lower()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Dropped-expectations counter surfaces in response
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_grade_response_includes_dropped_expectations_count():
+    """Malformed expectations on the eval should not 500; they should be
+    counted and surfaced via ``dropped_expectations`` so the UI can flag
+    them without log-scraping.
+    """
+    tenant_id = uuid.uuid4()
+    skill_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    eval_id = uuid.uuid4()
+
+    run_row = (
+        str(run_id), str(eval_id), "Hello!", None,
+        [
+            {"id": "e1", "description": "Has greeting"},
+            "garbage",                # not a dict — dropped
+            {"id": "e2"},             # missing description — dropped
+        ],
+        str(skill_id),
+    )
+
+    user = _user(tenant_id=tenant_id)
+    db = _StubDB(skill_tenant_id=tenant_id, run_row=run_row)
+    client = _build_client(user, db)
+
+    fake = _verdicts_json(
+        {"id": "e1", "passed": True, "reasoning": "Says hello."},
+    )
+
+    with patch("app.services.local_inference.generate_sync", return_value=fake):
+        resp = client.post(
+            f"/api/v1/skills/{skill_id}/evals/grade",
+            json={"run_id": str(run_id)},
+        )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["dropped_expectations"] == 2
+    # The single surviving expectation graded normally.
+    assert [e["id"] for e in body["expectations"]] == ["e1"]
+    assert body["score"] == 1.0

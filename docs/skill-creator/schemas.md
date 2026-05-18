@@ -164,7 +164,8 @@ Output of the grader (Phase 1, this PR). Lives at
       "passed": true,
       "reasoning": "Vendor field is 'Olive Garden'."
     }
-  ]
+  ],
+  "dropped_expectations": 0
 }
 ```
 
@@ -177,7 +178,8 @@ Field | Type | Required | Meaning
 `grader_model` | string | yes | Literal model id the grader called — the value passed to ``local_inference.generate_sync``. Phase 1 always grades on the local ``gemma3:4b`` floor regardless of tenant preference; Phase 4 wires per-tenant routing through ``agent_router`` and the label will then name the CLI-dispatched model. Recorded so a re-grade is forensically comparable to the run that produced it.
 `score` | number | yes | Fraction of expectations passed: `count(passed=true) / len(expectations)`. Range `[0, 1]`. Producer computes.
 `passed` | bool | yes | `true` iff every expectation passed (`score == 1.0`). Producer computes.
-`expectations` | array<GradedExpectation> | yes | One entry per expectation, in input order. Same length as input.
+`expectations` | array<GradedExpectation> | yes | One entry per expectation, in input order. Same length as the *cleaned* input — malformed expectations are dropped before grading (see `dropped_expectations`).
+`dropped_expectations` | int | yes | Count of input expectations that failed schema validation and were dropped before grading. `0` for a well-formed eval. Surfaced so the UI can say "2 of your expectations were malformed" without log-scraping.
 
 GradedExpectation object:
 

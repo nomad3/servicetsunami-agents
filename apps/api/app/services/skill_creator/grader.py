@@ -85,6 +85,10 @@ class GradingResult(BaseModel):
     score: float = Field(..., ge=0.0, le=1.0)
     passed: bool
     expectations: List[GradedExpectation]
+    # Count of input expectations that were malformed and dropped before
+    # grading (see ``_validate_expectations``). Surfaced so callers can
+    # show "2 of your expectations were malformed" without scraping logs.
+    dropped_expectations: int = 0
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -223,21 +227,23 @@ def _summarize_outputs(outputs_dir: Optional[Path]) -> str:
     return "\n".join(lines)
 
 
-def _validate_expectations(raw: List) -> List[Expectation]:
+def _validate_expectations(raw: List) -> tuple[List[Expectation], int]:
     """Coerce caller-supplied list-of-dicts into Expectation objects.
 
     Drops entries that don't match the schema instead of raising — a malformed
-    single expectation shouldn't 500 the grader. The endpoint surfaces a count
-    of dropped expectations in the response metadata (Phase 1 keeps this
-    server-side only; Phase 2 wires it into the UI).
+    single expectation shouldn't 500 the grader. Returns ``(cleaned, dropped)``
+    so the grader can surface a count of dropped expectations in the response
+    payload (``GradingResult.dropped_expectations``).
     """
     cleaned: List[Expectation] = []
+    dropped = 0
     for item in raw:
         if isinstance(item, Expectation):
             cleaned.append(item)
             continue
         if not isinstance(item, dict):
             logger.warning("grader: dropping non-dict expectation: %r", item)
+            dropped += 1
             continue
         try:
             cleaned.append(Expectation(**item))
@@ -245,7 +251,8 @@ def _validate_expectations(raw: List) -> List[Expectation]:
             logger.warning(
                 "grader: dropping malformed expectation %r: %s", item, exc
             )
-    return cleaned
+            dropped += 1
+    return cleaned, dropped
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -296,7 +303,7 @@ def grade(
             be graded. A partial grade (some expectations parsed, others
             fell back to ``passed=false``) is returned without raising.
     """
-    cleaned = _validate_expectations(expectations)
+    cleaned, dropped = _validate_expectations(expectations)
     if not cleaned:
         # Caller asked us to grade against zero usable expectations. Return
         # a zero-length grading rather than raising so the endpoint can
@@ -305,6 +312,7 @@ def grade(
             eval_id=eval_id,
             run_id=run_id,
             grader_model=_DEFAULT_LOCAL_MODEL_TAG,
+            dropped_expectations=dropped,
         )
 
     grader_model_label = _DEFAULT_LOCAL_MODEL_TAG
@@ -383,10 +391,17 @@ def grade(
         # but immune to float-rounding edge cases and clearer to readers.
         passed=all(g.passed for g in graded),
         expectations=graded,
+        dropped_expectations=dropped,
     )
 
 
-def _empty_result(*, eval_id: str, run_id: str, grader_model: str) -> GradingResult:
+def _empty_result(
+    *,
+    eval_id: str,
+    run_id: str,
+    grader_model: str,
+    dropped_expectations: int = 0,
+) -> GradingResult:
     """Zero-expectation grading payload (score 0.0, passed False).
 
     Score is 0.0 by convention — there's nothing to pass, so the run can't
@@ -402,4 +417,5 @@ def _empty_result(*, eval_id: str, run_id: str, grader_model: str) -> GradingRes
         score=0.0,
         passed=False,
         expectations=[],
+        dropped_expectations=dropped_expectations,
     )

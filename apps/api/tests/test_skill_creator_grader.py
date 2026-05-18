@@ -76,9 +76,10 @@ def test_extract_json_returns_none_for_garbage():
 
 def test_validate_expectations_drops_non_dict():
     raw = ["not a dict", 42, {"id": "e1", "description": "ok"}]
-    cleaned = _validate_expectations(raw)
+    cleaned, dropped = _validate_expectations(raw)
     assert len(cleaned) == 1
     assert cleaned[0].id == "e1"
+    assert dropped == 2
 
 
 def test_validate_expectations_drops_missing_required_fields():
@@ -87,19 +88,22 @@ def test_validate_expectations_drops_missing_required_fields():
         {"description": "no id"},  # missing id
         {"id": "e2", "description": "valid"},
     ]
-    cleaned = _validate_expectations(raw)
+    cleaned, dropped = _validate_expectations(raw)
     assert [e.id for e in cleaned] == ["e2"]
+    assert dropped == 2
 
 
 def test_validate_expectations_accepts_already_typed():
     e = Expectation(id="e1", description="ok")
-    cleaned = _validate_expectations([e])
+    cleaned, dropped = _validate_expectations([e])
     assert cleaned == [e]
+    assert dropped == 0
 
 
 def test_validate_expectations_defaults_kind_to_assertion():
-    cleaned = _validate_expectations([{"id": "e1", "description": "ok"}])
+    cleaned, dropped = _validate_expectations([{"id": "e1", "description": "ok"}])
     assert cleaned[0].kind == "assertion"
+    assert dropped == 0
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -251,6 +255,37 @@ def test_grade_malformed_expectations_dropped_then_graded():
     # Only e1 survived validation; both verdicts respected.
     assert [e.id for e in result.expectations] == ["e1"]
     assert result.score == 1.0
+    # Two malformed inputs ("garbage" + {"id":"e2"}) should be counted.
+    assert result.dropped_expectations == 2
+
+
+def test_grade_no_malformed_inputs_reports_zero_dropped():
+    expectations = [{"id": "e1", "description": "ok"}]
+    fake = _verdicts_json(
+        {"id": "e1", "passed": True, "reasoning": "yep"},
+    )
+    with patch("app.services.local_inference.generate_sync", return_value=fake):
+        result = grade(
+            transcript="hi",
+            outputs_dir=None,
+            expectations=expectations,
+            tenant_id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+        )
+    assert result.dropped_expectations == 0
+
+
+def test_grade_all_malformed_inputs_reports_drop_count():
+    result = grade(
+        transcript="Hello!",
+        outputs_dir=None,
+        expectations=["nope", {"id": "x"}],
+        tenant_id=uuid.uuid4(),
+        session_id=uuid.uuid4(),
+    )
+    # Both inputs were malformed; neither survived validation.
+    assert result.expectations == []
+    assert result.dropped_expectations == 2
 
 
 def test_grade_no_usable_expectations_returns_empty_result():
