@@ -49,6 +49,7 @@ from app.api.v1 import (
     claude_auth,
     codex_auth,
     gemini_cli_auth,
+    higgsfield_auth,
     notifications,
     reports,
     bookkeeper_exports,
@@ -188,6 +189,13 @@ router.include_router(oauth.router, prefix="/oauth", tags=["oauth"])
 router.include_router(claude_auth.router, prefix="/claude-auth", tags=["claude-auth"])
 router.include_router(codex_auth.router, prefix="/codex-auth", tags=["codex-auth"])
 router.include_router(gemini_cli_auth.router, prefix="/gemini-cli-auth", tags=["gemini-cli-auth"])
+# Higgsfield creative-content MCP source — Wave 1a of the CLI catalog
+# (#270). Mirrors the gemini-cli OAuth flow: api-owned PKCE + paste-back
+# code exchange. The resulting OAuth blob is stored in the vault and
+# fans out to a per-tenant MCP server registration that the Marketing/
+# Sales specialist agent picks up via the standard discover_mcp_tools
+# path.
+router.include_router(higgsfield_auth.router, prefix="/higgsfield-auth", tags=["higgsfield-auth"])
 router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 router.include_router(reports.router, prefix="/reports", tags=["reports"])
 router.include_router(

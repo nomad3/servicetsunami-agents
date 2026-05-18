@@ -36,6 +36,16 @@ const integrationConfigService = {
   geminiCliAuthSubmitCode: (code) => api.post('/gemini-cli-auth/submit-code', { code }),
   geminiCliAuthCancel: () => api.post('/gemini-cli-auth/cancel'),
   geminiCliAuthDisconnect: () => api.post('/gemini-cli-auth/disconnect'),
+  // Higgsfield creative-content MCP source — Wave 1a of the CLI catalog
+  // (#270). Mirrors the gemini-cli paste-back PKCE flow. The resulting
+  // OAuth blob registers a per-tenant Higgsfield MCP server that the
+  // Marketing/Sales specialist agent can call via discover_mcp_tools /
+  // call_mcp_tool.
+  higgsfieldAuthStart: () => api.post('/higgsfield-auth/start'),
+  higgsfieldAuthStatus: () => api.get('/higgsfield-auth/status'),
+  higgsfieldAuthSubmitCode: (code) => api.post('/higgsfield-auth/submit-code', { code }),
+  higgsfieldAuthCancel: () => api.post('/higgsfield-auth/cancel'),
+  higgsfieldAuthDisconnect: () => api.post('/higgsfield-auth/disconnect'),
   // Returns { connected: ["claude_code", ...] } for the current tenant
   // — the resolver-aligned list of CLIs the InlineCliPicker filters
   // its dropdown against. See apps/api/app/api/v1/integrations.py

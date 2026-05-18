@@ -114,3 +114,7 @@ env:
   # MCP server decommissioned — tools are FastMCP-based inside the API
   - name: OLLAMA_BASE_URL
     value: "http://host.docker.internal:11434"
+  # Higgsfield OAuth — operator MUST stamp client_id, secret, and
+  # redirect URI into the api-secrets k8s secret (built from
+  # apps/api/.env, see apps/api/.env.example) before /api/v1/
+  # higgsfield-auth/start will work. Leaving them unset returns 503.

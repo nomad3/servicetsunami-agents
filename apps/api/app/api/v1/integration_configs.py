@@ -157,6 +157,18 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
         "auth_type": "device_auth",
         "device_auth_endpoint": "/gemini-cli-auth",
     },
+    "higgsfield": {
+        # Wave 1a of the CLI integration catalog (#270). Per-tenant
+        # OAuth — every tenant brings their own Higgsfield account
+        # (multi-tenant ToS not confirmed yet, so no shared-founder
+        # path). Calls bill against tenant credits.
+        "display_name": "Higgsfield",
+        "description": "Creative-content MCP source: image (Soul, Cinema Studio, Flux, Seedream, Nano Banana), video (Seedance, Kling, Veo, Minimax Hailuo), plus Ad Engine + virality prediction. Powered by your Higgsfield account credits.",
+        "icon": "FaPalette",
+        "credentials": [],
+        "auth_type": "device_auth",
+        "device_auth_endpoint": "/higgsfield-auth",
+    },
     "meta_ads": {
         "display_name": "Meta Ads",
         "description": "Manage Facebook & Instagram ad campaigns, view insights, monitor competitor ads",

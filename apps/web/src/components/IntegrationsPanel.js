@@ -21,6 +21,7 @@ import {
   FaLink,
   FaLinkedin,
   FaMicrosoft,
+  FaPalette,
   FaPlay,
   FaPlug,
   FaPlus,
@@ -57,6 +58,7 @@ const ICON_MAP = {
   FaProjectDiagram: FaProjectDiagram,
   FaLinkedin: FaLinkedin,
   FaMicrosoft: FaMicrosoft,
+  FaPalette: FaPalette,
   FaTerminal: FaTerminal,
 };
 
@@ -74,6 +76,7 @@ const SKILL_COLORS = {
   claude_code: '#D97706',
   codex: '#111827',
   gemini_cli: '#1A73E8',
+  higgsfield: '#FF6B35',
 };
 
 // Pinned order for the integration card grid. Anything not listed gets pushed
@@ -88,6 +91,7 @@ const INTEGRATION_ORDER = [
   'claude_code',
   'github',
   'codex',
+  'higgsfield',
   'gmail',
   'google_calendar',
   'google_drive',
@@ -132,6 +136,12 @@ const IntegrationsPanel = () => {
   const [claudeAuthState, setClaudeAuthState] = useState({ status: 'idle', connected: false });
   const [geminiCliAuthState, setGeminiCliAuthState] = useState({ status: 'idle', connected: false });
   const [geminiCliCode, setGeminiCliCode] = useState('');
+  // Higgsfield mirrors the gemini-cli paste-back flow: /start opens
+  // Higgsfield's OAuth URL in a popup, the user copies the verification
+  // code back into this textbox, /submit-code persists the OAuth blob
+  // and registers the per-tenant MCP source.
+  const [higgsfieldAuthState, setHiggsfieldAuthState] = useState({ status: 'idle', connected: false });
+  const [higgsfieldCode, setHiggsfieldCode] = useState('');
   // claude-auth paste-code (option b) + API-key bypass (option a) inputs.
   // The paste-code surfaces when the OAuth subprocess is in `pending`
   // state (URL printed, waiting for the user to come back with the
@@ -218,6 +228,13 @@ const IntegrationsPanel = () => {
         setGeminiCliAuthState(geminiRes.data || { status: 'idle', connected: false });
       } catch {
         setGeminiCliAuthState({ status: 'idle', connected: false });
+      }
+
+      try {
+        const higgsRes = await integrationConfigService.higgsfieldAuthStatus();
+        setHiggsfieldAuthState(higgsRes.data || { status: 'idle', connected: false });
+      } catch {
+        setHiggsfieldAuthState({ status: 'idle', connected: false });
       }
 
       // Check inbox monitor status if Google is connected
@@ -326,6 +343,36 @@ const IntegrationsPanel = () => {
 
     return () => clearInterval(interval);
   }, [geminiCliAuthState?.status, fetchData]);
+
+  // Poll Higgsfield auth status while login is pending. Same shape as
+  // the gemini-cli poller: covers `starting`, `pending`, `submitting`
+  // so the UI clears once the api-owned PKCE exchange completes.
+  useEffect(() => {
+    if (!['starting', 'pending', 'submitting'].includes(higgsfieldAuthState?.status)) return undefined;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await integrationConfigService.higgsfieldAuthStatus();
+        const nextState = res.data || { status: 'idle', connected: false };
+        setHiggsfieldAuthState(nextState);
+
+        if (nextState.status === 'connected') {
+          setSuccess('Connected Higgsfield');
+          setTimeout(() => setSuccess(null), 4000);
+          setHiggsfieldCode('');
+          fetchData();
+        } else if (nextState.status === 'failed') {
+          setError(nextState.error || 'Higgsfield login failed');
+          setTimeout(() => setError(null), 6000);
+        }
+      } catch {
+        setError('Failed to check Higgsfield login status');
+        setTimeout(() => setError(null), 6000);
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [higgsfieldAuthState?.status, fetchData]);
 
   // Listen for OAuth popup messages
   useEffect(() => {
@@ -565,6 +612,77 @@ const IntegrationsPanel = () => {
       await fetchData();
     } catch (err) {
       setError('Failed to disconnect Gemini CLI');
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  // ── Higgsfield creative-content OAuth (paste-back code flow) ──
+  // Mirrors the gemini-cli handlers above. /start mints a Higgsfield
+  // PKCE URL and opens it in a popup; the user pastes the code into
+  // the Submit form; /submit-code exchanges + persists + registers
+  // the per-tenant MCP source.
+  const handleHiggsfieldConnect = async () => {
+    try {
+      setConnectingProvider('higgsfield');
+      const res = await integrationConfigService.higgsfieldAuthStart();
+      const nextState = res.data || { status: 'idle', connected: false };
+      setHiggsfieldAuthState(nextState);
+
+      if (nextState.verification_url) {
+        window.open(nextState.verification_url, 'higgsfield-auth', 'width=700,height=820,scrollbars=yes');
+      }
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Higgsfield login not available';
+      setError(detail);
+      setTimeout(() => setError(null), 6000);
+    } finally {
+      setConnectingProvider(null);
+    }
+  };
+
+  const handleHiggsfieldCancel = async () => {
+    try {
+      setSaving('higgsfield-cancel');
+      const res = await integrationConfigService.higgsfieldAuthCancel();
+      setHiggsfieldAuthState(res.data || { status: 'cancelled', connected: false });
+      setHiggsfieldCode('');
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Failed to cancel Higgsfield login';
+      setError(detail);
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleHiggsfieldSubmitCode = async () => {
+    if (!higgsfieldCode.trim()) return;
+    try {
+      setSaving('higgsfield-submit');
+      const res = await integrationConfigService.higgsfieldAuthSubmitCode(higgsfieldCode.trim());
+      setHiggsfieldAuthState(res.data || { status: 'pending', connected: false });
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Failed to submit Higgsfield code';
+      setError(detail);
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleHiggsfieldDisconnect = async () => {
+    try {
+      setSaving('higgsfield-disconnect');
+      await integrationConfigService.higgsfieldAuthDisconnect();
+      setHiggsfieldAuthState({ status: 'idle', connected: false });
+      setCredentialStatuses((prev) => ({ ...prev, higgsfield: [] }));
+      setSuccess('Disconnected Higgsfield');
+      setTimeout(() => setSuccess(null), 3000);
+      await fetchData();
+    } catch (err) {
+      setError('Failed to disconnect Higgsfield');
       setTimeout(() => setError(null), 5000);
     } finally {
       setSaving(null);
@@ -1151,6 +1269,160 @@ const IntegrationsPanel = () => {
     );
   };
 
+  // ── Higgsfield creative-content card ──
+  // Mirrors renderGeminiCliExpanded one-for-one. Cosmetic differences:
+  // accent color, the "credits" note (calls bill against the tenant's
+  // own Higgsfield account), and the FaPalette icon.
+  const renderHiggsfieldExpanded = (skill) => {
+    const config = getConfigForSkill(skill.integration_name);
+    const storedKeys = credentialStatuses[skill.integration_name] || [];
+    const hasStoredAuth =
+      storedKeys.includes('higgsfield_oauth') || storedKeys.includes('access_token');
+    const isConnected = higgsfieldAuthState.connected || hasStoredAuth;
+    const isPending = ['starting', 'pending'].includes(higgsfieldAuthState.status);
+    const isConnecting = connectingProvider === 'higgsfield';
+    const verificationUrl = higgsfieldAuthState.verification_url;
+
+    return (
+      <div className="py-2">
+        <Alert variant="info" className="mb-3" style={{ fontSize: '0.78rem' }}>
+          Powered by your Higgsfield account credits — every generation bills
+          against your own Higgsfield subscription. Bring your own Higgsfield
+          account during this Wave 1a rollout.
+        </Alert>
+
+        {isConnected && !isPending && (
+          <div
+            className="d-flex align-items-center justify-content-between mb-3 p-3"
+            style={{
+              border: '1px solid rgba(45,157,120,0.25)',
+              borderRadius: 10,
+              background: 'rgba(45,157,120,0.08)',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-foreground)' }}>
+                Connected with Higgsfield
+              </div>
+              <div style={{ fontSize: '0.74rem', color: 'var(--color-muted)' }}>
+                Higgsfield MCP source registered for this tenant
+              </div>
+            </div>
+            {!!config && (
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={handleHiggsfieldDisconnect}
+                disabled={saving === 'higgsfield-disconnect'}
+              >
+                Disconnect
+              </Button>
+            )}
+          </div>
+        )}
+
+        {isPending && (
+          <Alert variant="info" className="mb-3" style={{ fontSize: '0.82rem' }}>
+            <div className="fw-semibold mb-2">Finish Higgsfield sign-in</div>
+            <div className="mb-2">
+              {verificationUrl ? (
+                <>
+                  Open{' '}
+                  <a href={verificationUrl} target="_blank" rel="noreferrer">
+                    this Higgsfield authorization URL
+                  </a>
+                  , approve access with your Higgsfield account, then paste the code below.
+                </>
+              ) : (
+                'Waiting for the Higgsfield verification URL...'
+              )}
+            </div>
+            {verificationUrl && (
+              <Form.Group className="mb-2">
+                <Form.Label style={{ fontSize: '0.74rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Authorization code
+                </Form.Label>
+                <div className="d-flex gap-2">
+                  <Form.Control
+                    size="sm"
+                    type="text"
+                    placeholder="Paste the code from Higgsfield"
+                    value={higgsfieldCode}
+                    onChange={(e) => setHiggsfieldCode(e.target.value)}
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleHiggsfieldSubmitCode}
+                    disabled={saving === 'higgsfield-submit' || !higgsfieldCode.trim()}
+                  >
+                    Submit
+                  </Button>
+                </div>
+              </Form.Group>
+            )}
+          </Alert>
+        )}
+
+        {higgsfieldAuthState.status === 'failed' && higgsfieldAuthState.error && (
+          <Alert variant="danger" className="mb-3" style={{ fontSize: '0.8rem' }}>
+            {higgsfieldAuthState.error}
+          </Alert>
+        )}
+
+        <div className="d-flex gap-2">
+          <Button
+            size="sm"
+            onClick={handleHiggsfieldConnect}
+            disabled={isConnecting || isPending}
+            style={{
+              background: '#FF6B35',
+              color: '#fff',
+              border: 'none',
+              fontWeight: 500,
+              fontSize: '0.85rem',
+              padding: '8px 16px',
+              borderRadius: 6,
+            }}
+          >
+            {isConnecting ? (
+              <Spinner
+                animation="border"
+                size="sm"
+                style={{ width: 14, height: 14, borderWidth: 1.5 }}
+                className="me-2"
+              />
+            ) : (
+              <FaPalette className="me-2" size={14} />
+            )}
+            {isConnected ? 'Reconnect Higgsfield' : 'Connect with Higgsfield'}
+          </Button>
+
+          {isPending && (
+            <>
+              {verificationUrl && (
+                <Button
+                  variant="outline-secondary"
+                  size="sm"
+                  onClick={() => window.open(verificationUrl, 'higgsfield-auth', 'width=700,height=820,scrollbars=yes')}
+                >
+                  Open sign-in page
+                </Button>
+              )}
+              <Button
+                variant="outline-danger"
+                size="sm"
+                onClick={handleHiggsfieldCancel}
+                disabled={saving === 'higgsfield-cancel'}
+              >
+                Cancel
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // ---------------------------------------------------------------------------
   // Skill card renderer
   // ---------------------------------------------------------------------------
@@ -1172,7 +1444,9 @@ const IntegrationsPanel = () => {
             ? (codexAuthState.connected || hasStoredCredentials)
             : skill.integration_name === 'gemini_cli'
               ? (geminiCliAuthState.connected || hasStoredCredentials)
-              : hasStoredCredentials)
+              : skill.integration_name === 'higgsfield'
+                ? (higgsfieldAuthState.connected || hasStoredCredentials)
+                : hasStoredCredentials)
         : isBrowserAuth
         ? (skill.integration_name === 'claude_code' ? (claudeAuthState.connected || hasStoredCredentials) : hasStoredCredentials)
         : !!config;
@@ -1300,6 +1574,8 @@ const IntegrationsPanel = () => {
               {isDeviceAuth && skill.integration_name === 'codex' && renderCodexExpanded(skill)}
 
               {isDeviceAuth && skill.integration_name === 'gemini_cli' && renderGeminiCliExpanded(skill)}
+
+              {isDeviceAuth && skill.integration_name === 'higgsfield' && renderHiggsfieldExpanded(skill)}
 
               {/* Claude Code OAuth + API-key auth.
                   Two paths into the same credential slot:
