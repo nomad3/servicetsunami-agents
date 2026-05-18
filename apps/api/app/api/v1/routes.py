@@ -38,6 +38,7 @@ from app.api.v1 import (
     gesture_dispatch,
     fleet,
     skills_new,
+    skill_evals,
     mcp_bridge,
     workflows,
     remedia,
@@ -175,6 +176,10 @@ router.include_router(insights_coalition_replay.router, prefix="/insights", tags
 router.include_router(integration_configs.router, prefix="/integration-configs", tags=["integration-configs"])
 router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
 router.include_router(skills_new.router, prefix="/skills", tags=["skills"])
+# Skill-creator framework — Phase 1 grader endpoint. Mounted under /skills
+# so the URL reads `/api/v1/skills/{skill_id}/evals/grade` per the design
+# doc. Phases 2-7 add the rest of the authoring surface.
+router.include_router(skill_evals.router, prefix="/skills", tags=["skill-evals"])
 router.include_router(mcp_bridge.router, prefix="/mcp", tags=["mcp"])
 router.include_router(workflows.router, prefix="/workflows", tags=["workflows"])
 router.include_router(remedia.router, prefix="/remedia", tags=["remedia"])
