@@ -89,6 +89,16 @@ def execute_codex_chat(task_input, session_dir: str, image_path: str):
     env = os.environ.copy()
     env["CODEX_HOME"] = codex_home
     env["WORKSPACE"] = cli_cwd
+    # ── tenant HOME on workspaces volume (task #267 Phase 1) ────────────
+    # ``CODEX_HOME`` already pins codex's own state dir, but the codex
+    # subprocess will still ``pip install --user`` / write ``.cache`` /
+    # spawn sandboxed skills that honour ``$HOME``. Redirect HOME onto
+    # the persistent workspaces volume so that growth doesn't land on
+    # the code-worker writable layer.
+    try:
+        env["HOME"] = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+    except (ValueError, OSError):
+        pass
 
     # ---- streaming emitter (plan 2026-05-16 §4.5) ----
     # codex --json already streams NDJSON; the parser maps each line

@@ -95,6 +95,37 @@ def tenant_workspace_dir(tenant_id: str, session_id: str | None = None) -> Path:
     return target
 
 
+def tenant_home_dir(tenant_id: str) -> Path:
+    """Return the per-tenant persistent HOME directory, creating it on demand.
+
+    Layout:
+        WORKSPACES_ROOT / <tenant_id> / home /
+
+    Phase 1 of task #267 — the code-worker writable layer grows from
+    ``/home/codeworker/st_sessions/<tenant>/.local`` and ``.cache``
+    (per-tenant Python/Node package installs). Once it saturates the
+    Docker Desktop VM disk, CI api builds silently fail with ``apt-get
+    exit 100``. Moving the growth source onto the workspaces named volume
+    (which lives on the host disk, not the VM overlay) eliminates that
+    failure mode.
+
+    Reuses the same WORKSPACES_ROOT + UUID guard as ``tenant_workspace_dir``
+    so the two helpers can never disagree on what "this tenant's
+    directory" means. The 0o700 mode is paranoia — the volume is already
+    mounted only inside the code-worker container, but per-tenant
+    credential blobs (e.g. ``.gemini/oauth_creds.json``) should not be
+    world-readable even inside the container in case sandboxed CLIs land
+    here in the future.
+    """
+    if not _UUID_RE.match(str(tenant_id) if tenant_id is not None else ""):
+        raise ValueError(
+            f"tenant_home_dir: non-UUID tenant_id={tenant_id!r}"
+        )
+    home = WORKSPACES_ROOT / str(tenant_id) / "home"
+    home.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return home
+
+
 def resolve_cli_cwd(
     task_input,
     fallback: str,

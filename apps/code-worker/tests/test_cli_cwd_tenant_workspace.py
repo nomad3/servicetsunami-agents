@@ -292,10 +292,13 @@ class TestGeminiChatCwdScoped:
         assert "projects" in cwd
         # WORKSPACE env propagated.
         assert captured["kwargs"]["env"]["WORKSPACE"] == cwd
-        # HOME still points at gemini_home (not the tenant cwd) so the
-        # CLI keeps reading ~/.gemini/oauth_creds.json from the prepared
-        # home directory.
-        assert captured["kwargs"]["env"]["HOME"] == str(session_dir)
+        # HOME points at the per-tenant ``home/`` dir on the persistent
+        # workspaces volume (task #267 Phase 1). The CLI keeps reading
+        # ~/.gemini/oauth_creds.json — just from the volume now instead
+        # of the writable layer.
+        home_env = captured["kwargs"]["env"]["HOME"]
+        assert TENANT_GEMINI in home_env
+        assert home_env.endswith("/home")
 
 
 class TestCopilotChatCwdScoped:

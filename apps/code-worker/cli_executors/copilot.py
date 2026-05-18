@@ -117,6 +117,17 @@ def execute_copilot_chat(task_input, session_dir: str):
     if cli_cwd != _cwd_fallback:
         cmd.extend(["--add-dir", cli_cwd])
 
+    # ── tenant HOME on workspaces volume (task #267 Phase 1) ────────────
+    # ``COPILOT_HOME`` already pins copilot's own state dir, but tools
+    # the copilot subprocess invokes still honour ``$HOME`` for caches
+    # and ``--user`` installs. Redirect HOME onto the persistent
+    # workspaces volume so that growth doesn't land on the code-worker
+    # writable layer.
+    try:
+        env["HOME"] = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+    except (ValueError, OSError):
+        pass
+
     # ---- streaming emitter (plan 2026-05-16 §2.4) ----
     # Copilot CLI uses passthrough — terminal sees the raw JSONL stream.
     emitter = SessionEventEmitter(

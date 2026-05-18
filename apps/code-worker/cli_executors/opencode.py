@@ -131,6 +131,14 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
     _cwd_fallback = WORKSPACE if os.path.isdir(WORKSPACE) else session_dir
     cli_cwd = cli_runtime.resolve_cli_cwd(task_input, _cwd_fallback)
     env = {**os.environ, "WORKSPACE": cli_cwd}
+    # ── tenant HOME on workspaces volume (task #267 Phase 1) ────────────
+    # Redirect HOME onto the persistent workspaces volume so OpenCode's
+    # ``.local`` / ``.cache`` / ``--user`` installs survive container
+    # recycles AND don't grow the code-worker writable layer.
+    try:
+        env["HOME"] = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+    except (ValueError, OSError):
+        pass
 
     cmd = ["opencode", "run", "-p", prompt, "-y", "--output-format", "json"]
     try:

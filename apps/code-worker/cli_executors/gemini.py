@@ -44,9 +44,22 @@ def execute_gemini_chat(task_input, session_dir: str, image_path: str):
         except Exception as exc:
             return ChatCliResult(response_text="", success=False, error=f"Failed to load Gemini credentials: {exc}")
 
+    # ── tenant HOME on workspaces volume (task #267 Phase 1) ────────────
+    # Gemini CLI reads its credentials and per-tenant ``.gemini/`` state
+    # from ``$HOME/.gemini/``, so it's the one executor where the HOME
+    # redirect must thread through the prep helper too — otherwise the
+    # CLI looks for ``oauth_creds.json`` in the persistent-volume HOME
+    # while we wrote it into the legacy session_dir. ``tenant_home`` falls
+    # back to ``session_dir`` for non-UUID tenant_ids (same defensive
+    # shape as ``resolve_cli_cwd``) so this is a pure no-op in tests that
+    # don't mount WORKSPACES_ROOT.
+    try:
+        tenant_home = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+    except (ValueError, OSError):
+        tenant_home = session_dir
     if api_key:
         # API key auth — no OAuth, no ADC, just set GEMINI_API_KEY env var
-        gemini_home = _prepare_gemini_home_apikey(session_dir, task_input.mcp_config)
+        gemini_home = _prepare_gemini_home_apikey(tenant_home, task_input.mcp_config)
     else:
         # OAuth auth — write the persisted oauth_creds.json blob to disk so the
         # Gemini CLI uses its own client_id binding (refresh tokens are bound to
@@ -72,7 +85,7 @@ def execute_gemini_chat(task_input, session_dir: str, image_path: str):
             "refresh_token": refresh_token,
             "email": creds.get("email"),
         }
-        gemini_home = _prepare_gemini_home(session_dir, auth_payload, task_input.mcp_config)
+        gemini_home = _prepare_gemini_home(tenant_home, auth_payload, task_input.mcp_config)
     
     if not gemini_home:
         logger.error("gemini_home is None!")
@@ -94,7 +107,7 @@ def execute_gemini_chat(task_input, session_dir: str, image_path: str):
     ]
 
     env = os.environ.copy()
-    env["HOME"] = session_dir  # Tell Gemini CLI where to find .gemini/
+    env["HOME"] = tenant_home  # Tell Gemini CLI where to find .gemini/
     env["GEMINI_TELEMETRY"] = "0"
     # Bypass gemini-cli's "trusted folders" gate. The CLI added it as a
     # safety check for interactive use; in our headless code-worker the

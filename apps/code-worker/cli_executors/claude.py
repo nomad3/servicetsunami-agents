@@ -161,6 +161,18 @@ def execute_claude_chat(task_input, session_dir: str):
     if cli_cwd != _cwd_fallback:
         cmd.extend(["--add-dir", cli_cwd])
 
+    # ── tenant HOME on workspaces volume (task #267 Phase 1) ────────────
+    # Redirect HOME onto the persistent workspaces volume so per-tenant
+    # ``.local/`` / ``.cache/`` / package installs don't grow the
+    # code-worker writable layer (root cause of the 2026-05-04 &
+    # 2026-05-17 disk-full incidents). Non-UUID tenant_id falls back to
+    # the container's default HOME — same defensive shape as
+    # ``resolve_cli_cwd``.
+    try:
+        env["HOME"] = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+    except (ValueError, OSError):
+        pass
+
     # ---- streaming emitter (no-op if flag off / chat_session_id missing) ----
     emitter = SessionEventEmitter(
         chat_session_id=getattr(task_input, "chat_session_id", "") or "",
