@@ -23,6 +23,7 @@ import subprocess
 import time
 
 import cli_runtime
+import tenant_home_quota
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +136,10 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
     # Redirect HOME onto the persistent workspaces volume so OpenCode's
     # ``.local`` / ``.cache`` / ``--user`` installs survive container
     # recycles AND don't grow the code-worker writable layer.
+    tenant_home_path: str | None = None
     try:
-        env["HOME"] = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+        tenant_home_path = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+        env["HOME"] = tenant_home_path
     except (ValueError, OSError) as exc:
         logger.warning(
             "tenant_home_dir(%s) failed (%s); HOME falls back to container default",
@@ -144,6 +147,7 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
         )
 
     cmd = ["opencode", "run", "-p", prompt, "-y", "--output-format", "json"]
+    result: subprocess.CompletedProcess | None = None
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=300,
@@ -165,3 +169,21 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
         )
     except Exception as e:
         return ChatCliResult(response_text="", success=False, error=str(e))
+    finally:
+        # Phase 2 quota walker (task #264) — OpenCode doesn't go through
+        # the SessionEventEmitter so there's no real chunk counter to
+        # pass. Approximate from stdout size (~256B per "chunk-ish unit")
+        # so the watermark gate's delta logic still kicks in for big
+        # outputs without spuriously firing on tiny ones.
+        if tenant_home_path:
+            _stdout_len = 0
+            try:
+                if result is not None and result.stdout:
+                    _stdout_len = len(result.stdout)
+            except Exception:  # noqa: BLE001
+                _stdout_len = 0
+            tenant_home_quota.maybe_enforce_quota(
+                task_input.tenant_id,
+                tenant_home_path,
+                cumulative_chunks=_stdout_len // 256,
+            )

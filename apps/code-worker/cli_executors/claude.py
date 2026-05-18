@@ -30,6 +30,7 @@ import logging
 import os
 
 import cli_runtime
+import tenant_home_quota
 from cli_executors import claude_stream_parser
 from session_event_emitter import SessionEventEmitter
 from tenant_feature_flags import is_enabled as _feature_enabled
@@ -171,8 +172,10 @@ def execute_claude_chat(task_input, session_dir: str):
     # 2026-05-17 disk-full incidents). Non-UUID tenant_id falls back to
     # the container's default HOME — same defensive shape as
     # ``resolve_cli_cwd``.
+    tenant_home_path: str | None = None
     try:
-        env["HOME"] = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+        tenant_home_path = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
+        env["HOME"] = tenant_home_path
     except (ValueError, OSError) as exc:
         logger.warning(
             "tenant_home_dir(%s) failed (%s); HOME falls back to container default",
@@ -198,7 +201,17 @@ def execute_claude_chat(task_input, session_dir: str):
             on_chunk=on_chunk,
         )
     finally:
-        emitter.close()
+        _stats = emitter.close()
+        # ── Phase 2 quota walker (task #264) ────────────────────────────
+        # Walk the tenant HOME dir on the workspaces volume and prune
+        # non-essential subtrees if we're over the 2 GiB soft cap.
+        # Watermark-gated inside maybe_enforce_quota; non-raising.
+        if tenant_home_path:
+            tenant_home_quota.maybe_enforce_quota(
+                task_input.tenant_id,
+                tenant_home_path,
+                cumulative_chunks=int(_stats.get("emitted", 0)) if isinstance(_stats, dict) else 0,
+            )
 
     if result.returncode != 0:
         err = cli_runtime.safe_cli_error_snippet(result.stderr, result.stdout, 1000)
