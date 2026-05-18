@@ -217,28 +217,49 @@ async def transcribe_async(
         workflow_id = await _start_workflow(audio_path)
     except Exception as exc:
         # If we couldn't even hand off, clean up the temp file ourselves.
-        try:
-            os.unlink(audio_path)
-        except OSError:
-            pass
+        from pathlib import Path
+        Path(audio_path).unlink(missing_ok=True)
         raise TranscriptionUnavailable(f"Failed to start workflow: {exc}") from exc
 
-    result = await _await_workflow_result(workflow_id, timeout=sync_timeout)
-    if result is None:
+    # Wait for the result. Cleanup is idempotent with the activity-side
+    # unlink (see transcribe_audio_activity's finally block): both layers
+    # use Path.unlink(missing_ok=True) so it doesn't matter which one
+    # wins. The api-side unlink here is the safety net for cases where
+    # the workflow times out / fails BEFORE the activity runs (e.g. the
+    # code-worker is down, the activity hits its start-to-close timeout,
+    # or the workflow is cancelled). Without it those files would leak
+    # on the shared volume indefinitely.
+    try:
+        result = await _await_workflow_result(workflow_id, timeout=sync_timeout)
+        if result is None:
+            # Workflow is still running — DO NOT delete the temp file yet;
+            # the activity hasn't read it. Let the activity own cleanup.
+            return TranscriptionResult(
+                transcript=None,
+                engine="pending",
+                duration_ms=0,
+                job_id=workflow_id,
+                status="pending",
+            )
+        # Workflow completed inside our window — safe to belt-and-braces
+        # unlink. The activity already deleted (delete_after=True), so
+        # the missing_ok flag is doing the work.
+        from pathlib import Path
+        Path(audio_path).unlink(missing_ok=True)
         return TranscriptionResult(
-            transcript=None,
-            engine="pending",
-            duration_ms=0,
+            transcript=result.get("transcript"),
+            engine=result.get("engine", "unavailable"),
+            duration_ms=int(result.get("duration_ms", 0)),
             job_id=workflow_id,
-            status="pending",
+            status="completed",
         )
-    return TranscriptionResult(
-        transcript=result.get("transcript"),
-        engine=result.get("engine", "unavailable"),
-        duration_ms=int(result.get("duration_ms", 0)),
-        job_id=workflow_id,
-        status="completed",
-    )
+    except Exception:
+        # Workflow raised (cancelled, RpcError, etc) — the activity may
+        # never have run. Best-effort unlink so the shared volume doesn't
+        # collect orphans on every failure.
+        from pathlib import Path
+        Path(audio_path).unlink(missing_ok=True)
+        raise
 
 
 async def transcription_status(job_id: str) -> TranscriptionResult:

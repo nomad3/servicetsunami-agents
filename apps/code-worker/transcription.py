@@ -24,7 +24,6 @@ from __future__ import annotations
 import functools
 import io
 import logging
-import os
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Optional
@@ -170,12 +169,14 @@ def transcribe_audio_activity(input: TranscribeAudioInput) -> TranscribeAudioRes
             transcript=transcript, engine=engine, duration_ms=duration_ms
         )
     finally:
-        # Best-effort cleanup; caller may also unlink on its end and that's fine.
+        # Best-effort cleanup. The api-side ``transcribe_async`` ALSO
+        # unlinks on completion + failure for the case where this
+        # activity never ran (worker down, start-to-close timeout, etc).
+        # Both layers use ``Path.unlink(missing_ok=True)`` so whichever
+        # wins, the other is a no-op.
         if input.delete_after and input.audio_path:
-            try:
-                os.unlink(input.audio_path)
-            except OSError:
-                logger.debug("transcribe activity: temp file cleanup skipped", exc_info=True)
+            from pathlib import Path
+            Path(input.audio_path).unlink(missing_ok=True)
 
 
 @workflow.defn
