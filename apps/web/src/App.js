@@ -11,13 +11,18 @@ import authService from './services/auth';
 // ── Critical-path routes (kept eager) ──
 // LandingPage + AlphaLandingPage render at "/" before auth and dictate
 // LCP for cold marketing-site visitors; LoginPage is the next click on
-// the auth funnel. DashboardControlCenter is the post-login default and
-// is prefetched after first paint (see hot-route prefetch below) rather
-// than lazy-split, to keep the login→dashboard transition instant.
+// the auth funnel. Both ship in the initial bundle so unauth visitors
+// don't pay a Suspense round-trip on first paint.
 import LandingPage from './LandingPage';
 import AlphaLandingPage from './AlphaLandingPage';
 import LoginPage from './pages/LoginPage';
-import DashboardControlCenter from './pages/DashboardControlCenter';
+
+// ── Hot routes (lazy + prefetched) ──
+// Dashboard is the post-login default and gets webpackPrefetch hinted
+// from a useEffect below so its chunk arrives at idle priority before
+// the user logs in. Edge cache + prefetch + lazy = "instant" post-login
+// without sacrificing cold-marketing-visit FCP.
+const DashboardControlCenter = lazy(() => import(/* webpackChunkName: "dashboard" */ './pages/DashboardControlCenter'));
 
 // ── Lazy-loaded route pages ──
 // Each becomes its own webpack chunk loaded on navigation. The
@@ -137,6 +142,20 @@ export const useAuth = () => {
 
 function App() {
   useEffect(() => { initMarketingAnalytics(); }, []);
+
+  // ── Hot-route prefetch ──
+  // Once the eager bundle has painted, hint the browser to start
+  // downloading the dashboard chunk. webpackPrefetch=true emits a
+  // <link rel="prefetch"> which the browser fetches at idle priority —
+  // zero impact on FCP but turns the login → dashboard hop into a
+  // warm-cache load. The duplicate webpackChunkName is intentional and
+  // matches the lazy() declaration above so webpack reuses the same
+  // chunk file instead of emitting a second copy.
+  useEffect(() => {
+    // eslint-disable-next-line no-unused-expressions
+    import(/* webpackPrefetch: true, webpackChunkName: "dashboard" */ './pages/DashboardControlCenter');
+  }, []);
+
   return (
     <ThemeProvider>
       <Router>
