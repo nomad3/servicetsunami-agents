@@ -21,7 +21,7 @@ from app.services.tool_groups import TIER_LIMITS, TIER_MODEL_MAP, format_allowed
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_CLI_PLATFORMS = {"claude_code", "codex", "gemini_cli", "copilot_cli", "opencode"}
+SUPPORTED_CLI_PLATFORMS = {"claude_code", "codex", "gemini_cli", "copilot_cli", "qwen_code", "opencode"}
 
 
 # Universal anti-hallucination preamble. Lifted from aremko's "REGLA DE ORO"
@@ -875,6 +875,7 @@ def _run_agent_session_legacy(
             "codex": "Codex",
             "gemini_cli": "Gemini CLI",
             "copilot_cli": "GitHub Copilot CLI",
+            "qwen_code": "Qwen Code",
         }.get(platform, platform)
         err = (
             f"{platform_label} subscription is not connected "

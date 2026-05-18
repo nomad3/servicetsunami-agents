@@ -154,7 +154,7 @@ describe('InlineCliPicker', () => {
     // 5xx → graceful degrade to the pre-filter behaviour: every CLI
     // option still rendered so a user with a failing endpoint isn't
     // stuck on Auto-only.
-    expect(labels).toEqual(['Auto', 'Claude Code', 'Codex', 'Gemini CLI', 'Copilot CLI']);
+    expect(labels).toEqual(['Auto', 'Claude Code', 'Codex', 'Gemini CLI', 'Copilot CLI', 'Qwen Code']);
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
   });

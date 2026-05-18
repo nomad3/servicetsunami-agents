@@ -267,6 +267,7 @@ _CLI_DISPLAY_LABELS: Dict[str, str] = {
     "copilot_cli": "GitHub Copilot CLI",
     "codex": "Codex CLI",
     "gemini_cli": "Gemini CLI",
+    "qwen_code": "Qwen Code",
     "opencode": "OpenCode (local)",
     "local_gemma": "Local model",
     "template": "Template (no LLM)",

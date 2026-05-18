@@ -266,11 +266,12 @@ def test_chain_gemini_cli_via_google_integration(monkeypatch):
 def test_default_priority_when_multiple_clis_connected(monkeypatch):
     """No explicit preference + multiple connected → use the default
     priority order. As of 2026-05-05 the order is
-    gemini_cli > codex > copilot_cli > claude_code > opencode (most
-    tenants only have Google integrations connected, which auto-grant
-    gemini for free, so we lead with that). If product preferences
-    change, update _DEFAULT_PRIORITY in cli_platform_resolver.py and
-    this test changes too — that's a feature, not a bug."""
+    gemini_cli > codex > copilot_cli > claude_code > qwen_code > opencode
+    (most tenants only have Google integrations connected, which auto-grant
+    gemini for free, so we lead with that; Wave 1b adds qwen_code below
+    the established subscription CLIs). If product preferences change,
+    update _DEFAULT_PRIORITY in cli_platform_resolver.py and this test
+    changes too — that's a feature, not a bug."""
     _stub_connected(monkeypatch, {"github", "claude_code", "gemini_cli", "codex"})
     chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
     # opencode always last
@@ -282,3 +283,63 @@ def test_default_priority_when_multiple_clis_connected(monkeypatch):
     # All connected CLIs appear
     for cli in ("copilot_cli", "claude_code"):
         assert cli in chain
+
+
+# ── Wave 1b — qwen_code ──────────────────────────────────────────────
+
+def test_chain_when_only_qwen_connected(monkeypatch):
+    """Tenant with only Qwen Code integrated → chain leads with qwen_code,
+    falls through to opencode floor. Wave 1b BYOK happy path."""
+    _stub_connected(monkeypatch, {"qwen_code"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert chain[0] == "qwen_code"
+    assert chain[-1] == "opencode"
+    # The four established CLIs must NOT appear because their creds
+    # aren't wired.
+    assert set(chain).isdisjoint({"claude_code", "codex", "gemini_cli", "copilot_cli"})
+
+
+def test_qwen_code_ranks_below_subscription_clis(monkeypatch):
+    """With every CLI connected, qwen_code sits below the four
+    established subscription CLIs (gemini > codex > copilot > claude)
+    and above the opencode floor. Locks in the Wave 1b ranking decision
+    so a future re-shuffle is an explicit edit."""
+    _stub_connected(
+        monkeypatch,
+        {"gemini_cli", "codex", "github", "claude_code", "qwen_code"},
+    )
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert chain.index("qwen_code") > chain.index("claude_code")
+    assert chain.index("qwen_code") < chain.index("opencode")
+
+
+def test_qwen_code_explicit_preference_wins_when_available(monkeypatch):
+    """When an agent sets preferred_cli=qwen_code AND the qwen_code
+    integration is connected, qwen_code leads even if subscription CLIs
+    are also available."""
+    _stub_connected(monkeypatch, {"qwen_code", "gemini_cli"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform="qwen_code")
+    assert chain[0] == "qwen_code"
+    assert "gemini_cli" in chain
+    assert chain.index("qwen_code") < chain.index("gemini_cli")
+
+
+def test_qwen_code_cooldown_respected(monkeypatch):
+    """A quota'd Qwen Code is filtered from the chain just like the
+    other paid CLIs. Mirrors the copilot_cli cooldown contract."""
+    tid = uuid.uuid4()
+    _stub_connected(monkeypatch, {"qwen_code", "gemini_cli"})
+    r.mark_cooldown(tid, "qwen_code", reason="quota")
+    chain = r.resolve_cli_chain(None, tid, explicit_platform="qwen_code")
+    assert "qwen_code" not in chain
+    assert chain[0] == "gemini_cli"
+
+
+def test_qwen_code_is_public_in_connected_clis_list(monkeypatch):
+    """``connected_clis_for_tenant`` powers the chat-header InlineCliPicker;
+    qwen_code must surface there (unlike opencode, which is the routing
+    floor and intentionally excluded)."""
+    _stub_connected(monkeypatch, {"qwen_code"})
+    public = r.connected_clis_for_tenant(None, uuid.uuid4())
+    assert "qwen_code" in public
+    assert "opencode" not in public
