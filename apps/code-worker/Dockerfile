@@ -29,7 +29,8 @@ RUN npm install -g \
         @openai/codex@0.130.0 \
         @google/gemini-cli \
         opencode-ai \
-        @github/copilot
+        @github/copilot \
+        @moonshotai/kimi-cli
 
 # Python deps
 WORKDIR /app

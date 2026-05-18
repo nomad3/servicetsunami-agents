@@ -282,3 +282,49 @@ def test_default_priority_when_multiple_clis_connected(monkeypatch):
     # All connected CLIs appear
     for cli in ("copilot_cli", "claude_code"):
         assert cli in chain
+
+
+# ── Kimi K2 (Wave 1c Lane B) ─────────────────────────────────────────
+
+
+def test_chain_kimi_k2_via_integration(monkeypatch):
+    """A tenant with the Moonshot AI integration connected gets kimi_k2
+    in the resolver chain. Mirrors the gemini-via-gmail piggy-back test
+    for the simpler 1:1 integration mapping."""
+    _stub_connected(monkeypatch, {"kimi_k2"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert "kimi_k2" in chain
+    assert chain[-1] == "opencode"
+
+
+def test_chain_kimi_k2_explicit_platform_wins(monkeypatch):
+    """An agent with preferred_cli=kimi_k2 leads the chain when the
+    integration is wired, ahead of any other connected CLIs."""
+    _stub_connected(monkeypatch, {"kimi_k2", "claude_code", "github"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform="kimi_k2")
+    assert chain[0] == "kimi_k2"
+    # Default-priority fallbacks still appear after.
+    assert "claude_code" in chain
+    assert "copilot_cli" in chain
+
+
+def test_connected_clis_for_tenant_surfaces_kimi(monkeypatch):
+    """``connected_clis_for_tenant`` (the public list driving the
+    InlineCliPicker) MUST include kimi_k2 when wired — NOT hidden the
+    way opencode is."""
+    _stub_connected(monkeypatch, {"kimi_k2"})
+    listed = r.connected_clis_for_tenant(None, uuid.uuid4())
+    assert "kimi_k2" in listed
+    # opencode stays hidden — it's the routing floor, not user-pickable.
+    assert "opencode" not in listed
+
+
+def test_chain_kimi_k2_cooldown_respected(monkeypatch):
+    """A quota'd kimi_k2 is filtered from the chain just like the other
+    CLIs (only opencode is exempt from cooldown)."""
+    tid = uuid.uuid4()
+    _stub_connected(monkeypatch, {"kimi_k2", "claude_code"})
+    r.mark_cooldown(tid, "kimi_k2", reason="quota")
+    chain = r.resolve_cli_chain(None, tid, explicit_platform="kimi_k2")
+    assert "kimi_k2" not in chain
+    assert "claude_code" in chain

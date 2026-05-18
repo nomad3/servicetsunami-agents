@@ -51,12 +51,17 @@ _DEFAULT_PRIORITY: tuple[str, ...] = (
     # 2026-05-05 product call: gemini first because most tenants only
     # have Google integrations connected (gmail / calendar / drive
     # auto-grant gemini_cli access for free), then codex / copilot_cli /
-    # claude_code for tenants that pay for those CLI subscriptions, and
-    # finally opencode as the always-available local-Gemma floor.
+    # claude_code for tenants that pay for those CLI subscriptions,
+    # ``kimi_k2`` (Moonshot AI — Wave 1c Lane B Chinese OSS coding model)
+    # slotted below the established subscriptions so a tenant who's
+    # connected several CLIs gets the most-capable subscription first
+    # and Kimi as a complementary alternate, and finally opencode as
+    # the always-available local-Gemma floor.
     "gemini_cli",
     "codex",
     "copilot_cli",
     "claude_code",
+    "kimi_k2",
     "opencode",
 )
 
@@ -71,6 +76,7 @@ _CLI_TO_INTEGRATIONS: dict[str, tuple[str, ...]] = {
     "copilot_cli": ("github",),
     "codex": ("codex",),
     "gemini_cli": ("gemini_cli", "gmail", "google_drive", "google_calendar"),
+    "kimi_k2": ("kimi_k2",),
     "opencode": (),  # local
 }
 

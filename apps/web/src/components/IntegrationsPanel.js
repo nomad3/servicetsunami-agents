@@ -25,6 +25,7 @@ import {
   FaPlug,
   FaPlus,
   FaProjectDiagram,
+  FaRobot,
   FaSave,
   FaSignOutAlt,
   FaSlack,
@@ -57,6 +58,7 @@ const ICON_MAP = {
   FaProjectDiagram: FaProjectDiagram,
   FaLinkedin: FaLinkedin,
   FaMicrosoft: FaMicrosoft,
+  FaRobot: FaRobot,
   FaTerminal: FaTerminal,
 };
 
@@ -74,6 +76,7 @@ const SKILL_COLORS = {
   claude_code: '#D97706',
   codex: '#111827',
   gemini_cli: '#1A73E8',
+  kimi_k2: '#7C3AED',
 };
 
 // Pinned order for the integration card grid. Anything not listed gets pushed
@@ -88,6 +91,7 @@ const INTEGRATION_ORDER = [
   'claude_code',
   'github',
   'codex',
+  'kimi_k2',
   'gmail',
   'google_calendar',
   'google_drive',
