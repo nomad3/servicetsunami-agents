@@ -22,7 +22,7 @@
     "highlights": {
       "governedDataProducts": {
         "title": "CLI-first, by design",
-        "description": "Every feature flows through Alpha CLI. Frontend, desktop, automations, and integrations all call the same kernel — `alpha agent run`, `alpha workspace clone`, `alpha sync push`. What you script today still works tomorrow."
+        "description": "Every feature flows through Alpha CLI. Frontend, desktop, automations, and integrations all call the same kernel — `alpha run`, `alpha workspace clone`, `alpha recall`. What you script today still works tomorrow."
       },
       "unifiedLakehouseFabric": {
         "title": "Shared memory across every agent",
@@ -280,7 +280,7 @@
     "codeAgent": { "title": "Code Agent", "desc": "Autonomous coding powered by Claude Code CLI. Creates PRs with full audit trails." }
   },
   "footer": {
-    "tagline": "Alpha — the agent OS for AgentProvision. CLI-first, desktop-ready, built for teams that ship.",
+    "tagline": "Alpha — agent OS for AgentProvision. CLI-first, desktop-ready.",
     "links": {
       "platform": "Platform",
       "features": "Features",

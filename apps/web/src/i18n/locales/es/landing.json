@@ -16,13 +16,13 @@
     "socialProof": "De confianza en equipos de",
     "socialProofFallback": "Más de 500 equipos corriendo Alpha sobre AgentProvision",
     "spotlight": {
-      "heading": "Una CLI. Cada Agente.",
+      "heading": "Una CLI. Cada agente.",
       "badge": "Listo para Produccion"
     },
     "highlights": {
       "governedDataProducts": {
         "title": "CLI-first, por diseno",
-        "description": "Cada funcionalidad pasa por Alpha CLI. Frontend, escritorio, automatizaciones e integraciones llaman al mismo kernel — `alpha agent run`, `alpha workspace clone`, `alpha sync push`. Lo que scripteas hoy sigue funcionando manana."
+        "description": "Cada funcionalidad pasa por Alpha CLI. Frontend, escritorio, automatizaciones e integraciones llaman al mismo kernel — `alpha run`, `alpha workspace clone`, `alpha recall`. Lo que scripteas hoy sigue funcionando manana."
       },
       "unifiedLakehouseFabric": {
         "title": "Memoria compartida entre cada agente",
@@ -30,7 +30,7 @@
       },
       "agenticAutomation": {
         "title": "Ejecucion durable en cada capa",
-        "description": "Workflows con Temporal mantienen a cada agente corriendo de forma confiable. Desde deal pipelines hasta monitoreo de competidores y coding autonomo — cada tarea corre hasta completarse con trazabilidad completa y cero pelotas caidas."
+        "description": "Workflows con Temporal mantienen a cada agente corriendo de forma confiable. Desde deal pipelines hasta monitoreo de competidores y coding autonomo — cada tarea corre hasta completarse con trazabilidad completa y sin tareas olvidadas."
       }
     }
   },
@@ -280,7 +280,7 @@
     "codeAgent": { "title": "Agente de Código", "desc": "Programación autónoma con Claude Code CLI. Crea PRs con trazas de auditoría completas." }
   },
   "footer": {
-    "tagline": "Alpha — el OS de agentes para AgentProvision. CLI-first, escritorio listo, creado para equipos que entregan.",
+    "tagline": "Alpha — el OS de agentes para AgentProvision. CLI-first, listo para escritorio.",
     "links": {
       "platform": "Plataforma",
       "features": "Funciones",
@@ -307,7 +307,7 @@
   },
   "cta": {
     "heading": "Instala Alpha. Corre el OS.",
-    "subtext": "Consigue la CLI y el escritorio de Alpha sobre AgentProvision en minutos. Luna, tu persona supervisora, se conecta apenas inicias sesion — y toda la red de especialistas la sigue.",
+    "subtext": "Consigue la CLI y el escritorio de Alpha sobre AgentProvision en minutos. Luna, tu supervisora IA, se conecta apenas inicias sesion — y toda la red de especialistas la sigue.",
     "button": "Comenzar Gratis"
   }
 }

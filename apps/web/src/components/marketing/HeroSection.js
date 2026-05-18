@@ -41,6 +41,8 @@ export default function HeroSection() {
           style={prefersReducedMotion ? {} : { opacity: textOpacity, y: textY }}
         >
           <h1 className="hero-scroll__title">{t('hero.title')}</h1>
+          <p className="hero-scroll__lead">{t('hero.lead')}</p>
+          <p className="hero-scroll__subHighlight">{t('hero.subHighlight')}</p>
           <div className="hero-scroll__ctas">
             <Link to="/register" style={{ pointerEvents: 'auto' }} onClick={() => track('cta_get_started_click', { location: 'hero' })}>
               <button className="hero-scroll__cta-primary">{t('nav.getStarted')}</button>
