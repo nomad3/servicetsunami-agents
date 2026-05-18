@@ -2,7 +2,7 @@
   "nav": {
     "platform": "Plataforma",
     "features": "Funciones",
-    "integrations": "Integraciónes",
+    "integrations": "Integraciones",
     "pricing": "Precios",
     "signIn": "Iniciar Sesión",
     "getStarted": "Comenzar"
@@ -10,7 +10,7 @@
   "hero": {
     "badge": "Alpha — el OS de agentes",
     "title": "Alpha: el sistema operativo de agentes para tu negocio",
-    "lead": "Alpha es el OS de agentes que se ejecuta sobre AgentProvision. Una sola CLI es el kernel — nativa de terminal, scriptable, automatizable — y un escritorio Tauri lleva el mismo control plane a cada estación de trabajo. Por debajo, una red coordinada de especialistas opera código, ventas, marketing, datos y comunicaciónes, compartiendo memoria y enrutando tareas automáticamente.",
+    "lead": "Alpha es el OS de agentes que se ejecuta sobre AgentProvision. Una sola CLI es el kernel — nativa de terminal, scriptable, automatizable — y un escritorio Tauri lleva el mismo control plane a cada estación de trabajo. Por debajo, una red coordinada de especialistas opera código, ventas, marketing, datos y comunicaciones, compartiendo memoria y enrutando tareas automáticamente.",
     "subtext": "Desde `alpha` en tu terminal o la app de escritorio, un comando abre toda la red de agentes. Construye, observa y despliega — sin soltar el teclado.",
     "subHighlight": "AgentProvision es la plataforma. Alpha es el OS que realmente usas.",
     "socialProof": "De confianza en equipos de",
@@ -22,7 +22,7 @@
     "highlights": {
       "governedDataProducts": {
         "title": "CLI-first, por diseño",
-        "description": "Cada funcionalidad pasa por Alpha CLI. Frontend, escritorio, automatizaciones e integraciónes llaman al mismo kernel — `alpha run`, `alpha workspace clone`, `alpha recall`. Lo que scripteas hoy sigue funcionando mañana."
+        "description": "Cada funcionalidad pasa por Alpha CLI. Frontend, escritorio, automatizaciones e integraciones llaman al mismo kernel — `alpha run`, `alpha workspace clone`, `alpha recall`. Lo que scripteas hoy sigue funcionando mañana."
       },
       "unifiedLakehouseFabric": {
         "title": "Memoria compartida entre cada agente",
@@ -53,9 +53,9 @@
         "description": "Asistente personal, code agent, equipo de datos, marketing y ventas, deal management, cardiología veterinaria — cada uno con sus herramientas, memoria y expertise de dominio."
       },
       {
-        "label": "Integraciónes",
+        "label": "Integraciones",
         "value": "Gmail, Calendar, WhatsApp, Jira y Más",
-        "description": "10+ integraciónes conectadas via OAuth con refresh automático de tokens. Tus agentes leen emails, gestiónan eventos de calendario, rastrean issues en Jira y se comunican via WhatsApp de forma nativa."
+        "description": "10+ integraciones conectadas via OAuth con refresh automático de tokens. Tus agentes leen emails, gestionan eventos de calendario, rastrean issues en Jira y se comunican via WhatsApp de forma nativa."
       },
       {
         "label": "Sistema de Conocimiento",
@@ -84,7 +84,7 @@
   },
   "featuresGrid": {
     "heading": "Todo lo que necesitas para agentes IA en producción",
-    "subtitle": "Desde orquestación hasta memoria e integraciónes — construido para sistemas agenticos del mundo real",
+    "subtitle": "Desde orquestación hasta memoria e integraciones — construido para sistemas agenticos del mundo real",
     "items": {
       "multiAgentTeams": {
         "title": "Equipos Multi-Agente",
@@ -96,10 +96,10 @@
       },
       "aiChat": {
         "title": "Luna — tu Jefa de Gabinete IA",
-        "description": "La interfaz conversaciónal con toda tu red de agentes. Luna enruta tareas, recuerda el contexto y coordina a los especialistas en segundo plano."
+        "description": "La interfaz conversacional con toda tu red de agentes. Luna enruta tareas, recuerda el contexto y coordina a los especialistas en segundo plano."
       },
       "oauthIntegrations": {
-        "title": "Integraciónes OAuth",
+        "title": "Integraciones OAuth",
         "description": "Gmail, Calendar, WhatsApp, Jira, GitHub — los agentes acceden a tus herramientas reales con auto-refresh"
       },
       "durableWorkflows": {
@@ -116,7 +116,7 @@
       },
       "marketingIntelligence": {
         "title": "Inteligencia de Marketing",
-        "description": "Monitorea competidores, gestióna campañas publicitarias en Meta/Google/TikTok y rastrea señales del mercado automáticamente"
+        "description": "Monitorea competidores, gestiona campañas publicitarias en Meta/Google/TikTok y rastrea señales del mercado automáticamente"
       },
       "proactiveInboxMonitor": {
         "title": "Monitor Proactivo de Inbox",
@@ -138,7 +138,7 @@
       },
       "compliantCollaboration": {
         "title": "El Problema de Integración",
-        "description": "Los agentes son inútiles sin acceso a tus herramientas. Integraciónes OAuth con Gmail, Calendar, WhatsApp, Jira y más le dan a tus agentes capacidades del mundo real."
+        "description": "Los agentes son inútiles sin acceso a tus herramientas. Integraciones OAuth con Gmail, Calendar, WhatsApp, Jira y más le dan a tus agentes capacidades del mundo real."
       }
     },
     "secondary": {
@@ -147,7 +147,7 @@
       "items": {
         "adaptiveGuardrails": {
           "title": "Luna — tu Jefa de Gabinete IA",
-          "description": "La puerta conversaciónal a tu red de agentes. Luna aprende de cada interacción — extrae contactos, monitorea tu inbox, califica leads, coordina a los especialistas y se vuelve más aguda con el tiempo."
+          "description": "La puerta conversacional a tu red de agentes. Luna aprende de cada interacción — extrae contactos, monitorea tu inbox, califica leads, coordina a los especialistas y se vuelve más aguda con el tiempo."
         },
         "explainableDecisions": {
           "title": "Code Agent Autónomo",
@@ -188,7 +188,7 @@
     "items": {
       "insightCopilots": {
         "title": "Luna — Jefa de Gabinete IA Personal",
-        "description": "Gestión de email, coordinación de calendario, comunicación por WhatsApp, monitoreo de inbox, seguimiento en Jira y follow-ups proactivos. Luna es el centro conversaciónal de toda tu red de agentes."
+        "description": "Gestión de email, coordinación de calendario, comunicación por WhatsApp, monitoreo de inbox, seguimiento en Jira y follow-ups proactivos. Luna es el centro conversacional de toda tu red de agentes."
       },
       "composableSkills": {
         "title": "Equipo de Datos y Analytics",
@@ -214,7 +214,7 @@
   },
   "roadmap": {
     "heading": "Lo que Estamos Construyendo",
-    "subtitle": "Expandiendo las capacidades de los agentes e integraciónes.",
+    "subtitle": "Expandiendo las capacidades de los agentes e integraciones.",
     "items": {
       "marketplaceConnectors": {
         "title": "Agentes de SRE e Infraestructura",
@@ -226,7 +226,7 @@
       },
       "autonomousFinopsSuites": {
         "title": "Marketplace y Plugins",
-        "description": "Skills de agentes construidos por la comunidad, integraciónes de herramientas y templates de workflows. Extiende las capacidades de tus agentes sin escribir código."
+        "description": "Skills de agentes construidos por la comunidad, integraciones de herramientas y templates de workflows. Extiende las capacidades de tus agentes sin escribir código."
       }
     }
   },
@@ -294,7 +294,7 @@
     "subtitle": "Cómo equipos están usando agentprovision.com para desplegar agentes IA en producción",
     "items": [
       {
-        "quote": "Pasamos de un solo chatbot a una flota completa de agentes en dos semanas. Luna maneja las comunicaciónes con clientes mientras el code agent implementa features de forma autónoma. El sistema de memoria hace que nada se pierda.",
+        "quote": "Pasamos de un solo chatbot a una flota completa de agentes en dos semanas. Luna maneja las comunicaciones con clientes mientras el code agent implementa features de forma autónoma. El sistema de memoria hace que nada se pierda.",
         "author": "Líder de Ingenieria IA",
         "role": "Plataforma SaaS"
       },
