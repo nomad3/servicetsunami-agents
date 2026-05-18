@@ -496,7 +496,7 @@ const DashboardControlCenter = () => {
   // `cards.*` which doesn't exist in that namespace.
   return (
     <Layout>
-      <div className="dcc-container">
+      <div className={`dcc-container dcc-mode-${mode}`}>
         <header className="ap-page-header">
           <div>
             <h1 className="ap-page-title">{t('title')}</h1>
@@ -740,26 +740,6 @@ const DashboardControlCenter = () => {
           return chatRow;
         })()}
         </SessionEventsProvider>
-
-        {/* Compact navigation tiles at the bottom — moved here from the
-            top per user feedback (less prime-real-estate noise). */}
-        <div className="dcc-quick-tiles">
-          {[
-            { label: t('quick.agentFleet'), path: '/agents' },
-            { label: t('quick.integrations'), path: '/integrations' },
-            { label: t('quick.workflows'), path: '/workflows' },
-            { label: t('quick.memory', 'Memory'), path: '/memory' },
-          ].map((item) => (
-            <button
-              type="button"
-              key={item.label}
-              className="dcc-quick-tile"
-              onClick={() => navigate(item.path)}
-            >
-              {item.label} →
-            </button>
-          ))}
-        </div>
       </div>
     </Layout>
   );

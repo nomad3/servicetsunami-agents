@@ -12,30 +12,6 @@
   padding: 0 clamp(8px, 1vw, 24px);
 }
 
-/* ── Quick navigation tiles (compact pill row at bottom) ───────── */
-
-.dcc-quick-tiles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ap-space-2);
-  margin-top: var(--ap-space-4);
-}
-.dcc-quick-tile {
-  background: var(--ap-card-bg);
-  border: 1px solid var(--ap-border);
-  border-radius: var(--ap-radius-pill);
-  padding: 6px 14px;
-  font-size: var(--ap-fs-xs);
-  color: var(--ap-text-muted);
-  cursor: pointer;
-  font-family: inherit;
-  transition: color 120ms ease, border-color 120ms ease;
-}
-.dcc-quick-tile:hover {
-  color: var(--ap-text);
-  border-color: var(--ap-primary);
-}
-
 /* ── Sessions list (left column of the chat surface) ───────────── */
 
 /* The body needs an explicit flex-column chain so FileTreePanel's
@@ -115,6 +91,13 @@
 .dcc-chat-row {
   height: clamp(360px, calc(100vh - 520px), 520px);
   align-items: stretch; /* explicit; Bootstrap row default */
+}
+/* Simple mode: no terminal, no outer-col split — the chat is the only
+   surface on the page, so let it fill the viewport instead of being
+   clamped by the Pro-mode "leave room for terminal" calc above. */
+.dcc-mode-simple .dcc-chat-row {
+  height: calc(100vh - 200px);
+  min-height: min(480px, calc(100vh - 160px));
 }
 /* ── Outer column split (Pro mode only): chat-row over terminal ──
    When the chat row sits inside the outer column ResizableSplit
@@ -292,8 +275,10 @@
   .dcc-chat-row > [class*="col-"],
   .dcc-chat-row > .col,
   .dcc-chat-row .ap-card,
-  .dcc-outer-col {
+  .dcc-outer-col,
+  .dcc-mode-simple .dcc-chat-row {
     height: auto;
+    min-height: 0;
   }
   .dcc-chat-row .dcc-thread-card {
     height: clamp(360px, calc(100vh - 280px), 540px);
