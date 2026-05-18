@@ -43,6 +43,8 @@ from cli_executors.claude import execute_claude_chat as _execute_claude_chat
 from cli_executors.codex import execute_codex_chat as _execute_codex_chat
 from cli_executors.gemini import execute_gemini_chat as _execute_gemini_chat
 from cli_executors.copilot import execute_copilot_chat as _execute_copilot_chat
+from cli_executors.qwen import execute_qwen_chat as _execute_qwen_chat
+from cli_executors.kimi import execute_kimi_chat as _execute_kimi_chat
 from cli_executors.opencode import (
     execute_opencode_chat as _execute_opencode_chat,
     _execute_opencode_chat_cli,
@@ -314,6 +316,14 @@ _INTEGRATION_NOT_CONNECTED_MESSAGES = {
         "GitHub Copilot CLI is not connected. "
         "Please connect your GitHub account in Settings → Integrations "
         "and ensure your GitHub Copilot subscription is active."
+    ),
+    "qwen_code": (
+        "Qwen Code is not connected. "
+        "Please connect your Qwen API key in Settings → Integrations."
+    ),
+    "kimi_k2": (
+        "Kimi K2 is not connected. "
+        "Please connect your Moonshot account in Settings → Integrations."
     ),
 }
 
@@ -1165,9 +1175,17 @@ def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
             logger.info("Using platform: gemini_cli")
             return _execute_gemini_chat(task_input, session_dir, image_path)
 
+        if task_input.platform == "kimi_k2":
+            logger.info("Using platform: kimi_k2")
+            return _execute_kimi_chat(task_input, session_dir)
+
         if task_input.platform == "opencode":
             logger.info("Using platform: opencode")
             return _execute_opencode_chat(task_input, session_dir)
+
+        if task_input.platform == "qwen_code":
+            logger.info("Using platform: qwen_code")
+            return _execute_qwen_chat(task_input, session_dir)
 
         return ChatCliResult(response_text="", success=False, error=f"Unsupported platform: {task_input.platform}")
 

@@ -266,11 +266,12 @@ def test_chain_gemini_cli_via_google_integration(monkeypatch):
 def test_default_priority_when_multiple_clis_connected(monkeypatch):
     """No explicit preference + multiple connected → use the default
     priority order. As of 2026-05-05 the order is
-    gemini_cli > codex > copilot_cli > claude_code > opencode (most
-    tenants only have Google integrations connected, which auto-grant
-    gemini for free, so we lead with that). If product preferences
-    change, update _DEFAULT_PRIORITY in cli_platform_resolver.py and
-    this test changes too — that's a feature, not a bug."""
+    gemini_cli > codex > copilot_cli > claude_code > qwen_code > opencode
+    (most tenants only have Google integrations connected, which auto-grant
+    gemini for free, so we lead with that; Wave 1b adds qwen_code below
+    the established subscription CLIs). If product preferences change,
+    update _DEFAULT_PRIORITY in cli_platform_resolver.py and this test
+    changes too — that's a feature, not a bug."""
     _stub_connected(monkeypatch, {"github", "claude_code", "gemini_cli", "codex"})
     chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
     # opencode always last
@@ -282,3 +283,128 @@ def test_default_priority_when_multiple_clis_connected(monkeypatch):
     # All connected CLIs appear
     for cli in ("copilot_cli", "claude_code"):
         assert cli in chain
+
+
+# ── Wave 1b — qwen_code ──────────────────────────────────────────────
+
+def test_chain_when_only_qwen_connected(monkeypatch):
+    """Tenant with only Qwen Code integrated → chain leads with qwen_code,
+    falls through to opencode floor. Wave 1b BYOK happy path."""
+    _stub_connected(monkeypatch, {"qwen_code"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert chain[0] == "qwen_code"
+    assert chain[-1] == "opencode"
+    # The four established CLIs must NOT appear because their creds
+    # aren't wired.
+    assert set(chain).isdisjoint({"claude_code", "codex", "gemini_cli", "copilot_cli"})
+
+
+def test_qwen_code_ranks_below_subscription_clis(monkeypatch):
+    """With every CLI connected, qwen_code sits below the four
+    established subscription CLIs (gemini > codex > copilot > claude)
+    and above the opencode floor. Locks in the Wave 1b ranking decision
+    so a future re-shuffle is an explicit edit."""
+    _stub_connected(
+        monkeypatch,
+        {"gemini_cli", "codex", "github", "claude_code", "qwen_code"},
+    )
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert chain.index("qwen_code") > chain.index("claude_code")
+    assert chain.index("qwen_code") < chain.index("opencode")
+
+
+def test_qwen_code_explicit_preference_wins_when_available(monkeypatch):
+    """When an agent sets preferred_cli=qwen_code AND the qwen_code
+    integration is connected, qwen_code leads even if subscription CLIs
+    are also available."""
+    _stub_connected(monkeypatch, {"qwen_code", "gemini_cli"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform="qwen_code")
+    assert chain[0] == "qwen_code"
+    assert "gemini_cli" in chain
+    assert chain.index("qwen_code") < chain.index("gemini_cli")
+
+
+def test_qwen_code_cooldown_respected(monkeypatch):
+    """A quota'd Qwen Code is filtered from the chain just like the
+    other paid CLIs. Mirrors the copilot_cli cooldown contract."""
+    tid = uuid.uuid4()
+    _stub_connected(monkeypatch, {"qwen_code", "gemini_cli"})
+    r.mark_cooldown(tid, "qwen_code", reason="quota")
+    chain = r.resolve_cli_chain(None, tid, explicit_platform="qwen_code")
+    assert "qwen_code" not in chain
+    assert chain[0] == "gemini_cli"
+
+
+def test_qwen_code_is_public_in_connected_clis_list(monkeypatch):
+    """``connected_clis_for_tenant`` powers the chat-header InlineCliPicker;
+    qwen_code must surface there (unlike opencode, which is the routing
+    floor and intentionally excluded)."""
+    _stub_connected(monkeypatch, {"qwen_code"})
+    public = r.connected_clis_for_tenant(None, uuid.uuid4())
+    assert "qwen_code" in public
+    assert "opencode" not in public
+
+
+# ── Kimi K2 (Wave 1c Lane B) ─────────────────────────────────────────
+
+
+def test_chain_kimi_k2_via_integration(monkeypatch):
+    """A tenant with the Moonshot AI integration connected gets kimi_k2
+    in the resolver chain. Mirrors the gemini-via-gmail piggy-back test
+    for the simpler 1:1 integration mapping."""
+    _stub_connected(monkeypatch, {"kimi_k2"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform=None)
+    assert "kimi_k2" in chain
+    assert chain[-1] == "opencode"
+
+
+def test_chain_kimi_k2_explicit_platform_wins(monkeypatch):
+    """An agent with preferred_cli=kimi_k2 leads the chain when the
+    integration is wired, ahead of any other connected CLIs."""
+    _stub_connected(monkeypatch, {"kimi_k2", "claude_code", "github"})
+    chain = r.resolve_cli_chain(None, uuid.uuid4(), explicit_platform="kimi_k2")
+    assert chain[0] == "kimi_k2"
+    # Default-priority fallbacks still appear after.
+    assert "claude_code" in chain
+    assert "copilot_cli" in chain
+
+
+def test_connected_clis_for_tenant_surfaces_kimi(monkeypatch):
+    """``connected_clis_for_tenant`` (the public list driving the
+    InlineCliPicker) MUST include kimi_k2 when wired — NOT hidden the
+    way opencode is."""
+    _stub_connected(monkeypatch, {"kimi_k2"})
+    listed = r.connected_clis_for_tenant(None, uuid.uuid4())
+    assert "kimi_k2" in listed
+    # opencode stays hidden — it's the routing floor, not user-pickable.
+    assert "opencode" not in listed
+
+
+def test_chain_kimi_k2_cooldown_respected(monkeypatch):
+    """A quota'd kimi_k2 is filtered from the chain just like the other
+    CLIs (only opencode is exempt from cooldown)."""
+    tid = uuid.uuid4()
+    _stub_connected(monkeypatch, {"kimi_k2", "claude_code"})
+    r.mark_cooldown(tid, "kimi_k2", reason="quota")
+    chain = r.resolve_cli_chain(None, tid, explicit_platform="kimi_k2")
+    assert "kimi_k2" not in chain
+    assert "claude_code" in chain
+
+
+def test_kimi_k2_not_connected_message_classifies_as_missing_credential():
+    """The worker-side not-connected message for kimi_k2 (returned both
+    by ``_fetch_integration_credentials`` 404 path and the executor's
+    empty-api-key path) MUST be classified as ``missing_credential`` so
+    the orchestrator chain-walks past kimi_k2 WITHOUT a 10-minute
+    cooldown. A quick reconnect should be picked up on the next chat
+    turn, not masked by cooldown.
+
+    Regression for B1 in the superpowers review of PR #552: the prior
+    phrasing ("Please paste a MOONSHOT_API_KEY in Settings → Integrations")
+    didn't hit any branch of the missing-credential alternation in
+    ``packages/cli_orchestrator/classifier.py``."""
+    msg = (
+        "Kimi K2 is not connected. "
+        "Please connect your Moonshot account in Settings → Integrations."
+    )
+    assert r.classify_error(msg) == "missing_credential"

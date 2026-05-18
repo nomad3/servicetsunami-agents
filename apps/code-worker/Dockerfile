@@ -24,10 +24,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # refactor that surface (rename the flag, drop streamable-HTTP, etc.) and
 # silently break the streamable-HTTP mount in mcp-tools; pinning makes the
 # break a controlled bump-and-test rather than a surprise on image rebuild.
+#
+# Kimi K2 (Moonshot AI) is intentionally absent from this image: there
+# is no npm package for it, and the executor in
+# ``cli_executors/kimi.py`` talks to Moonshot's OpenAI-compatible HTTP
+# endpoint directly via httpx. Do not add a Kimi npm install here.
 RUN npm install -g \
         @anthropic-ai/claude-code \
         @openai/codex@0.130.0 \
         @google/gemini-cli \
+        @qwen-code/qwen-code@0.15.11 \
         opencode-ai \
         @github/copilot
 

@@ -318,6 +318,26 @@ def test_routing_summary_attributes_first_failure_not_last_in_chain(monkeypatch)
     assert rs["fallback_explanation"] == "rate limit / quota exceeded"
 
 
+def test_paid_cli_fast_pin_sets_include_qwen_code():
+    """M5 conservative-pin lesson: the paid-CLI fast-pin set decides
+    whether an explicit `platform=qwen_code` survives a transient
+    resolver hiccup. If qwen_code is missing from the set, a tenant who
+    explicitly picked Qwen but whose resolver probe transiently fails
+    (DB blip) gets silently downgraded to local Gemma instead of being
+    pinned to Qwen.
+
+    Wave 1c consolidation collapsed the two inline literal sets into a
+    single module-level ``_PAID_CLI_FAST_PIN_SET`` frozenset (kimi-k2
+    review I1) — assert on the constant rather than the literal source
+    text so the test survives future refactors.
+    """
+    assert "qwen_code" in agent_router._PAID_CLI_FAST_PIN_SET, (
+        "qwen_code missing from _PAID_CLI_FAST_PIN_SET; explicit "
+        "qwen_code requests will fall through to local Gemma on a "
+        "transient resolver hiccup."
+    )
+
+
 def test_routing_summary_no_leak_invariant_end_to_end(monkeypatch):
     """I3 from PR #256 review: the metadata returned to the caller (and
     thence to ChatMessage.context) must NOT contain forbidden keys
@@ -335,3 +355,27 @@ def test_routing_summary_no_leak_invariant_end_to_end(monkeypatch):
     # Inside routing_summary
     if isinstance(meta.get("routing_summary"), dict):
         assert forbidden.isdisjoint(meta["routing_summary"].keys())
+
+
+# ── Paid-CLI fast-pin set membership ────────────────────────────────
+
+
+def test_paid_cli_fast_pin_set_includes_oss_lane_b_clis():
+    """Wave 1c review I1: the explicit-platform fast-pin set must
+    include the Lane B OSS coding CLIs (``qwen_code`` and ``kimi_k2``)
+    alongside the original four. Missing entries cause a paid /
+    integration-wired tenant to silently downgrade to local Gemma 4 on
+    a transient resolver hiccup — the very regression PR #245 review
+    C5 closed for the original four CLIs.
+
+    Pinning the set membership here means a future edit that drops one
+    of these names has to do so deliberately."""
+    expected = {
+        "gemini_cli",
+        "claude_code",
+        "codex",
+        "copilot_cli",
+        "qwen_code",
+        "kimi_k2",
+    }
+    assert agent_router._PAID_CLI_FAST_PIN_SET == expected

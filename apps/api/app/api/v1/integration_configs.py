@@ -157,6 +157,32 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
         "auth_type": "device_auth",
         "device_auth_endpoint": "/gemini-cli-auth",
     },
+    "higgsfield": {
+        # Wave 1a of the CLI integration catalog (#270). Per-tenant
+        # OAuth — every tenant brings their own Higgsfield account
+        # (multi-tenant ToS not confirmed yet, so no shared-founder
+        # path). Calls bill against tenant credits.
+        "display_name": "Higgsfield",
+        "description": "Creative-content MCP source: image (Soul, Cinema Studio, Flux, Seedream, Nano Banana), video (Seedance, Kling, Veo, Minimax Hailuo), plus Ad Engine + virality prediction. Powered by your Higgsfield account credits.",
+        "icon": "FaPalette",
+        "credentials": [],
+        "auth_type": "device_auth",
+        "device_auth_endpoint": "/higgsfield-auth",
+    },
+    "qwen_code": {
+        # Wave 1b — Qwen Code (Tongyi Lab) joins the catalog via BYOK API
+        # key paste. OAuth dance is intentionally not wired yet; the
+        # platform-key lane-B fallback lands in a follow-up PR once
+        # adoption signals justify the secrets-manager work.
+        "display_name": "Qwen Code",
+        "description": "Connect your Qwen API key for Tongyi Qwen-Coder agent chat. Calls are billed against your DashScope account.",
+        "icon": "FaTerminal",
+        "auth_type": "api_key",
+        "credentials": [
+            {"key": "api_key", "label": "Qwen API Key", "type": "password", "required": True,
+             "help": "From DashScope console (dashscope.console.aliyun.com) > API-KEY. Used for both DashScope and OpenAI-compatible Qwen endpoints."},
+        ],
+    },
     "meta_ads": {
         "display_name": "Meta Ads",
         "description": "Manage Facebook & Instagram ad campaigns, view insights, monitor competitor ads",
@@ -264,6 +290,35 @@ INTEGRATION_CREDENTIAL_SCHEMAS = {
     # subscriptions only — Claude Code, Gemini CLI, GitHub Copilot CLI,
     # Codex CLI — not raw API keys. The AI Models tab in the UI handles
     # any remaining provider-key flows.
+    "kimi_k2": {
+        # Moonshot AI's Kimi K2 coding-tuned model — Wave 1c Lane B
+        # (Apache 2.0 weights, commercial resale permitted; see
+        # ``docs/plans/2026-05-18-cli-integration-catalog.md``). The
+        # executor talks to Moonshot's OpenAI-compatible HTTP endpoint
+        # directly from ``cli_executors/kimi.py`` — there is no local
+        # CLI binary involved (Moonshot's developer CLI is not a
+        # runtime dependency). Default base URL is
+        # ``https://api.moonshot.ai/v1`` (international); switch to
+        # ``https://api.moonshot.cn/v1`` for the Chinese tier via the
+        # optional ``base_url`` credential below.
+        "display_name": "Kimi K2 (Moonshot AI)",
+        "description": (
+            "Route chat agents to Moonshot AI's Kimi K2 coding model. "
+            "OpenAI-compatible HTTP API; paste your MOONSHOT_API_KEY to enable. "
+            "Calls are billed against your Moonshot account."
+        ),
+        "icon": "FaRobot",
+        "auth_type": "manual",
+        "credentials": [
+            {"key": "api_key", "label": "Moonshot API Key", "type": "password", "required": True,
+             "help": "MOONSHOT_API_KEY from https://platform.moonshot.ai/console/api-keys (international) "
+                     "or https://platform.moonshot.cn/console/api-keys (Chinese tier)."},
+            {"key": "base_url", "label": "Base URL", "type": "text", "required": False,
+             "help": "Defaults to https://api.moonshot.ai/v1. Set to https://api.moonshot.cn/v1 for the Chinese-region tier."},
+            {"key": "model", "label": "Model", "type": "text", "required": False,
+             "help": "Defaults to kimi-k2-0905-preview. Override only if Moonshot publishes a newer coding-tuned variant."},
+        ],
+    },
 }
 
 

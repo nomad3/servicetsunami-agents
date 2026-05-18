@@ -5,6 +5,8 @@ they need via agent.tool_groups. At runtime, only tools from declared groups
 are passed to the CLI via --allowedTools.
 """
 
+from app.services.higgsfield_mcp import HIGGSFIELD_TOOL_NAMES
+
 TOOL_GROUPS: dict[str, list[str]] = {
     "calendar": [
         "list_calendar_events",
@@ -99,6 +101,15 @@ TOOL_GROUPS: dict[str, list[str]] = {
         "start_competitor_monitor",
         "stop_competitor_monitor",
     ],
+    # Higgsfield creative-content tools — Wave 1a of the CLI catalog
+    # (#270). Per-tenant MCP source registered via
+    # apps/api/app/services/higgsfield_mcp.py after the OAuth dance
+    # completes. The list is the static fallback used by the
+    # Marketing/Sales specialist agent before live discovery has run;
+    # discover_mcp_tools refreshes the real names against the tenant's
+    # MCP server. Sourced from `higgsfield_mcp.HIGGSFIELD_TOOL_NAMES`
+    # so a tool rename only has to land in one place.
+    "higgsfield": list(HIGGSFIELD_TOOL_NAMES),
     "ads": [
         "list_meta_campaigns",
         "list_google_campaigns",
@@ -242,12 +253,14 @@ TIER_MODEL_MAP: dict[str, dict[str, str]] = {
         "claude_code": "haiku",
         "codex": "codex-mini",
         "gemini_cli": "gemini-2.5-flash",
+        "qwen_code": "qwen-coder-turbo",
         "opencode": "gemma4",
     },
     "full": {
         "claude_code": "sonnet",
         "codex": "codex",
         "gemini_cli": "gemini-2.5-pro",
+        "qwen_code": "qwen-coder",
         "opencode": "gemma4",
     },
 }
