@@ -70,9 +70,7 @@ async fn clone(args: CloneArgs, ctx: Context) -> anyhow::Result<()> {
     // a stray `--force` from silently destroying local edits. Non-tty
     // / `--yes` callers skip the prompt.
     if args.force && !args.yes && std::io::stdin().is_terminal() {
-        eprintln!(
-            "[alpha] --force will discard any local changes in the target. Continue? [y/N]"
-        );
+        eprintln!("[alpha] --force will discard any local changes in the target. Continue? [y/N]");
         let mut answer = String::new();
         std::io::stdin().read_line(&mut answer)?;
         let answer = answer.trim().to_lowercase();
@@ -129,7 +127,9 @@ mod tests {
     fn parse_clone(args: &[&str]) -> CloneArgs {
         let cli = TestCli::try_parse_from(args).expect("clap parse");
         match cli.cmd {
-            TestCmd::Workspace { sub: WorkspaceCommand::Clone(a) } => a,
+            TestCmd::Workspace {
+                sub: WorkspaceCommand::Clone(a),
+            } => a,
         }
     }
 
@@ -143,7 +143,12 @@ mod tests {
     #[test]
     fn parses_branch_flag() {
         let a = parse_clone(&[
-            "t", "workspace", "clone", "owner/name", "--branch", "release/1.2",
+            "t",
+            "workspace",
+            "clone",
+            "owner/name",
+            "--branch",
+            "release/1.2",
         ]);
         assert_eq!(a.repo, "owner/name");
         assert_eq!(a.branch.as_deref(), Some("release/1.2"));

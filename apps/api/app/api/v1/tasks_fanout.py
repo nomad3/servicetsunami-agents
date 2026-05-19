@@ -1,15 +1,17 @@
 """
-Prototype backend for `alpha run` + `alpha watch`.
+Backend for `alpha run` + `alpha watch`.
 
-Python side of Phase 1 of the CLI differentiation roadmap
-(`docs/plans/2026-05-13-ap-cli-differentiation-roadmap.md`).
+Python side of the CLI differentiation roadmap
+(`docs/plans/2026-05-13-ap-cli-differentiation-roadmap.md` for Phase 1
+shape, `docs/plans/2026-05-18-alpha-run-real-dispatch.md` for Phase 2).
 
-The endpoints accept the dispatch shape produced by the CLI and return
-synthetic task lifecycles (queued → running → completed | failed |
-cancelled) keyed by task id. Real Temporal dispatch via
-`FanoutChatCliWorkflow` (planned for Phase 1 ship) replaces the
-in-memory store; the wire contracts stay the same so the CLI side
-does not move.
+The endpoints accept the dispatch shape produced by the CLI. When
+`USE_REAL_FANOUT_WORKFLOW=True` (production) every dispatch — single
+provider, `--providers` fallback chain, and `--fanout` parallel — is
+routed to a real `FanoutChatCliWorkflow` on the `agentprovision-code`
+Temporal queue. When the flag is off, the request lands on the
+in-memory rollback stub that returns a synthetic lifecycle
+(queued → running → completed) for demo / disaster recovery.
 
 Why an in-memory dict and not a DB-backed scaffold:
   - The CLI flow is the demo. We want a fast, predictable lifecycle
@@ -63,12 +65,28 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
+from datetime import datetime, timezone
+
+from sqlalchemy import func
+
 from app.api.deps import get_current_user, get_db
 from app.core.config import settings
+from app.models.agent_performance_snapshot import AgentPerformanceSnapshot
+from app.models.tenant_features import TenantFeatures
 from app.models.user import User
 from app.services.cost_estimator import estimate_fanout_cost
 
 router = APIRouter()
+
+
+# ── Phase 2 (#177 follow-up, 2026-05-18) ──────────────────────────────
+# Default provider when the caller passes neither `providers` nor
+# `fanout`. Design doc open question #1 wants this auto-detected from
+# `tenant_features.default_cli_platform`; until that lookup lands, we
+# hard-code the safe ship-default. claude_code is the most-tested
+# leaf CLI under ChatCliWorkflow and matches the chat hot path's
+# tenant default in cli_session_manager.
+DEFAULT_RUN_PROVIDER = "claude_code"
 
 
 def _verify_tenant_header(
@@ -196,6 +214,11 @@ class RunFanoutResponse(BaseModel):
     status: str
     children: List[RunChildDispatch] = Field(default_factory=list)
     estimate: Optional[RunEstimate] = None
+    # Round-3 follow-up (#573 review): non-fatal advisories about the
+    # request — e.g. `agent_id` was passed but the dispatch path can't
+    # yet honor per-agent binding. Empty list on the happy path; the
+    # CLI surfaces non-empty entries with `[alpha] warning: ...`.
+    warnings: List[str] = Field(default_factory=list)
 
 
 class TaskStatusResponse(BaseModel):
@@ -433,6 +456,64 @@ def _recount_tenant_tasks_from_records(tenant_id: str) -> int:
     return sum(1 for rec in _TASKS.values() if rec["tenant_id"] == tenant_id)
 
 
+def _tenant_over_monthly_token_limit(
+    db: Session, tenant_id: uuid.UUID
+) -> bool:
+    """Round-3 follow-up (#573 review BLOCKER): cost gate.
+
+    `alpha run` with USE_REAL_FANOUT_WORKFLOW=true spends real LLM
+    tokens. A tenant that has already burned through their monthly
+    budget should not be able to keep dispatching — otherwise the
+    cap is just a moving target paid for by Anthropic.
+
+    Mirrors the canonical lookup in `insights_cost._quota_burn`:
+      - tenant_features.monthly_token_limit NULL / 0 -> unbounded
+        (opt-in policy; same as the rest of the platform).
+      - month-to-date tokens are summed from
+        AgentPerformanceSnapshot.total_tokens for the current
+        calendar month.
+      - over limit -> True (caller returns 429).
+
+    Returns False on every error path (DB hiccup, missing features
+    row, etc.) so a transient infra issue never blocks dispatch —
+    cost overruns are recoverable, dispatch failures are not.
+    """
+    try:
+        features = (
+            db.query(TenantFeatures)
+            .filter(TenantFeatures.tenant_id == tenant_id)
+            .first()
+        )
+        # Guard against the unit-test DB stub returning a MagicMock for
+        # `.first()` — must be a real TenantFeatures row to consult the
+        # limit. Same belt-and-suspenders shape used in insights_cost.
+        if not isinstance(features, TenantFeatures):
+            return False
+        limit = features.monthly_token_limit
+        if not limit or not isinstance(limit, int) or limit <= 0:
+            return False
+
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+        mtd_tokens = (
+            db.query(
+                func.coalesce(func.sum(AgentPerformanceSnapshot.total_tokens), 0)
+            )
+            .filter(AgentPerformanceSnapshot.tenant_id == tenant_id)
+            .filter(AgentPerformanceSnapshot.window_start >= month_start)
+            .scalar()
+        )
+        if not isinstance(mtd_tokens, (int, float)):
+            return False
+
+        return int(mtd_tokens) >= int(limit)
+    except Exception:
+        # Fail-open on DB / model errors — see docstring.
+        return False
+
+
 # ── Routes ────────────────────────────────────────────────────────────
 
 
@@ -485,8 +566,24 @@ async def run_fanout(
     # cap; the real-dispatch path could OOM Temporal by unlimited
     # workflow creation. Now both paths bill against the same per-
     # tenant ceiling.
+    #
+    # Phase 2 (#177 follow-up, 2026-05-18): cap accounting now reflects
+    # the effective dispatch shape — parent + one slot per child that
+    # the workflow will actually spawn. For `--providers` chain or the
+    # default single-provider path, the parent dispatches >=1 children
+    # too, so they bill against the cap.
     _sweep_expired_tasks()
-    n_new = 1 + len(body.fanout)  # parent + children we are about to mint
+    if settings.USE_REAL_FANOUT_WORKFLOW:
+        if body.fanout:
+            _planned_children = len(body.fanout)
+        elif body.providers:
+            _planned_children = len(body.providers)
+        else:
+            _planned_children = 1
+    else:
+        # Stub path is unchanged: only fanout mints children.
+        _planned_children = len(body.fanout)
+    n_new = 1 + _planned_children
     if _count_tenant_tasks(tenant_id) + n_new > MAX_TASKS_PER_TENANT:
         raise HTTPException(
             status_code=429,
@@ -497,17 +594,75 @@ async def run_fanout(
             ),
         )
 
+    # Round-3 follow-up (#573 review BLOCKER): monthly token / cost gate.
+    # The in-flight cap above bounds Temporal workflow inventory; it does
+    # NOT bound LLM spend. With USE_REAL_FANOUT_WORKFLOW=True every run
+    # spends real tokens against the provider account, so a tenant past
+    # their `tenant_features.monthly_token_limit` should be told to wait
+    # for the next billing window — not silently keep burning budget.
+    #
+    # NULL / 0 limit = unbounded (opt-in policy, same as
+    # insights_cost._quota_burn). Stub path (flag off) is exempt — it
+    # doesn't spend tokens, so the gate would just frustrate demos.
+    if settings.USE_REAL_FANOUT_WORKFLOW and _tenant_over_monthly_token_limit(
+        db, current_user.tenant_id
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail="Monthly token limit reached",
+        )
+
+    # Round-3 follow-up (#573 review IMPORTANT): `agent_id` is accepted
+    # by the request schema and stored on the record, but the underlying
+    # FanoutChatCliWorkflow does not yet honor per-agent binding —
+    # everything resolves through the tenant's default agent. Surface
+    # this as a non-fatal warning so the CLI can flag the no-op instead
+    # of silently dropping the user's intent.
+    response_warnings: list[str] = []
+    if body.agent_id:
+        response_warnings.append(
+            "agent_id ignored — worker not yet wired for per-agent dispatch "
+            "(Phase 3 follow-up). Tenant default agent will handle the run."
+        )
+
     # #177 Phase 1 ship: when `USE_REAL_FANOUT_WORKFLOW=true` AND the
     # request has a non-empty fanout, dispatch to Temporal instead of
-    # the in-memory stub. The stub stays as the demo-safe fallback
-    # for everything else (fallback-chain dispatches, single-provider,
-    # disabled flag) so rollback is just an env-var flip.
-    if settings.USE_REAL_FANOUT_WORKFLOW and body.fanout:
+    # the in-memory stub.
+    #
+    # Phase 2 (#177 follow-up, 2026-05-18): the flag now covers single-
+    # provider and `--providers` fallback-chain dispatches too, so
+    # `alpha run "..."` returns real LLM output instead of the synthetic
+    # placeholder. All three paths land on FanoutChatCliWorkflow, which
+    # already handles N=1 (single child, first-wins is a no-op merge)
+    # and N=k+first-wins (closest analog to a quota-aware chain pending
+    # a true sequential fallback workflow — see plan doc 2026-05-18).
+    # The stub stays as the demo-safe fallback when the flag is off
+    # so rollback is just an env-var flip.
+    if settings.USE_REAL_FANOUT_WORKFLOW:
+        # Resolve the effective provider list + merge mode for the
+        # workflow, treating fanout / providers / neither uniformly.
+        if body.fanout:
+            effective_providers = list(body.fanout)
+            effective_merge = body.merge
+        elif body.providers:
+            # Fallback chain: try each in order until one succeeds. We
+            # approximate with `first-wins` (the first child to *complete*
+            # wins, others cancel). True quota-aware sequential walk
+            # is tracked as a Phase-3 follow-up in the plan doc.
+            effective_providers = list(body.providers)
+            effective_merge = "first-wins"
+        else:
+            # Single-provider default. design doc #1: tenant_features.
+            # default_cli_platform lookup is the long-term home; until
+            # that lands, use the safe ship-default.
+            effective_providers = [DEFAULT_RUN_PROVIDER]
+            effective_merge = "first-wins"
+
         dispatch = await _dispatch_fanout_workflow(
             prompt=body.prompt,
             tenant_id=tenant_id,
-            providers=body.fanout,
-            merge=body.merge,
+            providers=effective_providers,
+            merge=effective_merge,
             agent_id=body.agent_id,
             session_id=body.session_id,
         )
@@ -529,26 +684,35 @@ async def run_fanout(
         # NOT resolvable through /status (the route only accepts the
         # real workflow_id for the parent). They exist purely for
         # cap-accounting parity with the stub path.
+        #
+        # Phase 2 (#177 follow-up, 2026-05-18): mirror children for the
+        # effective_providers list, not just `body.fanout`, so the
+        # single-provider and --providers chain paths get the same
+        # accounting treatment.
         child_record_ids = [
-            f"{parent_record_id}#child-{i}" for i in range(len(body.fanout))
+            f"{parent_record_id}#child-{i}" for i in range(len(effective_providers))
         ]
         _TASKS[parent_record_id] = {
             "tenant_id": tenant_id,
             "created_at": now_mono,
             "children": [
                 {"task_id": cid, "provider": p, "created_at": now_mono}
-                for cid, p in zip(child_record_ids, body.fanout)
+                for cid, p in zip(child_record_ids, effective_providers)
             ],
             "real_temporal": True,
             "prompt": body.prompt,
-            "providers": [],
-            "fanout": list(body.fanout),
-            "merge": body.merge,
+            # Round-2 L2-1 forward-compat: keep `fanout` populated when
+            # the caller passed --fanout; otherwise leave empty so a
+            # post-rollback stub-path read doesn't synthesize a fake
+            # multi-provider council message for a single-provider run.
+            "providers": list(body.providers) if body.providers and not body.fanout else [],
+            "fanout": list(body.fanout) if body.fanout else [],
+            "merge": effective_merge,
             "user_id": str(current_user.id),
             "agent_id": body.agent_id,
             "session_id": body.session_id,
         }
-        for cid, p in zip(child_record_ids, body.fanout):
+        for cid, p in zip(child_record_ids, effective_providers):
             _TASKS[cid] = {
                 "tenant_id": tenant_id,
                 "created_at": now_mono,
@@ -559,7 +723,7 @@ async def run_fanout(
                 "prompt": body.prompt,
                 "providers": [],
                 "fanout": [],
-                "merge": body.merge,
+                "merge": effective_merge,
                 "user_id": str(current_user.id),
                 "agent_id": body.agent_id,
                 "session_id": body.session_id,
@@ -568,7 +732,7 @@ async def run_fanout(
         # field from #174). Falls back to the static placeholder when
         # the tenant has zero history for the requested providers.
         ce = estimate_fanout_cost(
-            db, tenant_id=current_user.tenant_id, providers=body.fanout
+            db, tenant_id=current_user.tenant_id, providers=effective_providers
         )
         estimate = RunEstimate(
             estimated_duration_seconds=ce.estimated_duration_seconds,
@@ -584,6 +748,7 @@ async def run_fanout(
             status="queued",
             children=[],
             estimate=estimate,
+            warnings=response_warnings,
         )
 
     parent_id = _mint_task_id()
@@ -658,6 +823,7 @@ async def run_fanout(
         status="queued",
         children=children,
         estimate=estimate,
+        warnings=response_warnings,
     )
 
 
@@ -765,25 +931,28 @@ async def task_status(
     result = None
     error = None
     if status == "completed":
-        # Synthetic result body that demonstrates the council-merge
-        # demo from the design doc. Real impl reads from
-        # `agent_tasks.result_message`.
+        # Rollback-mode synthetic body. When USE_REAL_FANOUT_WORKFLOW
+        # is on (production target) every dispatch lands on the
+        # real-path branch above; this is only ever reached when the
+        # operator has deliberately disabled real dispatch via env-var
+        # flip. Phase 2 (#177 follow-up, 2026-05-18): wording tightened
+        # to mark this as a fallback state, not a normal demo response.
         if record.get("fanout"):
             providers = ", ".join(record["fanout"])
             result = (
-                f"[demo result] Fanout over [{providers}] merged via "
+                f"[stub] Fanout over [{providers}] merged via "
                 f"`{record['merge']}`.\n\n"
-                f"Consensus: all reviewers converged on the prompt:\n"
-                f"  > {record['prompt']}\n\n"
-                f"This is a Phase-1-prototype synthetic response. The real "
-                f"`FanoutChatCliWorkflow` will return the meta-adjudicator "
-                f"output once wired."
+                f"Prompt: {record['prompt']}\n\n"
+                f"USE_REAL_FANOUT_WORKFLOW is disabled on the API pod; "
+                f"this is the in-memory rollback response. Set the flag "
+                f"to True to dispatch real ChatCliWorkflow runs."
             )
         else:
             result = (
-                f"[demo result] Completed.\n\n"
+                f"[stub] Completed.\n\n"
                 f"Prompt: {record['prompt']}\n\n"
-                f"This is a Phase-1-prototype synthetic response."
+                f"USE_REAL_FANOUT_WORKFLOW is disabled on the API pod; "
+                f"this is the in-memory rollback response."
             )
 
     # Prototype lifecycle never reaches `failed`/`cancelled` from the
@@ -1040,23 +1209,22 @@ async def task_events_stream(
                                 else getattr(raw, "merged_text", None)
                             )
                         else:
-                            # Stub-path: reconstruct the synthetic body
-                            # the same way `/status` does inline.
+                            # Stub-path: reconstruct the rollback-mode
+                            # body the same way `/status` does inline.
                             r = _TASKS.get(task_id) or {}
                             if r.get("fanout"):
                                 providers = ", ".join(r["fanout"])
                                 merged = (
-                                    f"[demo result] Fanout over [{providers}] merged via "
+                                    f"[stub] Fanout over [{providers}] merged via "
                                     f"`{r.get('merge', 'council')}`.\n\n"
-                                    f"Consensus: all reviewers converged on the prompt:\n"
-                                    f"  > {r.get('prompt', '')}\n\n"
-                                    f"This is a Phase-1-prototype synthetic response."
+                                    f"Prompt: {r.get('prompt', '')}\n\n"
+                                    f"USE_REAL_FANOUT_WORKFLOW is disabled."
                                 )
                             else:
                                 merged = (
-                                    f"[demo result] Completed.\n\n"
+                                    f"[stub] Completed.\n\n"
                                     f"Prompt: {r.get('prompt', '')}\n\n"
-                                    f"This is a Phase-1-prototype synthetic response."
+                                    f"USE_REAL_FANOUT_WORKFLOW is disabled."
                                 )
                         if merged:
                             yield (

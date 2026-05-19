@@ -4,6 +4,24 @@
 //! authorizes the watch, so a task dispatched on a laptop can be tailed
 //! from a desktop without any handoff dance.
 //!
+//! ## JWT expiry between `run` and `watch`
+//!
+//! Access tokens are short-lived (~30 min). If a user runs
+//! `alpha run --background` and then comes back hours later to
+//! `alpha watch <task_id>`, the access token has likely expired —
+//! but the task result is still on the server. `ApiClient`'s
+//! auto-refresh middleware (wired in `context.rs::Context::new`)
+//! transparently swaps in a fresh access token from the stored
+//! refresh credential on 401, so the second watch invocation just
+//! works for the duration of REFRESH_TOKEN_EXPIRE_DAYS (server
+//! default 30d).
+//!
+//! If the refresh token has ALSO expired (multi-month gap), the
+//! client surfaces the 401 verbatim and the user re-runs
+//! `alpha login`. Task results persist server-side regardless, so
+//! the user can resume the same `alpha watch <task_id>` right after
+//! re-login — no work is lost.
+//!
 //! Prototype scope: polls `/tasks-fanout/{id}/status` every 1500ms.
 //! Phase 1 ship swaps the loop for an SSE consumer on the existing
 //! `/chat/sessions/{id}/events/stream` route reused for tasks.
