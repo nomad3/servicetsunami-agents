@@ -48,6 +48,16 @@
 --     `GET /evals/runs?job_id=...` (Phase 2 endpoint).
 --   * The existing (eval_id, iteration, with_skill) index from mig 136
 --     still serves the per-eval listings.
+--   * uq_skill_eval_runs_iteration_eval_leg — partial unique constraint
+--     (I5) preventing the same (iteration_run_id, eval_id, with_skill)
+--     triple from existing more than once. `iteration_run_id` lacks a
+--     FK (it's just a UUID grouping marker, not a row reference) so
+--     this index is the closest we can get to "all rows sharing an
+--     iteration_run_id share the same eval_id → skill_id chain": each
+--     concrete (eval_id, with_skill) leg can appear at most once per
+--     iteration_run_id. Partial WHERE clause skips legacy rows (where
+--     iteration_run_id is NULL) so the migration is safe to apply on
+--     pre-existing data.
 --
 -- Wrapped in BEGIN/COMMIT same pattern as migration 136/137.
 
@@ -61,6 +71,14 @@ ALTER TABLE skill_eval_runs
 
 CREATE INDEX IF NOT EXISTS idx_skill_eval_runs_iteration_run_id
     ON skill_eval_runs (iteration_run_id);
+
+-- I5 — defensive unique guard. Same (iteration_run_id, eval_id, with_skill)
+-- can never appear twice (the dispatch loop in eval_runner.py pairs True
+-- and False exactly once per eval). Partial index so legacy rows with
+-- NULL iteration_run_id (inserted before mig 140) don't trip the constraint.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_skill_eval_runs_iteration_eval_leg
+    ON skill_eval_runs (iteration_run_id, eval_id, with_skill)
+    WHERE iteration_run_id IS NOT NULL;
 
 COMMENT ON COLUMN skill_eval_runs.iteration_run_id IS
     'UUID grouping every row dispatched by one POST /skills/{id}/evals/run call. Returned to the caller as job_id so they can poll the full iteration set without joining on (eval_id, iteration). NULL on legacy rows inserted before Phase 2.';
