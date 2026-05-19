@@ -1,4 +1,4 @@
--- 137_reviews_coalitions.sql
+-- 139_reviews_coalitions.sql
 --
 -- Phase 1 of the `alpha review` cross-CLI consensus feature
 -- (see docs/plans/2026-05-18-alpha-review-consensus.md).
