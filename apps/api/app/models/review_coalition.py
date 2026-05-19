@@ -7,7 +7,7 @@ columns here are the cached aggregate snapshot the consensus
 aggregator writes after each round so the read path can answer
 `GET /reviews/{id}` without re-walking the blackboard.
 
-See migration 137_reviews_coalitions.sql for the column-by-column
+See migration 139_reviews_coalitions.sql for the column-by-column
 schema rationale.
 """
 

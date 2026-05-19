@@ -54,6 +54,11 @@ pub enum ReviewCommand {
 pub struct StartArgs {
     /// Review target. PR number ("#570"), commit SHA, "path:line" /
     /// "path:start-end", or "--stdin" to hash piped content.
+    ///
+    /// IMPORTANT: PR refs starting with `#` MUST be quoted on the
+    /// shell — `alpha review start "#570"`, not `alpha review start
+    /// #570`. An unquoted `#` is a shell comment marker and the ref
+    /// will be silently dropped before the CLI even sees it.
     #[arg(value_name = "REF")]
     pub r#ref: Option<String>,
 

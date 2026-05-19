@@ -225,6 +225,35 @@ def test_aggregate_findings_three_clis_consensus():
     assert set(agreed[0]["cli_set"]) == {"claude", "codex", "gemini"}
 
 
+def test_aggregate_findings_output_is_order_stable():
+    """N5: the aggregator was order-dependent (greedy clustering took
+    whichever cluster the new finding hit first, which depended on
+    dict iteration order / which CLI's network came back first).
+    Sort the input work-list by (file, line_lo, severity, description)
+    so the output is stable regardless of input ordering."""
+    f_a = _f("BLOCKER", "z.py", "10", "alpha issue here unique tokens")
+    f_b = _f("BLOCKER", "z.py", "10", "beta issue here unique tokens")
+    f_c = _f("NIT",     "a.py", "1",  "naming convention typo wrong")
+    f_d = _f("NIT",     "a.py", "1",  "typo in naming convention wrong")
+
+    # Two orderings that differ only in which CLI was iterated first.
+    run1 = aggregate_findings({"claude": [f_a, f_c], "codex": [f_b, f_d]})
+    run2 = aggregate_findings({"codex":  [f_b, f_d], "claude": [f_a, f_c]})
+
+    def _normalize(out):
+        return [
+            (
+                row["severity"],
+                row["file"],
+                row["line_range"],
+                sorted(row["cli_set"]),
+            )
+            for row in out
+        ]
+
+    assert _normalize(run1) == _normalize(run2)
+
+
 def test_aggregate_findings_clusters_synonym_descriptions():
     """I1: synonyms tokenize to disjoint sets (Jaccard 0) but if file
     + line + severity all line up we should still cluster — otherwise

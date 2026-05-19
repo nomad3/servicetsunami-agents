@@ -274,67 +274,89 @@ def aggregate_findings(per_cli: Dict[str, List[Dict]]) -> List[Dict]:
     Otherwise open a new cluster. After clustering, emit clusters with
     cli_set size ≥ 2.
     """
-    clusters: List[Dict] = []
+    # N5: deterministic order. Greedy clustering is order-dependent
+    # (which existing cluster a new finding attaches to depends on
+    # what's been seen so far). Sort the (cli, finding) work-list by
+    # (file, line_lo, severity_rank, description) so the output is
+    # stable across runs regardless of dict iteration order or which
+    # CLI's network round-tripped first. The cli name is the final
+    # tie-breaker.
+    work: List[Tuple[str, Dict]] = []
     for cli, findings in per_cli.items():
         for f in findings:
-            tokens = _tokenize(f.get("description", ""))
-            attached = False
-            for cluster in clusters:
-                if not _paths_match(cluster.get("file"), f.get("file")):
+            work.append((cli, f))
+
+    def _sort_key(item: Tuple[str, Dict]):
+        cli_name, f = item
+        f_path = _normalize_path(f.get("file")) or ""
+        rng = _parse_range(f.get("line_range"))
+        line_lo = rng[0] if rng else 0
+        sev_rank = -_SEV_RANK.get((f.get("severity") or "NIT").upper(), 0)
+        desc = (f.get("description") or "")
+        return (f_path, line_lo, sev_rank, desc, cli_name)
+
+    work.sort(key=_sort_key)
+
+    clusters: List[Dict] = []
+    for cli, f in work:
+        tokens = _tokenize(f.get("description", ""))
+        attached = False
+        for cluster in clusters:
+            if not _paths_match(cluster.get("file"), f.get("file")):
+                continue
+            if not _line_ranges_overlap(
+                cluster.get("line_range"), f.get("line_range")
+            ):
+                continue
+            # I1: Jaccard 0.4 is too strict for synonym descriptions
+            # like "missing tenant_id check" vs "tenant scoping not
+            # enforced" — disjoint token sets => Jaccard 0 even
+            # though they're the same bug. Drop the main threshold
+            # to 0.2 AND add a file+line+severity fallback so true
+            # synonyms still cluster. The fallback is narrow enough
+            # not to over-cluster: file paths must already match
+            # (post-B2 normalization), line ranges must overlap
+            # (already enforced), and severities must agree.
+            jacc = _jaccard(cluster["_tokens"], tokens)
+            if jacc < 0.2:
+                # Fallback: same file, overlapping lines, matching
+                # severity → cluster anyway.
+                cluster_sev = _strongest_severity(cluster.get("severities") or [])
+                this_sev = (f.get("severity") or "NIT").upper()
+                if cluster_sev != this_sev:
                     continue
-                if not _line_ranges_overlap(
-                    cluster.get("line_range"), f.get("line_range")
-                ):
+                if cluster.get("file") is None and f.get("file") is None:
+                    # Without a file anchor the fallback is too
+                    # loose — require file + line range present.
                     continue
-                # I1: Jaccard 0.4 is too strict for synonym descriptions
-                # like "missing tenant_id check" vs "tenant scoping not
-                # enforced" — disjoint token sets => Jaccard 0 even
-                # though they're the same bug. Drop the main threshold
-                # to 0.2 AND add a file+line+severity fallback so true
-                # synonyms still cluster. The fallback is narrow enough
-                # not to over-cluster: file paths must already match
-                # (post-B2 normalization), line ranges must overlap
-                # (already enforced), and severities must agree.
-                jacc = _jaccard(cluster["_tokens"], tokens)
-                if jacc < 0.2:
-                    # Fallback: same file, overlapping lines, matching
-                    # severity → cluster anyway.
-                    cluster_sev = _strongest_severity(cluster.get("severities") or [])
-                    this_sev = (f.get("severity") or "NIT").upper()
-                    if cluster_sev != this_sev:
-                        continue
-                    if cluster.get("file") is None and f.get("file") is None:
-                        # Without a file anchor the fallback is too
-                        # loose — require file + line range present.
-                        continue
-                    # Otherwise allow the cluster join.
-                # Attach. Expand the cluster's line_range so later
-                # findings nearby (within slack window) still match.
-                cluster["descriptions"].append(f.get("description", ""))
-                cluster["severities"].append(f.get("severity", "NIT"))
-                cluster["cli_set"].add(cli)
-                cluster["_tokens"] |= tokens
-                cluster["line_range"] = _merge_range(
-                    cluster.get("line_range"), f.get("line_range"),
-                )
-                # Prefer the more-qualified (longer) path so the
-                # cluster's reported `file` is the most informative
-                # variant any CLI supplied — "apps/api/main.py" wins
-                # over bare "main.py".
-                cluster["file"] = _prefer_longer_path(
-                    cluster.get("file"), f.get("file"),
-                )
-                attached = True
-                break
-            if not attached:
-                clusters.append({
-                    "file": f.get("file"),
-                    "line_range": f.get("line_range"),
-                    "descriptions": [f.get("description", "")],
-                    "severities": [f.get("severity", "NIT")],
-                    "cli_set": {cli},
-                    "_tokens": tokens,
-                })
+                # Otherwise allow the cluster join.
+            # Attach. Expand the cluster's line_range so later
+            # findings nearby (within slack window) still match.
+            cluster["descriptions"].append(f.get("description", ""))
+            cluster["severities"].append(f.get("severity", "NIT"))
+            cluster["cli_set"].add(cli)
+            cluster["_tokens"] |= tokens
+            cluster["line_range"] = _merge_range(
+                cluster.get("line_range"), f.get("line_range"),
+            )
+            # Prefer the more-qualified (longer) path so the
+            # cluster's reported `file` is the most informative
+            # variant any CLI supplied — "apps/api/main.py" wins
+            # over bare "main.py".
+            cluster["file"] = _prefer_longer_path(
+                cluster.get("file"), f.get("file"),
+            )
+            attached = True
+            break
+        if not attached:
+            clusters.append({
+                "file": f.get("file"),
+                "line_range": f.get("line_range"),
+                "descriptions": [f.get("description", "")],
+                "severities": [f.get("severity", "NIT")],
+                "cli_set": {cli},
+                "_tokens": tokens,
+            })
 
     agreed: List[Dict] = []
     for c in clusters:
