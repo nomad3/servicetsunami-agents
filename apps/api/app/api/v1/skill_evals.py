@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -31,6 +32,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
 from app.services.skill_creator import GradingResult, grade
+from app.services.skill_creator import eval_runner as eval_runner_module
 from app.services.skill_creator.grader import GraderError
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,35 @@ class GradeRunRequest(BaseModel):
     """
 
     run_id: uuid.UUID
+
+
+class RunIterationRequest(BaseModel):
+    """Request body for ``POST /skills/{skill_id}/evals/run``.
+
+    ``iteration`` is required — the caller chooses N (typically
+    ``max(iteration) + 1`` from existing rows). ``platform`` and ``model``
+    are optional overrides; defaults track the tenant's CLI policy.
+    Phase 2 hardcodes ``platform=claude_code`` if omitted — Phase 3 will
+    wire RL routing per tenant.
+    """
+
+    iteration: int
+    platform: Optional[str] = None
+    model: Optional[str] = None
+
+
+class RunIterationResponse(BaseModel):
+    """Response from ``POST /skills/{skill_id}/evals/run``.
+
+    Returns immediately after the worker threads are spawned. Clients
+    poll ``GET /skills/{skill_id}/evals/jobs/{job_id}`` for status (Phase 2
+    surface; Phase 4 adds SSE).
+    """
+
+    job_id: uuid.UUID
+    run_ids: list[uuid.UUID]
+    iteration: int
+    skill_id: uuid.UUID
 
 
 def _verify_tenant_owns_skill(
@@ -221,3 +252,131 @@ def grade_run(
         )
 
     return result
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 2: eval runner — POST /run + GET /jobs/{job_id}
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/{skill_id}/evals/run",
+    response_model=RunIterationResponse,
+    status_code=202,
+)
+def run_iteration(
+    skill_id: uuid.UUID,
+    payload: RunIterationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RunIterationResponse:
+    """Kick off all evals for one iteration. Returns a job_id immediately.
+
+    The endpoint is 202 Accepted — the actual run lives on Temporal +
+    background daemon threads (see ``eval_runner.dispatch_iteration``).
+    Clients poll ``GET /evals/jobs/{job_id}`` for status; Phase 4 adds
+    an SSE feed for live progress.
+
+    Validation:
+      * 404 if the skill doesn't exist OR belongs to a different tenant.
+        Same 404-not-403 pattern as ``grade_run``.
+      * 400 if the skill has no evals defined yet (the runner needs at
+        least one to dispatch).
+      * 400 if ``iteration`` is < 1.
+      * 503 if Temporal dispatch fails on the first row insert. After
+        the first row is queued the runner returns the job_id — failures
+        on subsequent dispatches surface via the per-run ``status=error``
+        state, not the endpoint response.
+    """
+    _verify_tenant_owns_skill(db, skill_id, current_user.tenant_id)
+
+    platform = payload.platform or "claude_code"
+    model = payload.model or ""
+
+    try:
+        result = eval_runner_module.dispatch_iteration(
+            db,
+            skill_id=skill_id,
+            iteration=payload.iteration,
+            platform=platform,
+            model=model,
+        )
+    except eval_runner_module.TenantWorkspaceQuotaExceeded as exc:
+        # I3 — refuse dispatch when the tenant is at quota; same 413
+        # contract the workspace clone endpoint uses.
+        logger.info(
+            "run_iteration: quota exceeded skill=%s tenant=%s used=%d budget=%d",
+            skill_id, current_user.tenant_id, exc.used, exc.budget,
+        )
+        raise HTTPException(
+            status_code=413,
+            detail="Tenant workspace quota exceeded",
+        )
+    except ValueError as exc:
+        # "no evals defined" or "iteration < 1" — caller-fixable.
+        logger.info(
+            "run_iteration: bad request skill=%s tenant=%s: %s",
+            skill_id, current_user.tenant_id, exc,
+        )
+        raise HTTPException(status_code=400, detail=str(exc))
+    except LookupError as exc:
+        # Skill row vanished between _verify_tenant_owns_skill and
+        # _load_skill_row — extremely rare race, surface as 404.
+        logger.warning(
+            "run_iteration: skill vanished mid-dispatch skill=%s: %s",
+            skill_id, exc,
+        )
+        raise HTTPException(status_code=404, detail="Skill not found")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "run_iteration: dispatch crashed skill=%s tenant=%s",
+            skill_id, current_user.tenant_id,
+        )
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="failed to dispatch eval iteration",
+        ) from exc
+
+    return RunIterationResponse(
+        job_id=uuid.UUID(result["job_id"]),
+        run_ids=[uuid.UUID(r) for r in result["run_ids"]],
+        iteration=int(result["iteration"]),
+        skill_id=uuid.UUID(result["skill_id"]),
+    )
+
+
+@router.get(
+    "/{skill_id}/evals/jobs/{job_id}",
+)
+def get_iteration_job(
+    skill_id: uuid.UUID,
+    job_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Return the per-run status snapshot for an iteration job.
+
+    Tenant-scoped: a foreign tenant's job_id 404s. Same convention as
+    ``chat_jobs.get_job``.
+
+    The endpoint also re-verifies ``skill_id`` ownership so a tenant
+    can't probe job_ids that belong to a different skill in the same
+    tenant — that's not strictly a privacy boundary (same tenant), but
+    it keeps the URL coordinate consistent and matches the grader
+    endpoint's behaviour.
+    """
+    _verify_tenant_owns_skill(db, skill_id, current_user.tenant_id)
+
+    snap = eval_runner_module.get_iteration_status(
+        db,
+        iteration_run_id=job_id,
+        tenant_id=current_user.tenant_id,
+    )
+    if not snap:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if snap["skill_id"] != str(skill_id):
+        # job_id exists but for a different skill (same tenant). 404 to
+        # avoid leaking which skill it belongs to.
+        raise HTTPException(status_code=404, detail="Job not found")
+    return snap

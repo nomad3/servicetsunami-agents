@@ -47,6 +47,24 @@ def _find_skill_md(skill_dir: Path) -> Optional[Path]:
     return None
 
 
+def derive_slug(name: str) -> str:
+    """Canonical skill-slug derivation used everywhere a `name` becomes a
+    disk-side directory.
+
+    Mirrors the rule applied in ``SkillManager.create_skill`` (mig 110):
+    lowercase, collapse any run of non-``[a-z0-9]`` characters into a
+    single underscore, strip leading/trailing underscores. The result is
+    guaranteed to be a path-safe relative segment — no separators, no
+    ``..``, no dot prefix — so callers that build ``<root>/<slug>``
+    paths can rely on containment under ``<root>`` without an extra
+    realpath check (eval_runner still does one as defence-in-depth).
+
+    Returns an empty string when the input is empty / fully scrubbed;
+    callers MUST treat that as an invalid skill name (ValueError).
+    """
+    return re.sub(r"[^a-z0-9]+", "_", (name or "").lower()).strip("_")
+
+
 def _normalize_external_metadata(metadata: dict) -> dict:
     """Adapt external skill formats (e.g. GWS SKILL.md) to our frontmatter schema."""
     # If metadata already has 'engine', it's likely our format — skip
@@ -289,7 +307,7 @@ class SkillManager:
         if self.get_skill_by_name(name, tenant_id):
             return {"error": f"Skill '{name}' already exists."}
 
-        slug = re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')
+        slug = derive_slug(name)
         if not slug:
             return {"error": "Invalid skill name."}
 
