@@ -11,11 +11,10 @@ Covers the test plan in docs/plans/2026-05-19-emotions-engine-prototype-design.m
 from __future__ import annotations
 
 import itertools
-import math
 
 import pytest
 
-from app.schemas.emotion import PADVector, _pad_to_mood_label
+from app.schemas.emotion import PADVector, _pad_to_mood_label, clamp_pad
 from app.services.emotion_engine import (
     DECAY_RATE,
     TOOL_OUTCOME_DOMINANCE_GAIN,
@@ -294,3 +293,13 @@ def test_pad_to_mood_label_pure_no_side_effects():
     with no dependency on PADVector. This test fences that invariant."""
     label = _pad_to_mood_label(0.5, 0.5, 0.5)
     assert label in VALID_MOODS
+
+
+def test_clamp_pad_public_helper():
+    """clamp_pad is the public clamping helper (was leading-underscore
+    `_clamp` previously; N1 of superpowers code-review). The leading-
+    underscore alias is preserved for back-compat but new code uses
+    clamp_pad."""
+    assert clamp_pad(2.5) == 1.0
+    assert clamp_pad(-3.0) == -1.0
+    assert clamp_pad(0.5) == 0.5

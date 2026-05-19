@@ -22,7 +22,17 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.schemas.emotion import PADVector, _clamp
+from app.schemas.emotion import PADVector, clamp_pad
+
+
+def _clamp_unit(value: float) -> float:
+    """Clamp a [0, 1] unit value. Used for reward/severity inputs that
+    are not PAD components themselves but feed into PAD math."""
+    if value < 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
 
 
 # ── Tunable constants ─────────────────────────────────────────────────
@@ -100,8 +110,7 @@ def _appraise_tool_outcome(
     Reward 1.0 = full impulse. Reward 0.0 = no shift (the tool ran but
     contributed nothing).
     """
-    reward = float(payload.get("reward", 0.0))
-    reward = max(0.0, min(1.0, reward))
+    reward = _clamp_unit(float(payload.get("reward", 0.0)))
     return PADVector.from_components(
         pleasure=current.pleasure + TOOL_OUTCOME_PLEASURE_GAIN * reward,
         arousal=current.arousal + TOOL_OUTCOME_AROUSAL_GAIN * reward,
@@ -124,8 +133,7 @@ def _appraise_tool_failure(
     high-arousal. This is the central architectural correction Luna
     caught during the design review.
     """
-    severity = float(payload.get("severity", 0.5))
-    severity = max(0.0, min(1.0, severity))
+    severity = _clamp_unit(float(payload.get("severity", 0.5)))
     return PADVector.from_components(
         pleasure=current.pleasure - TOOL_FAILURE_PLEASURE_LOSS * severity,
         arousal=current.arousal + TOOL_FAILURE_AROUSAL_GAIN * severity,
@@ -142,9 +150,17 @@ def _appraise_peer_signal(
     """Another coalition agent broadcast their PAD. Payload:
     {"pleasure": float, "arousal": float, "dominance": float}.
 
-    Pull toward the peer's vector by PEER_SIGNAL_WEIGHT. This is the
-    emotional-contagion primitive. Phase 2 adds Blackboard write/read
-    machinery; the math lives here so PR A can unit-test it.
+    Linear weighted pull from `current` toward the peer's vector by
+    PEER_SIGNAL_WEIGHT. NO baseline anchoring in Phase 1 — the
+    `baseline` param is kept in the signature for API symmetry with the
+    other appraisers, but the math is `current + (peer - current) *
+    weight`. Baseline-anchored contagion (pulling toward our own
+    baseline if peer is too far away) is a Phase 2/3 question once
+    we've seen real emotional-contagion behaviour in coalitions.
+
+    `PADVector.from_dict` clamps the peer payload to [-1, 1] before the
+    interpolation, so an adversarial peer broadcasting (10.0, 10.0,
+    10.0) cannot pull us past the bounds.
     """
     peer = PADVector.from_dict(payload)
     return PADVector.from_components(
@@ -184,7 +200,8 @@ def decay(
         a = a + (ba - a) * rate
         d = d + (bd - d) * rate
 
-    return PADVector.from_components(pleasure=_clamp(p), arousal=_clamp(a), dominance=_clamp(d))
+    # from_components clamps internally — no need to clamp here.
+    return PADVector.from_components(pleasure=p, arousal=a, dominance=d)
 
 
 # ── Derive-on-read helper for legacy mood-column callers ──────────────
