@@ -603,8 +603,8 @@ NATIVE_TEMPLATES = [
                     "type": "mcp_tool",
                     "tool": "call_mcp_tool",
                     "params": {
-                        "server": "remedia",
-                        "tool": "create_order",
+                        "connector_id": "remedia",
+                        "tool_name": "create_order",
                         "pharmacy_id": "{{input.pharmacy_id}}",
                         "items": "{{input.items}}",
                         "payment_provider": "{{input.payment_provider | default('mercadopago')}}",
@@ -664,8 +664,8 @@ NATIVE_TEMPLATES = [
                     "type": "mcp_tool",
                     "tool": "call_mcp_tool",
                     "params": {
-                        "server": "remedia",
-                        "tool": "track_delivery",
+                        "connector_id": "remedia",
+                        "tool_name": "track_delivery",
                         "order_id": "{{order.order_id}}",
                     },
                     "output": "delivery_status",
@@ -810,8 +810,8 @@ NATIVE_TEMPLATES = [
                             "type": "mcp_tool",
                             "tool": "call_mcp_tool",
                             "params": {
-                                "server": "scraper",
-                                "tool": "scrape_website",
+                                "connector_id": "scraper",
+                                "tool_name": "scrape_website",
                                 "url": "{{competitor.website}}",
                             },
                             "output": "scrape_result",

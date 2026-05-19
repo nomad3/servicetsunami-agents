@@ -5,6 +5,7 @@ external MCP servers — bringing third-party tool ecosystems into
 AgentProvision.
 """
 import json
+from typing import Any, Dict, List, Optional
 import logging
 
 import httpx
@@ -231,11 +232,12 @@ async def discover_mcp_tools(
 
 @mcp.tool()
 async def call_mcp_tool(
-    connector_id: str,
-    tool_name: str,
+    connector_id: str = "",
+    tool_name: str = "",
     arguments: str = "{}",
     tenant_id: str = "",
     ctx: Context = None,
+    **kwargs: Any,
 ) -> dict:
     """Call a tool on a connected external MCP server.
 
@@ -249,6 +251,7 @@ async def call_mcp_tool(
             Example: '{"query": "SELECT * FROM users LIMIT 10"}'
         tenant_id: Tenant UUID (resolved from session if omitted).
         ctx: MCP request context (injected automatically).
+        **kwargs: Support for 'server' and 'tool' aliases and flat arguments.
 
     Returns:
         Tool execution result from the remote MCP server.
@@ -257,19 +260,57 @@ async def call_mcp_tool(
     if not tid:
         return {"error": "tenant_id is required."}
 
+    # Support aliases from workflow templates
+    cid = connector_id or kwargs.get("server", "")
+    tn = tool_name or kwargs.get("tool", "")
+
+    if not cid:
+        return {"error": "connector_id (or 'server' alias) is required."}
+    if not tn:
+        return {"error": "tool_name (or 'tool' alias) is required."}
+
     try:
         args_dict = json.loads(arguments)
     except json.JSONDecodeError:
         return {"error": "arguments must be valid JSON"}
 
+    # Merge flat kwargs into args_dict (excluding used aliases)
+    for k, v in kwargs.items():
+        if k not in ("server", "tool") and k not in args_dict:
+            args_dict[k] = v
+
     api_base = _get_api_base_url()
+
+    # Resolve server name to connector_id if it's not a UUID
+    import re
+    uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+    if not uuid_pattern.match(cid):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    f"{api_base}/api/v1/mcp-servers/internal/list",
+                    headers=_headers(tid),
+                    params={"tenant_id": tid},
+                )
+                if resp.status_code == 200:
+                    servers = resp.json()
+                    matched = next((s for s in servers if s["name"].lower() == cid.lower()), None)
+                    if matched:
+                        cid = matched["id"]
+                    else:
+                        return {"error": f"MCP server '{cid}' not found for tenant {tid}"}
+                else:
+                    return {"error": f"Failed to resolve server name: {resp.status_code}"}
+        except Exception as e:
+            return {"error": f"Error resolving server name: {str(e)}"}
+
     try:
         async with httpx.AsyncClient(timeout=90.0) as client:
             resp = await client.post(
-                f"{api_base}/api/v1/mcp-servers/internal/{connector_id}/call",
+                f"{api_base}/api/v1/mcp-servers/internal/{cid}/call",
                 headers=_headers(tid),
                 params={"tenant_id": tid},
-                json={"tool_name": tool_name, "arguments": args_dict},
+                json={"tool_name": tn, "arguments": args_dict},
             )
             if resp.status_code == 200:
                 return resp.json()
@@ -281,8 +322,6 @@ async def call_mcp_tool(
     except Exception as e:
         logger.exception("call_mcp_tool failed")
         return {"error": str(e)}
-
-
 @mcp.tool()
 async def disconnect_mcp_server(
     connector_id: str,
