@@ -13,7 +13,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_current_user, get_db
+from app.api.deps import get_current_user, get_db
 from app.models.user import User
 from app.services.emotion_engine_io import (
     get_affect_trace,
