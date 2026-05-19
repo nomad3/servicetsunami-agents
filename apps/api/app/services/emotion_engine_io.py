@@ -18,7 +18,10 @@ from sqlalchemy.orm import Session
 from app.models.agent_memory import AgentMemory
 from app.models.conversation_episode import ConversationEpisode
 from app.schemas.emotion import PADVector
-from app.services.emotion_engine import appraise_event
+from app.services.emotion_engine import (
+    appraise_event,
+    format_affect_addendum,
+)
 
 
 # ── Conversation episode ──────────────────────────────────────────────
@@ -154,6 +157,112 @@ def get_affect_baseline(
 
 
 # ── RL wire-in helper ─────────────────────────────────────────────────
+
+
+def get_latest_session_affect(
+    db: Session,
+    *,
+    session_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> Optional[PADVector]:
+    """Return the most recent PAD vector for a session, or None if no
+    episode in the session has an affect_vector yet.
+
+    Phase 1 PR C: read path for the prompt-side style injection.
+    Tenant-scoped — foreign sessions return None.
+    """
+    episode = (
+        db.query(ConversationEpisode)
+        .filter(
+            ConversationEpisode.session_id == session_id,
+            ConversationEpisode.tenant_id == tenant_id,
+            ConversationEpisode.affect_vector.isnot(None),
+        )
+        .order_by(ConversationEpisode.created_at.desc())
+        .first()
+    )
+    if episode is None or episode.affect_vector is None:
+        return None
+    return PADVector.from_dict(episode.affect_vector)
+
+
+def build_affect_addendum_for_session(
+    db: Session,
+    *,
+    session_id: Optional[uuid.UUID],
+    tenant_id: uuid.UUID,
+) -> str:
+    """Return the system-prompt addendum string for the session's
+    current affective state, or empty string if no affect recorded /
+    state is neutral.
+
+    This is the THIN seam used by cli_session_manager: it can
+    unconditionally concatenate the return value into the assembled
+    prompt without checking whether emotion is enabled.
+
+    None session_id is tolerated (returns "") so callers don't need
+    upstream guards for ad-hoc / one-off prompts.
+    """
+    if session_id is None:
+        return ""
+    try:
+        vector = get_latest_session_affect(
+            db,
+            session_id=session_id,
+            tenant_id=tenant_id,
+        )
+    except Exception:
+        # Best-effort: never let an emotion-layer read failure crash
+        # prompt assembly. The CLI gets a slightly stale (neutral)
+        # prompt instead of a 500.
+        return ""
+    return format_affect_addendum(vector)
+
+
+def appraise_and_record_tool_failure(
+    db: Session,
+    *,
+    episode_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    severity: float = 0.5,
+) -> Optional[PADVector]:
+    """The error-path wire-in: when a tool call fails, run failure
+    appraisal and persist. Mirrors appraise_and_record_tool_outcome
+    but for the tool_failure event type — pleasure down + arousal UP
+    (Luna's temperature-flip correction).
+
+    Returns the post-appraisal PAD vector or None if the episode
+    doesn't exist / is tenant-foreign.
+    """
+    episode = (
+        db.query(ConversationEpisode)
+        .filter(
+            ConversationEpisode.id == episode_id,
+            ConversationEpisode.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if episode is None:
+        return None
+
+    baseline = get_affect_baseline(db, agent_id=agent_id, tenant_id=tenant_id)
+    current = (
+        PADVector.from_dict(episode.affect_vector)
+        if episode.affect_vector
+        else baseline
+    )
+
+    new_vector = appraise_event(
+        "tool_failure",
+        {"severity": severity},
+        current=current,
+        baseline=baseline,
+    )
+    episode.affect_vector = new_vector.to_dict()
+    db.commit()
+    db.refresh(episode)
+    return new_vector
 
 
 def appraise_and_record_tool_outcome(

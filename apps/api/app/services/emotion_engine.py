@@ -223,10 +223,39 @@ def affect_vector_to_mood_label(vector: Optional[PADVector | dict]) -> str:
     return vector.label
 
 
+# ── Prompt-side style addendum (Phase 1 PR C) ─────────────────────────
+
+
+def format_affect_addendum(vector: Optional[PADVector]) -> str:
+    """Return a small markdown block describing the agent's current
+    affective state, suitable for appending to the assembled system
+    prompt. Returns empty string for neutral / missing vectors so
+    callers can unconditionally concatenate.
+
+    Format kept short (3-4 lines) so it doesn't dominate the prompt.
+    The label is the human-readable bridge to behaviour; the numeric
+    components are included as ground truth for any downstream consumer
+    that wants to act on them.
+    """
+    if vector is None:
+        return ""
+    if vector.label == "neutral":
+        return ""
+    return (
+        "\n## Current Affective State\n"
+        f"Felt state: **{vector.label}** "
+        f"(pleasure={vector.pleasure:+.2f}, arousal={vector.arousal:+.2f}, "
+        f"dominance={vector.dominance:+.2f}).\n"
+        "Let this state colour your tone and tempo, but do not announce "
+        "it; respond naturally as a person in this state would.\n"
+    )
+
+
 __all__ = [
     "appraise_event",
     "decay",
     "affect_vector_to_mood_label",
+    "format_affect_addendum",
     "DECAY_RATE",
     "TOOL_OUTCOME_PLEASURE_GAIN",
     "TOOL_OUTCOME_DOMINANCE_GAIN",
