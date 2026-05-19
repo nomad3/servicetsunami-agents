@@ -1,15 +1,17 @@
 """
-Prototype backend for `alpha run` + `alpha watch`.
+Backend for `alpha run` + `alpha watch`.
 
-Python side of Phase 1 of the CLI differentiation roadmap
-(`docs/plans/2026-05-13-ap-cli-differentiation-roadmap.md`).
+Python side of the CLI differentiation roadmap
+(`docs/plans/2026-05-13-ap-cli-differentiation-roadmap.md` for Phase 1
+shape, `docs/plans/2026-05-18-alpha-run-real-dispatch.md` for Phase 2).
 
-The endpoints accept the dispatch shape produced by the CLI and return
-synthetic task lifecycles (queued → running → completed | failed |
-cancelled) keyed by task id. Real Temporal dispatch via
-`FanoutChatCliWorkflow` (planned for Phase 1 ship) replaces the
-in-memory store; the wire contracts stay the same so the CLI side
-does not move.
+The endpoints accept the dispatch shape produced by the CLI. When
+`USE_REAL_FANOUT_WORKFLOW=True` (production) every dispatch — single
+provider, `--providers` fallback chain, and `--fanout` parallel — is
+routed to a real `FanoutChatCliWorkflow` on the `agentprovision-code`
+Temporal queue. When the flag is off, the request lands on the
+in-memory rollback stub that returns a synthetic lifecycle
+(queued → running → completed) for demo / disaster recovery.
 
 Why an in-memory dict and not a DB-backed scaffold:
   - The CLI flow is the demo. We want a fast, predictable lifecycle
@@ -69,6 +71,16 @@ from app.models.user import User
 from app.services.cost_estimator import estimate_fanout_cost
 
 router = APIRouter()
+
+
+# ── Phase 2 (#177 follow-up, 2026-05-18) ──────────────────────────────
+# Default provider when the caller passes neither `providers` nor
+# `fanout`. Design doc open question #1 wants this auto-detected from
+# `tenant_features.default_cli_platform`; until that lookup lands, we
+# hard-code the safe ship-default. claude_code is the most-tested
+# leaf CLI under ChatCliWorkflow and matches the chat hot path's
+# tenant default in cli_session_manager.
+DEFAULT_RUN_PROVIDER = "claude_code"
 
 
 def _verify_tenant_header(
@@ -485,8 +497,24 @@ async def run_fanout(
     # cap; the real-dispatch path could OOM Temporal by unlimited
     # workflow creation. Now both paths bill against the same per-
     # tenant ceiling.
+    #
+    # Phase 2 (#177 follow-up, 2026-05-18): cap accounting now reflects
+    # the effective dispatch shape — parent + one slot per child that
+    # the workflow will actually spawn. For `--providers` chain or the
+    # default single-provider path, the parent dispatches >=1 children
+    # too, so they bill against the cap.
     _sweep_expired_tasks()
-    n_new = 1 + len(body.fanout)  # parent + children we are about to mint
+    if settings.USE_REAL_FANOUT_WORKFLOW:
+        if body.fanout:
+            _planned_children = len(body.fanout)
+        elif body.providers:
+            _planned_children = len(body.providers)
+        else:
+            _planned_children = 1
+    else:
+        # Stub path is unchanged: only fanout mints children.
+        _planned_children = len(body.fanout)
+    n_new = 1 + _planned_children
     if _count_tenant_tasks(tenant_id) + n_new > MAX_TASKS_PER_TENANT:
         raise HTTPException(
             status_code=429,
@@ -499,15 +527,42 @@ async def run_fanout(
 
     # #177 Phase 1 ship: when `USE_REAL_FANOUT_WORKFLOW=true` AND the
     # request has a non-empty fanout, dispatch to Temporal instead of
-    # the in-memory stub. The stub stays as the demo-safe fallback
-    # for everything else (fallback-chain dispatches, single-provider,
-    # disabled flag) so rollback is just an env-var flip.
-    if settings.USE_REAL_FANOUT_WORKFLOW and body.fanout:
+    # the in-memory stub.
+    #
+    # Phase 2 (#177 follow-up, 2026-05-18): the flag now covers single-
+    # provider and `--providers` fallback-chain dispatches too, so
+    # `alpha run "..."` returns real LLM output instead of the synthetic
+    # placeholder. All three paths land on FanoutChatCliWorkflow, which
+    # already handles N=1 (single child, first-wins is a no-op merge)
+    # and N=k+first-wins (closest analog to a quota-aware chain pending
+    # a true sequential fallback workflow — see plan doc 2026-05-18).
+    # The stub stays as the demo-safe fallback when the flag is off
+    # so rollback is just an env-var flip.
+    if settings.USE_REAL_FANOUT_WORKFLOW:
+        # Resolve the effective provider list + merge mode for the
+        # workflow, treating fanout / providers / neither uniformly.
+        if body.fanout:
+            effective_providers = list(body.fanout)
+            effective_merge = body.merge
+        elif body.providers:
+            # Fallback chain: try each in order until one succeeds. We
+            # approximate with `first-wins` (the first child to *complete*
+            # wins, others cancel). True quota-aware sequential walk
+            # is tracked as a Phase-3 follow-up in the plan doc.
+            effective_providers = list(body.providers)
+            effective_merge = "first-wins"
+        else:
+            # Single-provider default. design doc #1: tenant_features.
+            # default_cli_platform lookup is the long-term home; until
+            # that lands, use the safe ship-default.
+            effective_providers = [DEFAULT_RUN_PROVIDER]
+            effective_merge = "first-wins"
+
         dispatch = await _dispatch_fanout_workflow(
             prompt=body.prompt,
             tenant_id=tenant_id,
-            providers=body.fanout,
-            merge=body.merge,
+            providers=effective_providers,
+            merge=effective_merge,
             agent_id=body.agent_id,
             session_id=body.session_id,
         )
@@ -529,26 +584,35 @@ async def run_fanout(
         # NOT resolvable through /status (the route only accepts the
         # real workflow_id for the parent). They exist purely for
         # cap-accounting parity with the stub path.
+        #
+        # Phase 2 (#177 follow-up, 2026-05-18): mirror children for the
+        # effective_providers list, not just `body.fanout`, so the
+        # single-provider and --providers chain paths get the same
+        # accounting treatment.
         child_record_ids = [
-            f"{parent_record_id}#child-{i}" for i in range(len(body.fanout))
+            f"{parent_record_id}#child-{i}" for i in range(len(effective_providers))
         ]
         _TASKS[parent_record_id] = {
             "tenant_id": tenant_id,
             "created_at": now_mono,
             "children": [
                 {"task_id": cid, "provider": p, "created_at": now_mono}
-                for cid, p in zip(child_record_ids, body.fanout)
+                for cid, p in zip(child_record_ids, effective_providers)
             ],
             "real_temporal": True,
             "prompt": body.prompt,
-            "providers": [],
-            "fanout": list(body.fanout),
-            "merge": body.merge,
+            # Round-2 L2-1 forward-compat: keep `fanout` populated when
+            # the caller passed --fanout; otherwise leave empty so a
+            # post-rollback stub-path read doesn't synthesize a fake
+            # multi-provider council message for a single-provider run.
+            "providers": list(body.providers) if body.providers and not body.fanout else [],
+            "fanout": list(body.fanout) if body.fanout else [],
+            "merge": effective_merge,
             "user_id": str(current_user.id),
             "agent_id": body.agent_id,
             "session_id": body.session_id,
         }
-        for cid, p in zip(child_record_ids, body.fanout):
+        for cid, p in zip(child_record_ids, effective_providers):
             _TASKS[cid] = {
                 "tenant_id": tenant_id,
                 "created_at": now_mono,
@@ -559,7 +623,7 @@ async def run_fanout(
                 "prompt": body.prompt,
                 "providers": [],
                 "fanout": [],
-                "merge": body.merge,
+                "merge": effective_merge,
                 "user_id": str(current_user.id),
                 "agent_id": body.agent_id,
                 "session_id": body.session_id,
@@ -568,7 +632,7 @@ async def run_fanout(
         # field from #174). Falls back to the static placeholder when
         # the tenant has zero history for the requested providers.
         ce = estimate_fanout_cost(
-            db, tenant_id=current_user.tenant_id, providers=body.fanout
+            db, tenant_id=current_user.tenant_id, providers=effective_providers
         )
         estimate = RunEstimate(
             estimated_duration_seconds=ce.estimated_duration_seconds,
@@ -765,25 +829,28 @@ async def task_status(
     result = None
     error = None
     if status == "completed":
-        # Synthetic result body that demonstrates the council-merge
-        # demo from the design doc. Real impl reads from
-        # `agent_tasks.result_message`.
+        # Rollback-mode synthetic body. When USE_REAL_FANOUT_WORKFLOW
+        # is on (production target) every dispatch lands on the
+        # real-path branch above; this is only ever reached when the
+        # operator has deliberately disabled real dispatch via env-var
+        # flip. Phase 2 (#177 follow-up, 2026-05-18): wording tightened
+        # to mark this as a fallback state, not a normal demo response.
         if record.get("fanout"):
             providers = ", ".join(record["fanout"])
             result = (
-                f"[demo result] Fanout over [{providers}] merged via "
+                f"[stub] Fanout over [{providers}] merged via "
                 f"`{record['merge']}`.\n\n"
-                f"Consensus: all reviewers converged on the prompt:\n"
-                f"  > {record['prompt']}\n\n"
-                f"This is a Phase-1-prototype synthetic response. The real "
-                f"`FanoutChatCliWorkflow` will return the meta-adjudicator "
-                f"output once wired."
+                f"Prompt: {record['prompt']}\n\n"
+                f"USE_REAL_FANOUT_WORKFLOW is disabled on the API pod; "
+                f"this is the in-memory rollback response. Set the flag "
+                f"to True to dispatch real ChatCliWorkflow runs."
             )
         else:
             result = (
-                f"[demo result] Completed.\n\n"
+                f"[stub] Completed.\n\n"
                 f"Prompt: {record['prompt']}\n\n"
-                f"This is a Phase-1-prototype synthetic response."
+                f"USE_REAL_FANOUT_WORKFLOW is disabled on the API pod; "
+                f"this is the in-memory rollback response."
             )
 
     # Prototype lifecycle never reaches `failed`/`cancelled` from the
@@ -1040,23 +1107,22 @@ async def task_events_stream(
                                 else getattr(raw, "merged_text", None)
                             )
                         else:
-                            # Stub-path: reconstruct the synthetic body
-                            # the same way `/status` does inline.
+                            # Stub-path: reconstruct the rollback-mode
+                            # body the same way `/status` does inline.
                             r = _TASKS.get(task_id) or {}
                             if r.get("fanout"):
                                 providers = ", ".join(r["fanout"])
                                 merged = (
-                                    f"[demo result] Fanout over [{providers}] merged via "
+                                    f"[stub] Fanout over [{providers}] merged via "
                                     f"`{r.get('merge', 'council')}`.\n\n"
-                                    f"Consensus: all reviewers converged on the prompt:\n"
-                                    f"  > {r.get('prompt', '')}\n\n"
-                                    f"This is a Phase-1-prototype synthetic response."
+                                    f"Prompt: {r.get('prompt', '')}\n\n"
+                                    f"USE_REAL_FANOUT_WORKFLOW is disabled."
                                 )
                             else:
                                 merged = (
-                                    f"[demo result] Completed.\n\n"
+                                    f"[stub] Completed.\n\n"
                                     f"Prompt: {r.get('prompt', '')}\n\n"
-                                    f"This is a Phase-1-prototype synthetic response."
+                                    f"USE_REAL_FANOUT_WORKFLOW is disabled."
                                 )
                         if merged:
                             yield (
