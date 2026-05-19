@@ -317,6 +317,15 @@ def record_session_tool_failure(
     callers don't have to know about episode_id resolution. This sits
     between the chat hot path and the emotion engine; it MUST NOT raise
     — the caller is in an exception handler already.
+
+    AGENT ATTRIBUTION CAVEAT (Phase 3 follow-up):
+    When `agent_id` is None we fall back to a random UUID so the baseline
+    lookup returns neutral. That keeps the appraisal correct but the
+    persisted `affect_vector` has no agent-of-record. Phase 3 should
+    resolve agent_id from db_session_memory or the most-recent
+    ExecutionTrace before persisting; without it, per-agent affect
+    analytics will be blind to failures originating from
+    `cli_session_manager`. TODO(phase-3): plumb agent_id through.
     """
     if session_id is None:
         return None

@@ -1389,6 +1389,13 @@ def _record_tool_failure_affect(
     severity convention:
       - 0.5 = graceful failure (workflow returned empty/error). Moderate.
       - 1.0 = hard exception (workflow raised). Maximum.
+
+    Safety note: the bare `except Exception` below makes it impossible
+    for this helper to propagate into the caller's outer try/except.
+    If a future refactor narrows that exception class, the graceful-
+    path call site at the top of dispatch's try-block could fall
+    through to the hard-exception path and double-count. Keep the
+    bare except.
     """
     try:
         from app.services.emotion_engine_io import record_session_tool_failure
