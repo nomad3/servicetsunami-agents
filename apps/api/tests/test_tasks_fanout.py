@@ -665,6 +665,124 @@ def test_real_fanout_flag_off_single_provider_stays_on_stub(monkeypatch):
     assert resp.json()["task_id"].startswith("t_")
 
 
+# ── #573 review BLOCKER: monthly token / cost gate ─────────────────────
+
+
+def test_real_fanout_over_monthly_token_limit_returns_429(monkeypatch):
+    """Tenant past monthly_token_limit cannot dispatch real workflows.
+
+    With USE_REAL_FANOUT_WORKFLOW=True, run dispatch spends real LLM
+    tokens. A tenant already over their monthly_token_limit must be
+    blocked at the door (429) rather than burning further budget."""
+
+    monkeypatch.setattr(tf.settings, "USE_REAL_FANOUT_WORKFLOW", True)
+
+    # Patch the gate helper to simulate "tenant has burned through the
+    # monthly limit." Test_make_client stubs the DB, so we cannot
+    # populate real TenantFeatures rows here — patching the helper is
+    # the right injection point (mirrors the pattern used elsewhere
+    # for _dispatch_fanout_workflow).
+    monkeypatch.setattr(tf, "_tenant_over_monthly_token_limit", lambda db, tid: True)
+
+    user = _user()
+    client = _make_client(user)
+    resp = client.post(
+        "/api/v1/tasks-fanout/run",
+        json={"prompt": "over budget"},
+    )
+    assert resp.status_code == 429, resp.text
+    assert "Monthly token limit" in resp.json()["detail"]
+
+
+def test_real_fanout_under_monthly_token_limit_dispatches(monkeypatch):
+    """Sanity inverse: under-limit tenant goes through normally."""
+
+    monkeypatch.setattr(tf.settings, "USE_REAL_FANOUT_WORKFLOW", True)
+    monkeypatch.setattr(tf, "_tenant_over_monthly_token_limit", lambda db, tid: False)
+
+    async def fake_dispatch(*, prompt, tenant_id, providers, merge, agent_id, session_id):
+        return {"task_id": f"fanout-{tenant_id}-ok", "run_id": "r"}
+
+    monkeypatch.setattr(tf, "_dispatch_fanout_workflow", fake_dispatch)
+
+    user = _user()
+    client = _make_client(user)
+    resp = client.post(
+        "/api/v1/tasks-fanout/run",
+        json={"prompt": "within budget"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_stub_path_skips_monthly_token_gate(monkeypatch):
+    """Stub path (flag off) does not spend tokens, so the gate must
+    NOT fire even when the helper would return True. Demos through
+    the rollback path stay frictionless."""
+
+    monkeypatch.setattr(tf.settings, "USE_REAL_FANOUT_WORKFLOW", False)
+    monkeypatch.setattr(
+        tf, "_tenant_over_monthly_token_limit", lambda db, tid: True
+    )
+
+    user = _user()
+    client = _make_client(user)
+    resp = client.post(
+        "/api/v1/tasks-fanout/run",
+        json={"prompt": "demo path"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+# ── #573 review IMPORTANT: agent_id warning surface ────────────────────
+
+
+def test_agent_id_in_body_emits_warning(monkeypatch):
+    """`agent_id` passed in the body is accepted (Pydantic) and stored
+    on the record, but the underlying worker does not yet honor per-
+    agent dispatch — the run resolves through the tenant default
+    agent. Surface a non-fatal warning so the CLI can tell the user."""
+
+    monkeypatch.setattr(tf.settings, "USE_REAL_FANOUT_WORKFLOW", True)
+    monkeypatch.setattr(tf, "_tenant_over_monthly_token_limit", lambda db, tid: False)
+
+    async def fake_dispatch(*, prompt, tenant_id, providers, merge, agent_id, session_id):
+        return {"task_id": f"fanout-{tenant_id}-wfwarn", "run_id": "r"}
+
+    monkeypatch.setattr(tf, "_dispatch_fanout_workflow", fake_dispatch)
+
+    user = _user()
+    client = _make_client(user)
+    resp = client.post(
+        "/api/v1/tasks-fanout/run",
+        json={"prompt": "x", "agent_id": str(uuid.uuid4())},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["warnings"], "agent_id passed without warning is the UX trap"
+    assert any("agent_id" in w for w in body["warnings"])
+
+
+def test_no_agent_id_no_warning(monkeypatch):
+    """Happy path stays warning-free."""
+
+    monkeypatch.setattr(tf.settings, "USE_REAL_FANOUT_WORKFLOW", True)
+    monkeypatch.setattr(tf, "_tenant_over_monthly_token_limit", lambda db, tid: False)
+
+    async def fake_dispatch(*, prompt, tenant_id, providers, merge, agent_id, session_id):
+        return {"task_id": f"fanout-{tenant_id}-nowarn", "run_id": "r"}
+
+    monkeypatch.setattr(tf, "_dispatch_fanout_workflow", fake_dispatch)
+
+    user = _user()
+    client = _make_client(user)
+    resp = client.post(
+        "/api/v1/tasks-fanout/run",
+        json={"prompt": "x"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["warnings"] == []
+
+
 # ── #188 SSE endpoint coverage (round-1 review M4) ────────────────────
 
 

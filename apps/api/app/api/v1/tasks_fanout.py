@@ -65,8 +65,14 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
+from datetime import datetime, timezone
+
+from sqlalchemy import func
+
 from app.api.deps import get_current_user, get_db
 from app.core.config import settings
+from app.models.agent_performance_snapshot import AgentPerformanceSnapshot
+from app.models.tenant_features import TenantFeatures
 from app.models.user import User
 from app.services.cost_estimator import estimate_fanout_cost
 
@@ -208,6 +214,11 @@ class RunFanoutResponse(BaseModel):
     status: str
     children: List[RunChildDispatch] = Field(default_factory=list)
     estimate: Optional[RunEstimate] = None
+    # Round-3 follow-up (#573 review): non-fatal advisories about the
+    # request — e.g. `agent_id` was passed but the dispatch path can't
+    # yet honor per-agent binding. Empty list on the happy path; the
+    # CLI surfaces non-empty entries with `[alpha] warning: ...`.
+    warnings: List[str] = Field(default_factory=list)
 
 
 class TaskStatusResponse(BaseModel):
@@ -445,6 +456,64 @@ def _recount_tenant_tasks_from_records(tenant_id: str) -> int:
     return sum(1 for rec in _TASKS.values() if rec["tenant_id"] == tenant_id)
 
 
+def _tenant_over_monthly_token_limit(
+    db: Session, tenant_id: uuid.UUID
+) -> bool:
+    """Round-3 follow-up (#573 review BLOCKER): cost gate.
+
+    `alpha run` with USE_REAL_FANOUT_WORKFLOW=true spends real LLM
+    tokens. A tenant that has already burned through their monthly
+    budget should not be able to keep dispatching — otherwise the
+    cap is just a moving target paid for by Anthropic.
+
+    Mirrors the canonical lookup in `insights_cost._quota_burn`:
+      - tenant_features.monthly_token_limit NULL / 0 -> unbounded
+        (opt-in policy; same as the rest of the platform).
+      - month-to-date tokens are summed from
+        AgentPerformanceSnapshot.total_tokens for the current
+        calendar month.
+      - over limit -> True (caller returns 429).
+
+    Returns False on every error path (DB hiccup, missing features
+    row, etc.) so a transient infra issue never blocks dispatch —
+    cost overruns are recoverable, dispatch failures are not.
+    """
+    try:
+        features = (
+            db.query(TenantFeatures)
+            .filter(TenantFeatures.tenant_id == tenant_id)
+            .first()
+        )
+        # Guard against the unit-test DB stub returning a MagicMock for
+        # `.first()` — must be a real TenantFeatures row to consult the
+        # limit. Same belt-and-suspenders shape used in insights_cost.
+        if not isinstance(features, TenantFeatures):
+            return False
+        limit = features.monthly_token_limit
+        if not limit or not isinstance(limit, int) or limit <= 0:
+            return False
+
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+        mtd_tokens = (
+            db.query(
+                func.coalesce(func.sum(AgentPerformanceSnapshot.total_tokens), 0)
+            )
+            .filter(AgentPerformanceSnapshot.tenant_id == tenant_id)
+            .filter(AgentPerformanceSnapshot.window_start >= month_start)
+            .scalar()
+        )
+        if not isinstance(mtd_tokens, (int, float)):
+            return False
+
+        return int(mtd_tokens) >= int(limit)
+    except Exception:
+        # Fail-open on DB / model errors — see docstring.
+        return False
+
+
 # ── Routes ────────────────────────────────────────────────────────────
 
 
@@ -523,6 +592,37 @@ async def run_fanout(
                 f"(max {MAX_TASKS_PER_TENANT}). Wait for some to complete or "
                 f"call POST /{{task_id}}/cancel."
             ),
+        )
+
+    # Round-3 follow-up (#573 review BLOCKER): monthly token / cost gate.
+    # The in-flight cap above bounds Temporal workflow inventory; it does
+    # NOT bound LLM spend. With USE_REAL_FANOUT_WORKFLOW=True every run
+    # spends real tokens against the provider account, so a tenant past
+    # their `tenant_features.monthly_token_limit` should be told to wait
+    # for the next billing window — not silently keep burning budget.
+    #
+    # NULL / 0 limit = unbounded (opt-in policy, same as
+    # insights_cost._quota_burn). Stub path (flag off) is exempt — it
+    # doesn't spend tokens, so the gate would just frustrate demos.
+    if settings.USE_REAL_FANOUT_WORKFLOW and _tenant_over_monthly_token_limit(
+        db, current_user.tenant_id
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail="Monthly token limit reached",
+        )
+
+    # Round-3 follow-up (#573 review IMPORTANT): `agent_id` is accepted
+    # by the request schema and stored on the record, but the underlying
+    # FanoutChatCliWorkflow does not yet honor per-agent binding —
+    # everything resolves through the tenant's default agent. Surface
+    # this as a non-fatal warning so the CLI can flag the no-op instead
+    # of silently dropping the user's intent.
+    response_warnings: list[str] = []
+    if body.agent_id:
+        response_warnings.append(
+            "agent_id ignored — worker not yet wired for per-agent dispatch "
+            "(Phase 3 follow-up). Tenant default agent will handle the run."
         )
 
     # #177 Phase 1 ship: when `USE_REAL_FANOUT_WORKFLOW=true` AND the
@@ -648,6 +748,7 @@ async def run_fanout(
             status="queued",
             children=[],
             estimate=estimate,
+            warnings=response_warnings,
         )
 
     parent_id = _mint_task_id()
@@ -722,6 +823,7 @@ async def run_fanout(
         status="queued",
         children=children,
         estimate=estimate,
+        warnings=response_warnings,
     )
 
 
