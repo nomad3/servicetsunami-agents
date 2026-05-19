@@ -119,6 +119,65 @@ def parse_findings_from_text(text: str) -> List[Dict]:
     return findings
 
 
+def _normalize_path(p: Optional[str]) -> Optional[str]:
+    """Normalize a file path so paths reported inconsistently across
+    CLIs still cluster together.
+
+    Different CLIs emit paths in different shapes:
+      * absolute      "/repo/apps/api/main.py"
+      * repo-rooted   "apps/api/main.py"
+      * basename      "main.py"
+
+    We lower-case and collapse runs of "/" so the comparison helper
+    `_paths_match` can ask suffix-style: a == b OR a.endswith("/"+b)
+    OR b.endswith("/"+a). This is intentionally permissive — three
+    CLIs flagging the same line of the same file should always
+    cluster, even if one used a basename. Different files won't
+    collide because the suffix check requires a "/" boundary.
+    """
+    if p is None:
+        return None
+    s = str(p).strip().lower()
+    if not s:
+        return None
+    # Collapse repeated slashes; strip a leading "./".
+    while "//" in s:
+        s = s.replace("//", "/")
+    if s.startswith("./"):
+        s = s[2:]
+    return s
+
+
+def _prefer_longer_path(a: Optional[str], b: Optional[str]) -> Optional[str]:
+    """Pick the more-qualified of two normalized-equal paths.
+
+    When two CLIs report the same file at different qualification
+    levels (e.g. "main.py" vs "apps/api/main.py"), the longer one is
+    almost always the more useful one for the operator. Returns the
+    raw (un-normalized) value so the cluster shows what a CLI actually
+    emitted.
+    """
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if len(str(a)) >= len(str(b)) else b
+
+
+def _paths_match(a: Optional[str], b: Optional[str]) -> bool:
+    """Two normalized paths cluster if they are equal OR if one is a
+    path-suffix of the other (on a "/" boundary). Both-None counts as
+    a match — the no-file bucket clusters with itself."""
+    na, nb = _normalize_path(a), _normalize_path(b)
+    if na is None and nb is None:
+        return True
+    if na is None or nb is None:
+        return False
+    if na == nb:
+        return True
+    return na.endswith("/" + nb) or nb.endswith("/" + na)
+
+
 def _tokenize(s: str) -> set:
     """Lower-case, drop stopwords, keep alphanumeric tokens."""
     if not s:
@@ -216,7 +275,7 @@ def aggregate_findings(per_cli: Dict[str, List[Dict]]) -> List[Dict]:
             tokens = _tokenize(f.get("description", ""))
             attached = False
             for cluster in clusters:
-                if cluster.get("file") != f.get("file"):
+                if not _paths_match(cluster.get("file"), f.get("file")):
                     continue
                 if not _line_ranges_overlap(
                     cluster.get("line_range"), f.get("line_range")
@@ -232,6 +291,13 @@ def aggregate_findings(per_cli: Dict[str, List[Dict]]) -> List[Dict]:
                 cluster["_tokens"] |= tokens
                 cluster["line_range"] = _merge_range(
                     cluster.get("line_range"), f.get("line_range"),
+                )
+                # Prefer the more-qualified (longer) path so the
+                # cluster's reported `file` is the most informative
+                # variant any CLI supplied — "apps/api/main.py" wins
+                # over bare "main.py".
+                cluster["file"] = _prefer_longer_path(
+                    cluster.get("file"), f.get("file"),
                 )
                 attached = True
                 break

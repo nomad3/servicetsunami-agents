@@ -28,6 +28,8 @@ import pytest
 from app.services.review_service import (
     _jaccard,
     _line_ranges_overlap,
+    _normalize_path,
+    _paths_match,
     _strongest_severity,
     _tokenize,
     aggregate_findings,
@@ -71,6 +73,53 @@ def test_line_ranges_overlap_slack_window():
     # line 11 (no range) clusters with a finding at lines 10-12.
     assert _line_ranges_overlap("10-20", "21-30") is True
     assert _line_ranges_overlap("10-20", "26-30") is False
+
+
+def test_normalize_path_lowercases_and_strips_dot_slash():
+    assert _normalize_path("Apps/API/Main.py") == "apps/api/main.py"
+    assert _normalize_path("./apps/api/main.py") == "apps/api/main.py"
+    assert _normalize_path("//apps//api//main.py") == "/apps/api/main.py"
+    assert _normalize_path(None) is None
+    assert _normalize_path("   ") is None
+
+
+def test_paths_match_basename_vs_repo_rooted_vs_absolute():
+    # Basename matches repo-rooted path on a "/" boundary.
+    assert _paths_match("main.py", "apps/api/main.py") is True
+    # Repo-rooted matches absolute.
+    assert _paths_match("apps/api/main.py", "/repo/apps/api/main.py") is True
+    # All three together — transitively the basename matches absolute.
+    assert _paths_match("main.py", "/repo/apps/api/main.py") is True
+
+
+def test_paths_match_does_not_collide_across_dirs():
+    # "main.py" must NOT match "apps/api/other_main.py" — the "/"
+    # boundary in the suffix check prevents partial-name overlap.
+    assert _paths_match("main.py", "apps/api/other_main.py") is False
+    assert _paths_match("a/main.py", "b/main.py") is False
+
+
+def test_paths_match_handles_none_both_and_one_side():
+    assert _paths_match(None, None) is True
+    assert _paths_match(None, "main.py") is False
+    assert _paths_match("main.py", None) is False
+
+
+def test_aggregate_findings_clusters_basename_with_repo_rooted_file():
+    """B2: three CLIs flag the same issue but emit paths at different
+    qualification levels — they should still cluster, not ship as
+    three singletons (which the original raw-equality check did)."""
+    desc = "missing tenant id check user input"
+    per_cli = {
+        "claude": [_f("BLOCKER", "main.py", "10", desc)],
+        "codex":  [_f("BLOCKER", "apps/api/main.py", "10", desc)],
+        "gemini": [_f("BLOCKER", "/repo/apps/api/main.py", "10", desc)],
+    }
+    agreed = aggregate_findings(per_cli)
+    assert len(agreed) == 1
+    assert set(agreed[0]["cli_set"]) == {"claude", "codex", "gemini"}
+    # The cluster reports the most-qualified path any CLI supplied.
+    assert agreed[0]["file"].endswith("apps/api/main.py")
 
 
 def test_line_ranges_overlap_none_is_permissive():
