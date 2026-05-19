@@ -294,6 +294,63 @@ def appraise_and_record_tool_failure(
     return new_vector
 
 
+def record_session_tool_failure(
+    db: Session,
+    *,
+    session_id: Optional[uuid.UUID],
+    tenant_id: uuid.UUID,
+    agent_id: Optional[uuid.UUID] = None,
+    severity: float = 0.5,
+) -> Optional[PADVector]:
+    """Phase 2 wire-in for tool_failure events from `cli_session_manager`.
+
+    Finds the most recent conversation_episode for this session and applies
+    `appraise_and_record_tool_failure` to it. Graceful no-op when:
+      - session_id is None (defensive — call site passes whatever is in
+        db_session_memory),
+      - no episode exists yet for this session (first failure of a fresh
+        session — PostChatMemoryWorkflow hasn't created an episode yet),
+      - the most-recent episode is foreign-tenant (the IO helper's
+        existing safety pattern).
+
+    Wraps the existing pure-function appraisal so cli_session_manager
+    callers don't have to know about episode_id resolution. This sits
+    between the chat hot path and the emotion engine; it MUST NOT raise
+    — the caller is in an exception handler already.
+    """
+    if session_id is None:
+        return None
+    try:
+        episode = (
+            db.query(ConversationEpisode)
+            .filter(
+                ConversationEpisode.session_id == session_id,
+                ConversationEpisode.tenant_id == tenant_id,
+            )
+            .order_by(ConversationEpisode.created_at.desc())
+            .first()
+        )
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "emotion_engine_io.record_session_tool_failure: episode "
+            "lookup failed. session_id=%s tenant_id=%s err=%s",
+            session_id, tenant_id, exc,
+        )
+        return None
+    if episode is None:
+        # First failure of a fresh session — no episode to attach to yet.
+        # Phase 3 can buffer these in Redis for PostChatMemoryWorkflow to
+        # apply at episode creation; Phase 2 accepts the miss.
+        return None
+    return appraise_and_record_tool_failure(
+        db,
+        episode_id=episode.id,
+        tenant_id=tenant_id,
+        agent_id=agent_id or uuid.uuid4(),
+        severity=severity,
+    )
+
+
 def appraise_and_record_tool_outcome(
     db: Session,
     *,

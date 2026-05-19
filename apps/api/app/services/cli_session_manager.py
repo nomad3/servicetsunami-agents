@@ -1355,6 +1355,7 @@ def _run_agent_session_legacy(
             "ChatCliWorkflow result: success=%s error=%s response_len=%s",
             success, error, len(response_text) if response_text else 0,
         )
+        _record_tool_failure_affect(db, db_session_memory, tenant_id, severity=0.5)
         return None, metadata
     except Exception as exc:
         # Roll back so the caller (chat.py route_and_execute) can keep
@@ -1368,4 +1369,42 @@ def _run_agent_session_legacy(
         safe_rollback(db)
         logger.exception("ChatCliWorkflow dispatch failed")
         metadata["error"] = str(exc)
+        _record_tool_failure_affect(db, db_session_memory, tenant_id, severity=1.0)
         return None, metadata
+
+
+def _record_tool_failure_affect(
+    db,
+    db_session_memory,
+    tenant_id,
+    *,
+    severity: float,
+) -> None:
+    """Emotion-engine wire-in for cli_session_manager failure paths.
+
+    Best-effort: NEVER raises into the caller. Failures here log a debug
+    line and return; the emotion layer must not break chat. Phase 2 of
+    the emotions engine (see docs/plans/2026-05-19-emotions-engine-prototype-design.md).
+
+    severity convention:
+      - 0.5 = graceful failure (workflow returned empty/error). Moderate.
+      - 1.0 = hard exception (workflow raised). Maximum.
+    """
+    try:
+        from app.services.emotion_engine_io import record_session_tool_failure
+
+        session_id_str = (db_session_memory or {}).get("chat_session_id") or ""
+        if not session_id_str:
+            return
+        session_id = uuid.UUID(session_id_str)
+        record_session_tool_failure(
+            db,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            severity=severity,
+        )
+    except Exception:  # noqa: BLE001 — emotion layer never crashes chat
+        logger.debug(
+            "emotion_engine tool_failure wire-in raised; suppressed.",
+            exc_info=True,
+        )
