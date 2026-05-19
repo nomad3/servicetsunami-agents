@@ -430,6 +430,72 @@ def test_record_cli_findings_max_rounds_caps(monkeypatch):
     assert len(out.agreed_findings) == 1
 
 
+def test_blackboard_critique_is_idempotent_on_retry(monkeypatch):
+    """I4: when `record_review_finding` retries (Temporal RetryPolicy
+    fires after a partial-success), we must NOT double-append the
+    CRITIQUE blackboard entry for the same (cli, round). Subsequent
+    attempts find an existing entry and skip the append.
+    """
+    from app.services import review_service
+
+    review = _FakeReview(
+        clis=[{"name": "claude", "agent_slug": "claude"},
+              {"name": "codex", "agent_slug": "codex"}],
+        rounds_completed=0,
+        blackboard_id=uuid.uuid4(),
+    )
+    db = _stub_db_for_review(review)
+    monkeypatch.setattr(review_service, "get_review", lambda *_a, **_k: review)
+
+    add_calls: List[Any] = []
+    existing_entries: List[Any] = []
+
+    class _Entry:
+        def __init__(self, slug, round_):
+            self.author_agent_slug = slug
+            self.evidence = [{"findings_count": 0}, {"review_round": round_}]
+
+    def _fake_get_active(db, tenant_id, board_id, entry_type=None):
+        return list(existing_entries)
+
+    def _fake_add(db, tenant_id, board_id, entry_in):
+        add_calls.append(entry_in.author_agent_slug)
+        # Simulate the DB-side insert by populating the active set.
+        existing_entries.append(_Entry(entry_in.author_agent_slug,
+                                       review.rounds_completed))
+        return None
+
+    monkeypatch.setattr(
+        review_service.blackboard_service,
+        "get_active_entries",
+        _fake_get_active,
+    )
+    monkeypatch.setattr(
+        review_service.blackboard_service,
+        "add_entry",
+        _fake_add,
+    )
+
+    # First call — fresh CRITIQUE write.
+    review_service.record_cli_findings(
+        db, review.tenant_id, review.id,
+        cli="claude",
+        raw_text="- BLOCKER x.py:1 race",
+    )
+    # Retry: same cli, same round — must NOT add a second blackboard
+    # entry. (Reset status to running so the service path executes.)
+    review.status = "running"
+    review_service.record_cli_findings(
+        db, review.tenant_id, review.id,
+        cli="claude",
+        raw_text="- BLOCKER x.py:1 race",
+    )
+    assert add_calls == ["claude"], (
+        "blackboard add_entry must run exactly once per (cli, round) "
+        f"under retry — got {add_calls}"
+    )
+
+
 def test_late_record_after_awaiting_response_does_not_double_increment(monkeypatch):
     """I2: a record arriving after the round already closed (status
     flipped to awaiting_response) must NOT re-fire _close_round and

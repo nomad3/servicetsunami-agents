@@ -438,6 +438,22 @@ def get_review(
     )
 
 
+def _entry_round_matches(entry, current_round: int) -> bool:
+    """Return True iff a blackboard CRITIQUE entry's `evidence` array
+    declares the same review_round as `current_round`. Used by I4 to
+    de-duplicate retried activity invocations.
+    """
+    ev = getattr(entry, "evidence", None) or []
+    for item in ev:
+        if isinstance(item, dict) and "review_round" in item:
+            try:
+                if int(item["review_round"]) == int(current_round):
+                    return True
+            except (TypeError, ValueError):
+                return False
+    return False
+
+
 def record_cli_findings(
     db: Session,
     tenant_id: uuid.UUID,
@@ -465,21 +481,47 @@ def record_cli_findings(
 
     # Append to blackboard (audit trail). Best-effort — if the
     # blackboard was pruned out of band we still record into the cache.
+    #
+    # I4: the Temporal `record_review_finding` activity wraps this
+    # call in a RetryPolicy(maximum_attempts=3). A partial-success
+    # retry (e.g. DB commit landed but the activity ack never made it
+    # back to the workflow worker) would otherwise re-fire and append
+    # a duplicate CRITIQUE entry for the same (cli, round). Check for
+    # an existing entry first and skip the append in that case — the
+    # findings-cache update below is already idempotent (it replaces
+    # the per-CLI slot rather than appending) so the read path stays
+    # correct either way.
     if review.blackboard_id is not None:
         try:
-            blackboard_service.add_entry(
+            existing = blackboard_service.get_active_entries(
                 db,
                 tenant_id,
                 review.blackboard_id,
-                BlackboardEntryCreate(
-                    entry_type=EntryType.CRITIQUE,
-                    content=raw_text[:8000] if raw_text else "(no output)",
-                    evidence=[{"findings_count": len(parsed)}],
-                    confidence=0.8,
-                    author_agent_slug=cli,
-                    author_role=AuthorRole.CRITIC,
-                ),
+                entry_type=EntryType.CRITIQUE.value,
             )
+            current_round = review.rounds_completed or 0
+            duplicate = any(
+                (e.author_agent_slug == cli)
+                and _entry_round_matches(e, current_round)
+                for e in existing
+            )
+            if not duplicate:
+                blackboard_service.add_entry(
+                    db,
+                    tenant_id,
+                    review.blackboard_id,
+                    BlackboardEntryCreate(
+                        entry_type=EntryType.CRITIQUE,
+                        content=raw_text[:8000] if raw_text else "(no output)",
+                        evidence=[
+                            {"findings_count": len(parsed)},
+                            {"review_round": current_round},
+                        ],
+                        confidence=0.8,
+                        author_agent_slug=cli,
+                        author_role=AuthorRole.CRITIC,
+                    ),
+                )
         except Exception:
             # Don't let blackboard write failures lose the finding
             # cache update — the cached snapshot in review.findings is
