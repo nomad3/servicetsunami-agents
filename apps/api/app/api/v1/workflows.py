@@ -654,19 +654,21 @@ async def get_workflow(
         client = await _get_temporal_client()
         handle = client.get_workflow_handle(workflow_id=workflow_id)
         description = await handle.describe()
-        info = description.workflow_execution_info
+        # temporalio>=1.10 flattened the WorkflowExecutionDescription —
+        # fields live directly on `description`, not on a
+        # `.workflow_execution_info` wrapper.
 
         return {
-            "workflow_id": info.id,
-            "run_id": info.run_id,
-            "type": info.workflow_type,
-            "status": info.status.name if info.status else None,
-            "start_time": info.start_time.isoformat() if info.start_time else None,
-            "close_time": info.close_time.isoformat() if info.close_time else None,
-            "execution_time": info.execution_time.isoformat() if info.execution_time else None,
-            "history_length": info.history_length,
+            "workflow_id": description.id,
+            "run_id": description.run_id,
+            "type": description.workflow_type,
+            "status": description.status.name if description.status else None,
+            "start_time": description.start_time.isoformat() if description.start_time else None,
+            "close_time": description.close_time.isoformat() if description.close_time else None,
+            "execution_time": description.execution_time.isoformat() if description.execution_time else None,
+            "history_length": description.history_length,
             "memo": dict(description.memo) if description.memo else {},
-            "task_queue": info.task_queue,
+            "task_queue": description.task_queue,
         }
     except (TemporalNotConfiguredError, RuntimeError) as exc:
         raise HTTPException(status_code=503, detail=f"Temporal unavailable: {exc}")

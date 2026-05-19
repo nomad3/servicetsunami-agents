@@ -62,15 +62,19 @@ async def describe_workflow(*, workflow_id: str, run_id: str | None = None) -> D
     handle = client.get_workflow_handle(workflow_id=workflow_id, run_id=run_id)
     description = await handle.describe()
 
-    info = description.workflow_execution_info
+    # temporalio>=1.10 dropped the `.workflow_execution_info` wrapper —
+    # the fields live directly on WorkflowExecutionDescription now.
+    # WorkflowType also flattens to a bare string `description.workflow_type`
+    # instead of `.type.name`. Surfaced when alpha run --fanout started
+    # actually dispatching real Temporal workflows in PR #573.
     return {
-        "workflow_id": info.execution.workflow_id,
-        "run_id": info.execution.run_id,
-        "type": info.type.name,
-        "status": info.status.name if info.status else None,
-        "start_time": info.start_time.isoformat() if info.start_time else None,
-        "close_time": info.close_time.isoformat() if info.close_time else None,
-        "history_length": info.history_length,
+        "workflow_id": description.id,
+        "run_id": description.run_id,
+        "type": description.workflow_type,
+        "status": description.status.name if description.status else None,
+        "start_time": description.start_time.isoformat() if description.start_time else None,
+        "close_time": description.close_time.isoformat() if description.close_time else None,
+        "history_length": description.history_length,
         "memo": description.memo or {},
     }
 
