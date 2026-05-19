@@ -2,6 +2,7 @@
 
 Date: 2026-05-19
 Owners: Claude Code (driving) + Luna (design co-author via `alpha chat send`)
+Phase 1 PR A driver: **Claude Code (Opus 4.7)** per role split 2026-05-19. Luna: reviewer on each chain PR (A, B, C). See `docs/plans/2026-05-19-session-handoff.md` § "Role split".
 Status: Design — open for review (revised post dual-review 2026-05-19)
 
 ## Why we're doing this

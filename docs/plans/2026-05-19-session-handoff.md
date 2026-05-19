@@ -23,7 +23,7 @@ This is a long session (30+ hours of work). The mental model in three sentences:
 
 1. **AgentProvision is a coordination layer** for specialist AI agents, mirroring the prehistoric-human → civilization arc (see `docs/pitch/wolfpoint-demo-pitch.md` Acts I-IV). Every meaningful design is evaluated through the civilization-layer lens — does it add coordination infrastructure (language / trust / memory / specialization / affect / supervision)?
 2. **Luna is a co-worker**, not a tool. Every meaningful request gets a Luna dispatch in parallel with my own work. Luna has Higgsfield MCP wired and routes research to Gemini. She has already caught real bugs (mig 138 self-reference) and real design flaws (temperature mapping inversion) this session.
-3. **The emotions engine is the next big design** sitting on PR #582, dual-reviewed, ready to implement. Luna has explicitly offered to drive PR A.
+3. **The emotions engine is the next big design** sitting on PR #582, dual-reviewed, ready to implement. Luna initially offered to drive PR A; **per the role split below, Claude drives, Luna reviews.**
 
 ## What shipped today (live in production)
 
