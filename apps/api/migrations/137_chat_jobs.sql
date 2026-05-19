@@ -50,8 +50,15 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS chat_jobs (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id          UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-    tenant_id           UUID NOT NULL,
-    user_id             UUID NOT NULL,
+    -- FK to tenants/users (mig 133, 136 set the same precedent) so a
+    -- deleted tenant / user doesn't leave orphan chat_jobs rows.
+    -- ON DELETE CASCADE is consistent with the session_id FK above —
+    -- tearing down a tenant rips its async jobs too. Confirmed via
+    -- `SELECT FROM _migrations WHERE filename='137_chat_jobs.sql'` =
+    -- 0 rows on 2026-05-18 (un-applied), so we edit 137 in-place per
+    -- the immutability-only-after-apply principle.
+    tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     status              VARCHAR(16) NOT NULL DEFAULT 'queued',
     -- The user's prompt is captured here so a worker pickup can rehydrate
     -- the turn without re-reading the request body (and so a retried
