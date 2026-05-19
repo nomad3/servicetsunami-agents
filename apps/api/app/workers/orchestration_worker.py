@@ -19,6 +19,7 @@ from app.workflows.idle_episode_scan import IdleEpisodeScanWorkflow
 from app.workflows.teams_monitor import TeamsMonitorWorkflow
 from app.workflows.backfill_embeddings import BackfillEmbeddingsWorkflow
 from app.workflows.coalition_workflow import CoalitionWorkflow
+from app.workflows.review_workflow import ReviewWorkflow
 from app.workflows.training_ingestion import (
     TrainingIngestionWorkflow,
     extract_and_persist_batch as training_extract_and_persist_batch,
@@ -156,6 +157,10 @@ from app.workflows.activities.coalition_activities import (
     record_collaboration_step,
     finalize_collaboration,
 )
+from app.workflows.activities.review_activities import (
+    load_review_state,
+    record_review_finding,
+)
 from app.workflows.activities.post_chat_memory_activities import (
     detect_commitment,
     update_world_state,
@@ -227,6 +232,7 @@ async def run_orchestration_worker():
             IdleEpisodeScanWorkflow,
             BackfillEmbeddingsWorkflow,
             CoalitionWorkflow,
+            ReviewWorkflow,
             AgentPerformanceRollupWorkflow,
             TeamsMonitorWorkflow,
             TrainingIngestionWorkflow,
@@ -355,6 +361,9 @@ async def run_orchestration_worker():
             prepare_collaboration_step,
             record_collaboration_step,
             finalize_collaboration,
+            # Review (cross-CLI consensus) activities
+            load_review_state,
+            record_review_finding,
             # Agent lifecycle: performance snapshots
             compute_agent_performance_snapshot,
         ],

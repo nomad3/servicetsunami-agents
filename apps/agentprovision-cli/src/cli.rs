@@ -4,8 +4,8 @@ use clap::{Parser, Subcommand};
 
 use crate::commands::{
     agent, cancel, chat, coalition, completions, goal, integration, login, logout, memory, policy,
-    quickstart, recall, recipes, remember, run, session, sessions, skill, status, tasks, upgrade,
-    usage, watch, workflow, workspace,
+    quickstart, recall, recipes, remember, review, run, session, sessions, skill, status, tasks,
+    upgrade, usage, watch, workflow, workspace,
 };
 use crate::context::Context;
 
@@ -145,6 +145,15 @@ pub enum Command {
     #[command(subcommand)]
     Coalition(coalition::CoalitionCommand),
 
+    /// Cross-CLI consensus code review. Fan the same review prompt
+    /// out to N active CLIs in parallel, aggregate findings via the
+    /// existing Blackboard + Coalition primitives, and return
+    /// `agreed_findings` (≥ 2 CLIs flagged) to the operator. Loop
+    /// until consensus or `--max-rounds` is exhausted. See
+    /// docs/plans/2026-05-18-alpha-review-consensus.md.
+    #[command(subcommand)]
+    Review(review::ReviewCommand),
+
     /// Install + run pre-built dynamic workflows (daily briefing,
     /// competitor watch, code review, cardiac report, deal pipeline,
     /// ...). The "Helm charts for AI workflows" surface of the
@@ -225,6 +234,7 @@ pub async fn dispatch(args: Cli, ctx: Context) -> anyhow::Result<()> {
         Command::Remember(a) => remember::run(a, ctx).await,
         Command::Policy(cmd) => policy::run(policy::PolicyArgs { command: cmd }, ctx).await,
         Command::Coalition(cmd) => coalition::dispatch(cmd, ctx).await,
+        Command::Review(cmd) => review::dispatch(cmd, ctx).await,
         Command::Recipes(cmd) => recipes::run(recipes::RecipesArgs { command: cmd }, ctx).await,
         Command::Goal(a) => goal::run(a, ctx).await,
         Command::Tasks(a) => tasks::run(a, ctx).await,

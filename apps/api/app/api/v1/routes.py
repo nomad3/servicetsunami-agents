@@ -68,6 +68,7 @@ from app.api.v1 import (
     blackboards,
     collaborations,
     coalitions,
+    reviews,
     learning,
     learning_dashboard,
     branding_domain,
@@ -222,6 +223,7 @@ router.include_router(plans.router, prefix="/plans", tags=["plans"])
 router.include_router(blackboards.router, prefix="/blackboards", tags=["blackboards"])
 router.include_router(collaborations.router, prefix="/collaborations", tags=["collaborations"])
 router.include_router(coalitions.router, prefix="/coalitions", tags=["coalitions"])
+router.include_router(reviews.router, prefix="/reviews", tags=["reviews"])
 router.include_router(learning.router, prefix="/learning", tags=["learning"])
 router.include_router(learning_dashboard.router, prefix="/learning/dashboard", tags=["learning-dashboard"])
 router.include_router(branding_domain.router, tags=["domain-branding"])

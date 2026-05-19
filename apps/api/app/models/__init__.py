@@ -62,6 +62,7 @@ from .plan import Plan, PlanStep, PlanAssumption, PlanEvent
 from .blackboard import Blackboard, BlackboardEntry
 from .collaboration import CollaborationSession
 from .coalition import CoalitionTemplate, CoalitionOutcome
+from .review_coalition import ReviewCoalition
 from .learning_experiment import PolicyCandidate, LearningExperiment
 from .dynamic_workflow import DynamicWorkflow, WorkflowRun, WorkflowStepLog
 from .simulation import SimulationPersona, SimulationScenario, SimulationResult, SkillGap

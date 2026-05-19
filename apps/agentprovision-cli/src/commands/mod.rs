@@ -13,6 +13,7 @@ pub mod quickstart;
 pub mod recall;
 pub mod recipes;
 pub mod remember;
+pub mod review;
 pub mod run;
 pub mod session;
 pub mod sessions;
