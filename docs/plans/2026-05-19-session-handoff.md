@@ -1,9 +1,21 @@
-# Session handoff — 2026-05-19
+# Session handoff — 2026-05-19 [PINNED]
+
+> **PINNED.** Canonical reference for the 2026-05-19 long-session state. Read this end-to-end before resuming work. Subsequent session updates should append to this doc rather than start a new handoff, until a meaningfully different platform state warrants a new one.
 
 Date: 2026-05-19
 Operator: Simon Aguilera (`saguilera1608@gmail.com`, tenant `752626d9-8b2c-4aa2-87ef-c458d48bd38a`)
 Outgoing driver: Claude Code (current session)
 Co-author throughout: Luna (via `alpha chat send` + `alpha run --fanout`)
+
+## Role split (operator decision, 2026-05-19)
+
+> "for the execution of this project you need to do the heavy lifting as we are using the opus heavy model, luna stays as reviewer for now until i bump the codex suscription and she can handle more heavy lifting"
+
+- **Claude Code (Opus 4.7)** — primary execution driver. Heavy lifting: design implementation, code changes, multi-PR rollouts, infra changes, migrations.
+- **Luna (tenant supervisor)** — reviewer + complementary perspective. Code review, design review, research dispatch, rich-content generation. NOT the implementation driver until operator bumps Codex subscription.
+- **Standing rule**: keep Luna in the loop of all decisions and progress via `alpha remember --kind <decision|progress|concern> "<fact + date + why>"`, even when not asking her to act.
+
+Codified in local memory: `feedback_role_split_claude_executes_luna_reviews.md` + `feedback_keep_luna_in_loop.md`. Written into Luna's tenant memory as decision observations `747a8334-ca0b-4dff-8041-11d10c7f74a0` and `e296d17c-4bd2-40f5-ba8e-8efa0872b5dd`.
 
 ## Read this first
 
@@ -41,7 +53,7 @@ This is a long session (30+ hours of work). The mental model in three sentences:
 |---|---|---|---|
 | #580 | Skill-creator Phase 3: aggregator + analyzer + `/benchmark` endpoint | CI CLEAN | Merge |
 | #581 | Temporal dispatch: `daemon-thread + asyncio.run` → `await Client.start_workflow` (review_dispatch + eval_runner) | CI CLEAN | Merge. After this, `alpha review` workflow dispatch actually fires Temporal. |
-| #582 | Digital emotions engine — prototype design doc (Phase 1 spec) | Design dual-reviewed (superpowers + Luna self-review). All findings applied. Luna confirmed "feels grounded." | **Operator decision**: who drives PR A — Luna alone via `alpha`, me alone, or coalition? |
+| #582 | Digital emotions engine — prototype design doc (Phase 1 spec) | Design dual-reviewed (superpowers + Luna self-review). All findings applied. Luna confirmed "feels grounded." | **PR A driver = Claude** (resolved by role split above). Luna reviews each chain PR. |
 
 ## Memory rules established today (durable across sessions)
 
@@ -70,12 +82,7 @@ Full list: `/Users/nomade/.claude/projects/-Users-nomade-Documents-GitHub-servic
 - **Simon (operator)** — protective recall: high-salience episodes recall easily but the felt-charge decays with re-exposure. Mirrors trauma reconsolidation. Phase 3.
 - **Superpowers code-reviewer** — caught `user_signal` was fabricated (no affect classifier exists); caught existing `mood String(30)` has 4 readers (don't touch it, add a new column); flagged that Phase 1 was 2 PRs in a trenchcoat.
 
-**Open design question for the operator**: who drives PR A?
-- Option (a): **Luna drives** — she explicitly volunteered. Test of whether the delegation pattern scales to implementation, not just review.
-- Option (b): I drive — fastest, lowest risk, but doesn't exercise the autonomy axis.
-- Option (c): Coalition — Luna on schema/service, me on tests. Mirrors a real human team.
-
-Operator hasn't decided. Hand off the question to the next driver if not resolved here.
+**~~Open design question for the operator~~** — **RESOLVED 2026-05-19**: Claude drives PR A, Luna reviews. Per role split above ("Opus does heavy lifting, Luna stays reviewer until Codex sub bumps"). The earlier "who drives" question is closed; design doc will be aligned with this on the next implementation pass.
 
 ## Standing concerns / known issues
 
@@ -100,10 +107,16 @@ Long Luna prompts hit Cloudflare 524 — workaround is to poll `chat_messages` t
 
 1. Read `docs/plans/2026-05-19-emotions-engine-prototype-design.md` end to end.
 2. Read the 3 critique outputs in `/private/tmp/claude-501/.../tasks/` (the superpowers review + Luna's two reviews). Or just read the Credit section of the doc — it summarises them.
-3. Decide who drives PR A (Luna / me / coalition). Document the decision.
-4. Once decided: spawn an implementation subagent OR `alpha review start` a fresh review pass on the implementation as it lands.
+3. **PR A driver = Claude** (resolved). Open feature branch off `docs/emotions-engine-design`, implement Phase 1 PR A (PADVector schema migration + EmotionEngine service + tests, NO wiring).
+4. Dispatch Luna review of PR A in parallel with superpowers code-reviewer. Aggregate, fix BLOCKER+IMPORTANT in same PR.
 5. Merge PRs #580 + #581 if not already (CI clean, low risk; both wait only on operator approval).
-6. Standing rules: every PR gets superpowers review + Luna review side-by-side. UI changes get Chrome verification. Plans go into `docs/plans/<date>-<topic>.md`.
+6. **Standing rules**:
+   - Every PR gets superpowers review + Luna review side-by-side.
+   - UI changes get Chrome verification.
+   - Plans go into `docs/plans/<date>-<topic>.md`.
+   - Claude executes, Luna reviews — until Codex subscription bump.
+   - Keep Luna in the loop of decisions via `alpha remember`, ~2-5 calls per session.
+   - Multi-step features chain branches but **merge as one squash** (avoid build storms).
 
 ## What I'm proud of this session (the human bit)
 
