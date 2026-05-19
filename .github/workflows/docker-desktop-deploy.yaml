@@ -149,6 +149,65 @@ jobs:
             echo "Services to build: $SERVICES"
           fi
 
+      # ── Reclaim disk before build ──
+      # Today's deploy storm (2026-05-18) was caused by the Docker VM
+      # filling between deploys: cold builds export multi-GB images and
+      # leave dangling parents behind, and stale buildx cache layers
+      # pile up across runs. The 4 AM cron prune (docker-cleanup.yaml)
+      # is too rare; the sentinel runbook is reactive. This tiny
+      # pre-build step makes every deploy start at maximum free space.
+      #
+      # Runs only when SERVICES is non-empty (i.e. an actual build is
+      # about to happen) — no-op deploys (workflow-file tweaks, docs)
+      # don't churn the prune.
+      #
+      # Flag rationale:
+      #   * `image prune -f`        → dangling images only (cheap, frees real bytes,
+      #                               never touches tagged-and-in-use images).
+      #   * `buildx prune --until=24h -f`
+      #                             → drop buildx cache OLDER than 24h. Critical:
+      #                               this preserves the cache for the build that's
+      #                               about to run (cache produced minutes ago is
+      #                               always < 24h). `buildx prune -af` would
+      #                               nuke the warm cache and force a cold rebuild.
+      #   * `container prune -f`    → stopped containers only. None expected on
+      #                               a healthy runner, but cheap insurance.
+      #
+      # NEVER do here:
+      #   * `docker volume prune`   → would delete db_data, hf_cache,
+      #                               workspaces, redis AOF, temporal state.
+      #   * `docker system prune -a -f`
+      #                             → would delete in-use tagged images
+      #                               (anything not currently bound to a
+      #                               running container is fair game).
+      #   * `docker buildx prune -af`
+      #                             → discards ALL cache including warm
+      #                               layers, defeating the point.
+      #
+      # `set +e` is intentional: a single failing prune subcommand
+      # should never fail the deploy — the build is what matters.
+      - name: Reclaim disk before build
+        if: steps.changes.outputs.services != ''
+        run: |
+          set +e
+          echo "=== Before prune ==="
+          docker exec agentprovision-agents-api-1 df -h / 2>/dev/null | tail -1 || true
+          docker system df 2>&1 | head -5
+          # Drop dangling images first (cheap, frees real bytes)
+          docker image prune -f 2>&1 | tail -1
+          # Drop buildx cache older than 24h (safe — recent builds keep their caches)
+          docker buildx prune --filter "until=24h" -f 2>&1 | tail -1
+          # Drop stopped containers (none expected, but cheap)
+          docker container prune -f 2>&1 | tail -1
+          echo "=== After prune ==="
+          docker system df 2>&1 | head -5
+          docker exec agentprovision-agents-api-1 df -h / 2>/dev/null | tail -1 || true
+          # NEVER `docker volume prune` here — would delete db_data, hf_cache etc.
+          # NEVER `docker system prune -a -f` here — would delete in-use images.
+          # NEVER `docker buildx prune -af` here — would discard ALL cache,
+          # including the cache for the build that's about to run.
+          set -e
+
       - name: Build and update services
         run: |
           SERVICES="${{ steps.changes.outputs.services }}"
@@ -158,8 +217,11 @@ jobs:
           for svc in $SERVICES; do
             echo "--- Building $svc ---"
             # Some services might not be in docker-compose.yml yet or have different names
-            # We use docker compose build <service_name> to respect the compose file
-            docker compose build $svc || echo "Skipping $svc (not in compose or build error)"
+            # We use docker compose build <service_name> to respect the compose file.
+            # `--force-rm` removes intermediate containers from failed/aborted
+            # build stages so they don't accumulate on the runner between
+            # deploys (BuildKit normally leaves them around for debugging).
+            docker compose build --force-rm $svc || echo "Skipping $svc (not in compose or build error)"
           done
 
       - name: Up
