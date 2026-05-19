@@ -61,6 +61,59 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _enforce_review_quota(db: Session, tenant_id: uuid.UUID) -> None:
+    """I5: refuse to start a new review when the tenant has already
+    burned its monthly token budget.
+
+    Mirrors the projection logic in `insights_cost._quota_burn` but is
+    a strict gate rather than a soft warning:
+
+      * If the tenant has no `tenant_features` row, OR
+      * the row's `monthly_token_limit` is None / 0,
+    we don't enforce — same opt-in policy as the dashboard.
+
+    Otherwise, sum month-to-date tokens from
+    `agent_performance_snapshots` (same source the dashboard reads —
+    no second source of truth) and raise 429 when usage has already
+    met or exceeded the limit. Reviews are an opt-in heavy operation,
+    not a hot path; the extra query is fine.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import func as _func
+
+    from app.models.agent_performance_snapshot import AgentPerformanceSnapshot
+    from app.models.tenant_features import TenantFeatures
+
+    features = (
+        db.query(TenantFeatures)
+        .filter(TenantFeatures.tenant_id == tenant_id)
+        .first()
+    )
+    if not features or not features.monthly_token_limit:
+        return
+
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    mtd_tokens = (
+        db.query(_func.coalesce(_func.sum(AgentPerformanceSnapshot.total_tokens), 0))
+        .filter(AgentPerformanceSnapshot.tenant_id == tenant_id)
+        .filter(AgentPerformanceSnapshot.window_start >= month_start)
+        .scalar()
+    ) or 0
+
+    if int(mtd_tokens) >= int(features.monthly_token_limit):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"tenant has exceeded monthly_token_limit "
+                f"({mtd_tokens}/{features.monthly_token_limit}); "
+                "raise the limit or wait for next month before starting "
+                "another review"
+            ),
+        )
+
+
 def _state_payload(review) -> dict:
     """Render a ReviewCoalition row as a dict matching ReviewState."""
     return {
@@ -94,7 +147,17 @@ def start_review(
     on the agentprovision-orchestration Temporal queue (same queue as
     CoalitionWorkflow). Poll GET /reviews/{id} or subscribe to
     /reviews/{id}/events.
+
+    I5: Cost gate — a single review fans out to N CLIs × M rounds,
+    each with non-trivial LLM token cost. Refuse to start a new
+    review when the tenant has already exceeded its
+    `tenant_features.monthly_token_limit` for the month. Per
+    insights_cost.py the limit is opt-in: tenants with no
+    tenant_features row (or a NULL/0 limit) are unbounded as today.
     """
+    # I5: monthly-token-limit gate.
+    _enforce_review_quota(db, current_user.tenant_id)
+
     # Soft-validate scope. Unknown scopes are accepted (we pass them to
     # the leaf CLI verbatim so tenants can customize) but log a warning.
     if request.scope not in ALLOWED_SCOPES:

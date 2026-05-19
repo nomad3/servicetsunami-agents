@@ -842,3 +842,206 @@ def test_record_no_auth_returns_401():
         json={"cli": "claude", "raw_text": ""},
     )
     assert resp.status_code == 401, resp.text
+
+
+# ── Cost gate (I5) ────────────────────────────────────────────────────
+
+
+def test_start_review_blocks_when_tenant_over_monthly_token_limit(monkeypatch):
+    """I5: refuse to start a new review when the tenant has already
+    burned its monthly_token_limit."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api import deps
+    from app.api.v1 import reviews as reviews_module
+
+    tenant_id_ = uuid.uuid4()
+
+    class _User:
+        pass
+    user = _User()
+    user.tenant_id = tenant_id_
+
+    class _Features:
+        monthly_token_limit = 1000
+
+    class _Q:
+        def __init__(self, result):
+            self._result = result
+
+        def filter(self, *_a, **_k):
+            return self
+
+        def first(self):
+            return self._result
+
+        def scalar(self):
+            return self._result
+
+    class _DB:
+        def __init__(self):
+            self._features_q = _Q(_Features())
+            # Sum query returns "tokens already used".
+            self._sum_q = _Q(5000)
+
+        def query(self, *args):
+            # First-arg-typed query routing: TenantFeatures vs sum().
+            from app.models.tenant_features import TenantFeatures
+            if args and args[0] is TenantFeatures:
+                return self._features_q
+            return self._sum_q
+
+        def add(self, *a, **k): pass
+        def commit(self): pass
+        def refresh(self, *a, **k): pass
+        def rollback(self): pass
+
+    test_app = FastAPI()
+    test_app.dependency_overrides[deps.get_db] = lambda: (yield _DB())
+    test_app.dependency_overrides[deps.get_current_user] = lambda: user
+    test_app.include_router(reviews_module.router, prefix="/api/v1/reviews")
+    client = TestClient(test_app, raise_server_exceptions=False)
+
+    resp = client.post(
+        "/api/v1/reviews/start",
+        json={"ref": "#570"},
+    )
+    assert resp.status_code == 429, resp.text
+    assert "monthly_token_limit" in resp.text
+
+
+def test_start_review_passes_when_under_limit(monkeypatch):
+    """Sanity counterpart: under-limit tenant proceeds past the gate.
+    We don't assert 201 (start_review also creates a Blackboard which
+    needs more plumbing); just assert we don't get a 429.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api import deps
+    from app.api.v1 import reviews as reviews_module
+
+    tenant_id_ = uuid.uuid4()
+
+    class _User:
+        pass
+    user = _User()
+    user.tenant_id = tenant_id_
+
+    class _Features:
+        monthly_token_limit = 1_000_000
+
+    class _Q:
+        def __init__(self, result):
+            self._result = result
+
+        def filter(self, *_a, **_k):
+            return self
+
+        def first(self):
+            return self._result
+
+        def scalar(self):
+            return self._result
+
+    class _DB:
+        def __init__(self):
+            self._features_q = _Q(_Features())
+            self._sum_q = _Q(100)  # well under limit
+
+        def query(self, *args):
+            from app.models.tenant_features import TenantFeatures
+            if args and args[0] is TenantFeatures:
+                return self._features_q
+            return self._sum_q
+
+        def add(self, *a, **k): pass
+        def commit(self): pass
+        def refresh(self, *a, **k): pass
+        def rollback(self): pass
+
+    # Short-circuit the start_review service call to avoid touching
+    # the Blackboard machinery.
+    fake_board = MagicMock()
+    fake_review_obj = _FakeReview(status="running")
+    from datetime import datetime as _dt
+    fake_review_obj.created_at = _dt.utcnow()
+    fake_review_obj.updated_at = _dt.utcnow()
+
+    monkeypatch.setattr(
+        reviews_module.review_service,
+        "start_review",
+        lambda *a, **k: (fake_review_obj, fake_board),
+    )
+
+    test_app = FastAPI()
+    test_app.dependency_overrides[deps.get_db] = lambda: (yield _DB())
+    test_app.dependency_overrides[deps.get_current_user] = lambda: user
+    test_app.include_router(reviews_module.router, prefix="/api/v1/reviews")
+    client = TestClient(test_app, raise_server_exceptions=False)
+
+    resp = client.post("/api/v1/reviews/start", json={"ref": "#570"})
+    # Either 201 (created) or 500 from dispatch shim — either way, NOT 429.
+    assert resp.status_code != 429, resp.text
+
+
+def test_start_review_no_features_row_does_not_block(monkeypatch):
+    """Opt-in policy: tenants without a tenant_features row are
+    unbounded — the gate must not fire."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api import deps
+    from app.api.v1 import reviews as reviews_module
+
+    tenant_id_ = uuid.uuid4()
+
+    class _User:
+        pass
+    user = _User()
+    user.tenant_id = tenant_id_
+
+    class _Q:
+        def __init__(self, result):
+            self._result = result
+
+        def filter(self, *_a, **_k):
+            return self
+
+        def first(self):
+            return self._result
+
+        def scalar(self):
+            return self._result
+
+    class _DB:
+        def query(self, *args):
+            # No features row, scalar returns 0.
+            return _Q(None)
+
+        def add(self, *a, **k): pass
+        def commit(self): pass
+        def refresh(self, *a, **k): pass
+        def rollback(self): pass
+
+    fake_board = MagicMock()
+    fake_review_obj = _FakeReview(status="running")
+    from datetime import datetime as _dt
+    fake_review_obj.created_at = _dt.utcnow()
+    fake_review_obj.updated_at = _dt.utcnow()
+
+    monkeypatch.setattr(
+        reviews_module.review_service,
+        "start_review",
+        lambda *a, **k: (fake_review_obj, fake_board),
+    )
+
+    test_app = FastAPI()
+    test_app.dependency_overrides[deps.get_db] = lambda: (yield _DB())
+    test_app.dependency_overrides[deps.get_current_user] = lambda: user
+    test_app.include_router(reviews_module.router, prefix="/api/v1/reviews")
+    client = TestClient(test_app, raise_server_exceptions=False)
+
+    resp = client.post("/api/v1/reviews/start", json={"ref": "#570"})
+    assert resp.status_code != 429, resp.text
