@@ -255,6 +255,12 @@ def appraise_and_record_tool_failure(
     but for the tool_failure event type — pleasure down + arousal UP
     (Luna's temperature-flip correction).
 
+    Args:
+        severity: float in [0, 1]. Caller-derived intensity of the
+            failure. 1.0 = hard exception / unrecoverable. 0.3 =
+            retryable. Defaults to 0.5 (moderate). Values outside
+            [0, 1] are clamped by the underlying appraise_event.
+
     Returns the post-appraisal PAD vector or None if the episode
     doesn't exist / is tenant-foreign.
     """
