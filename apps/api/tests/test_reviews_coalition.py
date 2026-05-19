@@ -443,3 +443,217 @@ def test_review_start_request_caps_max_rounds():
 
     with pytest.raises(ValueError):
         ReviewStartRequest(ref="#1", max_rounds=99)
+
+
+# ── /record auth (B1) ─────────────────────────────────────────────────
+#
+# The /record endpoint accepts three auth tiers, with the agent-token
+# tier specifically bound so a compromised leaf inside the tenant
+# can't submit findings under another CLI's name and force a fake
+# consensus. See apps/api/app/api/v1/reviews.py:record_findings.
+
+
+def _make_record_test_client(mock_agent=None):
+    """Mount the reviews router on a minimal FastAPI app for record-
+    endpoint auth tests. Patches DB + record_cli_findings to no-op."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api import deps
+    from app.api.v1 import reviews as reviews_module
+    from app.services import review_service
+
+    test_app = FastAPI()
+
+    # Stub DB session — the only model lookup record_findings does is
+    # for Agent in the agent-token tier; we drive that via a fake query.
+    class _Q:
+        def __init__(self, result):
+            self._result = result
+
+        def filter(self, *_a, **_k):
+            return self
+
+        def first(self):
+            return self._result
+
+    class _DB:
+        def query(self, model):
+            return _Q(mock_agent)
+
+        # The endpoint may commit/refresh through record_cli_findings,
+        # but we monkeypatch that to a no-op below.
+        def add(self, *_a, **_k):
+            return None
+
+        def commit(self):
+            return None
+
+        def refresh(self, *_a, **_k):
+            return None
+
+        def rollback(self):
+            return None
+
+    def _stub_db():
+        yield _DB()
+
+    test_app.dependency_overrides[deps.get_db] = _stub_db
+
+    # record_cli_findings is exercised by the service-level tests
+    # already; for auth tests we just need it to return a _FakeReview.
+    from datetime import datetime as _dt
+    fake_review = _FakeReview(status="running")
+    fake_review.created_at = _dt.utcnow()
+    fake_review.updated_at = _dt.utcnow()
+
+    def _fake_record(db, tenant_id, review_id, *, cli, raw_text, findings=None):
+        fake_review.tenant_id = tenant_id
+        return fake_review
+
+    import app.services.review_service as rs_mod  # noqa: F401
+    reviews_module.review_service.record_cli_findings = _fake_record  # type: ignore[assignment]
+
+    test_app.include_router(reviews_module.router, prefix="/api/v1/reviews")
+    return TestClient(test_app, raise_server_exceptions=True)
+
+
+def test_record_internal_key_with_any_cli_returns_200():
+    """Tier 1: X-Internal-Key + X-Tenant-Id accepts any cli name."""
+    from app.core.config import settings
+
+    client = _make_record_test_client()
+    review_id = uuid.uuid4()
+    tenant_id = uuid.uuid4()
+    resp = client.post(
+        f"/api/v1/reviews/{review_id}/record",
+        headers={
+            "X-Internal-Key": settings.API_INTERNAL_KEY,
+            "X-Tenant-Id": str(tenant_id),
+        },
+        json={"cli": "anything-goes", "raw_text": "- BLOCKER x.py:1 ok"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_record_internal_key_missing_tenant_id_400():
+    from app.core.config import settings
+
+    client = _make_record_test_client()
+    review_id = uuid.uuid4()
+    resp = client.post(
+        f"/api/v1/reviews/{review_id}/record",
+        headers={"X-Internal-Key": settings.API_INTERNAL_KEY},
+        json={"cli": "claude", "raw_text": ""},
+    )
+    assert resp.status_code == 400, resp.text
+
+
+def _mk_agent(agent_id, tenant_id_, name="claude"):
+    class _Agent:
+        pass
+    a = _Agent()
+    a.id = agent_id
+    a.tenant_id = tenant_id_
+    a.name = name
+    return a
+
+
+def test_record_agent_token_matching_cli_returns_200(monkeypatch):
+    """Tier 2: agent-scoped JWT whose Agent.name matches `cli` → 200."""
+    from app.api.v1 import reviews as reviews_module
+
+    agent_id = uuid.uuid4()
+    tenant_id_ = uuid.uuid4()
+
+    client = _make_record_test_client(mock_agent=_mk_agent(agent_id, tenant_id_, "claude"))
+
+    monkeypatch.setattr(
+        reviews_module,
+        "verify_agent_token",
+        lambda tok: {
+            "kind": "agent_token",
+            "agent_id": str(agent_id),
+            "tenant_id": str(tenant_id_),
+        },
+    )
+
+    resp = client.post(
+        f"/api/v1/reviews/{uuid.uuid4()}/record",
+        headers={"Authorization": "Bearer fake-agent-token"},
+        json={"cli": "claude", "raw_text": "- BLOCKER x.py:1 ok"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_record_agent_token_mismatched_cli_returns_403(monkeypatch):
+    """Tier 2: agent-scoped JWT whose Agent.name != `cli` → 403."""
+    from app.api.v1 import reviews as reviews_module
+
+    agent_id = uuid.uuid4()
+    tenant_id_ = uuid.uuid4()
+
+    # token is bound to claude
+    client = _make_record_test_client(mock_agent=_mk_agent(agent_id, tenant_id_, "claude"))
+
+    monkeypatch.setattr(
+        reviews_module,
+        "verify_agent_token",
+        lambda tok: {
+            "kind": "agent_token",
+            "agent_id": str(agent_id),
+            "tenant_id": str(tenant_id_),
+        },
+    )
+
+    # …but the request claims to be from "codex" — must be rejected.
+    resp = client.post(
+        f"/api/v1/reviews/{uuid.uuid4()}/record",
+        headers={"Authorization": "Bearer fake-agent-token"},
+        json={"cli": "codex", "raw_text": "- BLOCKER x.py:1 ok"},
+    )
+    assert resp.status_code == 403, resp.text
+    assert "agent_token bound to 'claude'" in resp.text
+
+
+def test_record_human_bearer_with_any_cli_returns_200(monkeypatch):
+    """Tier 3: a normal tenant JWT (kind=access) accepts any cli."""
+    from app.api.v1 import reviews as reviews_module
+
+    tenant_id_ = uuid.uuid4()
+
+    class _User:
+        pass
+    user = _User()
+    user.tenant_id = tenant_id_
+
+    client = _make_record_test_client()
+
+    # verify_agent_token raises (it's a normal access-kind JWT, not
+    # an agent_token) — endpoint falls through to get_current_user.
+    monkeypatch.setattr(
+        reviews_module,
+        "verify_agent_token",
+        lambda tok: (_ for _ in ()).throw(ValueError("not an agent token")),
+    )
+    monkeypatch.setattr(
+        reviews_module,
+        "get_current_user",
+        lambda db, token: user,
+    )
+
+    resp = client.post(
+        f"/api/v1/reviews/{uuid.uuid4()}/record",
+        headers={"Authorization": "Bearer human-tenant-jwt"},
+        json={"cli": "codex", "raw_text": "- BLOCKER x.py:1 ok"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_record_no_auth_returns_401():
+    client = _make_record_test_client()
+    resp = client.post(
+        f"/api/v1/reviews/{uuid.uuid4()}/record",
+        json={"cli": "claude", "raw_text": ""},
+    )
+    assert resp.status_code == 401, resp.text

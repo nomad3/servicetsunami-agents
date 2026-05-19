@@ -38,13 +38,15 @@ import time
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
+from app.core.config import settings
 from app.models.user import User
+from app.models.agent import Agent
 from app.schemas.review import (
     ALLOWED_SCOPES,
     ReviewReplyRequest,
@@ -53,6 +55,7 @@ from app.schemas.review import (
     ReviewState,
 )
 from app.services import review_service
+from app.services.agent_token import verify_agent_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -216,19 +219,98 @@ class RecordFindingsRequest(BaseModel):
 def record_findings(
     review_id: uuid.UUID,
     payload: RecordFindingsRequest = Body(...),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    x_internal_key: Optional[str] = Header(default=None, alias="X-Internal-Key"),
+    x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
     """Record one CLI's review output for the current round.
 
-    Used by ReviewWorkflow activities (and by the test suite). Trips
-    the consensus aggregator when all expected CLIs have reported.
+    Three accepted auth tiers, in precedence order:
+
+      1. ``X-Internal-Key`` matching ``settings.API_INTERNAL_KEY`` or
+         ``settings.MCP_API_KEY`` → trusted service path (used by the
+         Temporal ReviewWorkflow). ``X-Tenant-Id`` MUST be supplied
+         alongside. Any ``cli`` value is accepted.
+
+      2. Agent-scoped JWT (``kind=agent_token``) → leaf CLI calling
+         back into the API. The token's ``agent_id`` is resolved to
+         its ``Agent.name`` (lower-cased); the request is rejected
+         with 403 unless that name matches ``payload.cli``. This
+         prevents a buggy or compromised leaf inside the tenant from
+         submitting findings under another CLI's name and forging a
+         fake consensus.
+
+      3. Human tenant bearer JWT (``kind=access``) → operator override
+         (e.g. replaying captured CLI output manually). Any ``cli``
+         value is accepted; tenant scope comes from the user row.
+
+    Trips the consensus aggregator when all expected CLIs have reported.
     """
+    cli_name = payload.cli.strip().lower()
+
+    # ── Tier 1: internal API key ────────────────────────────────────
+    if x_internal_key and x_internal_key in (
+        settings.API_INTERNAL_KEY, settings.MCP_API_KEY,
+    ):
+        if not x_tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="X-Tenant-Id required with X-Internal-Key",
+            )
+        try:
+            tenant_id = uuid.UUID(x_tenant_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="X-Tenant-Id must be a UUID")
+    else:
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Authorization header required")
+        parts = authorization.split(None, 1)
+        if len(parts) != 2 or parts[0].lower() != "bearer":
+            raise HTTPException(status_code=401, detail="Bearer scheme required")
+        token = parts[1].strip()
+
+        # ── Tier 2: agent-scoped JWT ────────────────────────────────
+        agent_claims = None
+        try:
+            agent_claims = verify_agent_token(token)
+        except Exception:
+            agent_claims = None
+
+        if agent_claims is not None:
+            agent_id_claim = agent_claims.get("agent_id")
+            tenant_id_claim = agent_claims.get("tenant_id")
+            if not agent_id_claim or not tenant_id_claim:
+                raise HTTPException(
+                    status_code=403,
+                    detail="agent_token missing agent_id/tenant_id",
+                )
+            agent = db.query(Agent).filter(Agent.id == agent_id_claim).first()
+            if not agent or str(agent.tenant_id) != str(tenant_id_claim):
+                raise HTTPException(
+                    status_code=403,
+                    detail="agent_token references unknown agent",
+                )
+            bound_slug = (agent.name or "").strip().lower()
+            if bound_slug != cli_name:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"agent_token bound to '{bound_slug}' cannot record "
+                        f"findings as '{cli_name}'"
+                    ),
+                )
+            tenant_id = uuid.UUID(str(tenant_id_claim))
+        else:
+            # ── Tier 3: human tenant bearer ─────────────────────────
+            user = get_current_user(db=db, token=token)
+            tenant_id = user.tenant_id
+
     review = review_service.record_cli_findings(
         db,
-        current_user.tenant_id,
+        tenant_id,
         review_id,
-        cli=payload.cli.strip().lower(),
+        cli=cli_name,
         raw_text=payload.raw_text,
         findings=payload.findings,
     )
