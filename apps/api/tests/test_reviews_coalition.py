@@ -430,6 +430,45 @@ def test_record_cli_findings_max_rounds_caps(monkeypatch):
     assert len(out.agreed_findings) == 1
 
 
+def test_late_record_after_awaiting_response_does_not_double_increment(monkeypatch):
+    """I2: a record arriving after the round already closed (status
+    flipped to awaiting_response) must NOT re-fire _close_round and
+    double-increment rounds_completed. The per-CLI cache is updated
+    for audit, but the round counter stays stable."""
+    from app.services import review_service
+
+    review = _FakeReview(
+        clis=[{"name": "claude", "agent_slug": "claude"},
+              {"name": "codex", "agent_slug": "codex"}],
+        rounds_completed=1,
+        max_rounds=3,
+        status="awaiting_response",
+        # The round previously closed with both CLIs already reported.
+        findings={"per_cli": {
+            "claude": {"findings": [], "raw_text": "x"},
+            "codex":  {"findings": [], "raw_text": "y"},
+        }, "last_round": 1},
+        agreed_findings=[{"severity": "BLOCKER", "file": "a.py",
+                          "line_range": "1", "descriptions": ["x"],
+                          "cli_set": ["claude", "codex"]}],
+    )
+    db = _stub_db_for_review(review)
+    monkeypatch.setattr(review_service, "get_review", lambda *_a, **_k: review)
+    monkeypatch.setattr(
+        review_service.blackboard_service, "add_entry", lambda *_a, **_k: None,
+    )
+
+    out = review_service.record_cli_findings(
+        db, review.tenant_id, review.id,
+        cli="claude",
+        raw_text="- BLOCKER a.py:1 late finding",
+    )
+    # rounds_completed must stay at 1 — the round already closed.
+    assert out.rounds_completed == 1
+    # Status doesn't regress back to running either.
+    assert out.status == "awaiting_response"
+
+
 def test_apply_reply_resets_round_and_advances_ref(monkeypatch):
     from app.services import review_service
 

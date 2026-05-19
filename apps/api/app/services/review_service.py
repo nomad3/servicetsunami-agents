@@ -512,7 +512,21 @@ def record_cli_findings(
 
 
 def _close_round(db: Session, review: ReviewCoalition, per_cli: Dict) -> None:
-    """All CLIs have reported — aggregate and decide next state."""
+    """All CLIs have reported — aggregate and decide next state.
+
+    I2: gate the body on status == "running". `record_cli_findings`
+    accepts records while status is either ``running`` or
+    ``awaiting_response`` (so a late-arriving record after we already
+    flipped to awaiting_response gets stored in the per-CLI cache for
+    audit) — but if a late record completes a *new* round on a review
+    that's already terminal-for-this-round we'd otherwise re-fire
+    _close_round and double-increment ``rounds_completed``. The gate
+    makes the round-close strictly idempotent in the late-arrival
+    case: the per-CLI cache is updated, but the round counter and
+    agreed_findings snapshot are not.
+    """
+    if review.status != "running":
+        return
     parsed_by_cli = {
         cli: (slot.get("findings") or [])
         for cli, slot in per_cli.items()
