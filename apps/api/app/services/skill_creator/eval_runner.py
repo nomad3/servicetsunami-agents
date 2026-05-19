@@ -29,37 +29,40 @@ fallback. Phase 4 (eval-viewer in the Den) will add an SSE feed
 keyed by ``iteration_run_id``; that's the analog of the chat-job
 event-log, not a wholesale reuse.
 
-Threading model
----------------
+Dispatch model
+--------------
 
-The runner spawns one ``threading.Thread(daemon=True)`` per
-``skill_eval_runs`` row. This mirrors the ``review_dispatch.py``
-fire-and-forget shape (PR #574 also uses this pattern). The threads
-each open their OWN ``SessionLocal`` so the request-scoped ``db`` is
-never shared cross-thread (the same pitfall the chat-job worker in
-``apps/api/app/api/v1/chat.py`` documents).
+``dispatch_iteration`` is an ``async`` coroutine that awaits
+``Client.start_workflow`` directly from the FastAPI request handler,
+one call per ``skill_eval_runs`` row. We do NOT spawn daemon threads
+any more — that pattern (``threading.Thread(target=runner,
+daemon=True).start()`` where ``runner`` calls ``asyncio.run(_go())``)
+silently failed under gunicorn workers, leaving rows in ``queued``
+with no Temporal workflow ever created (mirrors PR #574's bug).
 
-KNOWN CONCERN: fire-and-forget daemons attached to the API process do
-NOT survive an API pod restart mid-run. The Phase-2 spec accepts this —
-the runner is the dispatcher of a Temporal child workflow, and
-Temporal's at-least-once delivery means the child KEEPS RUNNING on
-restart; we'd just lose the worker thread that writes the result back
-to ``skill_eval_runs``. Phase 3 (analyzer) will add a janitor that
-sweeps orphan ``running`` rows older than the workflow's
-``execution_timeout`` and either re-correlates them by Temporal
-workflow_id or marks them ``error: dispatcher restart``.
+Temporal continues each ``ChatCliWorkflow`` server-side regardless of
+HTTP request lifecycle — that's the whole point of Temporal's
+at-least-once delivery. The api process can die after
+``start_workflow`` returns and the workflows keep running.
 
-This is the same trade-off PR #574 made; if/when the review_dispatch
-hotfix lands, we'll switch both call sites to the same pattern.
+CHANGE FROM PHASE-2 BEHAVIOR: the API process no longer waits for
+each ChatCliWorkflow to complete and no longer writes per-leg
+artifacts to the workspaces volume or flips ``skill_eval_runs`` to a
+terminal status from a worker thread. Those responsibilities move
+into a Temporal parent-workflow design (see
+``docs/plans/2026-05-19-skill-eval-temporal-parent-pattern-adr.md``).
+Until that Phase-3 parent workflow lands, ``skill_eval_runs`` rows
+will stay at ``queued`` after dispatch; the ChatCliWorkflow result is
+recoverable from Temporal's history if needed. The ``_run_one``
+helpers and ``compute_eval_dir`` layout helpers stay in this module
+as the future activity bodies for the parent workflow.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
-import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -383,14 +386,20 @@ def _dispatch_chat_cli_workflow(
     model: str,
     workflow_id: str,
 ) -> Dict[str, Any]:
-    """Run a ChatCliWorkflow synchronously from this thread.
+    """Run a ChatCliWorkflow synchronously, blocking until Temporal returns.
 
     Returns a dict ``{success, response_text, error, metadata}``. The
-    caller (a daemon thread, NOT a FastAPI request handler) blocks until
-    Temporal returns. The 25-minute execution timeout is generous —
-    a single eval rarely needs more than 60 s, but headroom keeps a
-    flaky CLI from prematurely tipping the row into ``error``.
+    25-minute execution timeout is generous — a single eval rarely needs
+    more than 60 s, but headroom keeps a flaky CLI from prematurely
+    tipping the row into ``error``.
+
+    This helper is no longer on the dispatch hot path (``dispatch_iteration``
+    now uses fire-and-forget ``start_workflow`` from the async request
+    handler). It survives in this module as the prospective body of the
+    per-leg Temporal activity in the Phase-3 parent-workflow design
+    (see the eval-temporal-parent-pattern ADR).
     """
+    import asyncio
     from dataclasses import dataclass as _dc
     from datetime import timedelta
 
@@ -693,7 +702,7 @@ def _run_one(
 # ──────────────────────────────────────────────────────────────────────────
 
 
-def dispatch_iteration(
+async def dispatch_iteration(
     db: Session,
     *,
     skill_id: uuid.UUID,
@@ -701,13 +710,12 @@ def dispatch_iteration(
     platform: str = "claude_code",
     model: str = "",
     workspaces_root: Optional[str] = None,
-    _runner: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Kick off all evals for a single iteration of a skill.
 
     Inserts the paired (with_skill + baseline) ``skill_eval_runs`` rows
-    in ``queued`` status, then spawns one daemon thread per row to
-    dispatch the ChatCliWorkflow. Returns:
+    in ``queued`` status, then awaits one ``Client.start_workflow``
+    RPC per row to launch a ``ChatCliWorkflow`` on Temporal. Returns:
 
         {
             "job_id": <iteration_run_id>,
@@ -717,9 +725,7 @@ def dispatch_iteration(
         }
 
     Args:
-        db: Request-scoped SQLAlchemy session. Used ONLY for the queued
-            inserts; the workers each open their own SessionLocal so
-            this session is safe to close after the function returns.
+        db: Request-scoped SQLAlchemy session.
         skill_id: Skill the iteration belongs to.
         iteration: 1-indexed iteration number. The caller is responsible
             for picking N (typically max(iteration) + 1 from prior runs).
@@ -728,16 +734,18 @@ def dispatch_iteration(
             ``cli_platform_resolver.py``.
         model: Optional model slug override. Empty string defers to the
             code-worker's per-platform default.
-        workspaces_root: Override of the workspaces root path. Tests
-            inject a tmp dir here.
-        _runner: Internal hook — pass a callable that takes the same
-            kwargs as ``_run_one`` to skip the thread spawn (lets tests
-            assert on the call args without standing up Temporal).
-            Production callers MUST leave this as None.
+        workspaces_root: Override of the workspaces root path. Retained
+            in the signature so the Phase-3 parent-workflow refactor can
+            thread it through to the artifact-write activity.
 
     Raises:
         ValueError: skill has no evals defined; iteration is < 1.
         LookupError: skill_id not found in the skills table.
+        TenantWorkspaceQuotaExceeded: tenant is at/over the per-tenant
+            workspace quota cap (I3).
+        Exception: Temporal dispatch failure — propagated from
+            ``Client.connect`` or ``start_workflow`` so the endpoint
+            can turn it into a 503.
     """
     if iteration < 1:
         raise ValueError(f"iteration must be >= 1, got {iteration}")
@@ -810,24 +818,22 @@ def dispatch_iteration(
 
     db.commit()
 
-    runner_fn = _runner or _spawn_worker_thread
-
-    for run_id, eval_id, prompt, with_skill in plans:
-        runner_fn(
-            run_id=run_id,
-            eval_id=eval_id,
-            eval_prompt=prompt,
-            iteration=iteration,
-            with_skill=with_skill,
-            tenant_id=tenant_id,
-            skill_id=skill_id,
-            skill_slug=skill_slug,
-            skill_body=skill_body,
-            platform=platform,
-            model=model,
-            workspaces_root=workspaces_root,
-            iteration_run_id=iteration_run_id,
-        )
+    # Temporal-native dispatch: await one start_workflow per leg.
+    # Workflows continue server-side regardless of HTTP request
+    # lifecycle. We DELIBERATELY do not await each workflow's
+    # completion — that's deferred to the Phase-3 parent-workflow
+    # design (see the eval-temporal-parent-pattern ADR), which will
+    # also restore the artifact-writing + terminal-status flip that
+    # the Phase-2 daemon-thread runner did.
+    await _start_chat_cli_workflows(
+        plans=plans,
+        iteration=iteration,
+        tenant_id=tenant_id,
+        skill_slug=skill_slug,
+        skill_body=skill_body,
+        platform=platform,
+        model=model,
+    )
 
     return {
         "job_id": str(iteration_run_id),
@@ -837,13 +843,63 @@ def dispatch_iteration(
     }
 
 
-def _spawn_worker_thread(**kwargs: Any) -> None:
-    """Default `_runner` — spin up a daemon thread that runs `_run_one`."""
-    threading.Thread(
-        target=_run_one,
-        kwargs=kwargs,
-        daemon=True,
-    ).start()
+async def _start_chat_cli_workflows(
+    *,
+    plans: List[Tuple[uuid.UUID, str, str, bool]],
+    iteration: int,
+    tenant_id: uuid.UUID,
+    skill_slug: str,
+    skill_body: str,
+    platform: str,
+    model: str,
+) -> None:
+    """Await one ``Client.start_workflow`` per planned leg.
+
+    Replaces the Phase-2 ``_spawn_worker_thread`` daemon-thread loop.
+    A single ``Client.connect`` is shared across all legs to keep the
+    handler latency under the 100ms budget called out in the ADR.
+
+    Test seam: tests can monkeypatch this function on the module to
+    skip the real Temporal RPC.
+    """
+    from dataclasses import dataclass as _dc
+
+    from temporalio.client import Client as TemporalClient
+
+    temporal_address = os.environ.get("TEMPORAL_ADDRESS", "temporal:7233")
+
+    @_dc
+    class _ChatCliInput:
+        platform: str
+        message: str
+        tenant_id: str
+        instruction_md_content: str = ""
+        mcp_config: str = ""
+        image_b64: str = ""
+        image_mime: str = ""
+        session_id: str = ""
+        model: str = ""
+        allowed_tools: str = ""
+        chat_session_id: str = ""
+        attempt: int = 1
+
+    client = await TemporalClient.connect(temporal_address)
+
+    for run_id, _eval_id, prompt, with_skill in plans:
+        instruction_md = skill_body if with_skill else ""
+        task_input = _ChatCliInput(
+            platform=platform,
+            message=prompt,
+            tenant_id=str(tenant_id),
+            instruction_md_content=instruction_md,
+            model=model,
+        )
+        await client.start_workflow(
+            "ChatCliWorkflow",
+            task_input,
+            id=f"skill-eval-{run_id}",
+            task_queue="agentprovision-code",
+        )
 
 
 def _derive_slug(name: str) -> str:

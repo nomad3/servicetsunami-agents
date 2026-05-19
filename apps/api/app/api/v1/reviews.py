@@ -136,7 +136,7 @@ def _state_payload(review) -> dict:
 
 
 @router.post("/start", response_model=ReviewStartResponse, status_code=status.HTTP_201_CREATED)
-def start_review(
+async def start_review(
     request: ReviewStartRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -179,19 +179,25 @@ def start_review(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Fire-and-forget Temporal dispatch. Import locally to keep the
-    # router importable when temporal client isn't installed (test
-    # suite).
+    # Temporal-native dispatch from the request handler. The
+    # `dispatch_review_workflow` coroutine awaits `Client.connect` +
+    # `start_workflow` synchronously; the daemon-thread wrapper that
+    # used to fire-and-forget here silently failed under gunicorn
+    # workers, leaving the review row with no Temporal workflow behind
+    # it. Import locally to keep the router importable when temporal
+    # client isn't installed (test suite).
     try:
         from app.services.review_dispatch import dispatch_review_workflow
 
-        dispatch_review_workflow(
+        await dispatch_review_workflow(
             tenant_id=current_user.tenant_id,
             review_id=review.id,
         )
     except Exception as e:
         # Don't fail the start — the operator can still drive the
         # review via /record (e.g. in tests, or while #287 is pending).
+        # The row stays in `running`; the operator can recover by
+        # POST /reply or by retrying.
         logger.warning(
             "ReviewWorkflow dispatch failed for review %s: %s",
             review.id,
@@ -237,7 +243,7 @@ def get_review(
 
 
 @router.post("/{review_id}/reply", response_model=ReviewState)
-def reply_review(
+async def reply_review(
     review_id: uuid.UUID,
     request: ReviewReplyRequest,
     db: Session = Depends(get_db),
@@ -258,7 +264,7 @@ def reply_review(
         try:
             from app.services.review_dispatch import dispatch_review_workflow
 
-            dispatch_review_workflow(
+            await dispatch_review_workflow(
                 tenant_id=current_user.tenant_id,
                 review_id=review.id,
             )
