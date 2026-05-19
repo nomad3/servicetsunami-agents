@@ -1,6 +1,6 @@
 [package]
 name = "agentprovision-cli"
-version = "0.7.4"
+version = "0.7.5"
 edition = "2021"
 rust-version = "1.77.2"
 description = "Single-binary CLI for the AgentProvision platform — login, chat, workflows, agents."
