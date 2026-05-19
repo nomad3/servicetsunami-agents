@@ -7,6 +7,7 @@ Python classes. Activity registrations are kept so the executor can dispatch the
 """
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from temporalio.client import Client
 from temporalio.worker import Worker
 
@@ -221,9 +222,19 @@ async def run_orchestration_worker():
     logger.info(f"Task queue: {TASK_QUEUE}")
 
     # Create and run worker
+    # PR #574's ReviewWorkflow uses sync (`def`) activities for
+    # blackboard / DB writes (load_review_state, record_review_finding,
+    # aggregate_findings). Temporal requires either `async def`
+    # activities or an `activity_executor` for sync ones — without it
+    # the Worker constructor raises and the whole orchestration tier
+    # crashloops. Give it a ThreadPoolExecutor sized for the dynamic
+    # workflow + review activity mix; sync activities yield the GIL on
+    # DB I/O so a small pool is enough.
+    _activity_executor = ThreadPoolExecutor(max_workers=32)
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
+        activity_executor=_activity_executor,
         workflows=[
             DynamicWorkflowExecutor,
             Gap1JournalSynthesis,
