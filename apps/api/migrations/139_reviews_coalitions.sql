@@ -45,6 +45,13 @@
 -- NB: there is no down migration. Reviews-coalitions are audit-grade
 -- records; dropping the table on rollback would silently lose tenant
 -- review history.
+--
+-- The whole body is wrapped in BEGIN/COMMIT so that a failed CREATE
+-- INDEX after CREATE TABLE rolls the table back too — otherwise a
+-- half-applied migration would shadow the file from re-running
+-- cleanly. Matches the pattern used by mig 133, 136, 137.
+
+BEGIN;
 
 CREATE TABLE reviews_coalitions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -89,3 +96,5 @@ CREATE INDEX idx_reviews_coalitions_blackboard
 CREATE INDEX idx_reviews_coalitions_chat_session
     ON reviews_coalitions (chat_session_id)
     WHERE chat_session_id IS NOT NULL;
+
+COMMIT;
