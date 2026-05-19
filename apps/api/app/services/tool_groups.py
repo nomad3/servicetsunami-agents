@@ -306,9 +306,73 @@ def resolve_tool_names(tool_groups: list[str] | None) -> list[str] | None:
     return sorted(names)
 
 
-def format_allowed_tools(tool_names: list[str]) -> str:
+def format_allowed_tools(
+    tool_names: list[str], cli_platform: str | None = None
+) -> str:
     """Format tool names for --allowedTools CLI flag.
 
-    Prefixes each tool with 'mcp__agentprovision__' for MCP tool matching.
+    Prefixes each tool with the MCP namespace the target CLI actually
+    registers tools under. Per `cli_session_manager.generate_cli_instructions`
+    (lines 124-126, verified from production logs 2026-04-25):
+
+      - Claude Code (and clones honoring Claude Code's MCP shape) register
+        tools as `mcp__agentprovision__<tool>` (double underscore).
+      - Gemini CLI registers tools as `mcp_agentprovision_<tool>`
+        (single underscore).
+
+    `cli_platform` accepts the values in
+    `cli_session_manager.SUPPORTED_CLI_PLATFORMS`. When None or unknown,
+    we emit BOTH shapes so the allow-list still matches whichever
+    convention the runtime CLI uses — false-positive entries against the
+    wrong CLI are harmless because the CLI silently ignores unknown tool
+    names.
+
+    Per-tenant external MCP connectors (e.g. Higgsfield) live behind their
+    own `mcp__<server_key>__*` namespace once injected by
+    `apps/api/app/services/cli_session_manager.py::generate_mcp_config`.
+    They are NOT served by the agentprovision tool surface, so prefixing
+    `higgsfield_*` tool names with `mcp__agentprovision__` would produce
+    allow-list entries the CLI can never match — calls get silently
+    filtered out. Detect the higgsfield-prefixed names and emit the
+    connector-namespaced wildcard (`mcp__higgsfield__*` for double-
+    underscore CLIs, `mcp_higgsfield_*` for Gemini's single-underscore
+    shape) instead. The individual `higgsfield_*` names in
+    `HIGGSFIELD_TOOL_NAMES` are static fallback hints used by docs /
+    discovery refresh; the real tool names come from live
+    `discover_mcp_tools` against the tenant's connector, so a wildcard is
+    the only allow-list shape that survives a tool rename on Higgsfield's
+    side without an api redeploy.
     """
-    return ",".join(f"mcp__agentprovision__{name}" for name in tool_names)
+    # CLI platforms that register MCP tools using Gemini's single-
+    # underscore convention. Anything else falls back to the Claude Code
+    # double-underscore shape — which is what Claude Code, Codex, Copilot,
+    # qwen-code, and opencode all observe in production (their MCP
+    # registries are derived from the Claude Code reference impl).
+    GEMINI_SHAPE_PLATFORMS = {"gemini_cli"}
+
+    if cli_platform is None:
+        emit_double = True
+        emit_single = True
+    elif cli_platform in GEMINI_SHAPE_PLATFORMS:
+        emit_double = False
+        emit_single = True
+    else:
+        emit_double = True
+        emit_single = False
+
+    parts: list[str] = []
+    has_higgsfield = False
+    for name in tool_names:
+        if name.startswith("higgsfield_"):
+            has_higgsfield = True
+            continue
+        if emit_double:
+            parts.append(f"mcp__agentprovision__{name}")
+        if emit_single:
+            parts.append(f"mcp_agentprovision_{name}")
+    if has_higgsfield:
+        if emit_double:
+            parts.append("mcp__higgsfield__*")
+        if emit_single:
+            parts.append("mcp_higgsfield_*")
+    return ",".join(parts)

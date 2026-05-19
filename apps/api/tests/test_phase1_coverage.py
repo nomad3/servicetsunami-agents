@@ -1251,13 +1251,89 @@ class TestToolGroups:
         assert len(names) == len(set(names))
 
     def test_format_allowed_tools(self):
+        # Default (no cli_platform) emits BOTH the Claude-Code-shape
+        # double-underscore prefix and the Gemini single-underscore
+        # prefix so the allow-list survives whichever CLI runs the turn.
         from app.services.tool_groups import format_allowed_tools
         out = format_allowed_tools(["search_emails", "send_email"])
-        assert out == "mcp__agentprovision__search_emails,mcp__agentprovision__send_email"
+        parts = out.split(",")
+        assert "mcp__agentprovision__search_emails" in parts
+        assert "mcp__agentprovision__send_email" in parts
+        assert "mcp_agentprovision_search_emails" in parts
+        assert "mcp_agentprovision_send_email" in parts
 
     def test_format_allowed_tools_empty(self):
         from app.services.tool_groups import format_allowed_tools
         assert format_allowed_tools([]) == ""
+
+    def test_format_allowed_tools_claude_code_platform(self):
+        # Claude Code only: double-underscore shape only.
+        from app.services.tool_groups import format_allowed_tools
+        out = format_allowed_tools(
+            ["search_emails", "send_email"], cli_platform="claude_code"
+        )
+        assert out == "mcp__agentprovision__search_emails,mcp__agentprovision__send_email"
+        assert "mcp_agentprovision_search_emails" not in out.split(",")
+
+    def test_format_allowed_tools_gemini_platform(self):
+        # Gemini CLI uses single-underscore MCP tool names (verified
+        # from production logs 2026-04-25, see cli_session_manager.py
+        # generate_cli_instructions). Formatter must emit ONLY the
+        # single-underscore shape — emitting the double-underscore
+        # shape on Gemini leaks no-op entries and previously caused
+        # Higgsfield tools to be silently filtered out (#572 BLOCKER).
+        from app.services.tool_groups import format_allowed_tools
+        out = format_allowed_tools(
+            ["search_emails", "send_email"], cli_platform="gemini_cli"
+        )
+        parts = out.split(",")
+        assert "mcp_agentprovision_search_emails" in parts
+        assert "mcp_agentprovision_send_email" in parts
+        # No double-underscore entries on the Gemini path.
+        assert not any(p.startswith("mcp__agentprovision__") for p in parts)
+
+    def test_format_allowed_tools_other_cli_uses_claude_shape(self):
+        # Codex, Copilot, qwen-code, opencode all observe the Claude
+        # Code MCP registration shape (their registries derive from
+        # the Claude Code reference impl).
+        from app.services.tool_groups import format_allowed_tools
+        for plat in ("codex", "copilot_cli", "qwen_code", "opencode"):
+            out = format_allowed_tools(["send_email"], cli_platform=plat)
+            assert out == "mcp__agentprovision__send_email", plat
+
+    def test_format_allowed_tools_higgsfield_wildcard(self):
+        # Higgsfield connector tools live behind `mcp__higgsfield__*`,
+        # not `mcp__agentprovision__*`. The formatter must collapse all
+        # higgsfield_* names to the wildcard so the CLI allow-list
+        # actually matches the per-tenant MCP connector's tools.
+        from app.services.tool_groups import format_allowed_tools
+        out = format_allowed_tools(
+            ["send_email", "higgsfield_soul", "higgsfield_flux"],
+            cli_platform="claude_code",
+        )
+        parts = out.split(",")
+        assert "mcp__agentprovision__send_email" in parts
+        assert "mcp__higgsfield__*" in parts
+        # No `mcp__agentprovision__higgsfield_*` entries leak through.
+        assert not any("agentprovision__higgsfield" in p for p in parts)
+
+    def test_format_allowed_tools_higgsfield_gemini(self):
+        # Gemini-routed: higgsfield wildcard uses the single-underscore
+        # shape so Gemini's MCP registrar can match it.
+        from app.services.tool_groups import format_allowed_tools
+        out = format_allowed_tools(
+            ["higgsfield_soul", "higgsfield_seedance"],
+            cli_platform="gemini_cli",
+        )
+        assert out == "mcp_higgsfield_*"
+
+    def test_format_allowed_tools_higgsfield_only(self):
+        from app.services.tool_groups import format_allowed_tools
+        out = format_allowed_tools(
+            ["higgsfield_soul", "higgsfield_seedance"],
+            cli_platform="claude_code",
+        )
+        assert out == "mcp__higgsfield__*"
 
 
 # ── app/services/scoring_rubrics ────────────────────────────────────────────

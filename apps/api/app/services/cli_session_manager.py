@@ -1237,7 +1237,16 @@ def _run_agent_session_legacy(
 
             model_slug = TIER_MODEL_MAP.get(agent_tier, {}).get(platform, "")
             tool_names = resolve_tool_names(agent_tool_groups)
-            allowed_tools_str = format_allowed_tools(tool_names) if tool_names else ""
+            # Pass the target CLI platform so the formatter emits the
+            # correct MCP namespace shape (Gemini uses single underscores,
+            # everything else uses double underscores). Without this,
+            # Gemini-routed turns silently filtered tools matched only by
+            # `mcp__*` shape — including Higgsfield (#572 BLOCKER fix).
+            allowed_tools_str = (
+                format_allowed_tools(tool_names, cli_platform=platform)
+                if tool_names
+                else ""
+            )
 
             chat_session_id_for_stream = str(
                 (db_session_memory or {}).get("chat_session_id", "") or ""
