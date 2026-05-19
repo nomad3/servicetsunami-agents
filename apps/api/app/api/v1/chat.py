@@ -739,6 +739,16 @@ def stream_chat_job_events(
     finally:
         _pf_db.close()
 
+    def _serialize_event(payload: dict) -> str:
+        """Single source of truth for SSE frame shape.
+
+        All four event types (event / terminal / timeout / truncated
+        preamble) ship through this so future schema drift is one
+        diff, not four. The trailing ``\n\n`` is the SSE record
+        separator.
+        """
+        return f"data: {_json.dumps(payload)}\n\n"
+
     def _gen():
         last_seq = int(from_seq)
         idle_iters = 0
@@ -749,26 +759,48 @@ def stream_chat_job_events(
         max_iters = 600
         sse_db = SessionLocal()
         try:
+            # Pre-flight preamble: if the very first read_events would
+            # truncate (events buffered up == limit), tell the client
+            # so it can immediately page via from_seq=<last_seq>.
+            # (NIT #12 from review — cheap surface, no extra round trip.)
+            initial_events = chat_jobs_service.read_events(
+                sse_db, job_id=job_id, from_seq=last_seq
+            )
+            if len(initial_events) >= 2000:
+                yield _serialize_event({"type": "truncated", "from_seq": last_seq})
+
+            # Emit the pre-fetched batch via the normal event path so
+            # we don't double-read.
+            pending_initial = initial_events
+
             for _ in range(max_iters):
-                events = chat_jobs_service.read_events(
+                events = pending_initial if pending_initial else chat_jobs_service.read_events(
                     sse_db, job_id=job_id, from_seq=last_seq
                 )
+                pending_initial = None
                 if events:
                     idle_iters = 0
                     for ev in events:
                         last_seq = ev["seq"]
-                        yield (
-                            f"data: {_json.dumps({'type': 'event', 'seq': ev['seq'], 'kind': ev['kind'], 'payload': ev['payload']})}\n\n"
-                        )
+                        yield _serialize_event({
+                            "type": "event",
+                            "seq": ev["seq"],
+                            "kind": ev["kind"],
+                            "payload": ev["payload"],
+                        })
 
                 # After draining new events, check terminal status.
                 job_now = chat_jobs_service.get_job(
                     sse_db, job_id=job_id, tenant_id=tenant_id
                 )
                 if job_now and job_now["status"] in chat_jobs_service.TERMINAL_STATUSES:
-                    yield (
-                        f"data: {_json.dumps({'type': 'terminal', 'status': job_now['status'], 'result_message_id': job_now.get('result_message_id'), 'error': job_now.get('error'), 'last_seq': last_seq})}\n\n"
-                    )
+                    yield _serialize_event({
+                        "type": "terminal",
+                        "status": job_now["status"],
+                        "result_message_id": job_now.get("result_message_id"),
+                        "error": job_now.get("error"),
+                        "last_seq": last_seq,
+                    })
                     return
 
                 # No new events this cycle — heartbeat keeps CF awake.
@@ -777,6 +809,12 @@ def stream_chat_job_events(
                     yield ": heartbeat\n\n"
 
                 _time.sleep(1.0)
+
+            # max_iters exhausted: tell the client to reconnect with
+            # ?from_seq=<last_seq>. Without this sentinel a polling
+            # caller couldn't tell "server says reconnect" from "TCP
+            # died" (IMPORTANT #3).
+            yield _serialize_event({"type": "timeout", "last_seq": last_seq})
         finally:
             sse_db.close()
 
