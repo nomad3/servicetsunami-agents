@@ -17,16 +17,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-get update && apt-get install -y gh && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install CLI providers.
+# ── npm CLI providers ──────────────────────────────────────────────────
 #
-# Phase B shrink plan (2026-05-18): every CLI is pinned to an exact
-# version so the BuildKit cache doesn't invalidate on an upstream
-# release of any one of them. claude-code, codex, qwen-code already
-# had stable pins; gemini-cli, opencode-ai, copilot are pinned here
-# for the first time (latest stable as of 2026-05-18, captured via
-# ``npm view <pkg> version``). Bump deliberately, not by accident on
-# image rebuild.
+# Phase B shrink plan (2026-05-18): every CLI is pinned (see prior
+# commit) AND lands in its OWN ``RUN`` layer so an upstream release of
+# one doesn't bust the BuildKit cache for the other five. Layer
+# overhead is ~50 MB × N but the cache-hit win on partial rebuilds
+# (90% of code-worker rebuilds don't touch any of these) is worth it.
 #
+# Order: least-volatile → most-volatile to maximise cache reuse.
+#
+# Kimi K2 (Moonshot AI) is intentionally absent from this image: there
+# is no npm package for it, and the executor in
+# ``cli_executors/kimi.py`` talks to Moonshot's OpenAI-compatible HTTP
+# endpoint directly via httpx. Do not add a Kimi npm install here.
+
+# claude-code — Anthropic's official CLI. Most stable surface; bumped
+# rarely, kept in its own layer so a cache hit here is the common case.
+ARG CLAUDE_CODE_VERSION=2.1.144
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+
 # @openai/codex is pinned to 0.130.0 (2026-05-16) because the rmcp client
 # transport contract is version-sensitive — see
 # ``docs/plans/2026-05-16-codex-mcp-transport-mismatch-research.md``.
@@ -35,24 +45,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # refactor that surface (rename the flag, drop streamable-HTTP, etc.) and
 # silently break the streamable-HTTP mount in mcp-tools; pinning makes the
 # break a controlled bump-and-test rather than a surprise on image rebuild.
-#
-# Kimi K2 (Moonshot AI) is intentionally absent from this image: there
-# is no npm package for it, and the executor in
-# ``cli_executors/kimi.py`` talks to Moonshot's OpenAI-compatible HTTP
-# endpoint directly via httpx. Do not add a Kimi npm install here.
-ARG CLAUDE_CODE_VERSION=2.1.144
 ARG CODEX_VERSION=0.130.0
-ARG GEMINI_CLI_VERSION=0.42.0
+RUN npm install -g @openai/codex@${CODEX_VERSION}
+
+# qwen-code — Tongyi Qwen-Coder BYOK; pinned because Wave 1b banner/
+# stdout shape is parser-sensitive (same reasoning as aider below).
 ARG QWEN_CODE_VERSION=0.15.11
+RUN npm install -g @qwen-code/qwen-code@${QWEN_CODE_VERSION}
+
+# gemini-cli — Google's CLI. Newly pinned 2026-05-18 (was floating
+# ``latest`` → busted cache on every upstream release).
+ARG GEMINI_CLI_VERSION=0.42.0
+RUN npm install -g @google/gemini-cli@${GEMINI_CLI_VERSION}
+
+# opencode-ai — local Gemma 4 floor. Newly pinned 2026-05-18.
 ARG OPENCODE_VERSION=1.15.5
+RUN npm install -g opencode-ai@${OPENCODE_VERSION}
+
+# GitHub Copilot CLI. Newly pinned 2026-05-18.
 ARG COPILOT_VERSION=1.0.49
-RUN npm install -g \
-        @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
-        @openai/codex@${CODEX_VERSION} \
-        @google/gemini-cli@${GEMINI_CLI_VERSION} \
-        @qwen-code/qwen-code@${QWEN_CODE_VERSION} \
-        opencode-ai@${OPENCODE_VERSION} \
-        @github/copilot@${COPILOT_VERSION}
+RUN npm install -g @github/copilot@${COPILOT_VERSION}
 
 # Aider (Wave 2c) ships on PyPI as ``aider-chat``, NOT npm — it's a
 # Python CLI binary published by paul-gauthier@github (Apache 2.0). The
