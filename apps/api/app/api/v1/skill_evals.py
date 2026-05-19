@@ -301,6 +301,17 @@ def run_iteration(
             platform=platform,
             model=model,
         )
+    except eval_runner_module.TenantWorkspaceQuotaExceeded as exc:
+        # I3 — refuse dispatch when the tenant is at quota; same 413
+        # contract the workspace clone endpoint uses.
+        logger.info(
+            "run_iteration: quota exceeded skill=%s tenant=%s used=%d budget=%d",
+            skill_id, current_user.tenant_id, exc.used, exc.budget,
+        )
+        raise HTTPException(
+            status_code=413,
+            detail="Tenant workspace quota exceeded",
+        )
     except ValueError as exc:
         # "no evals defined" or "iteration < 1" — caller-fixable.
         logger.info(

@@ -100,6 +100,25 @@ _VALID_STATUSES = ("queued", "running", "ok", "error", "timeout")
 TERMINAL_STATUSES = ("ok", "error", "timeout")
 
 
+class TenantWorkspaceQuotaExceeded(Exception):
+    """Raised by ``dispatch_iteration`` when the tenant is at or over the
+    workspace quota enforced by ``apps/api/app/api/v1/workspace.py``.
+
+    Carries the (used_bytes, budget_bytes) so the API layer can return a
+    descriptive 413 without re-querying. Same cap as the clone endpoint
+    (``_TENANT_WORKSPACE_BUDGET``, default 1 GiB, env-tunable via
+    ``TENANT_WORKSPACE_BUDGET_BYTES``).
+    """
+
+    def __init__(self, used: int, budget: int) -> None:
+        super().__init__(
+            f"Tenant workspace quota exceeded: used={used} bytes, "
+            f"budget={budget} bytes"
+        )
+        self.used = used
+        self.budget = budget
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Workspace layout helpers
 # ──────────────────────────────────────────────────────────────────────────
@@ -744,6 +763,31 @@ def dispatch_iteration(
             "eval_runner: skill body empty for slug=%s tenant=%s — "
             "with_skill leg will run with no instructions injected",
             skill_slug, tenant_id,
+        )
+
+    # I3 — eval artifacts count against the per-tenant workspace quota.
+    # Same 1 GiB cap and env knob as the git-clone endpoint; refuse
+    # dispatch BEFORE inserting any queued rows so an over-quota tenant
+    # doesn't accumulate orphan run rows. The check is best-effort: a
+    # transient OSError during the walk under-counts, which is the
+    # safer side to err on for an evaluator-internal feature.
+    try:
+        from app.api.v1.workspace import (
+            _TENANT_WORKSPACE_BUDGET,
+            _tenant_workspace_bytes,
+        )
+        used_bytes = _tenant_workspace_bytes(str(tenant_id))
+        if used_bytes >= _TENANT_WORKSPACE_BUDGET:
+            raise TenantWorkspaceQuotaExceeded(
+                used=used_bytes, budget=_TENANT_WORKSPACE_BUDGET
+            )
+    except TenantWorkspaceQuotaExceeded:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        # Quota module unavailable (test harness, alternate runtime) —
+        # log and continue. We'd rather over-allow than 503 every run.
+        logger.warning(
+            "eval_runner: workspace quota check skipped: %s", exc
         )
 
     iteration_run_id = uuid.uuid4()

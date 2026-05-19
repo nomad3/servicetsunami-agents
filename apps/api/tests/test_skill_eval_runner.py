@@ -631,3 +631,70 @@ def test_dispatch_iteration_with_traversal_name_stays_in_tenant(tmp_path):
         )
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# I3 — workspace quota precheck
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_dispatch_iteration_raises_when_over_quota(tmp_path):
+    """I3 — tenant at workspace quota → ``TenantWorkspaceQuotaExceeded``
+    before any rows are inserted.
+    """
+    tenant_id = uuid.uuid4()
+    skill_id = uuid.uuid4()
+    eval1 = uuid.uuid4()
+
+    db = _StubDB(
+        skill_tenant_id=tenant_id,
+        evals=[{"id": str(eval1), "prompt": "p", "expectations": []}],
+    )
+
+    with patch(
+        "app.api.v1.workspace._tenant_workspace_bytes",
+        return_value=2_000_000_000,  # 2 GB — over the 1 GiB cap
+    ), patch(
+        "app.api.v1.workspace._TENANT_WORKSPACE_BUDGET",
+        1_073_741_824,
+    ), patch(
+        "app.services.skill_creator.eval_runner._load_skill_body",
+        return_value="",
+    ):
+        with pytest.raises(eval_runner.TenantWorkspaceQuotaExceeded):
+            eval_runner.dispatch_iteration(
+                db,
+                skill_id=skill_id,
+                iteration=1,
+                workspaces_root=str(tmp_path),
+                _runner=lambda **kw: None,
+            )
+
+
+def test_run_endpoint_over_quota_returns_413():
+    """I3 — POST /run returns 413 when tenant is over workspace quota."""
+    tenant_id = uuid.uuid4()
+    skill_id = uuid.uuid4()
+    eval1 = uuid.uuid4()
+
+    db = _StubDB(
+        skill_tenant_id=tenant_id,
+        evals=[{"id": str(eval1), "prompt": "p", "expectations": []}],
+    )
+    user = _user(tenant_id=tenant_id)
+    client = _build_client(user, db)
+
+    with patch.object(
+        skill_evals_module.eval_runner_module,
+        "dispatch_iteration",
+        side_effect=eval_runner.TenantWorkspaceQuotaExceeded(
+            used=2_000_000_000, budget=1_073_741_824
+        ),
+    ):
+        resp = client.post(
+            f"/api/v1/skills/{skill_id}/evals/run",
+            json={"iteration": 1},
+        )
+
+    assert resp.status_code == 413, resp.text
+    assert "quota" in resp.json()["detail"].lower()
+
+
