@@ -121,7 +121,7 @@ INTENT_DEFINITIONS = [
     # The tools live behind the per-tenant Higgsfield MCP connector
     # registered by `apps/api/app/services/higgsfield_mcp.py` after the
     # OAuth dance; agents see them once their tool_groups include
-    # "higgsfield" (Luna gets it in migration 137).
+    # "higgsfield" (Luna gets it in migration 138).
     {"name": "generate image or video or marketing creative or product photoshoot", "tier": "full", "tools": ["higgsfield"], "mutation": True},
 ]
 

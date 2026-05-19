@@ -1,7 +1,7 @@
 # Higgsfield end-to-end validation — smoke test plan
 **Date:** 2026-05-18
 **Branch:** `feat/higgsfield-end-to-end-glue`
-**Related PRs:** #550 (OAuth flow), #569 (code-worker CLI install), this PR (glue + migration 137 + intent)
+**Related PRs:** #550 (OAuth flow), #569 (code-worker CLI install), this PR (glue + migration 138 + intent)
 
 ## Scope
 
@@ -34,7 +34,7 @@ chat ingress (apps/api/app/api/v1/chat.py:151 post_message)
 | 1 | API is up | `curl -fsS http://localhost:8000/health` returns 200 |
 | 2 | code-worker has the higgsfield CLI binary | `docker compose exec code-worker which higgsfield` returns a path (post #569 merge) |
 | 3 | OAuth env vars set | `docker compose exec api env | grep HIGGSFIELD_OAUTH` shows `_CLIENT_ID`, `_CLIENT_SECRET`, `_REDIRECT_URI` |
-| 4 | Migration 137 applied | `docker compose exec db psql -U postgres -d agentprovision -c "SELECT 1 FROM _migrations WHERE filename='137_luna_higgsfield_tool_group.sql'"` returns 1 row |
+| 4 | Migration 138 applied | `docker compose exec db psql -U postgres -d agentprovision -c "SELECT 1 FROM _migrations WHERE filename='138_luna_higgsfield_tool_group.sql'"` returns 1 row |
 | 5 | Luna has `higgsfield` group | `... -c "SELECT name, tool_groups FROM agents WHERE name ILIKE 'luna%' LIMIT 3"` shows `"higgsfield"` in the array |
 | 6 | User logged in to the web app | `localStorage.access_token` is fresh (≤30 min) |
 
@@ -84,7 +84,7 @@ chat ingress (apps/api/app/api/v1/chat.py:151 post_message)
 | Symptom | Likely cause | Where to look |
 | ------- | ------------ | ------------- |
 | `POST /higgsfield-auth/start` → 503 | OAuth env vars unset on the api container | `docker compose logs api | grep HIGGSFIELD_OAUTH` |
-| Card connects but tool never fires | Luna's tool_groups missing `higgsfield` (migration 137 not applied) | run check #4 above |
+| Card connects but tool never fires | Luna's tool_groups missing `higgsfield` (migration 138 not applied) | run check #4 above |
 | Tool name visible to CLI but call returns 401 | Stored bearer token expired; no refresh worker yet | `mcp_call_logs.error_message`; manually disconnect + reconnect Higgsfield |
 | Tool fires but returns `{"error": ...}` from Higgsfield | credits exhausted (70 → 0) or rate-limit | hit Higgsfield dashboard, or `higgsfield account status` from the host CLI |
 | Image URL renders broken | URL is signed + expired before the user clicked; check `expires_in` query arg | curl the URL and look for 403 |
@@ -100,6 +100,6 @@ chat ingress (apps/api/app/api/v1/chat.py:151 post_message)
 
 ## Rollback
 
-* If migration 137 misbehaves: `UPDATE agents SET tool_groups = tool_groups - 'higgsfield' WHERE name ILIKE 'luna%'; DELETE FROM _migrations WHERE filename='137_luna_higgsfield_tool_group.sql';`
+* If migration 138 misbehaves: `UPDATE agents SET tool_groups = tool_groups - 'higgsfield' WHERE name ILIKE 'luna%'; DELETE FROM _migrations WHERE filename='138_luna_higgsfield_tool_group.sql';`
 * If `format_allowed_tools` fix regresses unrelated allow-list: revert commit `74898682`.
 * If the intent for "generate image / video" steers chat traffic incorrectly: drop the new dict entry in `INTENT_DEFINITIONS` (last entry, embedding_service.py).
