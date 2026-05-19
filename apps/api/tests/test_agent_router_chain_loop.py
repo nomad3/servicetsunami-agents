@@ -361,14 +361,16 @@ def test_routing_summary_no_leak_invariant_end_to_end(monkeypatch):
 
 
 def test_paid_cli_fast_pin_set_includes_oss_lane_b_clis():
-    """Wave 1c review I1 + Wave 2a/b/c/d: the explicit-platform fast-pin
-    set must include every paid / OAuth-gated CLI surface — original
-    four (claude_code, codex, gemini_cli, copilot_cli) plus the OSS
-    Lane B coding CLIs (qwen_code, kimi_k2, deepseek, glm), Wave 2c's
-    Aider, and Wave 2d's BYOK multi-provider CLI (goose). Missing
-    entries cause a paid / integration-wired tenant to silently
-    downgrade to local Gemma 4 on a transient resolver hiccup — the
-    regression PR #245 review C5 closed for the original four CLIs.
+    """Wave 1c review I1 + Wave 2a/b/c/d + Task #278: the explicit-
+    platform fast-pin set must include every paid / OAuth-gated CLI
+    surface — original four (claude_code, codex, gemini_cli,
+    copilot_cli) plus the OSS Lane B coding CLIs (qwen_code, kimi_k2,
+    deepseek, glm), Wave 2c's Aider, Wave 2d's BYOK multi-provider
+    CLI (goose), and Phase B (2026-05-18) Higgsfield (image / video
+    generation, OAuth-gated). Missing entries cause a paid /
+    integration-wired tenant to silently downgrade to local Gemma 4
+    on a transient resolver hiccup — the regression PR #245 review
+    C5 closed for the original four CLIs.
 
     Pinning the set membership here means a future edit that drops one
     of these names has to do so deliberately."""
@@ -383,5 +385,6 @@ def test_paid_cli_fast_pin_set_includes_oss_lane_b_clis():
         "glm",
         "aider",
         "goose",
+        "higgsfield",
     }
     assert agent_router._PAID_CLI_FAST_PIN_SET == expected

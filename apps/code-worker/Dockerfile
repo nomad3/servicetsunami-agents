@@ -1,11 +1,17 @@
 FROM python:3.11-slim
 
-# Install system deps: git, gh CLI, Node.js 22, bzip2 + libgomp1
+# Install system deps: git, gh CLI, Node.js 22, libgomp1
 # (Goose binary links libgomp.so.1 dynamically; slim image lacks it and
 # the binary fails with "error while loading shared libraries" → exit
 # 127 at `goose --version` → image build aborts).
+#
+# Phase B (2026-05-18) — dropped ``bzip2`` (PR #561 switched the goose
+# tarball to ``.tar.gz``; gzip is in the base image, so bzip2 is dead
+# weight) and ``socat`` (no call sites in apps/code-worker/ or
+# packages/cli_orchestrator/; legacy from an earlier port-forwarding
+# experiment that never shipped).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl gnupg ca-certificates socat bzip2 libgomp1 && \
+    git curl gnupg ca-certificates libgomp1 && \
     # Node.js 22
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
@@ -17,8 +23,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-get update && apt-get install -y gh && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install CLI providers.
+# ── npm CLI providers ──────────────────────────────────────────────────
 #
+# Phase B shrink plan (2026-05-18): every CLI is pinned (see prior
+# commit) AND lands in its OWN ``RUN`` layer so an upstream release of
+# one doesn't bust the BuildKit cache for the other five. Layer
+# overhead is ~50 MB × N but the cache-hit win on partial rebuilds
+# (90% of code-worker rebuilds don't touch any of these) is worth it.
+#
+# Order: least-volatile → most-volatile to maximise cache reuse.
+#
+# Kimi K2 (Moonshot AI) is intentionally absent from this image: there
+# is no npm package for it, and the executor in
+# ``cli_executors/kimi.py`` talks to Moonshot's OpenAI-compatible HTTP
+# endpoint directly via httpx. Do not add a Kimi npm install here.
+
+# Layer ordering principle: least-volatile first, most-volatile LAST.
+# Each layer's cache only invalidates the layers AFTER it. So when
+# claude-code ships its weekly release (most volatile), only the final
+# layer rebuilds. When copilot/qwen-code bumps (rare), everything
+# downstream rebuilds — but that's once every few months. Reordered
+# 2026-05-18 after PR #569 review found the original order forced a
+# 6-layer rebuild on every claude-code bump (~weekly).
+
+# GitHub Copilot CLI — pinned, bumped rarely. Most stable surface.
+ARG COPILOT_VERSION=1.0.49
+RUN npm install -g @github/copilot@${COPILOT_VERSION}
+
+# qwen-code — Tongyi Qwen-Coder BYOK; pinned because Wave 1b banner/
+# stdout shape is parser-sensitive (same reasoning as aider below).
+ARG QWEN_CODE_VERSION=0.15.11
+RUN npm install -g @qwen-code/qwen-code@${QWEN_CODE_VERSION}
+
 # @openai/codex is pinned to 0.130.0 (2026-05-16) because the rmcp client
 # transport contract is version-sensitive — see
 # ``docs/plans/2026-05-16-codex-mcp-transport-mismatch-research.md``.
@@ -28,17 +64,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # silently break the streamable-HTTP mount in mcp-tools; pinning makes the
 # break a controlled bump-and-test rather than a surprise on image rebuild.
 #
-# Kimi K2 (Moonshot AI) is intentionally absent from this image: there
-# is no npm package for it, and the executor in
-# ``cli_executors/kimi.py`` talks to Moonshot's OpenAI-compatible HTTP
-# endpoint directly via httpx. Do not add a Kimi npm install here.
-RUN npm install -g \
-        @anthropic-ai/claude-code \
-        @openai/codex@0.130.0 \
-        @google/gemini-cli \
-        @qwen-code/qwen-code@0.15.11 \
-        opencode-ai \
-        @github/copilot
+# TODO(codex 0.131.0 transport-verify): 0.131.0 is on npm; re-verify the
+# rmcp client + StreamableHttp mount against the new release before
+# bumping. Hold at 0.130.0 until that smoke-test passes.
+ARG CODEX_VERSION=0.130.0
+RUN npm install -g @openai/codex@${CODEX_VERSION}
+
+# opencode-ai — local Gemma 4 floor. Newly pinned 2026-05-18.
+ARG OPENCODE_VERSION=1.15.5
+RUN npm install -g opencode-ai@${OPENCODE_VERSION}
+
+# gemini-cli — Google's CLI. Newly pinned 2026-05-18 (was floating
+# ``latest`` → busted cache on every upstream release). ~Monthly bumps.
+ARG GEMINI_CLI_VERSION=0.42.0
+RUN npm install -g @google/gemini-cli@${GEMINI_CLI_VERSION}
+
+# Higgsfield CLI (Task #278, 2026-05-18). Image / video generation
+# surface; OAuth + MCP wiring already shipped in PR #550. The binary
+# lands at /usr/local/bin/higgsfield so the agent can ``higgsfield``-
+# invoke from chat. Pinned to latest stable as of 2026-05-18. Newer
+# package than the others → expect occasional churn while their API
+# stabilises.
+ARG HIGGSFIELD_CLI_VERSION=0.1.40
+RUN npm install -g @higgsfield/cli@${HIGGSFIELD_CLI_VERSION}
+
+# claude-code — Anthropic's official CLI. WEEKLY release cadence, so
+# this layer churns the most → placed LAST so its frequent bumps don't
+# invalidate the cache for any of the other CLIs above.
+ARG CLAUDE_CODE_VERSION=2.1.144
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Aider (Wave 2c) ships on PyPI as ``aider-chat``, NOT npm — it's a
 # Python CLI binary published by paul-gauthier@github (Apache 2.0). The
@@ -78,12 +132,14 @@ ARG GOOSE_VERSION=v1.34.1
 # both arches.
 ARG TARGETARCH
 # The python:3.11-slim base ships GNU tar with gzip baked in but does
-# NOT include `bzip2`, so `tar -xjf` (= -j = bzip2) silently aborts
-# with "Cannot exec: No such file or directory" → goose binary never
-# lands at /usr/local/bin/goose → `goose --version` exits 127 →
-# build fails. We grab the `.tar.gz` release variant instead (goose
+# NOT include `bzip2`. We grab the `.tar.gz` release variant (goose
 # publishes both for every triple) so gzip in the base image is
-# enough; no extra apt package required.
+# enough; no extra apt package required. (PR #561 history: an earlier
+# Wave 2d attempt used `.tar.bz2` and `tar -xjf` silently aborted with
+# "Cannot exec: No such file or directory" → goose binary never
+# landed → `goose --version` exited 127 → build failed. The fix was
+# switching to `.tar.gz`; the now-redundant bzip2 apt install was
+# dropped in Phase B (2026-05-18) of the shrink plan.)
 RUN case "${TARGETARCH}" in \
         amd64) GOOSE_TRIPLE="x86_64-unknown-linux-gnu" ;; \
         arm64) GOOSE_TRIPLE="aarch64-unknown-linux-gnu" ;; \

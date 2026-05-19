@@ -120,6 +120,7 @@ INTEGRATION_DISPLAY: Dict[str, Dict[str, str]] = {
     "brightlocal": {"name": "BrightLocal", "icon": "FaSearch"},
     "scribblevet": {"name": "ScribbleVet", "icon": "FaNotesMedical"},
     "covetrus_pulse": {"name": "Covetrus Pulse", "icon": "FaHeartbeat"},
+    "higgsfield": {"name": "Higgsfield", "icon": "FaImage"},
 }
 
 

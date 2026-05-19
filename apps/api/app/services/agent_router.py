@@ -54,6 +54,15 @@ _PAID_CLI_FAST_PIN_SET = frozenset({
     "glm",
     "aider",
     "goose",
+    # Higgsfield (Task #278, 2026-05-18) is paid-only (OAuth-gated image
+    # / video generation). It is NOT in ``_DEFAULT_PRIORITY`` because it
+    # is not a coding CLI — generation requests dispatch through the
+    # per-tenant Higgsfield MCP connector wired in
+    # ``apps/api/app/services/higgsfield_mcp.py``, not through the CLI
+    # chain. The entry here is defensive: if the resolver ever surfaces
+    # higgsfield as a candidate platform on a future routing path, the
+    # tenant must not get silently downgraded to the local-Gemma floor.
+    "higgsfield",
 })
 
 
