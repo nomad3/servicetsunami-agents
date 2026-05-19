@@ -527,8 +527,34 @@ def post_message_start(
         from app.db.session import SessionLocal
 
         wdb = SessionLocal()
+
+        # Cancel-propagation contract (BLOCKER #2 from review):
+        # cancel_job() only flips `cancel_requested`. The worker MUST
+        # poll for that flag between phases and self-flip via
+        # observe_cancel(). Granularity is "between each side-effect"
+        # not "inside post_user_message" — post_user_message is a
+        # single synchronous call we don't have hooks into. Phases
+        # gated below:
+        #   (i)   before start_job's lifecycle.started event
+        #   (ii)  before post_user_message
+        #   (iii) before the final chunk event
+        #   (iv)  before finish_job
+        def _bail_if_cancelled() -> bool:
+            if chat_jobs_service.is_cancel_requested(wdb, job_id=job_uuid):
+                chat_jobs_service.append_event(
+                    wdb,
+                    job_id=job_uuid,
+                    kind="lifecycle",
+                    payload={"event": "cancelled"},
+                )
+                chat_jobs_service.observe_cancel(wdb, job_id=job_uuid)
+                return True
+            return False
+
         try:
             chat_jobs_service.start_job(wdb, job_id=job_uuid)
+            if _bail_if_cancelled():
+                return
             chat_jobs_service.append_event(
                 wdb,
                 job_id=job_uuid,
@@ -553,6 +579,9 @@ def post_message_start(
                 )
                 return
 
+            if _bail_if_cancelled():
+                return
+
             t0 = _time.perf_counter()
             user_msg, assistant_msg = chat_service.post_user_message(
                 wdb,
@@ -560,6 +589,9 @@ def post_message_start(
                 user_id=user_id,
                 content=content,
             )
+
+            if _bail_if_cancelled():
+                return
 
             # Emit a single `chunk` event with the full text. The
             # client renders it the same way it would render a stream
@@ -588,6 +620,11 @@ def post_message_start(
                     "elapsed_s": _time.perf_counter() - t0,
                 },
             )
+            if _bail_if_cancelled():
+                return
+            # finish_job is gated on status NOT IN terminal; even if the
+            # cancel beat us here, observe_cancel(running -> cancelled)
+            # makes this UPDATE a no-op. Race-free by SQL constraint.
             chat_jobs_service.finish_job(
                 wdb,
                 job_id=job_uuid,

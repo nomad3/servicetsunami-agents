@@ -153,6 +153,14 @@ class _StubDB:
                 return _StubResult(rowcount=1)
             return _StubResult(rowcount=0)
 
+        # ── cheap cancel_requested poll (BLOCKER #2 worker propagation)
+        if "SELECT cancel_requested FROM chat_jobs" in sql:
+            jid = params["id"]
+            job = self.jobs.get(jid)
+            if not job:
+                return _StubResult()
+            return _StubResult([(job["cancel_requested"],)])
+
         # ── chat_jobs reads
         if "FROM chat_jobs" in sql and "WHERE id = :id" in sql:
             jid = params["id"]
@@ -580,3 +588,93 @@ def test_worker_does_not_capture_request_scoped_user(monkeypatch):
     lookups = captured_args.get("session_lookups", [])
     assert lookups, "worker never looked up the session"
     assert lookups[-1]["tenant_id"] == expected_tenant
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Worker safety: cancel propagation (BLOCKER #2)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_worker_observes_cancel_midflight_and_status_becomes_cancelled(monkeypatch):
+    """BLOCKER #2: a mid-flight cancel must land before finish_job.
+
+    Setup: start a job, fire `cancel_chat_job` while
+    `chat_service.post_user_message` is still sleeping, then unblock the
+    sleep. The worker must observe cancel_requested between phases and
+    flip the row to 'cancelled' — not 'done'.
+    """
+    import threading as _threading
+
+    user = _user()
+    db = _StubDB()
+
+    from app.services import chat as chat_service_module
+
+    class _Sess:
+        def __init__(self):
+            self.id = uuid.uuid4()
+
+    monkeypatch.setattr(
+        chat_service_module, "get_session",
+        lambda *a, **kw: _Sess(),
+    )
+
+    from app.db import session as _session_module
+    monkeypatch.setattr(_session_module, "SessionLocal", lambda: db)
+
+    # post_user_message blocks until the test fires the cancel. After
+    # it returns, the worker's next is_cancel_requested poll must
+    # observe the flag and flip to cancelled, NOT call finish_job.
+    cancel_landed = _threading.Event()
+    pum_returned = _threading.Event()
+
+    def _slow_post_user_message(_db, *, session, user_id, content, **kwargs):
+        # Wait for the cancel endpoint to land its UPDATE.
+        assert cancel_landed.wait(timeout=2.0), "cancel never fired"
+        u = MagicMock()
+        u.id = uuid.uuid4()
+        u.content = content
+        a = MagicMock()
+        a.id = uuid.uuid4()
+        a.content = "would-be response"
+        pum_returned.set()
+        return (u, a)
+
+    monkeypatch.setattr(
+        chat_service_module, "post_user_message", _slow_post_user_message
+    )
+
+    client = _build_client(user, db)
+    r = client.post(
+        f"/api/v1/chat/sessions/{uuid.uuid4()}/messages/start",
+        json={"content": "hello-cancel"},
+    )
+    assert r.status_code == 202
+    job_id = r.json()["job_id"]
+
+    # Fire cancel while the worker is parked inside post_user_message.
+    rc = client.post(f"/api/v1/chat/jobs/{job_id}/cancel")
+    assert rc.status_code == 202
+    cancel_landed.set()
+
+    # Wait for post_user_message to return, then give the worker a
+    # moment to run its post-call cancel check + observe_cancel.
+    assert pum_returned.wait(timeout=2.0), "post_user_message never returned"
+
+    # Poll up to ~2s for the worker to settle on terminal status.
+    import time as _t
+    deadline = _t.monotonic() + 2.0
+    final = None
+    while _t.monotonic() < deadline:
+        snap = chat_jobs_service.get_job(
+            db, job_id=uuid.UUID(job_id), tenant_id=user.tenant_id
+        )
+        if snap and snap["status"] in chat_jobs_service.TERMINAL_STATUSES:
+            final = snap
+            break
+        _t.sleep(0.02)
+
+    assert final is not None, "worker never reached terminal status"
+    assert final["status"] == "cancelled"
+    # And finish_job's row was a no-op — no result_message_id set.
+    assert final["result_message_id"] is None

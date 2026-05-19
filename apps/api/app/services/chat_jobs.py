@@ -239,6 +239,23 @@ def cancel_job(db: Session, *, job_id: uuid.UUID) -> bool:
     return res.rowcount > 0
 
 
+def is_cancel_requested(db: Session, *, job_id: uuid.UUID) -> bool:
+    """Cheap point-in-time read of ``cancel_requested``.
+
+    The worker polls this between phases (BLOCKER #2 from PR review):
+    cancel_job() only flips the flag, so without an explicit check the
+    worker keeps running past the user's cancel request and races
+    finish_job(done) vs observe_cancel(cancelled). Returning a plain
+    bool keeps the call cheap enough to invoke before every event
+    emission; the row read is indexed on the PK.
+    """
+    row = db.execute(
+        text("SELECT cancel_requested FROM chat_jobs WHERE id = :id"),
+        {"id": str(job_id)},
+    ).fetchone()
+    return bool(row[0]) if row else False
+
+
 def observe_cancel(db: Session, *, job_id: uuid.UUID) -> bool:
     """Worker calls this once it has acknowledged a cancel_requested
     flag: flips running -> cancelled. Separate helper so the worker
