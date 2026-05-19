@@ -33,6 +33,8 @@ from app.api.deps import get_current_user, get_db
 from app.models.user import User
 from app.services.skill_creator import GradingResult, grade
 from app.services.skill_creator import eval_runner as eval_runner_module
+from app.services.skill_creator import aggregate as aggregate_module
+from app.services.skill_creator import analyzer as analyzer_module
 from app.services.skill_creator.grader import GraderError
 
 logger = logging.getLogger(__name__)
@@ -380,3 +382,71 @@ def get_iteration_job(
         # avoid leaking which skill it belongs to.
         raise HTTPException(status_code=404, detail="Job not found")
     return snap
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3: aggregator + analyzer — GET /iterations/{N}/benchmark
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/{skill_id}/evals/iterations/{iteration}/benchmark",
+)
+def get_iteration_benchmark(
+    skill_id: uuid.UUID,
+    iteration: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Return the aggregate benchmark + analyzer notes for one iteration.
+
+    Reads every ``skill_eval_runs`` row for the (skill, iteration) plus
+    their 1:1 ``skill_eval_grading`` payload, partitions by the
+    ``with_skill`` boolean, and produces:
+
+        {
+            "benchmark": {<docs/skill-creator/schemas.md#benchmark.json>},
+            "notes":     [<analyzer string>, ...],
+        }
+
+    Tenant-scoping: foreign skill → 404 (not 403), matching the
+    PR #563 / #579 pattern. An iteration with zero runs also returns
+    404 — there's nothing to benchmark.
+    """
+    _verify_tenant_owns_skill(db, skill_id, current_user.tenant_id)
+    if iteration < 1:
+        raise HTTPException(status_code=400, detail="iteration must be >= 1")
+
+    try:
+        benchmark = aggregate_module.aggregate_for_skill(
+            db,
+            skill_id=skill_id,
+            iteration=iteration,
+        )
+    except aggregate_module.AggregateNotFound as exc:
+        # No runs for (skill, iteration) — 404, same shape as the rest
+        # of the v1 skill endpoints. Don't leak whether the skill or
+        # the iteration was the missing half.
+        logger.info(
+            "get_iteration_benchmark: not found skill=%s iter=%s tenant=%s: %s",
+            skill_id, iteration, current_user.tenant_id, exc,
+        )
+        raise HTTPException(status_code=404, detail="Benchmark not found")
+
+    # Analyzer is best-effort — a crash here must NOT 500 the endpoint.
+    # The benchmark is the load-bearing payload; notes are gravy.
+    try:
+        notes = analyzer_module.analyze(
+            db,
+            skill_id=skill_id,
+            iteration=iteration,
+            benchmark=benchmark,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "get_iteration_benchmark: analyzer raised skill=%s iter=%s: %s",
+            skill_id, iteration, exc,
+        )
+        notes = []
+
+    return {"benchmark": benchmark, "notes": notes}
