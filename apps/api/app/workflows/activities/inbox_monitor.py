@@ -455,7 +455,7 @@ async def extract_from_emails(tenant_id: str, emails: List[Dict], triaged_items:
     """Extract entities, relations, memories, and action triggers from important emails.
 
     Uses the SAME extraction pipeline as chat messages:
-    KnowledgeExtractionService.extract_from_content(content_type="plain_text", activity_source="gmail")
+    KnowledgeExtractionService.extract_from_content(content_type="email", activity_source="gmail")
     """
     if not triaged_items:
         return {"entities": 0, "relations": 0, "memories": 0, "triggers": 0}
@@ -493,7 +493,7 @@ async def extract_from_emails(tenant_id: str, emails: List[Dict], triaged_items:
                 db=db,
                 tenant_id=tid,
                 content=content,
-                content_type="plain_text",
+                content_type="email",
                 activity_source="gmail",
             )
 

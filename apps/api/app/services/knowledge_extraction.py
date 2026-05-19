@@ -39,7 +39,7 @@ from app.services.orchestration.entity_validator import EntityValidator, Validat
 logger = logging.getLogger(__name__)
 
 # Supported content types for extract_from_content()
-SUPPORTED_CONTENT_TYPES = {"chat_transcript", "html", "structured_json", "plain_text"}
+SUPPORTED_CONTENT_TYPES = {"chat_transcript", "html", "structured_json", "plain_text", "email"}
 
 # Maximum characters sent to the LLM to stay within context limits
 _MAX_CONTENT_CHARS = 12_000
@@ -239,6 +239,9 @@ class KnowledgeExtractionService:
 
             relations_created = self._persist_relations(db, tenant_id, relations_data)
             memories_created = self._persist_memories(db, tenant_id, memories_data)
+            triggers_persisted = self._persist_action_triggers_as_tasks(
+                db, tenant_id, triggers_data, source_agent_id, collection_task_id, activity_source
+            )
 
             # --- Activity logging ---
             for entity in created:
@@ -273,7 +276,7 @@ class KnowledgeExtractionService:
 
             logger.info(
                 "Extracted %d entities (%d new), %d relations (%d persisted), "
-                "%d memories (%d persisted), %d triggers from content_type=%s",
+                "%d memories (%d persisted), %d triggers (%d persisted) from content_type=%s",
                 len(entities_data),
                 len(created),
                 len(relations_data),
@@ -281,6 +284,7 @@ class KnowledgeExtractionService:
                 len(memories_data),
                 memories_created,
                 len(triggers_data),
+                triggers_persisted,
                 content_type,
             )
             return {
@@ -324,6 +328,10 @@ class KnowledgeExtractionService:
                 "Analyze the following text and extract key entities "
                 "(people, companies, products, concepts, locations) and facts."
             ),
+            "email": (
+                "Analyze the following email and extract key entities (people, companies, "
+                "products, locations), dates, deadlines, action items, and next steps."
+            ),
         }
 
         parts: List[str] = []
@@ -355,6 +363,7 @@ class KnowledgeExtractionService:
             "- Normalize entity names: use the most complete, proper form (e.g. 'Dr. Maria Garcia' not 'maria')\n"
             "- If the same entity appears multiple times with slight variations, use ONE canonical name\n"
             "- Assign the most specific category that fits (e.g. 'lead' for a sales prospect, 'contact' for a known person)\n"
+            "- For 'task' entities, include any identified deadlines or dates in the attributes.\n"
         )
 
         parts.append(
@@ -381,6 +390,7 @@ class KnowledgeExtractionService:
             "- Decisions made during the conversation\n"
             "- Personal context shared (timezone, role, team structure)\n"
             "- Feedback on agent behavior (liked/disliked something the agent did)\n"
+            "- Dates and deadlines mentioned that are relevant to the user's schedule.\n"
             "Do NOT include memories about external entities (those are captured as entity attributes).\n"
             "\nACTION TRIGGERS — if the user explicitly requests a reminder, follow-up, or scheduled action:\n"
             'Return as "action_triggers" array. Each object:\n'
@@ -774,6 +784,66 @@ class KnowledgeExtractionService:
         if created_count:
             db.commit()
         logger.info("Persisted %d agent memories", created_count)
+        return created_count
+
+
+    @staticmethod
+    def _persist_action_triggers_as_tasks(
+        db: Session,
+        tenant_id: uuid.UUID,
+        triggers_data: List[Dict[str, Any]],
+        source_agent_id: Optional[uuid.UUID],
+        collection_task_id: Optional[uuid.UUID],
+        activity_source: str,
+    ) -> int:
+        """Persist extracted action triggers as 'task' entities in the knowledge graph."""
+        if not triggers_data:
+            return 0
+
+        created_count = 0
+        for trigger in triggers_data:
+            desc = trigger.get("description", "").strip()
+            t_type = trigger.get("type", "reminder")
+            if not desc:
+                continue
+
+            # Check for duplicate task by name/description
+            name = f"{t_type.replace('_', ' ').title()}: {desc[:50]}"
+            if len(desc) > 50:
+                name += "..."
+
+            existing = db.query(KnowledgeEntity).filter(
+                KnowledgeEntity.tenant_id == tenant_id,
+                KnowledgeEntity.name == name,
+                KnowledgeEntity.entity_type == "task",
+            ).first()
+            if existing:
+                continue
+
+            task = KnowledgeEntity(
+                tenant_id=tenant_id,
+                name=name,
+                entity_type="task",
+                category="task",
+                description=desc,
+                attributes={
+                    "trigger_type": t_type,
+                    "delay_hours": trigger.get("delay_hours", 24),
+                    "related_entity": trigger.get("entity_name"),
+                    "auto_extracted": True,
+                },
+                confidence=0.9,
+                source_agent_id=source_agent_id,
+                collection_task_id=collection_task_id,
+                status="draft",
+                extraction_platform="workflow",
+                extraction_agent="inbox_monitor" if activity_source == "gmail" else "luna",
+            )
+            db.add(task)
+            created_count += 1
+
+        if created_count:
+            db.commit()
         return created_count
 
 
