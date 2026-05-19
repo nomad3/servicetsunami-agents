@@ -7,18 +7,26 @@ this module wraps the JSONB read/write to `conversation_episodes` and
 
 Kept separate from `emotion_engine.py` to keep the appraisal math
 testable without a DB.
+
+Best-effort writes: write paths swallow SQLAlchemy errors and roll
+back. The emotion layer must NEVER crash the RL/chat hot path; a stale
+or missing affect_vector degrades to neutral, which is acceptable.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Optional
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.agent_memory import AgentMemory
 from app.models.conversation_episode import ConversationEpisode
 from app.schemas.emotion import PADVector
 from app.services.emotion_engine import appraise_event
+
+logger = logging.getLogger(__name__)
 
 
 # ── Conversation episode ──────────────────────────────────────────────
@@ -48,8 +56,17 @@ def record_affect_on_episode(
     if episode is None:
         return None
     episode.affect_vector = vector.to_dict()
-    db.commit()
-    db.refresh(episode)
+    try:
+        db.commit()
+        db.refresh(episode)
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "emotion_engine_io.record_affect_on_episode: commit failed, "
+            "rolling back. episode_id=%s tenant_id=%s err=%s",
+            episode_id, tenant_id, exc,
+        )
+        db.rollback()
+        return None
     return episode
 
 
@@ -138,6 +155,11 @@ def get_affect_baseline(
     this tenant; in Phase 1 we expect zero or one row to carry the
     baseline. Phase 2 may introduce a dedicated `agent_affect_baselines`
     table; for now we piggyback on the existing memory layer.
+
+    Deterministic selection: when multiple non-null baseline rows exist
+    (DB doesn't enforce uniqueness), pick the most-recently-updated
+    row. This way callers see the agent's freshest baseline rather than
+    an arbitrary one.
     """
     row = (
         db.query(AgentMemory.affect_baseline)
@@ -146,9 +168,10 @@ def get_affect_baseline(
             AgentMemory.tenant_id == tenant_id,
             AgentMemory.affect_baseline.isnot(None),
         )
+        .order_by(AgentMemory.updated_at.desc().nullslast())
         .first()
     )
-    if row is None or row[0] is None:
+    if row is None:
         return PADVector.neutral()
     return PADVector.from_dict(row[0])
 
@@ -199,6 +222,15 @@ def appraise_and_record_tool_outcome(
         baseline=baseline,
     )
     episode.affect_vector = new_vector.to_dict()
-    db.commit()
-    db.refresh(episode)
+    try:
+        db.commit()
+        db.refresh(episode)
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "emotion_engine_io.appraise_and_record_tool_outcome: commit "
+            "failed, rolling back. episode_id=%s tenant_id=%s err=%s",
+            episode_id, tenant_id, exc,
+        )
+        db.rollback()
+        return None
     return new_vector
