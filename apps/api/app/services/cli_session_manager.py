@@ -1093,6 +1093,30 @@ def _run_agent_session_legacy(
         connected_integrations=connected_integrations,
     )
 
+    # Phase 1 PR C — emotion engine prompt-side style injection.
+    # Best-effort: read the session's most recent affect_vector and append
+    # a short addendum. Returns "" when no affect is recorded or state is
+    # neutral, so the prompt is byte-identical in those cases.
+    try:
+        from app.services.emotion_engine_io import build_affect_addendum_for_session
+
+        affect_session_id_str = (
+            (db_session_memory or {}).get("chat_session_id", "") or ""
+        )
+        affect_session_id = (
+            uuid.UUID(affect_session_id_str) if affect_session_id_str else None
+        )
+        affect_addendum = build_affect_addendum_for_session(
+            db,
+            session_id=affect_session_id,
+            tenant_id=tenant_id,
+        )
+        if affect_addendum:
+            instruction_md_content = instruction_md_content + affect_addendum
+    except Exception:
+        # NEVER let the emotion layer break prompt assembly.
+        pass
+
     internal_key = settings.MCP_API_KEY or "dev_mcp_key"
 
     # ── Phase 4 commit 3 — agent-token mint (gated by resilient flag) ──

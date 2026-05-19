@@ -22,6 +22,7 @@ from app.api.v1 import (
     datasets,
     chat,
     internal,
+    emotion,
     memories,
     memory_remember,
     agent_policies,
@@ -148,6 +149,10 @@ router.include_router(dataset_groups.router, prefix="/dataset-groups", tags=["da
 router.include_router(chat.router, prefix="/chat", tags=["chat"])
 router.include_router(internal.router, prefix="/internal", tags=["internal"])
 router.include_router(memories.router, prefix="/memories", tags=["memories"])
+# Emotion engine — affect observability + (PR C) PAD-injection state.
+# Mounted at /api/v1 with no prefix so paths like /sessions/{id}/affect-trace
+# land under the session namespace, not /memories.
+router.include_router(emotion.router, prefix="", tags=["emotion"])
 # `alpha usage` + `alpha costs` (Phase 4 of the CLI roadmap, #181).
 # Aggregates chat_messages per-provider and per-day for the tenant.
 # Mounted at root (no prefix) so the routes read `/usage` and

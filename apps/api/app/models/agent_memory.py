@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Text, Float, Integer, DateTime, ForeignKey, JSON
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 
@@ -47,6 +47,11 @@ class AgentMemory(Base):
     # Categorization and linking
     tags = Column(JSON, default=list)  # e.g. ["project:luna", "priority:high"]
     related_entity_ids = Column(JSON, default=list)  # Links to knowledge_entities
+
+    # Phase 1 PR A — Digital Emotions Engine: per-agent stable trait
+    # baseline. Decay pulls the live affect_vector back toward this.
+    # NULL = use flat neutral default. Persona-derived seeding is Phase 2.
+    affect_baseline = Column(JSONB, nullable=True)
 
     # Multi-agent visibility scoping (migration 087, design doc §7)
     visibility = Column(String(20), nullable=False, default="tenant_wide")

@@ -22,6 +22,9 @@ class ConversationEpisode(Base):
     key_topics = Column(JSONB, default=list)
     key_entities = Column(JSONB, default=list)
     mood = Column(String(30), nullable=True)
+    # Phase 1 PR A — Digital Emotions Engine: PAD snapshot at episode close.
+    # Coexists with `mood` above (4 legacy readers — deliberately untouched).
+    affect_vector = Column(JSONB, nullable=True)
     outcome = Column(String(100), nullable=True)
     message_count = Column(Integer, default=0)
     source_channel = Column(String(50), nullable=True)
