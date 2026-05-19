@@ -7,6 +7,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api import deps
@@ -14,11 +15,13 @@ from app.models.user import User
 from app.schemas import chat as chat_schema
 from app.schemas import knowledge_entity as ke_schema
 from app.services import chat as chat_service
+from app.services import chat_jobs as chat_jobs_service
 from app.services import knowledge as knowledge_service
 from app.services.embedding_service import embed_and_store as _embed
 from app.services.enhanced_chat import get_enhanced_chat_service
 
 logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -463,3 +466,385 @@ def list_session_collaborations(
     ).order_by(CollaborationSession.created_at.desc()).all()
 
     return [CollaborationSessionInDB.model_validate(s) for s in sessions]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Async chat-result pattern — task #161
+# Design: docs/plans/2026-05-17-async-chat-result-pattern-design.md
+#
+# POST /sessions/{sid}/messages/start    → { job_id }    (returns immediately)
+# GET  /jobs/{job_id}/events?from=<seq>  → SSE (replay + tail)
+# GET  /jobs/{job_id}                    → terminal status / result snapshot
+# POST /jobs/{job_id}/cancel             → set cancel_requested flag
+#
+# Why a new path instead of replacing /messages/stream:
+#   * Phase 1 of the rollout (per design doc §"Migration path") is
+#     write-path-only — both endpoints coexist while we soak.
+#   * The legacy /stream endpoint is what every existing client (web,
+#     Tauri, Luna mobile) currently uses; cutting it would break
+#     traffic before we have read-path parity confidence.
+#   * The flag-gated cutover (chat_async_jobs) ramps tenants when
+#     they're ready. Code deletion is Phase 4.
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _JobStartResponse(BaseModel):
+    """Tiny envelope so a future field add (e.g. queue depth) doesn't
+    require a route version bump."""
+    job_id: uuid.UUID
+
+
+@router.post(
+    "/sessions/{session_id}/messages/start",
+    response_model=_JobStartResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def post_message_start(
+    session_id: uuid.UUID,
+    payload: chat_schema.ChatMessageCreate,
+    *,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Create a chat_job + dispatch generation; return job_id immediately.
+
+    Cloudflare's 524 ceiling kills any HTTP request that goes idle for
+    >100 s. Returning a job_id in <200 ms (then having the client
+    subscribe to /jobs/{job_id}/events) keeps the original request
+    short while the work continues server-side.
+    """
+    session = chat_service.get_session(
+        db, session_id=session_id, tenant_id=current_user.tenant_id
+    )
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found",
+        )
+
+    job = chat_jobs_service.create_job(
+        db,
+        session_id=session_id,
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+        content=payload.content,
+    )
+
+    # Snapshot primitives BEFORE the worker thread starts. `current_user`
+    # came from `Depends(get_db)`-scoped helpers, and `payload` is the
+    # request body; both become unsafe to touch once this handler
+    # returns (request scope closes, ORM session is gone, DetachedInstanceError
+    # under load). Mirrors the pattern used by `stream_chat_job_events`
+    # above. The worker closes over THESE primitives, never the ORM.
+    tenant_id = current_user.tenant_id
+    user_id = current_user.id
+    content = payload.content
+    sid = session_id
+    job_uuid = uuid.UUID(job["id"])
+
+    # Worker dispatch — runs in a background thread so this request
+    # returns immediately. Each job opens its own DB session; the
+    # request-scoped `db` is not safe to share across threads.
+    import threading
+
+    def _run_job():
+        import time as _time
+        from app.db.session import SessionLocal
+
+        wdb = SessionLocal()
+
+        # Cancel-propagation contract (BLOCKER #2 from review):
+        # cancel_job() only flips `cancel_requested`. The worker MUST
+        # poll for that flag between phases and self-flip via
+        # observe_cancel(). Granularity is "between each side-effect"
+        # not "inside post_user_message" — post_user_message is a
+        # single synchronous call we don't have hooks into. Phases
+        # gated below:
+        #   (i)   before start_job's lifecycle.started event
+        #   (ii)  before post_user_message
+        #   (iii) before the final chunk event
+        #   (iv)  before finish_job
+        def _bail_if_cancelled() -> bool:
+            if chat_jobs_service.is_cancel_requested(wdb, job_id=job_uuid):
+                chat_jobs_service.append_event(
+                    wdb,
+                    job_id=job_uuid,
+                    kind="lifecycle",
+                    payload={"event": "cancelled"},
+                )
+                chat_jobs_service.observe_cancel(wdb, job_id=job_uuid)
+                return True
+            return False
+
+        try:
+            chat_jobs_service.start_job(wdb, job_id=job_uuid)
+            if _bail_if_cancelled():
+                return
+            chat_jobs_service.append_event(
+                wdb,
+                job_id=job_uuid,
+                kind="lifecycle",
+                payload={"event": "started"},
+            )
+
+            # Re-fetch the session in the worker's own DB scope so we
+            # don't reuse a request-scoped ORM identity across threads.
+            wsession = chat_service.get_session(
+                wdb, session_id=sid, tenant_id=tenant_id
+            )
+            if not wsession:
+                chat_jobs_service.append_event(
+                    wdb,
+                    job_id=job_uuid,
+                    kind="lifecycle",
+                    payload={"event": "error", "detail": "session vanished"},
+                )
+                chat_jobs_service.fail_job(
+                    wdb, job_id=job_uuid, error="Chat session not found",
+                )
+                return
+
+            if _bail_if_cancelled():
+                return
+
+            t0 = _time.perf_counter()
+            user_msg, assistant_msg = chat_service.post_user_message(
+                wdb,
+                session=wsession,
+                user_id=user_id,
+                content=content,
+            )
+
+            if _bail_if_cancelled():
+                return
+
+            # Emit a single `chunk` event with the full text. The
+            # client renders it the same way it would render a stream
+            # of small chunks — the protocol is the same shape.
+            #
+            # Future: code-worker iterations will emit progressive
+            # `chunk` events as the CLI streams them. For now the
+            # CLI path returns whole-message; we wrap that in the
+            # event-log shape so the client code is forward-compatible.
+            text_out = assistant_msg.content or ""
+            chat_jobs_service.append_event(
+                wdb,
+                job_id=job_uuid,
+                kind="chunk",
+                payload={"text": text_out},
+            )
+
+            chat_jobs_service.append_event(
+                wdb,
+                job_id=job_uuid,
+                kind="lifecycle",
+                payload={
+                    "event": "done",
+                    "user_message_id": str(user_msg.id),
+                    "assistant_message_id": str(assistant_msg.id),
+                    "elapsed_s": _time.perf_counter() - t0,
+                },
+            )
+            if _bail_if_cancelled():
+                return
+            # finish_job is gated on status NOT IN terminal; even if the
+            # cancel beat us here, observe_cancel(running -> cancelled)
+            # makes this UPDATE a no-op. Race-free by SQL constraint.
+            chat_jobs_service.finish_job(
+                wdb,
+                job_id=job_uuid,
+                result_message_id=assistant_msg.id,
+            )
+        except Exception as exc:
+            logger.exception("[chat-job %s] worker crashed", job_uuid)
+            try:
+                chat_jobs_service.append_event(
+                    wdb,
+                    job_id=job_uuid,
+                    kind="lifecycle",
+                    payload={"event": "error", "detail": str(exc)[:512]},
+                )
+            except Exception:
+                pass
+            try:
+                chat_jobs_service.fail_job(
+                    wdb,
+                    job_id=job_uuid,
+                    error=str(exc),
+                )
+            except Exception:
+                pass
+        finally:
+            wdb.close()
+
+    threading.Thread(target=_run_job, daemon=True).start()
+    return _JobStartResponse(job_id=job_uuid)
+
+
+@router.get("/jobs/{job_id}")
+def get_chat_job(
+    job_id: uuid.UUID,
+    *,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Return the current job-state snapshot.
+
+    Used by the client's polling-fallback path when SSE isn't viable
+    (some corporate proxies kill text/event-stream even with the new
+    short-lived design — the client falls back to repeated GETs).
+    """
+    job = chat_jobs_service.get_job(
+        db, job_id=job_id, tenant_id=current_user.tenant_id
+    )
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return job
+
+
+@router.post("/jobs/{job_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+def cancel_chat_job(
+    job_id: uuid.UUID,
+    *,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Cooperative cancel — sets ``cancel_requested=TRUE``.
+
+    Per design §"Cancel semantics" we lean cooperative + 30 s grace
+    before SIGTERM. This endpoint only sets the flag; the worker
+    observes it and flips to ``cancelled``. A queued (not-yet-picked-up)
+    job flips immediately.
+    """
+    job = chat_jobs_service.get_job(
+        db, job_id=job_id, tenant_id=current_user.tenant_id
+    )
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    chat_jobs_service.cancel_job(db, job_id=job_id)
+    return {"job_id": str(job_id), "cancel_requested": True}
+
+
+@router.get("/jobs/{job_id}/events")
+def stream_chat_job_events(
+    job_id: uuid.UUID,
+    from_seq: int = 0,
+    *,
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """SSE stream — replay events with seq > from_seq, then tail.
+
+    Reconnect-safe by design: the client remembers the highest seq it
+    rendered, and on reconnect passes ``?from_seq=<n>`` so the catch-up
+    block doesn't re-emit history it's already painted.
+
+    Tail strategy: short-poll the event log every 1 s. Cheap because
+    the inner loop only fires SELECTs against (job_id, seq) PK
+    (index-only scans) and the connection is short-lived — we close
+    the moment the job's status row hits terminal.
+    """
+    import json as _json
+    import time as _time
+
+    from app.db.session import SessionLocal
+
+    # Snapshot tenant id outside the generator — the dependency-injected
+    # `current_user` may be garbage-collected by the time the generator
+    # runs because the request body returns first.
+    tenant_id = current_user.tenant_id
+
+    # Pre-flight ownership check using a transient DB session — surface a
+    # 404 *as a normal HTTP response* (not embedded in the SSE stream)
+    # so the client's error handling matches its REST expectations.
+    _pf_db = SessionLocal()
+    try:
+        job_pf = chat_jobs_service.get_job(_pf_db, job_id=job_id, tenant_id=tenant_id)
+        if job_pf is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    finally:
+        _pf_db.close()
+
+    def _serialize_event(payload: dict) -> str:
+        """Single source of truth for SSE frame shape.
+
+        All four event types (event / terminal / timeout / truncated
+        preamble) ship through this so future schema drift is one
+        diff, not four. The trailing ``\n\n`` is the SSE record
+        separator.
+        """
+        return f"data: {_json.dumps(payload)}\n\n"
+
+    def _gen():
+        last_seq = int(from_seq)
+        idle_iters = 0
+        # Hard ceiling so a runaway never holds the request forever; the
+        # client reconnects with `from_seq=<last_seq>` on a clean close.
+        # 600 iter * 1 s = 10 min — well below CF's 100 s idle ceiling
+        # because each loop yields data or a heartbeat.
+        max_iters = 600
+        sse_db = SessionLocal()
+        try:
+            # Pre-flight preamble: if the very first read_events would
+            # truncate (events buffered up == limit), tell the client
+            # so it can immediately page via from_seq=<last_seq>.
+            # (NIT #12 from review — cheap surface, no extra round trip.)
+            initial_events = chat_jobs_service.read_events(
+                sse_db, job_id=job_id, from_seq=last_seq
+            )
+            if len(initial_events) >= 2000:
+                yield _serialize_event({"type": "truncated", "from_seq": last_seq})
+
+            # Emit the pre-fetched batch via the normal event path so
+            # we don't double-read.
+            pending_initial = initial_events
+
+            for _ in range(max_iters):
+                events = pending_initial if pending_initial else chat_jobs_service.read_events(
+                    sse_db, job_id=job_id, from_seq=last_seq
+                )
+                pending_initial = None
+                if events:
+                    idle_iters = 0
+                    for ev in events:
+                        last_seq = ev["seq"]
+                        yield _serialize_event({
+                            "type": "event",
+                            "seq": ev["seq"],
+                            "kind": ev["kind"],
+                            "payload": ev["payload"],
+                        })
+
+                # After draining new events, check terminal status.
+                job_now = chat_jobs_service.get_job(
+                    sse_db, job_id=job_id, tenant_id=tenant_id
+                )
+                if job_now and job_now["status"] in chat_jobs_service.TERMINAL_STATUSES:
+                    yield _serialize_event({
+                        "type": "terminal",
+                        "status": job_now["status"],
+                        "result_message_id": job_now.get("result_message_id"),
+                        "error": job_now.get("error"),
+                        "last_seq": last_seq,
+                    })
+                    return
+
+                # No new events this cycle — heartbeat keeps CF awake.
+                if not events:
+                    idle_iters += 1
+                    yield ": heartbeat\n\n"
+
+                _time.sleep(1.0)
+
+            # max_iters exhausted: tell the client to reconnect with
+            # ?from_seq=<last_seq>. Without this sentinel a polling
+            # caller couldn't tell "server says reconnect" from "TCP
+            # died" (IMPORTANT #3).
+            yield _serialize_event({"type": "timeout", "last_seq": last_seq})
+        finally:
+            sse_db.close()
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
