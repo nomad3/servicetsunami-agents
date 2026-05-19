@@ -58,6 +58,7 @@ def write_run_artifacts(
     eval_metadata: Dict[str, Any],
     metrics: Dict[str, Any],
     timing: Dict[str, Any],
+    tenant_root: "Path | None" = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Write transcript.md / eval_metadata.json / metrics.json / timing.json
     and return the outputs manifest.
@@ -65,8 +66,22 @@ def write_run_artifacts(
     See ``apps/api/app/services/skill_creator/_artifact_writer.py`` for the
     documented contract. This is the byte-for-byte twin so callers from
     the code-worker import root resolve here.
+
+    ``tenant_root``: optional containment check (B1) — when set, the
+    resolved ``eval_dir`` must live under ``tenant_root`` or a ValueError
+    is raised BEFORE any mkdir/write.
     """
     eval_dir = Path(eval_dir)
+    if tenant_root is not None:
+        abs_eval = eval_dir.resolve()
+        abs_tenant_root = Path(tenant_root).resolve()
+        try:
+            abs_eval.relative_to(abs_tenant_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"workspace path escapes tenant root: "
+                f"path={abs_eval} tenant_root={abs_tenant_root}"
+            ) from exc
     eval_dir.mkdir(parents=True, exist_ok=True)
     (eval_dir / "outputs").mkdir(exist_ok=True)
 

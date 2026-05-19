@@ -47,6 +47,7 @@ def write_run_artifacts(
     eval_metadata: Dict[str, Any],
     metrics: Dict[str, Any],
     timing: Dict[str, Any],
+    tenant_root: "Path | None" = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Write the four canonical artifacts and return the outputs manifest.
 
@@ -56,13 +57,31 @@ def write_run_artifacts(
     in Phase 3 when the runner parses tool-call file writes out of the
     CLI event stream).
 
+    ``tenant_root``: if provided, ``eval_dir`` is resolved and verified
+    to live under it BEFORE any mkdir/write — defence-in-depth against
+    a slug or symlink that escapes the tenant volume (B1). The runner
+    always passes its tenant root here; legacy callers that omit it
+    skip the check and rely on the runner-side ``_assert_path_under_tenant_root``.
+
     Raises:
         OSError: when the directory can't be created. The caller catches
             this and downgrades the run row's ``workspace_path`` to NULL
             without flipping the status — the transcript still lives in
             ``skill_eval_runs.transcript``.
+        ValueError: when ``tenant_root`` is provided and ``eval_dir``
+            resolves outside it.
     """
     eval_dir = Path(eval_dir)
+    if tenant_root is not None:
+        abs_eval = eval_dir.resolve()
+        abs_tenant_root = Path(tenant_root).resolve()
+        try:
+            abs_eval.relative_to(abs_tenant_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"workspace path escapes tenant root: "
+                f"path={abs_eval} tenant_root={abs_tenant_root}"
+            ) from exc
     eval_dir.mkdir(parents=True, exist_ok=True)
     outputs_subdir = eval_dir / "outputs"
     outputs_subdir.mkdir(exist_ok=True)

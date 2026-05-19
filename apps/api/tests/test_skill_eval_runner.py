@@ -23,6 +23,7 @@ os.environ["TESTING"] = "True"
 
 import json
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
@@ -152,6 +153,24 @@ def test_compute_eval_dir_layout(tmp_path):
     )
     assert p.as_posix().endswith(
         f"{tenant_id}/skills/expense-classifier-workspace/iteration-3/eval-eval-001/with-skill"
+    )
+
+
+def test_compute_eval_dir_includes_iteration_run_id_when_provided(tmp_path):
+    """NIT — iteration_run_id segments concurrent retries (Phase-4 viewer)."""
+    tenant_id = uuid.uuid4()
+    irid = uuid.uuid4()
+    p = eval_runner.compute_eval_dir(
+        tenant_id=tenant_id,
+        skill_slug="expense_classifier",
+        iteration=3,
+        eval_id="eval-001",
+        with_skill=True,
+        workspaces_root=str(tmp_path),
+        iteration_run_id=irid,
+    )
+    assert p.as_posix().endswith(
+        f"iteration-3/eval-eval-001/{irid}/with-skill"
     )
 
 
@@ -490,3 +509,125 @@ def test_get_iteration_job_foreign_tenant_returns_404():
 def test_terminal_statuses_set_is_strict_subset():
     """Phase 2's terminal taxonomy is {ok, error, timeout}."""
     assert set(eval_runner.TERMINAL_STATUSES) == {"ok", "error", "timeout"}
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# B1 / B2 — canonical slug + path containment
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_derive_slug_strips_path_traversal(tmp_path):
+    """B1 — a skill name containing ``..`` / ``/`` must produce a safe
+    relative segment, NOT a path that escapes the tenant root.
+    """
+    slug = eval_runner._derive_slug("../../etc")
+    assert "/" not in slug
+    assert "\\" not in slug
+    assert ".." not in slug
+    assert slug == "etc"  # canonical: leading `..` are stripped
+
+
+def test_derive_slug_matches_skill_manager_rule():
+    """B2 — runner's slug derivation must match the rule used when the
+    skill was first written to disk; otherwise `_load_skill_body` looks
+    in the wrong directory.
+    """
+    from app.services.skill_manager import derive_slug as canonical
+    for name in [
+        "Expense Classifier",
+        "expense-classifier",
+        "Expense_Classifier!",
+        "  Expense  Classifier  ",
+        "café",  # non-ASCII collapses to empty between alnums
+    ]:
+        try:
+            runner_slug = eval_runner._derive_slug(name)
+        except ValueError:
+            runner_slug = ""
+        assert runner_slug == canonical(name), (
+            f"slug drift for {name!r}: runner={runner_slug!r} "
+            f"canonical={canonical(name)!r}"
+        )
+
+
+def test_derive_slug_raises_on_empty():
+    """An all-special-chars name scrubs to empty and must raise."""
+    with pytest.raises(ValueError):
+        eval_runner._derive_slug("///")
+
+
+def test_assert_path_under_tenant_root_rejects_escape(tmp_path):
+    """B1 — even if a slug somehow contained a traversal segment, the
+    containment guard catches it before any write.
+    """
+    tenant_id = uuid.uuid4()
+    escaping = Path(tmp_path) / "other-tenant" / "evil"
+    with pytest.raises(ValueError, match="escapes tenant root"):
+        eval_runner._assert_path_under_tenant_root(
+            path=escaping,
+            tenant_id=tenant_id,
+            workspaces_root=str(tmp_path),
+        )
+
+
+def test_assert_path_under_tenant_root_accepts_inside(tmp_path):
+    tenant_id = uuid.uuid4()
+    inside = (
+        Path(tmp_path)
+        / str(tenant_id)
+        / "skills"
+        / "x-workspace"
+        / "iteration-1"
+    )
+    # Should not raise
+    eval_runner._assert_path_under_tenant_root(
+        path=inside,
+        tenant_id=tenant_id,
+        workspaces_root=str(tmp_path),
+    )
+
+
+def test_dispatch_iteration_with_traversal_name_stays_in_tenant(tmp_path):
+    """B1 end-to-end: a skill named ``../../etc`` must NOT produce a
+    workspace path that escapes the tenant root.
+    """
+    tenant_id = uuid.uuid4()
+    skill_id = uuid.uuid4()
+    eval1 = uuid.uuid4()
+
+    db = _StubDB(
+        skill_tenant_id=tenant_id,
+        skill_name="../../etc",
+        evals=[{"id": str(eval1), "prompt": "p", "expectations": []}],
+    )
+
+    recorded: List[Dict[str, Any]] = []
+    with patch("app.services.skill_creator.eval_runner._load_skill_body",
+               return_value=""):
+        eval_runner.dispatch_iteration(
+            db,
+            skill_id=skill_id,
+            iteration=1,
+            workspaces_root=str(tmp_path),
+            _runner=lambda **kw: recorded.append(kw),
+        )
+
+    assert recorded, "runner should have been called for the queued runs"
+    for kw in recorded:
+        eval_dir = eval_runner.compute_eval_dir(
+            tenant_id=kw["tenant_id"],
+            skill_slug=kw["skill_slug"],
+            iteration=kw["iteration"],
+            eval_id=kw["eval_id"],
+            with_skill=kw["with_skill"],
+            workspaces_root=kw["workspaces_root"],
+            iteration_run_id=kw.get("iteration_run_id"),
+        )
+        # Defence-in-depth — must not raise
+        eval_runner._assert_path_under_tenant_root(
+            path=eval_dir,
+            tenant_id=kw["tenant_id"],
+            workspaces_root=kw["workspaces_root"],
+        )
+
+

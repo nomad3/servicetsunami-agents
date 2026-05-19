@@ -139,14 +139,22 @@ def compute_eval_dir(
     eval_id: str,
     with_skill: bool,
     workspaces_root: Optional[str] = None,
+    iteration_run_id: Optional[uuid.UUID] = None,
 ) -> Path:
-    """Return ``<iteration_dir>/eval-<id>/<leg>/`` for a single run.
+    """Return ``<iteration_dir>/eval-<id>/<iteration_run_id>/<leg>/`` for a single run.
 
     ``leg`` is ``with-skill`` or ``baseline`` — matches the eval-viewer's
     expected directory split so Phase 4 doesn't have to re-decide.
+
+    ``iteration_run_id`` is inserted between ``eval-<id>/`` and the leg
+    so concurrent retries of the same iteration don't clobber each
+    other's artifacts. Callers from Phase 2 always pass it (the runner
+    mints it once per ``dispatch_iteration`` call); legacy callers that
+    omit it fall back to the old flat layout, but that path is only
+    reachable from a handful of unit-test fixtures.
     """
     leg = "with-skill" if with_skill else "baseline"
-    return (
+    base = (
         compute_iteration_dir(
             tenant_id=tenant_id,
             skill_slug=skill_slug,
@@ -154,8 +162,10 @@ def compute_eval_dir(
             workspaces_root=workspaces_root,
         )
         / f"eval-{eval_id}"
-        / leg
     )
+    if iteration_run_id is not None:
+        return base / str(iteration_run_id) / leg
+    return base / leg
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -437,6 +447,7 @@ def _run_one(
     platform: str,
     model: str,
     workspaces_root: Optional[str] = None,
+    iteration_run_id: Optional[uuid.UUID] = None,
 ) -> None:
     """Single-leg worker. Opens its own DB session, dispatches the
     workflow, writes artifacts to disk, persists terminal row.
@@ -464,7 +475,41 @@ def _run_one(
         eval_id=eval_id,
         with_skill=with_skill,
         workspaces_root=workspaces_root,
+        iteration_run_id=iteration_run_id,
     )
+
+    # B1 — defence-in-depth path containment check. derive_slug should
+    # already guarantee this, but a slug bypass / symlink in the volume
+    # would otherwise let a write escape the tenant root.
+    try:
+        _assert_path_under_tenant_root(
+            path=eval_dir,
+            tenant_id=tenant_id,
+            workspaces_root=workspaces_root,
+        )
+    except ValueError as exc:
+        logger.error(
+            "eval_runner: refusing run %s — path escape: %s", run_id, exc
+        )
+        wdb = SessionLocal()
+        try:
+            _persist_terminal(
+                wdb,
+                run_id=run_id,
+                status="error",
+                transcript=None,
+                outputs_manifest=None,
+                metrics=None,
+                timing_ms=None,
+                model=model,
+                token_usage=None,
+                workspace_path=None,
+                error=f"workspace path escapes tenant root: {exc}",
+            )
+            wdb.commit()
+        finally:
+            wdb.close()
+        return
 
     wdb = SessionLocal()
     try:
@@ -562,6 +607,9 @@ def _run_one(
 
         outputs_manifest: Dict[str, Any] = {}
         workspace_path_str: Optional[str] = None
+        tenant_root_path = (
+            Path(workspaces_root or _WORKSPACES_ROOT).resolve() / str(tenant_id)
+        )
         try:
             outputs_manifest = write_run_artifacts(
                 eval_dir=eval_dir,
@@ -569,6 +617,7 @@ def _run_one(
                 eval_metadata=eval_metadata,
                 metrics=metrics_payload,
                 timing=timing_payload,
+                tenant_root=tenant_root_path,
             )
             workspace_path_str = str(eval_dir)
         except Exception as exc:  # noqa: BLE001
@@ -733,6 +782,7 @@ def dispatch_iteration(
             platform=platform,
             model=model,
             workspaces_root=workspaces_root,
+            iteration_run_id=iteration_run_id,
         )
 
     return {
@@ -753,19 +803,49 @@ def _spawn_worker_thread(**kwargs: Any) -> None:
 
 
 def _derive_slug(name: str) -> str:
-    """Mirror skill_manager's slug derivation: lowercase, hyphenate.
+    """Canonical skill slug — delegates to ``skill_manager.derive_slug``.
 
-    The slug is the disk-side directory name under `_tenant/<uuid>/`,
-    and Phase 2's workspace layout reuses it as the
-    `<slug>-workspace/` parent.
+    Keeping this thin wrapper avoids drift: a skill named
+    ``../../etc`` flows through the same ``re.sub(r"[^a-z0-9]+", "_", …)``
+    rule used by ``SkillManager.create_skill``, so the path segment is
+    always safe AND it matches what ``get_skill_by_slug`` looks up.
+
+    Raises ``ValueError`` when the input scrubs to empty — the runner
+    can't build a workspace path without a slug.
     """
-    return (
-        (name or "")
-        .strip()
-        .lower()
-        .replace("_", "-")
-        .replace(" ", "-")
-    )
+    from app.services.skill_manager import derive_slug as _canonical_derive_slug
+
+    slug = _canonical_derive_slug(name)
+    if not slug:
+        raise ValueError(f"skill name {name!r} produced empty slug")
+    return slug
+
+
+def _assert_path_under_tenant_root(
+    *,
+    path: Path,
+    tenant_id: uuid.UUID,
+    workspaces_root: Optional[str] = None,
+) -> None:
+    """Defence-in-depth: raise ValueError if ``path`` escapes the tenant
+    root after resolution.
+
+    With ``derive_slug`` enforcing ``[a-z0-9_]`` segments this should be
+    unreachable, but we keep the check so any future regression (a new
+    code path that bypasses the helper, a symlink planted in the
+    workspaces volume) trips loudly BEFORE we mkdir/write_text.
+    """
+    abs_path = path.resolve()
+    abs_tenant_root = (
+        Path(workspaces_root or _WORKSPACES_ROOT).resolve() / str(tenant_id)
+    ).resolve()
+    try:
+        abs_path.relative_to(abs_tenant_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"workspace path escapes tenant root: "
+            f"path={abs_path} tenant_root={abs_tenant_root}"
+        ) from exc
 
 
 def get_iteration_status(
