@@ -1259,6 +1259,24 @@ class TestToolGroups:
         from app.services.tool_groups import format_allowed_tools
         assert format_allowed_tools([]) == ""
 
+    def test_format_allowed_tools_higgsfield_wildcard(self):
+        # Higgsfield connector tools live behind `mcp__higgsfield__*`,
+        # not `mcp__agentprovision__*`. The formatter must collapse all
+        # higgsfield_* names to the wildcard so the CLI allow-list
+        # actually matches the per-tenant MCP connector's tools.
+        from app.services.tool_groups import format_allowed_tools
+        out = format_allowed_tools(["send_email", "higgsfield_soul", "higgsfield_flux"])
+        parts = out.split(",")
+        assert "mcp__agentprovision__send_email" in parts
+        assert "mcp__higgsfield__*" in parts
+        # No `mcp__agentprovision__higgsfield_*` entries leak through.
+        assert not any("agentprovision__higgsfield" in p for p in parts)
+
+    def test_format_allowed_tools_higgsfield_only(self):
+        from app.services.tool_groups import format_allowed_tools
+        out = format_allowed_tools(["higgsfield_soul", "higgsfield_seedance"])
+        assert out == "mcp__higgsfield__*"
+
 
 # ── app/services/scoring_rubrics ────────────────────────────────────────────
 

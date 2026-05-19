@@ -310,5 +310,28 @@ def format_allowed_tools(tool_names: list[str]) -> str:
     """Format tool names for --allowedTools CLI flag.
 
     Prefixes each tool with 'mcp__agentprovision__' for MCP tool matching.
+
+    Per-tenant external MCP connectors (e.g. Higgsfield) live behind their
+    own `mcp__<server_key>__*` namespace once injected by
+    `apps/api/app/services/cli_session_manager.py::generate_mcp_config`.
+    They are NOT served by the agentprovision tool surface, so prefixing
+    `higgsfield_*` tool names with `mcp__agentprovision__` would produce
+    allow-list entries the CLI can never match — calls get silently
+    filtered out. Detect the higgsfield-prefixed names and emit the
+    connector-namespaced wildcard `mcp__higgsfield__*` instead. The
+    individual `higgsfield_*` names in `HIGGSFIELD_TOOL_NAMES` are
+    static fallback hints used by docs / discovery refresh; the real
+    tool names come from live `discover_mcp_tools` against the tenant's
+    connector, so a wildcard is the only allow-list shape that survives
+    a tool rename on Higgsfield's side without an api redeploy.
     """
-    return ",".join(f"mcp__agentprovision__{name}" for name in tool_names)
+    parts: list[str] = []
+    has_higgsfield = False
+    for name in tool_names:
+        if name.startswith("higgsfield_") or name == "higgsfield":
+            has_higgsfield = True
+            continue
+        parts.append(f"mcp__agentprovision__{name}")
+    if has_higgsfield:
+        parts.append("mcp__higgsfield__*")
+    return ",".join(parts)
