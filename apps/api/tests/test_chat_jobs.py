@@ -215,6 +215,12 @@ class _StubDB:
     def rollback(self):
         self.rolled_back_count += 1
 
+    def close(self):
+        # Workers call .close() on their SessionLocal()-backed sessions;
+        # the stub is a no-op so tests can reuse the same instance across
+        # request + worker without losing state.
+        pass
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Service-level: state machine
@@ -471,3 +477,106 @@ def test_messages_start_404s_for_unknown_session(monkeypatch):
         json={"content": "hello"},
     )
     assert r.status_code == 404
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Worker safety: closure must NOT touch request-scoped ORM objects
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_worker_does_not_capture_request_scoped_user(monkeypatch):
+    """Regression: BLOCKER #1.
+
+    The worker thread fired by `post_message_start` used to dereference
+    `current_user.tenant_id` / `current_user.id` and `payload.content`
+    AFTER the request returned. Under load the ORM session backing
+    `current_user` is closed → DetachedInstanceError.
+
+    Now the handler snapshots primitives before launching the worker.
+    This test trips the regression by deliberately invalidating the
+    request-scoped `current_user` between request return and worker
+    execution: we set `current_user.tenant_id = None` once the request
+    completes, then assert the worker still finished successfully
+    against the captured snapshot.
+    """
+    import threading as _threading
+
+    user = _user()
+    db = _StubDB()
+
+    # Fake session lookup so the worker's branch survives.
+    from app.services import chat as chat_service_module
+
+    class _Sess:
+        def __init__(self):
+            self.id = uuid.uuid4()
+
+    captured_args: Dict[str, Any] = {}
+
+    def _fake_get_session(_db, *, session_id, tenant_id):
+        captured_args.setdefault("session_lookups", []).append(
+            {"session_id": session_id, "tenant_id": tenant_id}
+        )
+        return _Sess()
+
+    monkeypatch.setattr(chat_service_module, "get_session", _fake_get_session)
+
+    # The worker opens its own SessionLocal()-backed session. Point that
+    # factory at our `_StubDB` so the chat_jobs queries land on the stub
+    # instead of the real SQLite test engine.
+    from app.db import session as _session_module
+    monkeypatch.setattr(_session_module, "SessionLocal", lambda: db)
+
+    # Block the worker until we've trashed `current_user` so we can
+    # prove the snapshot is what's being used.
+    user_trashed = _threading.Event()
+    worker_done = _threading.Event()
+    post_user_args: Dict[str, Any] = {}
+
+    def _fake_post_user_message(_db, *, session, user_id, content, **kwargs):
+        # Wait for the request to "complete" and `current_user` to be
+        # mutated before doing any work.
+        assert user_trashed.wait(timeout=2.0), "test setup never signalled"
+        post_user_args["user_id"] = user_id
+        post_user_args["content"] = content
+        post_user_args["tenant_id"] = session is not None  # session object captured
+        # Return objects matching the .id + .content shape the worker reads.
+        u = MagicMock()
+        u.id = uuid.uuid4()
+        u.content = content
+        a = MagicMock()
+        a.id = uuid.uuid4()
+        a.content = "response"
+        worker_done.set()
+        return (u, a)
+
+    monkeypatch.setattr(
+        chat_service_module, "post_user_message", _fake_post_user_message
+    )
+
+    client = _build_client(user, db)
+    expected_tenant = user.tenant_id
+    expected_user_id = user.id
+    r = client.post(
+        f"/api/v1/chat/sessions/{uuid.uuid4()}/messages/start",
+        json={"content": "hello-snapshot"},
+    )
+    assert r.status_code == 202
+
+    # Simulate request-scope teardown: trash the user's tenant_id. If
+    # the worker still references `current_user`, it'll crash here.
+    user.tenant_id = None
+    user.id = None
+    user_trashed.set()
+
+    assert worker_done.wait(timeout=3.0), "worker never ran"
+
+    # Worker still used the captured primitives, not the trashed ORM.
+    assert post_user_args["user_id"] == expected_user_id
+    assert post_user_args["content"] == "hello-snapshot"
+
+    # And the session lookup inside the worker used the snapshotted
+    # tenant id, not the now-None one on `current_user`.
+    lookups = captured_args.get("session_lookups", [])
+    assert lookups, "worker never looked up the session"
+    assert lookups[-1]["tenant_id"] == expected_tenant

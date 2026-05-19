@@ -505,6 +505,18 @@ def post_message_start(
         content=payload.content,
     )
 
+    # Snapshot primitives BEFORE the worker thread starts. `current_user`
+    # came from `Depends(get_db)`-scoped helpers, and `payload` is the
+    # request body; both become unsafe to touch once this handler
+    # returns (request scope closes, ORM session is gone, DetachedInstanceError
+    # under load). Mirrors the pattern used by `stream_chat_job_events`
+    # above. The worker closes over THESE primitives, never the ORM.
+    tenant_id = current_user.tenant_id
+    user_id = current_user.id
+    content = payload.content
+    sid = session_id
+    job_uuid = uuid.UUID(job["id"])
+
     # Worker dispatch — runs in a background thread so this request
     # returns immediately. Each job opens its own DB session; the
     # request-scoped `db` is not safe to share across threads.
@@ -516,10 +528,10 @@ def post_message_start(
 
         wdb = SessionLocal()
         try:
-            chat_jobs_service.start_job(wdb, job_id=uuid.UUID(job["id"]))
+            chat_jobs_service.start_job(wdb, job_id=job_uuid)
             chat_jobs_service.append_event(
                 wdb,
-                job_id=uuid.UUID(job["id"]),
+                job_id=job_uuid,
                 kind="lifecycle",
                 payload={"event": "started"},
             )
@@ -527,17 +539,17 @@ def post_message_start(
             # Re-fetch the session in the worker's own DB scope so we
             # don't reuse a request-scoped ORM identity across threads.
             wsession = chat_service.get_session(
-                wdb, session_id=session_id, tenant_id=current_user.tenant_id
+                wdb, session_id=sid, tenant_id=tenant_id
             )
             if not wsession:
                 chat_jobs_service.append_event(
                     wdb,
-                    job_id=uuid.UUID(job["id"]),
+                    job_id=job_uuid,
                     kind="lifecycle",
                     payload={"event": "error", "detail": "session vanished"},
                 )
                 chat_jobs_service.fail_job(
-                    wdb, job_id=uuid.UUID(job["id"]), error="Chat session not found",
+                    wdb, job_id=job_uuid, error="Chat session not found",
                 )
                 return
 
@@ -545,8 +557,8 @@ def post_message_start(
             user_msg, assistant_msg = chat_service.post_user_message(
                 wdb,
                 session=wsession,
-                user_id=current_user.id,
-                content=payload.content,
+                user_id=user_id,
+                content=content,
             )
 
             # Emit a single `chunk` event with the full text. The
@@ -560,14 +572,14 @@ def post_message_start(
             text_out = assistant_msg.content or ""
             chat_jobs_service.append_event(
                 wdb,
-                job_id=uuid.UUID(job["id"]),
+                job_id=job_uuid,
                 kind="chunk",
                 payload={"text": text_out},
             )
 
             chat_jobs_service.append_event(
                 wdb,
-                job_id=uuid.UUID(job["id"]),
+                job_id=job_uuid,
                 kind="lifecycle",
                 payload={
                     "event": "done",
@@ -578,15 +590,15 @@ def post_message_start(
             )
             chat_jobs_service.finish_job(
                 wdb,
-                job_id=uuid.UUID(job["id"]),
+                job_id=job_uuid,
                 result_message_id=assistant_msg.id,
             )
         except Exception as exc:
-            logger.exception("[chat-job %s] worker crashed", job["id"])
+            logger.exception("[chat-job %s] worker crashed", job_uuid)
             try:
                 chat_jobs_service.append_event(
                     wdb,
-                    job_id=uuid.UUID(job["id"]),
+                    job_id=job_uuid,
                     kind="lifecycle",
                     payload={"event": "error", "detail": str(exc)[:512]},
                 )
@@ -595,7 +607,7 @@ def post_message_start(
             try:
                 chat_jobs_service.fail_job(
                     wdb,
-                    job_id=uuid.UUID(job["id"]),
+                    job_id=job_uuid,
                     error=str(exc),
                 )
             except Exception:
@@ -604,7 +616,7 @@ def post_message_start(
             wdb.close()
 
     threading.Thread(target=_run_job, daemon=True).start()
-    return _JobStartResponse(job_id=uuid.UUID(job["id"]))
+    return _JobStartResponse(job_id=job_uuid)
 
 
 @router.get("/jobs/{job_id}")
