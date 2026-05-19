@@ -117,6 +117,12 @@ INTENT_DEFINITIONS = [
     {"name": "connect or manage mcp servers", "tier": "full", "tools": ["mcp_servers"], "mutation": True},
     {"name": "register or manage webhooks", "tier": "full", "tools": ["webhooks"], "mutation": True},
     {"name": "start or stop inbox or competitor monitor", "tier": "full", "tools": ["monitor"], "mutation": True},
+    # Higgsfield creative-content generation (Wave 1a, PR #550 + #569).
+    # The tools live behind the per-tenant Higgsfield MCP connector
+    # registered by `apps/api/app/services/higgsfield_mcp.py` after the
+    # OAuth dance; agents see them once their tool_groups include
+    # "higgsfield" (Luna gets it in migration 137).
+    {"name": "generate image or video or marketing creative or product photoshoot", "tier": "full", "tools": ["higgsfield"], "mutation": True},
 ]
 
 # In-memory intent embedding cache (populated at startup)
