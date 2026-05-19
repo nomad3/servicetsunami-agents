@@ -214,4 +214,80 @@ The three patterns aren't mutually exclusive. Two useful composites:
   half; you can manually feed the result into
   `alpha review start --stdin` to vet it across CLIs.
 
-<!-- Phase 3 extensions queue follows in a separate commit. -->
+## Phase 3 — Extensions queued
+
+Highest-priority follow-ups, in rough order of leverage:
+
+1. **Fix the `dispatch_review_workflow` threading wrapper.** The
+   single blocker preventing `alpha review` from actually firing its
+   workflow. Daemon thread + `asyncio.run` does not start the
+   Temporal client cleanly; replace with a proper
+   `asyncio.create_task` from the request handler's loop (or move
+   to a Celery-style queue dispatcher). Hotfix PR slated for
+   tomorrow.
+2. **`alpha review pr <N>` helper subcommand.** Wraps
+   `gh pr diff N | alpha review start --stdin --clis ...` into one
+   call. Removes the manual ref-string handling and the `#570` shell-
+   comment footgun. The CLI side is a thin pre-processor over
+   existing `review start --stdin`.
+3. **`alpha research <topic> --provider gemini_cli` helper.** Wraps
+   `alpha run --fanout gemini_cli "<topic>" --background` plus an
+   immediate `alpha watch` for a one-line research-dispatch ergonomic.
+   No new backend.
+4. **Wire `--providers a,b,c` to real Temporal dispatch.** Currently
+   only `--fanout` real-dispatches. `--providers` should hit
+   `FanoutChatCliWorkflow` in *first-wins* sequential mode (quota-aware
+   fallback chain semantics, mirroring `_resolve_cli_chain` from
+   PR #245).
+5. **Wire naked `alpha run "..."` (no `--fanout`, no `--providers`) to
+   real Temporal dispatch.** Default provider resolved from
+   `tenant_features.default_cli_platform`. This kills the last
+   synthetic-stub path.
+6. **`--fanout` merge modes:**
+   - `--merge council` — LLM-summarises N reviews into agreed /
+     dissenting structure (mirrors what `alpha review` does already,
+     just for non-review prompts).
+   - `--merge first-wins` — race semantics. First child to terminate
+     wins, the rest are cancelled.
+   - `--merge all` — return raw N outputs (current behaviour; just
+     formalise as the explicit `all` mode).
+7. **`alpha usage` — per-tenant token / cost meter.** Roadmap Phase 4
+   item; backed by per-task `cost_usd` + token columns shipped in
+   #174. Surface today is stubbed in `cli.rs` but doesn't yet return
+   real aggregates.
+8. **CLI feature flag for the new async-job chat pattern (PR #570).**
+   Operator override during the migration window — `alpha chat send`
+   keeps the SSE path by default but a `--async` flag (or env var)
+   switches to the new `/messages/start` + `/jobs/{id}/events` flow.
+   Eliminates the Cloudflare 524 for long chat turns without the
+   user having to switch to `alpha run`.
+9. **`--agent <UUID>` propagation through `ChatCliInput`.** Today the
+   worker logs a warning and runs as the tenant default. Needs an
+   `agent_id` field on `ChatCliInput` + worker-side wiring.
+10. **`--timeout` → Temporal `execution_timeout`.** Plumb the CLI
+    flag through to the workflow's actual deadline; today the
+    backend is fixed at 180m and the CLI flag is foreground-tail-only.
+
+## Open design questions
+
+- Should `alpha review` and `alpha run --fanout --merge council` share
+  their adjudication model? They have near-identical shape (N CLIs in
+  parallel, structured consensus). A unified aggregator that
+  parameterises "what counts as agreement" would let us collapse the
+  two surfaces. Counter-argument: code review needs the structured
+  `agreed_findings` schema and the reply-loop; arbitrary prompts
+  don't. Likely answer: keep them separate but share the per-CLI
+  fanout primitive (`FanoutChatCliWorkflow`).
+- Default provider for naked `alpha run "..."`. Today the cheapest
+  path is hard-coded `claude_code`; long-term it should read
+  `tenant_features.default_cli_platform`. Tracked as item 5 above.
+- Cancellation semantics on fanout — if the parent is cancelled, do
+  children cascade? Today: yes. Document `--no-cascade-cancel` as
+  opt-out if/when someone needs it. No demand yet.
+
+## What's NOT changing
+
+The three-pattern mental model — chat / run / review — is the stable
+contract. Phase 3 fills in the corners; it doesn't reshape the
+patterns. The CLI's job is to keep the patterns clean enough that
+operators can pick the right one without reading this doc.
