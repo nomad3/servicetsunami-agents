@@ -10,6 +10,14 @@ The user (Simon) wants AgentProvision agents to **feel** in a functional sense �
 
 This document is the design for a PR-sized first slice. Subsequent phases extend. The first slice is itself split into a chain of three PRs (A/B/C) — see Phasing.
 
+### Architectural rationale: the civilization-layer lens
+
+This design is a **coordination-layer feature**, not an individual-node-smartness feature. Per the AgentProvision design principle (memory `feedback_design_for_civilization_layer`), every meaningful platform feature should be evaluated through the civilization-layer lens: does it add coordination infrastructure (language, trust, memory, specialization, affect, supervision) that lets specialist agents compose into something greater?
+
+From `docs/pitch/wolfpoint-demo-pitch.md` (Acts I-IV) — the prehistoric-human-to-civilization arc maps recursively to lone-LLM-to-AgentProvision-network. Affect-state reading is what let human societies scale past tribe-size (~150 people, Dunbar's number) because we could read each other's emotional state to coordinate. Giving agents an `affect_vector` visible on the Blackboard is the same primitive at one level up: agents in a coalition can now sense each other's affect the way humans sense team morale, and a supervisor agent (Luna) can read affective signals across its coalition the way a human leader reads the room.
+
+**This is leadership infrastructure for AI**, not feature creep. The emotions engine sits beside language (Alpha CLI), trust (consensus/coalition), memory (per-tenant + Blackboard), and specialization (agent_router + skills) as the fifth coordination primitive.
+
 ## Research grounding (Luna's literature survey, 2024–2026)
 
 The design draws on five specific papers Luna surfaced via the Gemini routing:
@@ -207,6 +215,7 @@ Per the chained-feature-branch convention (multi-PR rollouts that touch overlapp
 - Higgsfield MCP integration: agent can request rich-media expression of its affect (image / short video) when the user explicitly asks "show me how you feel". Bridges the affect engine into the existing Higgsfield generation surface.
 - Coalition voting weighted by arousal.
 - **High-affect memory etching**: episodes where `|PAD| > threshold` (i.e. emotionally salient turns) receive priority weighting on `conversation_episode` embedding indexing for recall. Emotional salience as a memory-recall booster — mirrors human episodic memory, where strongly-felt events are more retrievable. (Luna's addition.)
+- **Protective recall — affect decoupling on re-exposure**: high-salience episodes are easy to recall (Luna's etching above), BUT the `affect_vector_at_recall = affect_vector_at_event × decay(time_since_event, recall_count)`. The factual pattern is preserved for learning; the felt-charge fades the way emotional charge on trauma fades in healthy human memory. Recall the same painful failure 10 times → its affective imprint on the current PAD halves each cycle. Mirrors the **sleep-to-forget hypothesis** (Walker) and **memory reconsolidation** in trauma therapy (the memory comes back but the emotion attached to it loosens). Tunable decay rate per tenant — some operators may want agents that "remember the sting" of past failures longer; others want fast emotional recovery. **The user's contribution to the design.**
 
 ### Phase 4
 
