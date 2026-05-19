@@ -3,17 +3,16 @@
 Two surfaces are exercised:
 
   1. ``app.services.skill_creator.eval_runner`` — pure-Python helpers
-     (compute_eval_dir, dispatch_iteration with a ``_runner`` hook,
-     get_iteration_status).
+     (compute_eval_dir, dispatch_iteration with a patched
+     ``_start_chat_cli_workflows``, get_iteration_status).
   2. ``POST /api/v1/skills/{skill_id}/evals/run`` +
      ``GET /api/v1/skills/{skill_id}/evals/jobs/{job_id}`` — the
      endpoints, mocked via the same _StubDB pattern as the existing
      ``test_skill_evals_endpoint.py``.
 
-We do NOT call real Temporal here. The ``_runner`` hook on
-``dispatch_iteration`` lets us substitute a recording stub for the
-thread spawn so we can assert on the exact dispatch args without
-booting a Temporal worker.
+We do NOT call real Temporal here. ``_start_chat_cli_workflows`` is
+patched with an async stub that records the leg plans so we can
+assert on the exact dispatch args without booting a Temporal worker.
 """
 
 from __future__ import annotations
@@ -21,6 +20,7 @@ from __future__ import annotations
 import os
 os.environ["TESTING"] = "True"
 
+import asyncio
 import json
 import uuid
 from pathlib import Path
@@ -35,6 +35,27 @@ from app.api import deps
 from app.api.v1 import skill_evals as skill_evals_module
 from app.models.user import User
 from app.services.skill_creator import eval_runner
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Helpers — async no-op stub for _start_chat_cli_workflows
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def _make_recording_start_workflows():
+    """Return (stub_coroutine, recorded_calls).
+
+    The stub mirrors the signature of
+    ``eval_runner._start_chat_cli_workflows`` and appends the kwargs to
+    ``recorded_calls`` instead of touching Temporal. Use it as a
+    drop-in patch target.
+    """
+    recorded: List[Dict[str, Any]] = []
+
+    async def _stub(**kw):
+        recorded.append(kw)
+
+    return _stub, recorded
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -204,8 +225,8 @@ def test_compute_iteration_dir_layout(tmp_path):
 # ──────────────────────────────────────────────────────────────────────────
 
 
-def test_dispatch_iteration_inserts_paired_rows_and_calls_runner(tmp_path):
-    """Two evals -> 4 row inserts (paired) and 4 runner invocations."""
+def test_dispatch_iteration_inserts_paired_rows_and_calls_start_workflows(tmp_path):
+    """Two evals -> 4 row inserts (paired) and one batched workflow-start call."""
     tenant_id = uuid.uuid4()
     skill_id = uuid.uuid4()
     eval1, eval2 = uuid.uuid4(), uuid.uuid4()
@@ -218,20 +239,17 @@ def test_dispatch_iteration_inserts_paired_rows_and_calls_runner(tmp_path):
         ],
     )
 
-    recorded: List[Dict[str, Any]] = []
-
-    def _record(**kw):
-        recorded.append(kw)
+    stub, recorded = _make_recording_start_workflows()
 
     with patch("app.services.skill_creator.eval_runner._load_skill_body",
-               return_value="# stub body"):
-        out = eval_runner.dispatch_iteration(
+               return_value="# stub body"), \
+         patch.object(eval_runner, "_start_chat_cli_workflows", stub):
+        out = asyncio.run(eval_runner.dispatch_iteration(
             db,
             skill_id=skill_id,
             iteration=1,
             workspaces_root=str(tmp_path),
-            _runner=_record,
-        )
+        ))
 
     # 4 paired runs = 2 evals * (with_skill + baseline)
     assert len(out["run_ids"]) == 4
@@ -250,16 +268,17 @@ def test_dispatch_iteration_inserts_paired_rows_and_calls_runner(tmp_path):
     assert legs.count(True) == 2
     assert legs.count(False) == 2
 
-    # Runner was called 4 times — once per row.
-    assert len(recorded) == 4
-    # with_skill leg gets a non-empty skill_body; baseline does not.
-    for rec in recorded:
-        if rec["with_skill"]:
-            assert rec["skill_body"] == "# stub body"
-        else:
-            assert rec["skill_body"] == "# stub body"  # both get loaded; runner decides
-            # The baseline thread passes "" as instruction_md_content
-            # internally; that's enforced in _run_one, not here.
+    # _start_chat_cli_workflows was awaited once with all 4 leg plans.
+    assert len(recorded) == 1
+    call = recorded[0]
+    plans = call["plans"]
+    assert len(plans) == 4
+    # Plan rows are (run_id, eval_id, prompt, with_skill).
+    leg_flags = [p[3] for p in plans]
+    assert leg_flags.count(True) == 2
+    assert leg_flags.count(False) == 2
+    assert call["skill_body"] == "# stub body"
+    assert call["tenant_id"] == tenant_id
     assert db.committed
 
 
@@ -269,17 +288,17 @@ def test_dispatch_iteration_raises_on_no_evals():
     db = _StubDB(skill_tenant_id=tenant_id, evals=[])
 
     with pytest.raises(ValueError, match="no evals defined"):
-        eval_runner.dispatch_iteration(
-            db, skill_id=skill_id, iteration=1, _runner=lambda **kw: None,
-        )
+        asyncio.run(eval_runner.dispatch_iteration(
+            db, skill_id=skill_id, iteration=1,
+        ))
 
 
 def test_dispatch_iteration_raises_on_unknown_skill():
     db = _StubDB(skill_tenant_id=None)
     with pytest.raises(LookupError, match="not found"):
-        eval_runner.dispatch_iteration(
-            db, skill_id=uuid.uuid4(), iteration=1, _runner=lambda **kw: None,
-        )
+        asyncio.run(eval_runner.dispatch_iteration(
+            db, skill_id=uuid.uuid4(), iteration=1,
+        ))
 
 
 def test_dispatch_iteration_raises_on_zero_iteration():
@@ -287,9 +306,9 @@ def test_dispatch_iteration_raises_on_zero_iteration():
         {"id": str(uuid.uuid4()), "prompt": "x", "expectations": []},
     ])
     with pytest.raises(ValueError, match="iteration must be"):
-        eval_runner.dispatch_iteration(
-            db, skill_id=uuid.uuid4(), iteration=0, _runner=lambda **kw: None,
-        )
+        asyncio.run(eval_runner.dispatch_iteration(
+            db, skill_id=uuid.uuid4(), iteration=0,
+        ))
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -316,15 +335,19 @@ def test_run_endpoint_happy_path_returns_202_and_job_id():
     # whole function side-steps that entirely.
     fake_job_id = str(uuid.uuid4())
     fake_run_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
-    with patch.object(
-        skill_evals_module.eval_runner_module,
-        "dispatch_iteration",
-        return_value={
+
+    async def _fake_dispatch(*args, **kwargs):
+        return {
             "job_id": fake_job_id,
             "run_ids": fake_run_ids,
             "iteration": 1,
             "skill_id": str(skill_id),
-        },
+        }
+
+    with patch.object(
+        skill_evals_module.eval_runner_module,
+        "dispatch_iteration",
+        _fake_dispatch,
     ):
         resp = client.post(
             f"/api/v1/skills/{skill_id}/evals/run",
@@ -512,6 +535,122 @@ def test_terminal_statuses_set_is_strict_subset():
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# Temporal-native dispatch (replaces daemon-thread fire-and-forget)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_eval_runner_module_does_not_import_threading():
+    """Defence-in-depth: the daemon-thread bug (PR #579 inherited from
+    #574) re-appears every time someone wraps the async dispatch in
+    ``threading.Thread(daemon=True).start()``. Pin the import out.
+    """
+    import app.services.skill_creator.eval_runner as er
+    assert not hasattr(er, "threading"), (
+        "eval_runner must not import threading at module scope — the "
+        "daemon-thread fire-and-forget pattern is the bug this PR fixes."
+    )
+
+
+def test_start_chat_cli_workflows_calls_temporal_per_leg(tmp_path):
+    """End-to-end-ish: N planned legs => N awaited ``start_workflow``
+    calls, all on the agentprovision-code task queue with the
+    ``skill-eval-{run_id}`` workflow id convention.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    plans = [
+        (uuid.uuid4(), str(uuid.uuid4()), "prompt-a", True),
+        (uuid.uuid4(), str(uuid.uuid4()), "prompt-a", False),
+        (uuid.uuid4(), str(uuid.uuid4()), "prompt-b", True),
+        (uuid.uuid4(), str(uuid.uuid4()), "prompt-b", False),
+    ]
+
+    recorded: List[Dict[str, Any]] = []
+
+    fake_client = AsyncMock()
+
+    async def _record(*args, **kwargs):
+        recorded.append({"args": args, "kwargs": kwargs})
+        return MagicMock()
+
+    fake_client.start_workflow = _record
+
+    async def _fake_connect(*_a, **_kw):
+        return fake_client
+
+    with patch("temporalio.client.Client.connect", _fake_connect):
+        asyncio.run(eval_runner._start_chat_cli_workflows(
+            plans=plans,
+            iteration=1,
+            tenant_id=uuid.uuid4(),
+            skill_slug="x",
+            skill_body="# body",
+            platform="claude_code",
+            model="",
+        ))
+
+    # 4 legs => 4 start_workflow calls.
+    assert len(recorded) == 4
+    for call in recorded:
+        assert call["args"][0] == "ChatCliWorkflow"
+        assert call["kwargs"]["task_queue"] == "agentprovision-code"
+        assert call["kwargs"]["id"].startswith("skill-eval-")
+    # All run_ids represented exactly once.
+    expected_ids = {f"skill-eval-{p[0]}" for p in plans}
+    actual_ids = {c["kwargs"]["id"] for c in recorded}
+    assert actual_ids == expected_ids
+
+
+def test_dispatch_iteration_end_to_end_starts_temporal_per_leg(tmp_path):
+    """The full ``dispatch_iteration`` happy path with Temporal mocked
+    at the lowest level (``Client.connect``). Asserts the real
+    ``_start_chat_cli_workflows`` is exercised — not patched away.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    tenant_id = uuid.uuid4()
+    skill_id = uuid.uuid4()
+    eval1, eval2 = uuid.uuid4(), uuid.uuid4()
+
+    db = _StubDB(
+        skill_tenant_id=tenant_id,
+        evals=[
+            {"id": str(eval1), "prompt": "prompt-1", "expectations": []},
+            {"id": str(eval2), "prompt": "prompt-2", "expectations": []},
+        ],
+    )
+
+    recorded: List[Dict[str, Any]] = []
+    fake_client = AsyncMock()
+
+    async def _record(*args, **kwargs):
+        recorded.append({"args": args, "kwargs": kwargs})
+        return MagicMock()
+
+    fake_client.start_workflow = _record
+
+    async def _fake_connect(*_a, **_kw):
+        return fake_client
+
+    with patch("app.services.skill_creator.eval_runner._load_skill_body",
+               return_value="# body"), \
+         patch("temporalio.client.Client.connect", _fake_connect):
+        out = asyncio.run(eval_runner.dispatch_iteration(
+            db,
+            skill_id=skill_id,
+            iteration=1,
+            workspaces_root=str(tmp_path),
+        ))
+
+    # 2 evals x 2 legs = 4 workflows.
+    assert len(out["run_ids"]) == 4
+    assert len(recorded) == 4
+    for call in recorded:
+        assert call["args"][0] == "ChatCliWorkflow"
+        assert call["kwargs"]["task_queue"] == "agentprovision-code"
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # B1 / B2 — canonical slug + path containment
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -601,33 +740,36 @@ def test_dispatch_iteration_with_traversal_name_stays_in_tenant(tmp_path):
         evals=[{"id": str(eval1), "prompt": "p", "expectations": []}],
     )
 
-    recorded: List[Dict[str, Any]] = []
+    stub, recorded = _make_recording_start_workflows()
     with patch("app.services.skill_creator.eval_runner._load_skill_body",
-               return_value=""):
-        eval_runner.dispatch_iteration(
+               return_value=""), \
+         patch.object(eval_runner, "_start_chat_cli_workflows", stub):
+        out = asyncio.run(eval_runner.dispatch_iteration(
             db,
             skill_id=skill_id,
             iteration=1,
             workspaces_root=str(tmp_path),
-            _runner=lambda **kw: recorded.append(kw),
-        )
+        ))
 
-    assert recorded, "runner should have been called for the queued runs"
-    for kw in recorded:
+    assert recorded, "_start_chat_cli_workflows should have been awaited"
+    call = recorded[0]
+    iteration_run_id = uuid.UUID(out["job_id"])
+    # Plans: (run_id, eval_id, prompt, with_skill)
+    for run_id, eval_id, _prompt, with_skill in call["plans"]:
         eval_dir = eval_runner.compute_eval_dir(
-            tenant_id=kw["tenant_id"],
-            skill_slug=kw["skill_slug"],
-            iteration=kw["iteration"],
-            eval_id=kw["eval_id"],
-            with_skill=kw["with_skill"],
-            workspaces_root=kw["workspaces_root"],
-            iteration_run_id=kw.get("iteration_run_id"),
+            tenant_id=call["tenant_id"],
+            skill_slug=call["skill_slug"],
+            iteration=call["iteration"],
+            eval_id=eval_id,
+            with_skill=with_skill,
+            workspaces_root=str(tmp_path),
+            iteration_run_id=iteration_run_id,
         )
         # Defence-in-depth — must not raise
         eval_runner._assert_path_under_tenant_root(
             path=eval_dir,
-            tenant_id=kw["tenant_id"],
-            workspaces_root=kw["workspaces_root"],
+            tenant_id=call["tenant_id"],
+            workspaces_root=str(tmp_path),
         )
 
 
@@ -660,13 +802,12 @@ def test_dispatch_iteration_raises_when_over_quota(tmp_path):
         return_value="",
     ):
         with pytest.raises(eval_runner.TenantWorkspaceQuotaExceeded):
-            eval_runner.dispatch_iteration(
+            asyncio.run(eval_runner.dispatch_iteration(
                 db,
                 skill_id=skill_id,
                 iteration=1,
                 workspaces_root=str(tmp_path),
-                _runner=lambda **kw: None,
-            )
+            ))
 
 
 def test_run_endpoint_over_quota_returns_413():
@@ -682,12 +823,15 @@ def test_run_endpoint_over_quota_returns_413():
     user = _user(tenant_id=tenant_id)
     client = _build_client(user, db)
 
+    async def _fake_dispatch(*args, **kwargs):
+        raise eval_runner.TenantWorkspaceQuotaExceeded(
+            used=2_000_000_000, budget=1_073_741_824
+        )
+
     with patch.object(
         skill_evals_module.eval_runner_module,
         "dispatch_iteration",
-        side_effect=eval_runner.TenantWorkspaceQuotaExceeded(
-            used=2_000_000_000, budget=1_073_741_824
-        ),
+        _fake_dispatch,
     ):
         resp = client.post(
             f"/api/v1/skills/{skill_id}/evals/run",

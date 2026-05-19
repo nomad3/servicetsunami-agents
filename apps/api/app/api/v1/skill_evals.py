@@ -68,9 +68,9 @@ class RunIterationRequest(BaseModel):
 class RunIterationResponse(BaseModel):
     """Response from ``POST /skills/{skill_id}/evals/run``.
 
-    Returns immediately after the worker threads are spawned. Clients
-    poll ``GET /skills/{skill_id}/evals/jobs/{job_id}`` for status (Phase 2
-    surface; Phase 4 adds SSE).
+    Returns immediately after the Temporal workflows are started.
+    Clients poll ``GET /skills/{skill_id}/evals/jobs/{job_id}`` for
+    status (Phase 2 surface; Phase 4 adds SSE).
     """
 
     job_id: uuid.UUID
@@ -264,7 +264,7 @@ def grade_run(
     response_model=RunIterationResponse,
     status_code=202,
 )
-def run_iteration(
+async def run_iteration(
     skill_id: uuid.UUID,
     payload: RunIterationRequest,
     db: Session = Depends(get_db),
@@ -272,8 +272,10 @@ def run_iteration(
 ) -> RunIterationResponse:
     """Kick off all evals for one iteration. Returns a job_id immediately.
 
-    The endpoint is 202 Accepted — the actual run lives on Temporal +
-    background daemon threads (see ``eval_runner.dispatch_iteration``).
+    The endpoint is 202 Accepted — the actual run lives on Temporal.
+    ``dispatch_iteration`` is awaited synchronously here so a Temporal
+    outage surfaces as a 503 (no more silent "queued forever" rows from
+    a daemon-thread that died before ``start_workflow``).
     Clients poll ``GET /evals/jobs/{job_id}`` for status; Phase 4 adds
     an SSE feed for live progress.
 
@@ -294,7 +296,7 @@ def run_iteration(
     model = payload.model or ""
 
     try:
-        result = eval_runner_module.dispatch_iteration(
+        result = await eval_runner_module.dispatch_iteration(
             db,
             skill_id=skill_id,
             iteration=payload.iteration,
