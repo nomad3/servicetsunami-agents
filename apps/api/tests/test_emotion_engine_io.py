@@ -204,15 +204,47 @@ def test_appraise_and_record_tool_outcome_writes_positive_shift(db_session, test
         reward=1.0,
     )
     assert result is not None
-    # Tool outcome with full reward should shift pleasure & dominance up
-    # from the neutral baseline.
+    # Tool outcome with full reward should shift pleasure, arousal, AND
+    # dominance up from the neutral baseline (N3 of review: assert all
+    # three axes, not just pleasure + dominance).
     assert result.pleasure > 0
+    assert result.arousal > 0
     assert result.dominance > 0
 
     # Database row updated.
     db_session.refresh(ep)
     assert ep.affect_vector is not None
     assert ep.affect_vector["pleasure"] > 0
+
+
+def test_get_affect_baseline_returns_persisted_vector(db_session, test_tenant):
+    """N4 of review: round-trip test for get_affect_baseline reading an
+    actually-set baseline (not just the neutral fallback)."""
+    agent_id = uuid.uuid4()
+    baseline_vec = PADVector.from_components(
+        pleasure=0.4, arousal=-0.2, dominance=0.5
+    ).to_dict()
+
+    memory = AgentMemory(
+        id=uuid.uuid4(),
+        agent_id=agent_id,
+        tenant_id=test_tenant.id,
+        memory_type="trait",
+        content="baseline trait",
+        affect_baseline=baseline_vec,
+    )
+    db_session.add(memory)
+    db_session.commit()
+
+    result = get_affect_baseline(
+        db_session,
+        agent_id=agent_id,
+        tenant_id=test_tenant.id,
+    )
+    assert result.pleasure == pytest.approx(0.4)
+    assert result.arousal == pytest.approx(-0.2)
+    assert result.dominance == pytest.approx(0.5)
+    assert result.label != "neutral"
 
 
 def test_appraise_and_record_tool_outcome_chains_from_existing(db_session, test_tenant):
