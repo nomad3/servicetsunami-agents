@@ -81,7 +81,28 @@ def test_format_affect_addendum_does_not_announce_state():
     we don't get performative 'I am feeling sad now' surface text."""
     vec = PADVector.from_components(pleasure=0.5, arousal=0.5, dominance=0.0)
     out = format_affect_addendum(vec)
-    assert "do not announce" in out
+    assert "Do not announce" in out
+
+
+def test_format_affect_addendum_includes_per_mood_tone_guidance():
+    """Luna's chain-review IMPORTANT (2026-05-19): each mood label maps
+    to specific tone-guidance, not a uniform 'colour your tone'
+    instruction."""
+    moods_to_check = [
+        ("playful", PADVector.from_components(pleasure=0.7, arousal=0.7, dominance=0.5)),
+        ("serious", PADVector.from_components(pleasure=-0.7, arousal=0.3, dominance=0.5)),
+        ("empathetic", PADVector.from_components(pleasure=-0.7, arousal=-0.3, dominance=-0.5)),
+        ("calm", PADVector.from_components(pleasure=0.7, arousal=-0.5, dominance=0.5)),
+        ("warm", PADVector.from_components(pleasure=0.7, arousal=-0.5, dominance=-0.5)),
+    ]
+    addenda = {mood: format_affect_addendum(vec) for mood, vec in moods_to_check}
+    for mood, text in addenda.items():
+        assert text, f"{mood} addendum was empty"
+    assert "composed authority" in addenda["calm"]
+    assert "relaxed friendliness" in addenda["warm"]
+    assert "snappier" in addenda["playful"]
+    assert "fact-first" in addenda["serious"]
+    assert "Slow tempo" in addenda["empathetic"]
 
 
 # ── get_latest_session_affect (DB-backed) ─────────────────────────────

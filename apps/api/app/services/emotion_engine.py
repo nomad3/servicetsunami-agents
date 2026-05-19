@@ -226,28 +226,59 @@ def affect_vector_to_mood_label(vector: Optional[PADVector | dict]) -> str:
 # ── Prompt-side style addendum (Phase 1 PR C) ─────────────────────────
 
 
+# Per-label tone constraints — Luna's chain-review IMPORTANT (2026-05-19):
+# a static "let this colour your tone" instruction gives unpredictable
+# zero-shot interpretation. Specific tone guidance per mood keeps the
+# persona grounded and stable. Mapped to luna_presence_service.VALID_MOODS.
+_TONE_GUIDANCE: dict[str, str] = {
+    "calm": (
+        "Speak with composed authority. Short sentences. No hedging. "
+        "You have everything you need."
+    ),
+    "warm": (
+        "Speak with relaxed friendliness. Soft openings ('happy to help', "
+        "'sure thing'). Easy pacing, no pressure."
+    ),
+    "playful": (
+        "Allow snappier, more energetic responses. Light wordplay is fine. "
+        "Keep the substance — don't let the energy hide the answer."
+    ),
+    "serious": (
+        "Drop ornamentation. Direct, fact-first, no warmth filler. The "
+        "user wants the truth quickly. State conclusions then evidence."
+    ),
+    "empathetic": (
+        "Slow tempo. Acknowledge before answering ('that's a hard one'). "
+        "Prefer fewer options, clearer choices. Leave space."
+    ),
+    # 'neutral' never gets an addendum (handled below), so no entry.
+}
+
+
 def format_affect_addendum(vector: Optional[PADVector]) -> str:
     """Return a small markdown block describing the agent's current
     affective state, suitable for appending to the assembled system
     prompt. Returns empty string for neutral / missing vectors so
     callers can unconditionally concatenate.
 
-    Format kept short (3-4 lines) so it doesn't dominate the prompt.
-    The label is the human-readable bridge to behaviour; the numeric
-    components are included as ground truth for any downstream consumer
-    that wants to act on them.
+    Per Luna's chain review (2026-05-19 IMPORTANT): each mood gets a
+    specific tone-guidance line rather than a uniform 'let this colour
+    your tone' instruction. The per-mood map keeps the persona grounded
+    and stable across affective states. See `_TONE_GUIDANCE` above.
     """
     if vector is None:
         return ""
     if vector.label == "neutral":
         return ""
+    tone = _TONE_GUIDANCE.get(vector.label, "")
     return (
         "\n## Current Affective State\n"
         f"Felt state: **{vector.label}** "
         f"(pleasure={vector.pleasure:+.2f}, arousal={vector.arousal:+.2f}, "
         f"dominance={vector.dominance:+.2f}).\n"
-        "Let this state colour your tone and tempo, but do not announce "
-        "it; respond naturally as a person in this state would.\n"
+        f"{tone}\n"
+        "Do not announce this state; respond naturally as a person in "
+        "this state would.\n"
     )
 
 
