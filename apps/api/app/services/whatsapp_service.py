@@ -1427,8 +1427,12 @@ class WhatsAppService:
                     # Fallback: check if we have credentials on disk
                     logged_in = False
                     try:
-                        # Call is_logged_in and await if it returns an awaitable
-                        res = client.is_logged_in()
+                        # is_logged_in is a PROPERTY on neonize NewAClient
+                        # (verified 2026-05-20). Drop the parens; the getter
+                        # may return either a bool or an awaitable
+                        # depending on the build. Same fix pattern as
+                        # _socket_heartbeat in PR #599.
+                        res = client.is_logged_in
                         if inspect.isawaitable(res):
                             logged_in = await asyncio.wait_for(res, timeout=2)
                         else:
@@ -1486,8 +1490,11 @@ class WhatsAppService:
                 # Check logged_in as fallback
                 logged_in = False
                 try:
-                    # Call is_logged_in and await if it returns an awaitable
-                    res = client.is_logged_in()
+                    # is_logged_in is a PROPERTY on neonize NewAClient
+                    # (verified 2026-05-20). Drop the parens; getter may
+                    # return bool or awaitable. Mirrors PR #599's
+                    # heartbeat fix.
+                    res = client.is_logged_in
                     if inspect.isawaitable(res):
                         logged_in = await asyncio.wait_for(res, timeout=2)
                     else:
