@@ -26,6 +26,14 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import create_engine, text
 
+# Test fixtures hit real Postgres via os.environ["DATABASE_URL"] +
+# raw SQL INSERTs into tenants / chat_sessions / session_events.
+# Belongs in the api(integration, postgres+pgvector) job. Same fix
+# pattern as test_internal_session_stream.py / test_session_events.py
+# — unmasked 2026-05-20 after create_chat_session ImportError stopped
+# hiding everything below it.
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def engine():
