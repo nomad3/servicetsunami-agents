@@ -183,6 +183,55 @@ async def select_coalition_template(
                 match = agents[0]
             role_agent_map[role] = _slug(match.name) if match else role
 
+        # Teamwork engine runtime wire-in (2026-05-20). Layer active
+        # TeamRoleContracts on top of the auto-resolved map. For each
+        # coalition phase-role that maps to a known team scope, if any
+        # agent in the tenant holds an active contract for that scope,
+        # prefer that agent. Caller's explicit role_overrides still
+        # trump (see block below). Best-effort: if the import or
+        # lookup fails, we keep the original auto-resolved map and
+        # don't block dispatch.
+        try:
+            from app.services.team_engine import COALITION_ROLE_TO_TEAM_SCOPE
+            from app.services.team_engine_io import get_agent_for_scope
+
+            policy_changes = []
+            agent_by_id = {a.id: a for a in agents}
+            for coalition_role in list(role_agent_map.keys()):
+                team_scope = COALITION_ROLE_TO_TEAM_SCOPE.get(coalition_role)
+                if not team_scope:
+                    continue
+                pinned_agent_id = get_agent_for_scope(
+                    db,
+                    tenant_id=UUID(tenant_id),
+                    scope=team_scope,
+                )
+                if pinned_agent_id is None:
+                    continue
+                pinned_agent = agent_by_id.get(pinned_agent_id)
+                if pinned_agent is None or not pinned_agent.name:
+                    continue
+                pinned_slug = _slug(pinned_agent.name)
+                if role_agent_map.get(coalition_role) != pinned_slug:
+                    policy_changes.append(
+                        f"{coalition_role}={pinned_slug} "
+                        f"(scope={team_scope}, was {role_agent_map.get(coalition_role)})"
+                    )
+                role_agent_map[coalition_role] = pinned_slug
+
+            if policy_changes:
+                logger.info(
+                    "select_coalition_template: team-role contracts "
+                    "shaped routing for tenant=%s → %s",
+                    tenant_id, "; ".join(policy_changes),
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "select_coalition_template: team-role contract wire-in "
+                "failed (continuing with auto-resolved map); err=%s",
+                exc,
+            )
+
         # Layer caller-supplied role overrides on top. Only known roles
         # for the active pattern are honored — unknown keys are ignored
         # so a stale CLI flag can't smuggle in random roles.

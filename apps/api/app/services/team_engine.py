@@ -188,9 +188,33 @@ def describe_role_split(contract: TeamRoleContract) -> str:
     )
 
 
+# ── Runtime wire-in: coalition role → team scope ──────────────────────
+#
+# Maps the coalition phase-roles (planner / critic / synthesizer / …,
+# from `app.schemas.collaboration.PHASE_REQUIRED_ROLES`) onto the
+# coarser team scopes the engine reasons in
+# (`app.schemas.team.ALLOWED_SCOPES`).
+#
+# Unmapped coalition roles intentionally fall through to the auto-
+# resolution path in coalition_activities.select_coalition_template —
+# the contract advisory is additive, never lossy.
+COALITION_ROLE_TO_TEAM_SCOPE: dict = {
+    "planner": "design",
+    "critic": "review",
+    "verifier": "review",
+    "synthesizer": "execution",
+    "researcher": "research",
+    "triage_agent": "review",
+    "investigator": "research",
+    "analyst": "research",
+    "commander": "execution",
+}
+
+
 __all__ = [
     "ROLE_CONTRACT_MEMORY_TYPE",
     "NORM_MEMORY_TYPE",
+    "COALITION_ROLE_TO_TEAM_SCOPE",
     "serialize_role_contract",
     "deserialize_role_contract",
     "serialize_norm",

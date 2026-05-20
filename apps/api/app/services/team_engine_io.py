@@ -93,6 +93,51 @@ def get_active_role(
     return evaluate_role_contract(contracts, agent_id=str(agent_id), scope=scope)
 
 
+def get_agent_for_scope(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    scope: str,
+) -> Optional[uuid.UUID]:
+    """Runtime wire-in helper for the coalition dispatch path.
+
+    Walks all role contracts in the tenant, picks the one currently
+    active for the requested scope (via the most-recent-effective_from
+    tie-break inside evaluate_role_contract), and returns that
+    contract's agent_id. Returns None when no active contract applies
+    to the scope.
+
+    Multiple agents can hold contracts for the same scope (e.g. a
+    rotation). When that happens we return the agent from the most
+    recently effective contract — the same selection rule
+    evaluate_role_contract uses. Callers wanting all agents pinned to
+    a scope should walk list_role_contracts themselves; this is the
+    "pick one" convenience.
+
+    Called from coalition_activities.select_coalition_template to
+    layer contract-driven routing on top of the auto-resolved
+    role_agent_map, before the caller's explicit role_overrides.
+    """
+    contracts = list_role_contracts(db, tenant_id=tenant_id)
+    # Filter to contracts whose scope matches AND that are currently
+    # active (between effective_from and effective_until). Sort by
+    # effective_from DESC so the most-recently-effective contract wins.
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    candidates = [
+        c for c in contracts
+        if c.scope == scope and c.is_active_at(now)
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: c.effective_from, reverse=True)
+    try:
+        return uuid.UUID(candidates[0].agent_id)
+    except (ValueError, AttributeError):
+        return None
+
+
 # ── Norm read paths ───────────────────────────────────────────────────
 
 
@@ -463,6 +508,7 @@ def bootstrap_canonical_role_split(
 __all__ = [
     "list_role_contracts",
     "get_active_role",
+    "get_agent_for_scope",
     "list_norms",
     "get_norm_value",
     "write_role_contract",
