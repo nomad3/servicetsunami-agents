@@ -1,27 +1,50 @@
-"""Teamwork Engine — observability endpoints (Phase 1 PR B).
+"""Teamwork Engine — observability + operator write endpoints
+(Phase 1 PR B + PR C).
 
-Read-only HTTP surface for the Social Protocol primitive. Mirrors the
-shape of `app.api.v1.emotion`: thin FastAPI router, tenant-scoped via
-`get_current_user`, returns JSON shapes the dashboard + alpha CLI can
-consume.
+HTTP surface for the Social Protocol primitive. Mirrors emotion.py
+(thin FastAPI router, tenant-scoped via get_current_user, JSON shapes
+consumable by dashboard + alpha CLI).
 
-Write paths (POST/amend) ship in Phase 1 PR C alongside the operator-
-facing verbs.
+Read endpoints (PR B):
+- GET /team/roles            list role contracts (optionally by agent)
+- GET /team/roles/active     active contract for (agent, scope) or 404
+- GET /team/norms            list norms (coalition-scoped or tenant-wide)
+
+Write endpoints (PR C):
+- POST /team/roles           create a role contract
+- POST /team/norms           create a norm
+- POST /team/roles/{id}/amend  write a superseding contract (operator
+                                can override conditions / rationale /
+                                effective_from; old contract stays as
+                                audit trail; evaluate_role_contract
+                                picks new one via most-recent-
+                                effective_from tie-break)
 """
 from __future__ import annotations
 
 import uuid
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
+from app.schemas.team import (
+    ALLOWED_NORM_KEYS,
+    ALLOWED_ROLES,
+    ALLOWED_SCOPES,
+    TeamNorm,
+    TeamRoleContract,
+)
 from app.services.team_engine_io import (
     get_active_role,
     list_norms,
     list_role_contracts,
+    write_norm,
+    write_role_contract,
 )
 
 router = APIRouter()
@@ -140,4 +163,198 @@ def list_team_norms(
         "tenant_id": str(current_user.tenant_id),
         "coalition_id_filter": str(coalition_id) if coalition_id else None,
         "norms": out,
+    }
+
+
+# ── PR C — operator write endpoints ───────────────────────────────────
+
+
+class CreateRoleContractRequest(BaseModel):
+    """Body for POST /team/roles. The tenant_id comes from the JWT —
+    never from the body — same pattern as tasks_fanout."""
+
+    agent_id: uuid.UUID
+    role: str
+    scope: str
+    coalition_id: Optional[uuid.UUID] = None
+    effective_from: Optional[str] = None
+    effective_until: Optional[str] = None
+    conditions: dict = Field(default_factory=dict)
+    rationale: str = ""
+
+    @field_validator("role")
+    @classmethod
+    def _validate_role(cls, v: str) -> str:
+        if v not in ALLOWED_ROLES:
+            raise ValueError(f"role must be one of {sorted(ALLOWED_ROLES)}")
+        return v
+
+    @field_validator("scope")
+    @classmethod
+    def _validate_scope(cls, v: str) -> str:
+        if v not in ALLOWED_SCOPES:
+            raise ValueError(f"scope must be one of {sorted(ALLOWED_SCOPES)}")
+        return v
+
+
+class CreateNormRequest(BaseModel):
+    """Body for POST /team/norms."""
+
+    key: str
+    value: Any
+    coalition_id: Optional[uuid.UUID] = None
+    rationale: str = ""
+
+    @field_validator("key")
+    @classmethod
+    def _validate_key(cls, v: str) -> str:
+        if v not in ALLOWED_NORM_KEYS:
+            raise ValueError(f"key must be one of {sorted(ALLOWED_NORM_KEYS)}")
+        return v
+
+
+class AmendRoleContractRequest(BaseModel):
+    """Body for POST /team/roles/{id}/amend. Writes a NEW contract
+    that supersedes the existing one. Unset fields carry over from
+    the original."""
+
+    effective_from: Optional[str] = None
+    effective_until: Optional[str] = None
+    conditions: Optional[dict] = None
+    rationale: Optional[str] = None
+
+
+@router.post("/team/roles", status_code=201)
+def create_team_role(
+    body: CreateRoleContractRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a role contract for the current tenant.
+
+    tenant_id is taken from the JWT, never the body (round-1 spoofing
+    discipline matching tasks_fanout).
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    contract = TeamRoleContract(
+        tenant_id=str(current_user.tenant_id),
+        coalition_id=str(body.coalition_id) if body.coalition_id else None,
+        agent_id=str(body.agent_id),
+        role=body.role,
+        scope=body.scope,
+        effective_from=body.effective_from or now_iso,
+        effective_until=body.effective_until,
+        conditions=body.conditions,
+        rationale=body.rationale,
+        superseded_by=None,
+    )
+    row_id = write_role_contract(db, contract=contract)
+    if row_id is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to persist role contract (see api logs)",
+        )
+    return {"id": str(row_id), "contract": contract.to_dict()}
+
+
+@router.post("/team/norms", status_code=201)
+def create_team_norm(
+    body: CreateNormRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a norm for the current tenant. Coalition-specific
+    (with coalition_id) OR tenant-wide default (without)."""
+    norm = TeamNorm(
+        tenant_id=str(current_user.tenant_id),
+        coalition_id=str(body.coalition_id) if body.coalition_id else None,
+        key=body.key,
+        value=body.value,
+        rationale=body.rationale,
+        last_confirmed_at=datetime.now(timezone.utc).isoformat(),
+    )
+    row_id = write_norm(db, norm=norm)
+    if row_id is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to persist norm (see api logs)",
+        )
+    return {"id": str(row_id), "norm": norm.to_dict()}
+
+
+@router.post("/team/roles/{contract_row_id}/amend", status_code=201)
+def amend_team_role(
+    contract_row_id: uuid.UUID,
+    body: AmendRoleContractRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Amend an existing role contract by writing a NEW contract that
+    inherits the original's identity (agent_id, role, scope,
+    coalition_id) but overrides conditions / effective range /
+    rationale.
+
+    evaluate_role_contract picks the most-recent-effective_from
+    contract as the active one, so writing a newer contract is the
+    natural amendment path. The original stays in-place as audit.
+
+    Returns 404 if `contract_row_id` doesn't exist or belongs to
+    another tenant. Returns 201 + the new contract on success.
+    """
+    from app.models.agent_memory import AgentMemory
+    from app.services.team_engine import (
+        ROLE_CONTRACT_MEMORY_TYPE,
+        deserialize_role_contract,
+    )
+
+    row = (
+        db.query(AgentMemory)
+        .filter(
+            AgentMemory.id == contract_row_id,
+            AgentMemory.tenant_id == current_user.tenant_id,
+            AgentMemory.memory_type == ROLE_CONTRACT_MEMORY_TYPE,
+        )
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="role contract not found")
+
+    original = deserialize_role_contract(row.content)
+    if original is None:
+        raise HTTPException(
+            status_code=500,
+            detail="role contract row exists but content is malformed",
+        )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    amended = TeamRoleContract(
+        tenant_id=original.tenant_id,
+        coalition_id=original.coalition_id,
+        agent_id=original.agent_id,
+        role=original.role,
+        scope=original.scope,
+        effective_from=body.effective_from or now_iso,
+        effective_until=(
+            body.effective_until
+            if body.effective_until is not None
+            else original.effective_until
+        ),
+        conditions=(
+            body.conditions if body.conditions is not None else original.conditions
+        ),
+        rationale=(
+            body.rationale if body.rationale is not None else original.rationale
+        ),
+        superseded_by=None,
+    )
+    new_row_id = write_role_contract(db, contract=amended)
+    if new_row_id is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to persist amended role contract",
+        )
+    return {
+        "id": str(new_row_id),
+        "superseded_row_id": str(contract_row_id),
+        "contract": amended.to_dict(),
     }
