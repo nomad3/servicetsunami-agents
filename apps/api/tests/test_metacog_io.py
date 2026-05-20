@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import JSON, String, create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.types import TypeDecorator
 
 from app.db.base import Base
@@ -119,7 +120,19 @@ def _per_test_sqlite():
             tbl = Base.metadata.tables[tbl_name]
             original_types[tbl_name] = _swap_pg_types_on_table(tbl)
 
-        engine = create_engine("sqlite:///:memory:", future=True)
+        # StaticPool keeps every connection on the SAME in-memory
+        # SQLite. Without it, create_all() runs on connection A and
+        # the session's queries land on connection B which sees an
+        # empty database — that was the CI failure mode where
+        # write_prediction committed fine but refresh(row) raised
+        # ObjectDeletedError. Local container happened to dodge this
+        # because of an environment quirk in app.db.session.
+        engine = create_engine(
+            "sqlite:///:memory:",
+            future=True,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
         Base.metadata.create_all(
             engine,
             tables=[Base.metadata.tables[n] for n in table_names],
