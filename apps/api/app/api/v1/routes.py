@@ -24,6 +24,7 @@ from app.api.v1 import (
     internal,
     emotion,
     memories,
+    team,
     memory_remember,
     agent_policies,
     knowledge,
@@ -153,6 +154,10 @@ router.include_router(memories.router, prefix="/memories", tags=["memories"])
 # Mounted at /api/v1 with no prefix so paths like /sessions/{id}/affect-trace
 # land under the session namespace, not /memories.
 router.include_router(emotion.router, prefix="", tags=["emotion"])
+# Teamwork Engine — role contracts + norms observability endpoints.
+# Empty prefix so paths like /team/roles + /team/norms land at the
+# tenant-scoped /api/v1/team namespace.
+router.include_router(team.router, prefix="", tags=["team"])
 # `alpha usage` + `alpha costs` (Phase 4 of the CLI roadmap, #181).
 # Aggregates chat_messages per-provider and per-day for the tenant.
 # Mounted at root (no prefix) so the routes read `/usage` and
