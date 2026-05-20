@@ -28,6 +28,11 @@ from app.services.emotion_engine import (
     appraise_event,
     format_affect_addendum,
 )
+from app.services.emotion_engine_metrics import (
+    record_affect_write,
+    record_appraise_event,
+    record_clamp_events,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +75,14 @@ def record_affect_on_episode(
         )
         db.rollback()
         return None
+    # Observability — Prometheus instrumentation. Best-effort.
+    record_affect_write(tenant_id=str(tenant_id))
+    record_clamp_events(
+        tenant_id=str(tenant_id),
+        pleasure=vector.pleasure,
+        arousal=vector.arousal,
+        dominance=vector.dominance,
+    )
     return episode
 
 
@@ -288,9 +301,26 @@ def appraise_and_record_tool_failure(
         current=current,
         baseline=baseline,
     )
+    record_appraise_event(tenant_id=str(tenant_id), event_type="tool_failure")
     episode.affect_vector = new_vector.to_dict()
-    db.commit()
-    db.refresh(episode)
+    try:
+        db.commit()
+        db.refresh(episode)
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "emotion_engine_io.appraise_and_record_tool_failure: commit "
+            "failed, rolling back. episode_id=%s tenant_id=%s err=%s",
+            episode_id, tenant_id, exc,
+        )
+        db.rollback()
+        return None
+    record_affect_write(tenant_id=str(tenant_id))
+    record_clamp_events(
+        tenant_id=str(tenant_id),
+        pleasure=new_vector.pleasure,
+        arousal=new_vector.arousal,
+        dominance=new_vector.dominance,
+    )
     return new_vector
 
 
@@ -434,6 +464,7 @@ def appraise_and_record_tool_outcome(
         current=current,
         baseline=baseline,
     )
+    record_appraise_event(tenant_id=str(tenant_id), event_type="tool_outcome")
     episode.affect_vector = new_vector.to_dict()
     try:
         db.commit()
@@ -446,4 +477,11 @@ def appraise_and_record_tool_outcome(
         )
         db.rollback()
         return None
+    record_affect_write(tenant_id=str(tenant_id))
+    record_clamp_events(
+        tenant_id=str(tenant_id),
+        pleasure=new_vector.pleasure,
+        arousal=new_vector.arousal,
+        dominance=new_vector.dominance,
+    )
     return new_vector
