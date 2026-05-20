@@ -24,6 +24,14 @@ services:
       dockerfile: apps/api/Dockerfile
     ports:
       - "${API_PORT:-8000}:8000"
+    # Bumped from docker-compose's 10s default so uvicorn can drain
+    # in-flight chat requests on SIGTERM before docker SIGKILLs. Luna
+    # chat turns can run 30-90s against Codex (longer when Gemini
+    # quota cooldown forces a fallback chain); the prior 10s killed
+    # responses mid-stream on every merge-triggered redeploy. Mirrors
+    # helm/values/agentprovision-api.yaml — keep in sync per the no-
+    # drift rule. See concern memory 25307912.
+    stop_grace_period: 180s
     volumes:
       - ./apps/api:/app
       # Phase 1.5: read-only bind-mount of the canonical cli_orchestrator

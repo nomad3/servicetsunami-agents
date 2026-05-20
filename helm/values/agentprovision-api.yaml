@@ -16,6 +16,13 @@ strategy:
     maxSurge: 1
     maxUnavailable: 0
 
+# Bumped from k8s default 30s so uvicorn can drain in-flight chat
+# requests on SIGTERM before docker SIGKILLs. Luna chat turns can
+# run 30-90s against Codex (longer when Gemini quota cooldown forces
+# a fallback chain); the prior default killed responses mid-stream on
+# every merge-triggered redeploy. See concern memory 25307912.
+terminationGracePeriodSeconds: 180
+
 container:
   port: 8000
 

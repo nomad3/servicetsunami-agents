@@ -34,6 +34,14 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "microservice.serviceAccountName" . }}
+      {{- with .Values.terminationGracePeriodSeconds }}
+      # Bumped from k8s default 30s for chat-hosting services (api).
+      # Uvicorn drains in-flight HTTP on SIGTERM, but a Luna chat turn
+      # against Codex can run 30-90s. The original 10s docker-compose
+      # default killed responses mid-stream on every merge-triggered
+      # redeploy. See concern memory 25307912 + PR adding this.
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- with .Values.initContainers }}
