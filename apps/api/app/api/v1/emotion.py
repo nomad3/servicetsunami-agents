@@ -144,22 +144,33 @@ def _latest_affect_for_agent_tenant(
     agent_id: uuid.UUID,
     tenant_id: uuid.UUID,
 ) -> PADVector | None:
-    """Approximate the agent's 'current affect' by reading the most
-    recent non-null affect_vector across any conversation_episode for
-    this tenant. Phase 3 will refine to per-agent attribution when
-    record_session_tool_failure / appraise_and_record_tool_outcome gain
-    agent_id plumbing (see the existing TODO in emotion_engine_io).
+    """Return the agent's 'current affect' by reading the most recent
+    non-null affect_vector across conversation_episodes whose session
+    belongs to this agent.
+
+    2026-05-19 Luna review fix: previously this ignored agent_id and
+    returned the tenant-wide latest affect, so every per-agent endpoint
+    call returned the same value within a tenant. Now joins through
+    ChatSession.agent_id; falls back to tenant-wide latest only when
+    that agent has no affect-bearing episodes yet (to preserve the
+    'has_live_state' soft-degradation contract).
 
     Best-effort: tenant-scoped, returns None on read failure or when no
     episode has affect_vector yet.
     """
+    from app.models.chat import ChatSession
     from app.models.conversation_episode import ConversationEpisode
 
     try:
         episode = (
             db.query(ConversationEpisode)
+            .join(
+                ChatSession,
+                ConversationEpisode.session_id == ChatSession.id,
+            )
             .filter(
                 ConversationEpisode.tenant_id == tenant_id,
+                ChatSession.agent_id == agent_id,
                 ConversationEpisode.affect_vector.isnot(None),
             )
             .order_by(ConversationEpisode.created_at.desc())
