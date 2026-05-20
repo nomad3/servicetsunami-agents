@@ -88,13 +88,24 @@ def create_session(
         if not agent or str(agent.tenant_id) != str(tenant_id):
             raise ValueError("Agent not found for tenant")
     else:
-        # Auto-select: prefer Luna, then production > staging > draft > deprecated,
-        # stable tiebreak by id
+        # Auto-select: prefer Luna (any agent whose name starts with
+        # "Luna"), then production > staging > draft > deprecated,
+        # stable tiebreak by id.
+        #
+        # 2026-05-19 fix: the previous query used `Agent.name == "Luna"`
+        # which only matched the literal bare name. Tenants with named
+        # variants like "Luna Supervisor" or "Luna General Assistant"
+        # never satisfied the predicate, so the selection fell through to
+        # `Agent.id.asc()` and picked whichever production agent had the
+        # lowest UUID — for at least one tenant that was "Root Cause
+        # Analyst", which then appeared as the title of every fresh chat
+        # session. Bumping to `ILIKE 'Luna%'` honours the original intent
+        # without requiring tenants to keep an unnamed "Luna" row.
         agent = (
             db.query(Agent)
             .filter(Agent.tenant_id == tenant_id)
             .order_by(
-                (Agent.name == "Luna").desc(),
+                Agent.name.ilike("Luna%").desc(),
                 agent_status_rank.asc(),
                 Agent.id.asc(),
             )
@@ -110,7 +121,16 @@ def create_session(
             parts.append(f"on {dataset.name}")
         elif dataset_group:
             parts.append(f"on {dataset_group.name} (Group)")
-        session_title = " ".join(parts) if parts else "New Session"
+        # 2026-05-19 fix: append a HH:MM disambiguator when the caller
+        # didn't pass a title. Previously every fresh session for the
+        # same agent had the same title, so a day's worth of dispatches
+        # collapsed into a wall of identical "Root Cause Analyst" rows
+        # in the dashboard sessions list. The timestamp suffix is cheap
+        # and reversible; callers that want a meaningful title still get
+        # full control via the `title` parameter.
+        from datetime import datetime
+        base_title = " ".join(parts) if parts else "New Session"
+        session_title = f"{base_title} · {datetime.utcnow().strftime('%H:%M')}"
 
     session = ChatSessionModel(
         title=session_title,
