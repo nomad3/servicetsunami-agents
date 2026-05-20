@@ -348,14 +348,15 @@ def record_session_tool_failure(
     between the chat hot path and the emotion engine; it MUST NOT raise
     — the caller is in an exception handler already.
 
-    AGENT ATTRIBUTION CAVEAT (Phase 3 follow-up):
-    When `agent_id` is None we fall back to a random UUID so the baseline
-    lookup returns neutral. That keeps the appraisal correct but the
-    persisted `affect_vector` has no agent-of-record. Phase 3 should
-    resolve agent_id from db_session_memory or the most-recent
-    ExecutionTrace before persisting; without it, per-agent affect
-    analytics will be blind to failures originating from
-    `cli_session_manager`. TODO(phase-3): plumb agent_id through.
+    AGENT ATTRIBUTION:
+    `cli_session_manager._record_tool_failure_affect` now resolves the
+    agent_id from `chat_session.agent_id` and passes it through (2026-
+    05-20 Phase 3 plumbing). When agent_id is None (e.g. for orphan
+    chat sessions or alternate call sites that don't yet plumb it),
+    the fallback random UUID keeps the appraisal correct (baseline
+    lookup returns neutral) but leaves affect_vector without an
+    agent-of-record. The remaining call sites that still need
+    plumbing: future caller sites that don't go through cli_session_manager.
     """
     if session_id is None:
         return None
@@ -381,11 +382,42 @@ def record_session_tool_failure(
         # Phase 3 can buffer these in Redis for PostChatMemoryWorkflow to
         # apply at episode creation; Phase 2 accepts the miss.
         return None
+
+    # Luna 2026-05-19 review IMPORTANT: silent agent_id=None fallback
+    # was destroying attribution. Make the gap loud:
+    # - WARN log carries enough context to grep for it
+    # - try to record a Prometheus counter event_type so dashboards
+    #   show the rate over time (best-effort; the metrics module ships
+    #   in PR #607 — graceful no-op when not present yet).
+    effective_agent_id = agent_id
+    if effective_agent_id is None:
+        effective_agent_id = uuid.uuid4()
+        logger.warning(
+            "emotion_engine_io.record_session_tool_failure: agent_id "
+            "fallback triggered (caller didn't resolve a real agent_id). "
+            "session_id=%s tenant_id=%s severity=%.2f → using random "
+            "UUID %s. Appraisal will land on a neutral baseline; affect "
+            "won't be attributable to a real agent.",
+            session_id, tenant_id, severity, effective_agent_id,
+        )
+        try:
+            from app.services.emotion_engine_metrics import (
+                record_appraise_event,
+            )
+            record_appraise_event(
+                tenant_id=str(tenant_id),
+                event_type="agent_id_fallback",
+            )
+        except ImportError:
+            pass  # metrics module ships in PR #607
+        except Exception:  # noqa: BLE001
+            pass  # never let metrics emission break appraisal
+
     return appraise_and_record_tool_failure(
         db,
         episode_id=episode.id,
         tenant_id=tenant_id,
-        agent_id=agent_id or uuid.uuid4(),
+        agent_id=effective_agent_id,
         severity=severity,
     )
 

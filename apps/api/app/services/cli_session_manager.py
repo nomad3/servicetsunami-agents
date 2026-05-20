@@ -1398,16 +1398,36 @@ def _record_tool_failure_affect(
     bare except.
     """
     try:
+        from app.models.chat import ChatSession
         from app.services.emotion_engine_io import record_session_tool_failure
 
         session_id_str = (db_session_memory or {}).get("chat_session_id") or ""
         if not session_id_str:
             return
         session_id = uuid.UUID(session_id_str)
+        # Phase 3 follow-up to the agent_id-attribution TODO in
+        # appraise_and_record_tool_failure. Resolve the agent owner of
+        # this chat session so the failure appraisal lands on the right
+        # agent's affect_baseline (instead of a random UUID fallback).
+        # Best-effort: if the lookup fails for any reason, fall back to
+        # None and let record_session_tool_failure use its existing
+        # fallback. Never crash chat.
+        agent_id = None
+        try:
+            chat_session = db.query(ChatSession).filter(
+                ChatSession.id == session_id,
+                ChatSession.tenant_id == tenant_id,
+            ).first()
+            if chat_session is not None:
+                agent_id = chat_session.agent_id
+        except Exception:  # noqa: BLE001
+            pass
+
         record_session_tool_failure(
             db,
             session_id=session_id,
             tenant_id=tenant_id,
+            agent_id=agent_id,
             severity=severity,
         )
     except Exception:  # noqa: BLE001 — emotion layer never crashes chat

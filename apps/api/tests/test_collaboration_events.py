@@ -4,6 +4,8 @@ os.environ["TESTING"] = "True"
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 def test_publish_event_sends_to_correct_channel():
     mock_redis = MagicMock()
@@ -19,6 +21,16 @@ def test_publish_event_sends_to_correct_channel():
         assert "timestamp" in data
 
 
+# 2026-05-20: `publish_session_event` allocates seq_no via
+# `SELECT pg_advisory_xact_lock(hashtext(?))` on the global SessionLocal
+# — Postgres-only functions that SQLite refuses ("no such function:
+# hashtext"). The test mocks Redis but NOT the DB session, so the
+# advisory-lock call hits real SQLite and fails. Marking this single
+# test integration so it runs in the Postgres-backed job; the
+# tenant-channel-routing surface it covers is more naturally tested
+# against a real DB anyway. The mock-only `test_publish_event_…` test
+# above stays on the fast unit path.
+@pytest.mark.integration
 def test_publish_session_event_sends_to_session_channel():
     mock_redis = MagicMock()
     with patch("app.services.collaboration_events._get_redis", return_value=mock_redis):
