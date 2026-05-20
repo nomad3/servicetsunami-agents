@@ -21,6 +21,13 @@ from sqlalchemy import create_engine, text
 
 pytest.importorskip("fastapi")
 
+# Test fixtures hit real Postgres tables (tenants + chat_sessions +
+# session_events) via raw SQL. SQLite unit run lacks those, so this
+# file belongs in the api(integration, postgres+pgvector) job. Same
+# fix as test_internal_session_stream.py — unmasked 2026-05-20 after
+# the create_chat_session ImportError stopped hiding everything below.
+pytestmark = pytest.mark.integration
+
 from app.api import deps
 from app.api.v2 import router as v2_router
 
