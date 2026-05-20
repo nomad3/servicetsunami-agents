@@ -246,10 +246,18 @@ class WhatsAppService:
                     logger.info(f"_socket_heartbeat exiting for {key} (no client)")
                     return
                 try:
-                    is_connected = await asyncio.wait_for(
-                        asyncio.to_thread(client.IsConnected),
-                        timeout=self.HEARTBEAT_TIMEOUT_SECONDS,
-                    )
+                    # neonize exposes whatsmeow's IsConnected as
+                    # `is_connected` (snake_case). The return may be a
+                    # bool or an awaitable depending on the neonize
+                    # build, so mirror the existing pairing-status probe
+                    # pattern that uses is_logged_in.
+                    res = client.is_connected()
+                    if inspect.isawaitable(res):
+                        is_connected = await asyncio.wait_for(
+                            res, timeout=self.HEARTBEAT_TIMEOUT_SECONDS,
+                        )
+                    else:
+                        is_connected = bool(res)
                 except asyncio.TimeoutError:
                     logger.warning(
                         f"_socket_heartbeat: IsConnected() hung > "
