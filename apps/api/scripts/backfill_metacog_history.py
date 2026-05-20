@@ -60,7 +60,7 @@ from typing import Iterable, Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.database import SessionLocal
+from app.db.session import SessionLocal
 from app.models.agent_memory import AgentMemory
 from app.schemas.metacog import ConfidencePrediction, OutcomeObservation
 from app.services import metacog_io
