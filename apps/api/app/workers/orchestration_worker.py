@@ -17,6 +17,14 @@ from app.workflows.gap1_journal_synthesis import Gap1JournalSynthesis
 from app.workflows.post_chat_memory import PostChatMemoryWorkflow
 from app.workflows.episode_workflow import EpisodeWorkflow
 from app.workflows.idle_episode_scan import IdleEpisodeScanWorkflow
+from app.workflows.nightly_reflection_workflow import NightlyReflectionWorkflow
+from app.workflows.activities.reflection_activities import (
+    check_killswitch as reflection_check_killswitch,
+    gather_episodes as reflection_gather_episodes,
+    cluster_episodes as reflection_cluster_episodes,
+    synthesize_reflections as reflection_synthesize_reflections,
+    write_reflections as reflection_write_reflections,
+)
 from app.workflows.teams_monitor import TeamsMonitorWorkflow
 from app.workflows.backfill_embeddings import BackfillEmbeddingsWorkflow
 from app.workflows.coalition_workflow import CoalitionWorkflow
@@ -247,6 +255,7 @@ async def run_orchestration_worker():
             AgentPerformanceRollupWorkflow,
             TeamsMonitorWorkflow,
             TrainingIngestionWorkflow,
+            NightlyReflectionWorkflow,
         ],
         activities=[
             dispatch_task,
@@ -377,6 +386,13 @@ async def run_orchestration_worker():
             record_review_finding,
             # Agent lifecycle: performance snapshots
             compute_agent_performance_snapshot,
+            # NightlyReflectionWorkflow (O2) — kill-switch gated;
+            # default OFF in prod per locked design decision #4.
+            reflection_check_killswitch,
+            reflection_gather_episodes,
+            reflection_cluster_episodes,
+            reflection_synthesize_reflections,
+            reflection_write_reflections,
         ],
     )
 

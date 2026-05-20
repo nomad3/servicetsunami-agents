@@ -81,6 +81,13 @@ class TenantFeatures(Base):
     # docs/plans/2026-05-16-terminal-full-cli-output.md §9
     cli_stream_output = Column(Boolean, nullable=False, default=False)
 
+    # NightlyReflectionWorkflow (O2 of #616) per-tenant kill-switch.
+    # Default OFF in prod — locked decision #4 in the canonical design.
+    # The workflow checks this flag at top-of-run and short-circuits
+    # with reason='kill_switch_off' when FALSE. Operators flip per
+    # tenant after reviewing dry-run output. Migration 142.
+    nightly_reflection_enabled = Column(Boolean, nullable=False, default=False)
+
     # CPA software export format for the Bookkeeper Agent's weekly
     # categorized output. AAHA stays canonical — the Bookkeeper still
     # categorizes against the AAHA chart of accounts; this just picks
