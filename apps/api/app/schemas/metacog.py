@@ -66,10 +66,24 @@ class ConfidencePrediction:
         return asdict(self)
 
 
+def normalize_reward(reward: float) -> float:
+    """Rescale an actual_reward in [-1, 1] to [0, 1] for ECE/importance
+    comparison against predicted_confidence. Module-level so IO and
+    schema layers reuse the same definition (superpowers NIT #1)."""
+    return (reward + 1.0) / 2.0
+
+
 @dataclass(frozen=True)
 class OutcomeObservation:
     """Post-outcome: the actual reward and latency the decision
     produced. Joins to a ConfidencePrediction via decision_id.
+
+    `agent_id` lives ON the observation as well as the prediction so
+    the IO layer can persist + read back the agent attribution
+    without re-resolving it from the paired prediction (superpowers
+    IMPORTANT #1). Without this a buggy caller could write an
+    observation under the wrong agent's FK and split a trace across
+    two agents in agent_memory.
 
     `actual_reward` is in [-1.0, 1.0] to match the RL signal
     convention (positive = better-than-baseline). The calibration
@@ -79,6 +93,7 @@ class OutcomeObservation:
     """
 
     tenant_id: str
+    agent_id: str
     decision_id: str
     actual_reward: float
     latency_ms: int
@@ -122,12 +137,17 @@ class MetacogTrace:
             raise ValueError(
                 "MetacogTrace requires same tenant_id on both sides"
             )
+        if self.prediction.agent_id != self.observation.agent_id:
+            raise ValueError(
+                "MetacogTrace requires same agent_id on both sides "
+                "(superpowers IMPORTANT #1 — split-attribution guard)"
+            )
 
     @property
     def normalized_reward(self) -> float:
         """Rescale actual_reward from [-1, 1] to [0, 1] so it can be
         compared against predicted_confidence on the same axis."""
-        return (self.observation.actual_reward + 1.0) / 2.0
+        return normalize_reward(self.observation.actual_reward)
 
 
 __all__ = [
@@ -135,4 +155,5 @@ __all__ = [
     "ConfidencePrediction",
     "OutcomeObservation",
     "MetacogTrace",
+    "normalize_reward",
 ]

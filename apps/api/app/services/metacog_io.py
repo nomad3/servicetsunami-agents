@@ -24,6 +24,7 @@ from app.schemas.metacog import (
     ConfidencePrediction,
     MetacogTrace,
     OutcomeObservation,
+    normalize_reward,
 )
 from app.services.metacog import (
     OBSERVATION_MEMORY_TYPE,
@@ -105,25 +106,25 @@ def write_observation(
     db: Session,
     *,
     observation: OutcomeObservation,
-    agent_id: uuid.UUID,
     current_tenant_id: Optional[uuid.UUID] = None,
 ) -> Optional[uuid.UUID]:
     """Persist an OutcomeObservation as an agent_memory row.
 
-    `agent_id` is passed separately because OutcomeObservation
-    intentionally doesn't carry the agent_id — the observation binds
-    to a decision_id, and the decision_id already resolves to an
-    agent via its paired ConfidencePrediction. We still need a real
-    agent_id for the agent_memory FK (no marker UUIDs — Luna review
-    BLOCKER lesson from #604).
+    agent_id is now embedded ON the observation (superpowers
+    IMPORTANT #1 — was previously a separate kwarg that could split
+    a trace across two agents in agent_memory if a buggy caller
+    passed a mismatched agent_id). Tenant + agent come from the
+    observation itself; current_tenant_id enforces JWT match.
 
     Same tenant-boundary discipline as write_prediction.
     """
     try:
         tenant_id = uuid.UUID(observation.tenant_id)
+        agent_id = uuid.UUID(observation.agent_id)
     except (ValueError, AttributeError) as exc:
         logger.warning(
-            "metacog_io.write_observation: bad tenant UUID — %s", exc
+            "metacog_io.write_observation: bad tenant/agent UUID — %s",
+            exc,
         )
         return None
 
@@ -137,7 +138,7 @@ def write_observation(
         return None
 
     # Rescale [-1, 1] reward to [0, 1] for the importance column.
-    importance = max(0.0, min(1.0, (observation.actual_reward + 1.0) / 2.0))
+    importance = max(0.0, min(1.0, normalize_reward(observation.actual_reward)))
 
     row = AgentMemory(
         tenant_id=tenant_id,
@@ -178,7 +179,13 @@ def list_predictions(
 ) -> List[ConfidencePrediction]:
     """Return predictions in the tenant, optionally filtered to a
     specific agent and/or decision_kind. Order by created_at DESC so
-    consumers see freshest first."""
+    consumers see freshest first.
+
+    decision_kind is pushed into SQL via the tags JSON column
+    (superpowers IMPORTANT #4 — the previous post-query filter
+    would have fetched every prediction row in the tenant at scale).
+    The tags array is already populated with the kind during write.
+    """
     try:
         q = db.query(AgentMemory).filter(
             AgentMemory.tenant_id == tenant_id,
@@ -186,6 +193,20 @@ def list_predictions(
         )
         if agent_id is not None:
             q = q.filter(AgentMemory.agent_id == agent_id)
+        if decision_kind is not None:
+            # The tags column is JSON. Postgres has true JSON
+            # containment semantics via the @> operator; SQLite's
+            # JSON contains silently returns false for everything so
+            # we can't push the filter down there. Detect dialect and
+            # only push down on Postgres; the post-filter safety net
+            # in the deserialization loop below handles other dialects
+            # (notably SQLite-backed tests).
+            try:
+                dialect_name = db.bind.dialect.name  # type: ignore[union-attr]
+            except AttributeError:
+                dialect_name = ""
+            if dialect_name.startswith("postgres"):
+                q = q.filter(AgentMemory.tags.contains([decision_kind]))
         rows = q.order_by(AgentMemory.created_at.desc()).all()
     except SQLAlchemyError as exc:
         logger.warning(
@@ -199,6 +220,8 @@ def list_predictions(
         p = deserialize_prediction(row.content)
         if p is None:
             continue
+        # Post-filter safety net for dialects that don't support the
+        # tags.contains() pushdown (e.g. SQLite test runs).
         if decision_kind is not None and p.decision_kind != decision_kind:
             continue
         out.append(p)

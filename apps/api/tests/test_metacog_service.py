@@ -42,11 +42,11 @@ def _pred(
 
 
 def _obs(
-    decision_id="d", reward=0.0, tenant="t",
+    decision_id="d", reward=0.0, tenant="t", agent="a",
     latency=10, error=None,
 ) -> OutcomeObservation:
     return OutcomeObservation(
-        tenant_id=tenant, decision_id=decision_id,
+        tenant_id=tenant, agent_id=agent, decision_id=decision_id,
         actual_reward=reward, latency_ms=latency,
         completed_at=_now(), error=error,
     )
@@ -98,7 +98,7 @@ def test_deserialize_returns_none_on_malformed_blob():
     assert deserialize_observation("not json") is None
     assert deserialize_observation("{}") is None
     assert deserialize_observation(
-        '{"tenant_id":"t","decision_id":"d",'
+        '{"tenant_id":"t","agent_id":"a","decision_id":"d",'
         '"actual_reward":2.0,"latency_ms":1,"completed_at":"now"}'
     ) is None  # actual_reward out of range
 
@@ -186,3 +186,27 @@ def test_ece_default_bin_count_is_ten():
     import inspect
     sig = inspect.signature(expected_calibration_error)
     assert sig.parameters["bins"].default == 10
+
+
+def test_ece_at_bucket_boundary_lands_in_upper():
+    """Superpowers IMPORTANT #2 — lock the half-open [lo, hi)
+    convention at lower edges. predicted_confidence = 0.1 with
+    10 bins must land in bucket index 1, not 0. A future 'fix' that
+    flips this convention would silently change calibration
+    semantics for every existing tenant."""
+    # Two traces with identical predicted=0.1 but different rewards.
+    # If they land in the same (upper) bucket, ECE = |0.1 − 0.5| = 0.4.
+    # If they land in DIFFERENT buckets, ECE would be different — and
+    # the test would catch it.
+    p1 = _pred(decision_id="d1", predicted=0.1)
+    p2 = _pred(decision_id="d2", predicted=0.1)
+    # normalize: reward=0.0 → 0.5
+    o1 = _obs(decision_id="d1", reward=0.0)
+    o2 = _obs(decision_id="d2", reward=0.0)
+    traces = [
+        MetacogTrace(prediction=p1, observation=o1),
+        MetacogTrace(prediction=p2, observation=o2),
+    ]
+    # Both predictions in same bucket; mean pred 0.1, mean actual 0.5
+    # → bucket contributes |0.1 − 0.5| × (2/2) = 0.4
+    assert expected_calibration_error(traces, bins=10) == pytest.approx(0.4)

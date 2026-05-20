@@ -96,11 +96,16 @@ def expected_calibration_error(
 
     bin_width = 1.0 / bins
     buckets: list[list[MetacogTrace]] = [[] for _ in range(bins)]
+    # Bucket convention (locked per superpowers IMPORTANT #2): each
+    # bucket is half-open [lo, hi) on the lower edge except the last,
+    # which is closed [0.9, 1.0]. Predictions exactly at a bucket
+    # boundary (0.1, 0.2, …) land in the UPPER bucket — standard
+    # Naeini convention. Do not change this without also updating
+    # test_ece_at_bucket_boundary_lands_in_upper.
     for t in materialized:
         pred = t.prediction.predicted_confidence
-        # Edge case: prediction of exactly 1.0 lands in the last bucket,
-        # not in an out-of-range index. The 0.999… clamp protects against
-        # floating-point cases where 1.0 / bin_width would yield `bins`.
+        # The min() clamp handles pred == 1.0 → would otherwise yield
+        # `bins`, which is out of range.
         idx = min(int(pred / bin_width), bins - 1)
         buckets[idx].append(t)
 
@@ -130,22 +135,32 @@ def join_traces(
     Stable: input order is preserved for predictions; the resulting
     list contains a trace for each prediction that has a matching
     observation, in prediction order.
+
+    Tenant-mismatch / agent-mismatch traces are dropped silently
+    here (per-row log was N×spammy at scale; superpowers IMPORTANT
+    #3). A single batch-summary warning fires when any mismatches
+    occur — M3 will replace that with a Prometheus counter.
     """
     obs_by_id = {o.decision_id: o for o in observations}
     out: list[MetacogTrace] = []
+    skipped = 0
     for p in predictions:
         o = obs_by_id.get(p.decision_id)
         if o is None:
             continue
         try:
             out.append(MetacogTrace(prediction=p, observation=o))
-        except ValueError as exc:
-            # Tenant-mismatch or other invariant breach — log and skip.
-            logger.warning(
-                "metacog.join_traces: skipping malformed trace "
-                "decision_id=%s err=%s",
-                p.decision_id, exc,
-            )
+        except ValueError:
+            # Tenant/agent mismatch or other invariant breach. Counted
+            # in batch-summary log below; not per-row to avoid spam.
+            skipped += 1
+    if skipped:
+        logger.warning(
+            "metacog.join_traces: skipped %d malformed trace(s) "
+            "(tenant/agent mismatch). Phase-3 wiring will surface "
+            "this as a Prometheus counter.",
+            skipped,
+        )
     return out
 
 

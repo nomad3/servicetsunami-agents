@@ -1,18 +1,26 @@
 """DB-touching tests for app.services.metacog_io (M1 of #616).
 
-Uses a PER-TEST SQLite engine with scoped metadata containment —
-NOT the shared Base.metadata pattern that bit us four times this
-session (#610/#612/#613 cascade). Each test gets a fresh
-`sqlite:///:memory:` engine and creates only the tables it needs.
+Uses a PER-TEST SQLite engine with comprehensive PG-only type
+shimming — NOT the shared Base.metadata pattern that bit us four
+times this session (#610/#612/#613 cascade).
 
-The fixture pattern:
-  1. Build a fresh engine per test
-  2. Patch UUID/INET column types onto String(36) for the duration
-     of the test, then restore in a try/finally so we never leak
-     mutations out of the test
-  3. Create only `tenants`, `agents`, `agent_memories` — the three
-     tables metacog_io actually touches
-  4. Drop everything on teardown so the next test starts clean
+Why this fixture is heavy:
+  - SQLAlchemy ORM-mapped classes (AgentMemory etc.) are bound to
+    Base.metadata. We can't sidestep that without rewriting the IO
+    layer to take a table arg. So we DO temporarily mutate column
+    types — but ALL PG-only types in the tables we create:
+      UUID(as_uuid=True) → String(36) via _SqliteUuidShim
+      JSONB             → JSON (cross-dialect)
+      ARRAY(...)        → JSON (we don't exercise array ops here)
+      Vector(...)       → JSON (NULL-only in our writes)
+      INET              → String(45)
+  - try/finally always restores. Single-threaded only (no xdist) —
+    the file's own warning makes that explicit.
+
+Superpowers BLOCKER fix (PR #617 review): the v1 fixture only shimmed
+UUIDs and missed JSONB/ARRAY/Vector columns on agents +
+agent_memories. All 11 IO tests failed at create_all. This v2
+shims everything.
 """
 from __future__ import annotations
 
@@ -21,7 +29,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import String, create_engine
+from sqlalchemy import JSON, String, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.types import TypeDecorator
 
@@ -39,13 +47,17 @@ from app.services.metacog_io import (
 )
 
 
+# Single-threaded-only: this fixture mutates Base.metadata columns
+# for its lifetime. xdist would race. Same rule the existing
+# test_refresh_tokens.py file already uses.
+pytestmark = pytest.mark.serial
+
+
 # ── Per-test SQLite isolation harness ─────────────────────────────────
 
 
 class _SqliteUuidShim(TypeDecorator):
-    """UUID ↔ CHAR(36) bridge for SQLite. Same shape as the version
-    in test_refresh_tokens.py — but here we restore the originals in
-    a try/finally so the mutation doesn't leak."""
+    """UUID ↔ CHAR(36) bridge for SQLite."""
 
     impl = String(36)
     cache_ok = True
@@ -63,35 +75,54 @@ class _SqliteUuidShim(TypeDecorator):
         return uuid.UUID(value) if isinstance(value, str) else value
 
 
-_PG_ONLY_COLUMNS_BY_TABLE = {
-    "tenants": ("id",),
-    "agents": ("id", "tenant_id"),
-    "agent_memories": ("id", "tenant_id", "agent_id"),
+# Class-name-based dispatch is more robust than isinstance against
+# Postgres-only type classes — those classes are imported from
+# sqlalchemy.dialects.postgresql and pg_vector, so we don't want a
+# hard import dependency here.
+_PG_TYPE_CLASSES_TO_REPLACE = {
+    "UUID": lambda: _SqliteUuidShim(),
+    "JSONB": lambda: JSON(),
+    "ARRAY": lambda: JSON(),
+    "Vector": lambda: JSON(),
+    "INET": lambda: String(45),
 }
+
+
+def _swap_pg_types_on_table(table) -> dict:
+    """For each column whose type's class name is in
+    _PG_TYPE_CLASSES_TO_REPLACE, swap the type to a SQLite-friendly
+    fallback. Returns the {col_name: original_type} dict so the
+    caller can restore later.
+
+    Idempotent: skips columns whose type was already shimmed.
+    """
+    originals: dict[str, object] = {}
+    for col in table.c:
+        type_class_name = col.type.__class__.__name__
+        if type_class_name in _PG_TYPE_CLASSES_TO_REPLACE:
+            originals[col.name] = col.type
+            col.type = _PG_TYPE_CLASSES_TO_REPLACE[type_class_name]()
+    return originals
 
 
 @contextmanager
 def _per_test_sqlite():
     """Yield a Session bound to a fresh in-memory SQLite engine with
-    just the three tables metacog_io touches. Restores Base.metadata
-    type mutations on exit so the next test sees pristine state."""
-    original_types: dict[tuple[str, str], object] = {}
+    the three tables metacog_io touches (tenants, agents,
+    agent_memories). All PG-only column types are swapped to
+    SQLite-friendly fallbacks for the duration; restored in
+    try/finally so nothing leaks out."""
+    original_types: dict[str, dict[str, object]] = {}
+    table_names = ("tenants", "agents", "agent_memories")
     try:
-        for tbl_name, cols in _PG_ONLY_COLUMNS_BY_TABLE.items():
+        for tbl_name in table_names:
             tbl = Base.metadata.tables[tbl_name]
-            for col_name in cols:
-                col = tbl.c[col_name]
-                original_types[(tbl_name, col_name)] = col.type
-                col.type = _SqliteUuidShim()
+            original_types[tbl_name] = _swap_pg_types_on_table(tbl)
 
         engine = create_engine("sqlite:///:memory:", future=True)
         Base.metadata.create_all(
             engine,
-            tables=[
-                Base.metadata.tables["tenants"],
-                Base.metadata.tables["agents"],
-                Base.metadata.tables["agent_memories"],
-            ],
+            tables=[Base.metadata.tables[n] for n in table_names],
         )
         Session_ = sessionmaker(bind=engine, future=True)
         session = Session_()
@@ -101,8 +132,10 @@ def _per_test_sqlite():
             session.close()
             engine.dispose()
     finally:
-        for (tbl_name, col_name), original in original_types.items():
-            Base.metadata.tables[tbl_name].c[col_name].type = original  # type: ignore[assignment]
+        for tbl_name, by_col in original_types.items():
+            tbl = Base.metadata.tables[tbl_name]
+            for col_name, original in by_col.items():
+                tbl.c[col_name].type = original  # type: ignore[assignment]
 
 
 @pytest.fixture
@@ -147,10 +180,11 @@ def _make_prediction(
 
 
 def _make_observation(
-    tenant_id, decision_id, reward=0.0,
+    tenant_id, agent_id, decision_id, reward=0.0,
 ) -> OutcomeObservation:
     return OutcomeObservation(
         tenant_id=str(tenant_id),
+        agent_id=str(agent_id),
         decision_id=str(decision_id),
         actual_reward=reward,
         latency_ms=10,
@@ -212,8 +246,8 @@ def test_write_prediction_rejects_malformed_uuids(db):
 def test_write_observation_persists_and_roundtrips(db, tenant_with_agent):
     tenant, agent = tenant_with_agent
     decision_id = uuid.uuid4()
-    o = _make_observation(tenant.id, decision_id, reward=0.42)
-    row_id = write_observation(db, observation=o, agent_id=agent.id)
+    o = _make_observation(tenant.id, agent.id, decision_id, reward=0.42)
+    row_id = write_observation(db, observation=o)
     assert row_id is not None
 
     fetched = list_observations(db, tenant_id=tenant.id)
@@ -227,11 +261,10 @@ def test_write_observation_rejects_tenant_boundary_violation(
 ):
     tenant, agent = tenant_with_agent
     other_tenant_id = uuid.uuid4()
-    foreign_obs = _make_observation(other_tenant_id, uuid.uuid4())
+    foreign_obs = _make_observation(other_tenant_id, agent.id, uuid.uuid4())
     row_id = write_observation(
         db,
         observation=foreign_obs,
-        agent_id=agent.id,
         current_tenant_id=tenant.id,
     )
     assert row_id is None
@@ -296,10 +329,10 @@ def test_list_traces_pairs_prediction_with_observation(
     tenant, agent = tenant_with_agent
     decision_id = uuid.uuid4()
     p = _make_prediction(tenant.id, agent.id, decision_id=decision_id)
-    o = _make_observation(tenant.id, decision_id, reward=0.4)
+    o = _make_observation(tenant.id, agent.id, decision_id, reward=0.4)
 
     write_prediction(db, prediction=p)
-    write_observation(db, observation=o, agent_id=agent.id)
+    write_observation(db, observation=o)
 
     traces = list_traces(db, tenant_id=tenant.id)
     assert len(traces) == 1
@@ -322,7 +355,6 @@ def test_list_traces_drops_unpaired_observations(db, tenant_with_agent):
     tenant, agent = tenant_with_agent
     write_observation(
         db,
-        observation=_make_observation(tenant.id, uuid.uuid4()),
-        agent_id=agent.id,
+        observation=_make_observation(tenant.id, agent.id, uuid.uuid4()),
     )
     assert list_traces(db, tenant_id=tenant.id) == []

@@ -99,7 +99,7 @@ def test_prediction_to_dict_roundtrips_all_fields():
 
 def test_observation_accepts_canonical_shape():
     o = OutcomeObservation(
-        tenant_id="t", decision_id="d",
+        tenant_id="t", agent_id="a", decision_id="d",
         actual_reward=0.4, latency_ms=120, completed_at=_now(),
     )
     assert o.actual_reward == 0.4
@@ -110,7 +110,7 @@ def test_observation_rejects_out_of_range_reward():
     for bad in (-1.01, 1.01, 5.0):
         with pytest.raises(ValueError, match="actual_reward must be in"):
             OutcomeObservation(
-                tenant_id="t", decision_id="d",
+                tenant_id="t", agent_id="a", decision_id="d",
                 actual_reward=bad, latency_ms=10, completed_at=_now(),
             )
 
@@ -118,14 +118,14 @@ def test_observation_rejects_out_of_range_reward():
 def test_observation_rejects_negative_latency():
     with pytest.raises(ValueError, match="latency_ms must be non-negative"):
         OutcomeObservation(
-            tenant_id="t", decision_id="d",
+            tenant_id="t", agent_id="a", decision_id="d",
             actual_reward=0.0, latency_ms=-1, completed_at=_now(),
         )
 
 
 def test_observation_carries_error_string():
     o = OutcomeObservation(
-        tenant_id="t", decision_id="d",
+        tenant_id="t", agent_id="a", decision_id="d",
         actual_reward=-0.5, latency_ms=99, completed_at=_now(),
         error="timeout",
     )
@@ -142,7 +142,7 @@ def test_trace_pairs_matching_decision_id():
         predicted_confidence=0.6, context_hash="x", ts=_now(),
     )
     o = OutcomeObservation(
-        tenant_id="t", decision_id="d-1",
+        tenant_id="t", agent_id="a", decision_id="d-1",
         actual_reward=0.2, latency_ms=50, completed_at=_now(),
     )
     t = MetacogTrace(prediction=p, observation=o)
@@ -156,7 +156,7 @@ def test_trace_rejects_decision_id_mismatch():
         predicted_confidence=0.6, context_hash="x", ts=_now(),
     )
     o = OutcomeObservation(
-        tenant_id="t", decision_id="d-2",
+        tenant_id="t", agent_id="a", decision_id="d-2",
         actual_reward=0.2, latency_ms=50, completed_at=_now(),
     )
     with pytest.raises(ValueError, match="decision_id"):
@@ -170,10 +170,27 @@ def test_trace_rejects_tenant_mismatch():
         predicted_confidence=0.6, context_hash="x", ts=_now(),
     )
     o = OutcomeObservation(
-        tenant_id="t-2", decision_id="d-1",
+        tenant_id="t-2", agent_id="a", decision_id="d-1",
         actual_reward=0.2, latency_ms=50, completed_at=_now(),
     )
     with pytest.raises(ValueError, match="tenant_id"):
+        MetacogTrace(prediction=p, observation=o)
+
+
+def test_trace_rejects_agent_mismatch():
+    """Superpowers IMPORTANT #1 — split-attribution guard. A
+    prediction made by agent-A paired with an observation attributed
+    to agent-B is suspicious and must raise."""
+    p = ConfidencePrediction(
+        tenant_id="t", agent_id="a-1", decision_id="d-1",
+        decision_kind="rl_route_chat_response",
+        predicted_confidence=0.6, context_hash="x", ts=_now(),
+    )
+    o = OutcomeObservation(
+        tenant_id="t", agent_id="a-2", decision_id="d-1",
+        actual_reward=0.2, latency_ms=50, completed_at=_now(),
+    )
+    with pytest.raises(ValueError, match="agent_id"):
         MetacogTrace(prediction=p, observation=o)
 
 
@@ -186,21 +203,21 @@ def test_trace_normalized_reward_rescales_to_unit_interval():
     )
     # actual_reward = -1.0 → normalized 0.0
     o_low = OutcomeObservation(
-        tenant_id="t", decision_id="d", actual_reward=-1.0,
+        tenant_id="t", agent_id="a", decision_id="d", actual_reward=-1.0,
         latency_ms=1, completed_at=_now(),
     )
     assert MetacogTrace(prediction=p, observation=o_low).normalized_reward == 0.0
 
     # actual_reward = 0.0 → normalized 0.5
     o_mid = OutcomeObservation(
-        tenant_id="t", decision_id="d", actual_reward=0.0,
+        tenant_id="t", agent_id="a", decision_id="d", actual_reward=0.0,
         latency_ms=1, completed_at=_now(),
     )
     assert MetacogTrace(prediction=p, observation=o_mid).normalized_reward == 0.5
 
     # actual_reward = 1.0 → normalized 1.0
     o_high = OutcomeObservation(
-        tenant_id="t", decision_id="d", actual_reward=1.0,
+        tenant_id="t", agent_id="a", decision_id="d", actual_reward=1.0,
         latency_ms=1, completed_at=_now(),
     )
     assert MetacogTrace(prediction=p, observation=o_high).normalized_reward == 1.0
