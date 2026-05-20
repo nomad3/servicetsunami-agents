@@ -630,7 +630,27 @@ def run_agent_session(
     and calls ResilientExecutor.execute(req) — this function is not
     on that path. Either way, shadow can NEVER poison the response
     (try/except around the call).
+
+    M2 of #616 (metacognition): wrap the legacy dispatch with a
+    ConfidencePrediction → OutcomeObservation pair so calibration
+    data accumulates per chat turn. Both hook sites are best-effort
+    (try/except Exception → logger.debug) — same precedent as
+    ``_record_tool_failure_affect`` below: the metacog layer must
+    never break chat.
     """
+    import time as _metacog_time
+
+    decision_id = str(uuid.uuid4())
+    metacog_start = _metacog_time.monotonic()
+    _record_metacog_prediction(
+        db,
+        tenant_id=tenant_id,
+        db_session_memory=db_session_memory,
+        decision_id=decision_id,
+        platform=platform,
+        agent_slug=agent_slug,
+    )
+
     response_text, metadata = _run_agent_session_legacy(
         db, tenant_id=tenant_id, user_id=user_id,
         platform=platform, agent_slug=agent_slug,
@@ -643,6 +663,17 @@ def run_agent_session(
         agent_memory_domains=agent_memory_domains,
         agent_skill_slugs=agent_skill_slugs,
         attempt=attempt,
+    )
+
+    latency_ms = int((_metacog_time.monotonic() - metacog_start) * 1000)
+    _record_metacog_observation(
+        db,
+        tenant_id=tenant_id,
+        db_session_memory=db_session_memory,
+        decision_id=decision_id,
+        response_text=response_text,
+        metadata=metadata,
+        latency_ms=latency_ms,
     )
 
     # Phase 2 shadow comparison — wrapped in try/except so the shadow
@@ -1433,5 +1464,168 @@ def _record_tool_failure_affect(
     except Exception:  # noqa: BLE001 — emotion layer never crashes chat
         logger.debug(
             "emotion_engine tool_failure wire-in raised; suppressed.",
+            exc_info=True,
+        )
+
+
+# ── Metacognition hook (M2 of #616) ───────────────────────────────────
+#
+# Two best-effort wire-ins around the chat_response routing
+# decision. They mirror ``_record_tool_failure_affect`` above: a bare
+# ``except Exception`` keeps the metacog layer from ever propagating
+# into the chat hot path. The substrate landed in M1 (#617 / PR feat/
+# luna-metacognition-m1-substrate); this is just the runtime wire.
+#
+# Hook A — before dispatch — writes a ConfidencePrediction with the
+# agent's a-priori belief in this routing decision. Phase 1 ships a
+# constant 0.5 ("no opinion"); Phase 3 replaces it with the RL
+# policy's predicted reward at action-selection time (design §3.4).
+#
+# Hook B — after dispatch — writes the matching OutcomeObservation
+# with measured latency and a coarse success → +1 / failure → -1
+# reward signal. Phase 3 will swap that for the real RL reward once
+# the experience-assignment race is closed (design §3.4 note 2).
+
+
+def _resolve_chat_agent_id(db, db_session_memory, tenant_id) -> Optional[uuid.UUID]:
+    """Best-effort: resolve the agent UUID for the active chat session.
+
+    Mirrors the lookup in ``_record_tool_failure_affect``. Returns
+    None when the lookup can't complete — callers must treat that as
+    'skip the metacog write' (we can't attribute it to an agent, and
+    agent_id is required on both schemas)."""
+    try:
+        from app.models.chat import ChatSession
+
+        session_id_str = (db_session_memory or {}).get("chat_session_id") or ""
+        if not session_id_str:
+            return None
+        session_id = uuid.UUID(session_id_str)
+        chat_session = db.query(ChatSession).filter(
+            ChatSession.id == session_id,
+            ChatSession.tenant_id == tenant_id,
+        ).first()
+        if chat_session is None:
+            return None
+        return chat_session.agent_id
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _record_metacog_prediction(
+    db,
+    *,
+    tenant_id,
+    db_session_memory,
+    decision_id: str,
+    platform: str,
+    agent_slug: str,
+) -> None:
+    """Pre-dispatch ConfidencePrediction wire-in (M2 of #616).
+
+    Best-effort: NEVER raises into the caller. Failures here log a
+    debug line and return; the metacog layer must not break chat
+    routing — same discipline as the emotion engine wire-in above.
+
+    The predicted_confidence is hardcoded to 0.5 in Phase 1 (no RL
+    policy hook yet — design §3.4 Phase 1 vs Phase 3). The
+    context_hash carries the platform + agent_slug so the calibration
+    aggregator can group structurally-similar routing decisions
+    without needing the raw chat payload.
+    """
+    try:
+        import hashlib
+        from datetime import datetime, timezone
+
+        from app.schemas.metacog import ConfidencePrediction
+        from app.services import metacog_io
+
+        agent_id = _resolve_chat_agent_id(db, db_session_memory, tenant_id)
+        if agent_id is None:
+            # Can't attribute — skip the write rather than fabricate
+            # an agent_id. Better to drop the trace than split it.
+            return
+
+        context_hash = hashlib.sha256(
+            f"{platform}|{agent_slug}".encode("utf-8")
+        ).hexdigest()[:16]
+
+        prediction = ConfidencePrediction(
+            tenant_id=str(tenant_id),
+            agent_id=str(agent_id),
+            decision_id=decision_id,
+            decision_kind="rl_route_chat_response",
+            predicted_confidence=0.5,
+            context_hash=context_hash,
+            ts=datetime.now(timezone.utc).isoformat(),
+        )
+        metacog_io.write_prediction(
+            db,
+            prediction=prediction,
+            current_tenant_id=tenant_id,
+        )
+    except Exception:  # noqa: BLE001 — metacog layer never crashes chat
+        logger.debug(
+            "metacog prediction wire-in raised; suppressed.",
+            exc_info=True,
+        )
+
+
+def _record_metacog_observation(
+    db,
+    *,
+    tenant_id,
+    db_session_memory,
+    decision_id: str,
+    response_text: Optional[str],
+    metadata: Dict[str, Any],
+    latency_ms: int,
+) -> None:
+    """Post-dispatch OutcomeObservation wire-in (M2 of #616).
+
+    Best-effort: NEVER raises into the caller. Same discipline as the
+    prediction wire-in above.
+
+    Phase 1 reward: +1.0 if dispatch returned a non-empty response,
+    -1.0 otherwise. Phase 3 will swap this for the real RL reward
+    signal once experience-assignment lines up with the metacog
+    decision_id (design §3.4 note 2).
+    """
+    try:
+        from datetime import datetime, timezone
+
+        from app.schemas.metacog import OutcomeObservation
+        from app.services import metacog_io
+
+        agent_id = _resolve_chat_agent_id(db, db_session_memory, tenant_id)
+        if agent_id is None:
+            return
+
+        # Coarse success/failure proxy for Phase 1. Empty response or
+        # presence of an error key in metadata both count as failure.
+        success = bool(response_text) and not (metadata or {}).get("error")
+        actual_reward = 1.0 if success else -1.0
+        error_str: Optional[str] = None
+        if not success:
+            err = (metadata or {}).get("error")
+            error_str = str(err)[:200] if err else "empty_response"
+
+        observation = OutcomeObservation(
+            tenant_id=str(tenant_id),
+            agent_id=str(agent_id),
+            decision_id=decision_id,
+            actual_reward=actual_reward,
+            latency_ms=max(0, int(latency_ms)),
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            error=error_str,
+        )
+        metacog_io.write_observation(
+            db,
+            observation=observation,
+            current_tenant_id=tenant_id,
+        )
+    except Exception:  # noqa: BLE001 — metacog layer never crashes chat
+        logger.debug(
+            "metacog observation wire-in raised; suppressed.",
             exc_info=True,
         )
