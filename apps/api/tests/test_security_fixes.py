@@ -12,21 +12,49 @@ def test_secret_key_has_no_insecure_default(monkeypatch, tmp_path):
     Uses ``monkeypatch.chdir`` into an empty directory so pydantic-settings
     cannot pick up the developer's local ``apps/api/.env`` file (which would
     silently provide the missing values).
+
+    2026-05-20: the sys.modules.pop() + re-import was leaking out of the
+    test and leaving `app.api.v1.auth.settings` pointing at a stale
+    Settings instance. Downstream tests that patched
+    `app.core.config.settings.PUBLIC_BASE_URL` then saw the patch take
+    no effect because auth was reading the OLD reference. The fix is
+    to restore the original module after this test runs (and re-import
+    `app.api.v1.auth` so its `settings` reference is rebound). We do
+    this in a try/finally so the restore fires even on assert failure.
     """
     env_without_secrets = {k: v for k, v in os.environ.items()
                            if k not in ("SECRET_KEY", "MCP_API_KEY", "API_INTERNAL_KEY")}
     monkeypatch.chdir(tmp_path)
-    with patch.dict(os.environ, env_without_secrets, clear=True):
-        # Remove any cached module so the reload triggers a fresh Settings() call
-        sys.modules.pop("app.core.config", None)
-        with pytest.raises(ValidationError) as exc_info:
-            importlib.import_module("app.core.config")
-        # Verify the error is about missing required fields, not some unrelated failure
-        error_str = str(exc_info.value)
-        assert any(field in error_str for field in [
-            "SECRET_KEY", "MCP_API_KEY", "API_INTERNAL_KEY",
-            "secret_key", "mcp_api_key", "api_internal_key",
-        ]), f"Error should mention missing required fields, got: {error_str}"
+    original_config = sys.modules.get("app.core.config")
+    original_auth = sys.modules.get("app.api.v1.auth")
+    try:
+        with patch.dict(os.environ, env_without_secrets, clear=True):
+            # Remove any cached module so the reload triggers a fresh Settings() call
+            sys.modules.pop("app.core.config", None)
+            with pytest.raises(ValidationError) as exc_info:
+                importlib.import_module("app.core.config")
+            # Verify the error is about missing required fields, not some unrelated failure
+            error_str = str(exc_info.value)
+            assert any(field in error_str for field in [
+                "SECRET_KEY", "MCP_API_KEY", "API_INTERNAL_KEY",
+                "secret_key", "mcp_api_key", "api_internal_key",
+            ]), f"Error should mention missing required fields, got: {error_str}"
+    finally:
+        # Restore the original app.core.config so downstream tests that
+        # do `from app.core.config import settings` get the canonical
+        # Settings instance, not the one created during the cleared-env
+        # re-import attempt above.
+        if original_config is not None:
+            sys.modules["app.core.config"] = original_config
+        else:
+            sys.modules.pop("app.core.config", None)
+        # And rebind app.api.v1.auth.settings (and any other consumers
+        # cached in sys.modules) by force-reloading them so attribute
+        # lookups land on the same settings object the rest of the
+        # suite is patching. Best-effort: if the module wasn't loaded
+        # before this test, leave it alone.
+        if original_auth is not None:
+            importlib.reload(original_auth)
 
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-tests")
