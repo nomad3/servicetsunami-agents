@@ -25,6 +25,14 @@ from app.api import deps
 from app.api.v2 import router as v2_router
 from app.core.config import settings
 
+# Test fixtures INSERT directly into tenants + chat_sessions via raw SQL
+# (`engine.begin() … INSERT INTO tenants …`). SQLite-backed unit runs
+# lack those tables, so every test in this module needs a real Postgres
+# (the api(integration, postgres+pgvector) job). Marker added 2026-05-20
+# when the create_chat_session ImportError stopped masking this — the
+# tests have been silently miscollected since the file was added.
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def engine():
