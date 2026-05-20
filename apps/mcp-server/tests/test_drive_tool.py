@@ -226,6 +226,71 @@ async def test_create_drive_file_fallback_metadata_then_patch(patch_drive, mock_
 
 
 @pytest.mark.asyncio
+async def test_create_drive_file_google_doc_uses_multipart_with_text_source(
+    patch_drive, mock_ctx,
+):
+    """Bug fix 2026-05-20: when target mime is the native Google Doc
+    type, the multipart body must declare the SOURCE part as text/plain
+    (not the Doc mime). Drive converts on import using metadata.mimeType.
+    Without this, the upload silently produced empty Docs."""
+    from tests.conftest import _DummyResponse  # type: ignore
+
+    seen = {}
+
+    def _side_effect(method, url, kwargs):
+        if method == "POST" and "upload/drive/v3/files" in url:
+            seen["body"] = kwargs.get("content", b"").decode("utf-8")
+            seen["ct"] = kwargs.get("headers", {}).get("Content-Type", "")
+            return _DummyResponse(200, {"id": "doc-1"})
+        return _DummyResponse(500, {})
+
+    patch_drive(side_effect=_side_effect)
+    out = await dr.create_drive_file(
+        name="Report.gdoc",
+        content="# Quarterly numbers",
+        mime_type="application/vnd.google-apps.document",
+        tenant_id="t",
+        ctx=mock_ctx,
+    )
+    assert out["status"] == "success"
+    assert out["id"] == "doc-1"
+    assert seen["ct"].startswith("multipart/related; boundary=")
+    assert "application/vnd.google-apps.document" in seen["body"]
+    assert "Content-Type: text/plain" in seen["body"]
+    assert "# Quarterly numbers" in seen["body"]
+
+
+@pytest.mark.asyncio
+async def test_create_drive_file_google_doc_failure_does_not_fallback(
+    patch_drive, mock_ctx,
+):
+    """For native Doc targets the media-PATCH fallback is invalid (it
+    creates an empty Doc). Confirm we surface the error instead of
+    silently producing a broken Doc."""
+    from tests.conftest import _DummyResponse  # type: ignore
+
+    calls = {"posts": 0, "patches": 0}
+
+    def _side_effect(method, url, kwargs):
+        if method == "POST":
+            calls["posts"] += 1
+        if method == "PATCH":
+            calls["patches"] += 1
+        return _DummyResponse(500, {}, text="boom")
+
+    patch_drive(side_effect=_side_effect)
+    out = await dr.create_drive_file(
+        name="Report",
+        content="x",
+        mime_type="application/vnd.google-apps.document",
+        tenant_id="t", ctx=mock_ctx,
+    )
+    assert "error" in out
+    assert calls["posts"] == 1  # only the multipart upload, no fallback
+    assert calls["patches"] == 0
+
+
+@pytest.mark.asyncio
 async def test_create_drive_file_metadata_create_fails(patch_drive, mock_ctx):
     """Both initial multipart and fallback POST fail → error response."""
     from tests.conftest import _DummyResponse  # type: ignore
