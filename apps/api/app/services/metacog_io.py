@@ -188,14 +188,23 @@ def list_predictions(
     (superpowers IMPORTANT #4 — the previous post-query filter
     would have fetched every prediction row in the tenant at scale).
     The tags array is already populated with the kind during write.
+
+    UUID filters are cast to str so the bind value works under both
+    Postgres (native uuid column, implicit string→uuid cast) and the
+    SQLite test shim where the column was monkey-patched to TEXT but
+    the ORM's compiled bind processor still received the original
+    UUID type. Without the cast, ORM-side `Column == uuid.UUID(...)`
+    silently returns zero rows under SQLite (CI failure on PR #617).
     """
+    tenant_id_param = str(tenant_id)
+    agent_id_param = str(agent_id) if agent_id is not None else None
     try:
         q = db.query(AgentMemory).filter(
-            AgentMemory.tenant_id == tenant_id,
+            AgentMemory.tenant_id == tenant_id_param,
             AgentMemory.memory_type == PREDICTION_MEMORY_TYPE,
         )
-        if agent_id is not None:
-            q = q.filter(AgentMemory.agent_id == agent_id)
+        if agent_id_param is not None:
+            q = q.filter(AgentMemory.agent_id == agent_id_param)
         if decision_kind is not None:
             # The tags column is JSON. Postgres has true JSON
             # containment semantics via the @> operator; SQLite's
@@ -236,12 +245,17 @@ def list_observations(
     *,
     tenant_id: uuid.UUID,
 ) -> List[OutcomeObservation]:
-    """Return observations in the tenant. Order by created_at DESC."""
+    """Return observations in the tenant. Order by created_at DESC.
+
+    See list_predictions docstring re: the str() cast on tenant_id —
+    same dialect-shim story.
+    """
+    tenant_id_param = str(tenant_id)
     try:
         rows = (
             db.query(AgentMemory)
             .filter(
-                AgentMemory.tenant_id == tenant_id,
+                AgentMemory.tenant_id == tenant_id_param,
                 AgentMemory.memory_type == OBSERVATION_MEMORY_TYPE,
             )
             .order_by(AgentMemory.created_at.desc())
