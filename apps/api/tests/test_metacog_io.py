@@ -238,6 +238,25 @@ def test_write_prediction_persists_and_roundtrips(db, tenant_with_agent):
         f"!= queried tenant_id={queried_tenant_id!r}"
     )
 
+    # Diagnostic: bypass list_predictions, query directly via ORM.
+    # If filter-by-memory-type passes but filter-by-tenant-id fails,
+    # the shim's bind processor isn't being applied for the ORM query.
+    from app.models.agent_memory import AgentMemory as _AM
+    by_kind = db.query(_AM).filter(
+        _AM.memory_type == "metacog_confidence_prediction",
+    ).all()
+    assert len(by_kind) == 1, (
+        f"ORM filter by memory_type only: got {len(by_kind)}"
+    )
+    by_kind_and_tenant = db.query(_AM).filter(
+        _AM.memory_type == "metacog_confidence_prediction",
+        _AM.tenant_id == tenant.id,
+    ).all()
+    assert len(by_kind_and_tenant) == 1, (
+        f"ORM filter w/ tenant_id=uuid.UUID: got {len(by_kind_and_tenant)} "
+        f"(stored={stored_tenant_id!r}, tenant.id={tenant.id!r} type={type(tenant.id).__name__})"
+    )
+
     fetched = list_predictions(db, tenant_id=tenant.id)
     assert len(fetched) == 1
     assert fetched[0].predicted_confidence == 0.77
