@@ -93,6 +93,7 @@ from app.api.v1 import (
     mcp_public,
     usage_costs,
     dashboard_tasks,
+    luna_impact,
 )
 
 _logger = logging.getLogger(__name__)
@@ -168,6 +169,11 @@ router.include_router(usage_costs.router, tags=["usage-costs"])
 # because the v1 root already has /tasks claimed by agent_tasks
 # (orchestration-internal AgentTask records).
 router.include_router(dashboard_tasks.router, prefix="/dashboard", tags=["dashboard"])
+# Luna-impact baseline dashboard (#327) — single tenant-scoped endpoint
+# aggregating Layer-1 measurable signals (stability / routing / affect /
+# coordination / metacog). Canonical doc:
+# docs/plans/2026-05-20-luna-metacognition-and-dreams-canonical.md §6.
+router.include_router(luna_impact.router, prefix="/luna", tags=["luna-impact"])
 # `alpha remember` (Phase 2 of the CLI roadmap, #179) — free-form
 # fact ingestion via knowledge.create_observation.
 router.include_router(memory_remember.router, prefix="/memory", tags=["memory"])

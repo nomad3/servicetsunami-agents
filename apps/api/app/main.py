@@ -16,6 +16,14 @@ from app.core.logging import setup_logging, log_request
 setup_logging(_os.environ.get("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
+# Luna-impact dashboard (#327) — record the api process start so the
+# /api/v1/luna/impact endpoint can compute api_uptime_seconds without
+# pulling in psutil. Best-effort: if the value can't be read (e.g.
+# the module is reloaded mid-test), the endpoint reports null and adds
+# "api_uptime_seconds" to _unavailable_metrics.
+from app.services import luna_impact as _luna_impact  # noqa: E402
+_luna_impact.mark_process_start()
+
 db = SessionLocal()
 try:
     init_db(db=db)
