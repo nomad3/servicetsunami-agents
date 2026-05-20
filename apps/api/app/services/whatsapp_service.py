@@ -246,12 +246,15 @@ class WhatsAppService:
                     logger.info(f"_socket_heartbeat exiting for {key} (no client)")
                     return
                 try:
-                    # neonize exposes whatsmeow's IsConnected as
-                    # `is_connected` (snake_case). The return may be a
-                    # bool or an awaitable depending on the neonize
-                    # build, so mirror the existing pairing-status probe
-                    # pattern that uses is_logged_in.
-                    res = client.is_connected()
+                    # neonize exposes `is_connected` as a PROPERTY
+                    # (verified 2026-05-20 via
+                    # `type(getattr(NewAClient, 'is_connected'))` →
+                    # `<class 'property'>`). Accessing the attribute
+                    # returns the property's getter result — which is
+                    # itself a coroutine in the async client build, NOT
+                    # a callable. Do not add parens. Then check
+                    # awaitable / coerce to bool as before.
+                    res = client.is_connected
                     if inspect.isawaitable(res):
                         is_connected = await asyncio.wait_for(
                             res, timeout=self.HEARTBEAT_TIMEOUT_SECONDS,
