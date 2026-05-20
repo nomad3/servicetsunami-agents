@@ -352,11 +352,42 @@ def record_session_tool_failure(
         # Phase 3 can buffer these in Redis for PostChatMemoryWorkflow to
         # apply at episode creation; Phase 2 accepts the miss.
         return None
+
+    # Luna 2026-05-19 review IMPORTANT: silent agent_id=None fallback
+    # was destroying attribution. Make the gap loud:
+    # - WARN log carries enough context to grep for it
+    # - try to record a Prometheus counter event_type so dashboards
+    #   show the rate over time (best-effort; the metrics module ships
+    #   in PR #607 — graceful no-op when not present yet).
+    effective_agent_id = agent_id
+    if effective_agent_id is None:
+        effective_agent_id = uuid.uuid4()
+        logger.warning(
+            "emotion_engine_io.record_session_tool_failure: agent_id "
+            "fallback triggered (caller didn't resolve a real agent_id). "
+            "session_id=%s tenant_id=%s severity=%.2f → using random "
+            "UUID %s. Appraisal will land on a neutral baseline; affect "
+            "won't be attributable to a real agent.",
+            session_id, tenant_id, severity, effective_agent_id,
+        )
+        try:
+            from app.services.emotion_engine_metrics import (
+                record_appraise_event,
+            )
+            record_appraise_event(
+                tenant_id=str(tenant_id),
+                event_type="agent_id_fallback",
+            )
+        except ImportError:
+            pass  # metrics module ships in PR #607
+        except Exception:  # noqa: BLE001
+            pass  # never let metrics emission break appraisal
+
     return appraise_and_record_tool_failure(
         db,
         episode_id=episode.id,
         tenant_id=tenant_id,
-        agent_id=agent_id or uuid.uuid4(),
+        agent_id=effective_agent_id,
         severity=severity,
     )
 
