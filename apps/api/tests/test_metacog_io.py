@@ -58,10 +58,19 @@ pytestmark = pytest.mark.serial
 
 
 class _SqliteUuidShim(TypeDecorator):
-    """UUID ↔ CHAR(36) bridge for SQLite."""
+    """UUID ↔ CHAR(36) bridge for SQLite.
+
+    cache_ok=False: SQLAlchemy compiles WHERE clauses with the
+    column's bind_processor baked in at first execution. If the
+    original postgresql.UUID was compiled BEFORE we monkey-patched
+    the column type to this shim, the cached bind_processor wins
+    and our process_bind_param never fires. Disabling cache forces
+    re-compile on every query so the shim is honored. CI failure
+    pattern on PR #617 traced to exactly this.
+    """
 
     impl = String(36)
-    cache_ok = True
+    cache_ok = False
 
     def process_bind_param(self, value, dialect):
         if value is None:
