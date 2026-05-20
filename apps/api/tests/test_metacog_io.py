@@ -1,42 +1,35 @@
 """DB-touching tests for app.services.metacog_io (M1 of #616).
 
-Uses a PER-TEST SQLite engine with comprehensive PG-only type
-shimming — NOT the shared Base.metadata pattern that bit us four
-times this session (#610/#612/#613 cascade).
+Marked `integration` and runs against the real Postgres exposed by
+the api(integration, postgres+pgvector) CI job. The earlier SQLite
+shim approach kept fighting SQLAlchemy's compiled-statement cache
+(the column type was monkey-patched but the bind_processor had
+already been baked in at first compile). Real Postgres handles
+postgresql.UUID natively, so the type-decorator dance disappears.
 
-Why this fixture is heavy:
-  - SQLAlchemy ORM-mapped classes (AgentMemory etc.) are bound to
-    Base.metadata. We can't sidestep that without rewriting the IO
-    layer to take a table arg. So we DO temporarily mutate column
-    types — but ALL PG-only types in the tables we create:
-      UUID(as_uuid=True) → String(36) via _SqliteUuidShim
-      JSONB             → JSON (cross-dialect)
-      ARRAY(...)        → JSON (we don't exercise array ops here)
-      Vector(...)       → JSON (NULL-only in our writes)
-      INET              → String(45)
-  - try/finally always restores. Single-threaded only (no xdist) —
-    the file's own warning makes that explicit.
-
-Superpowers BLOCKER fix (PR #617 review): the v1 fixture only shimmed
-UUIDs and missed JSONB/ARRAY/Vector columns on agents +
-agent_memories. All 11 IO tests failed at create_all. This v2
-shims everything.
+Each test creates a throwaway Tenant + Agent in setup, exercises
+metacog_io, and DELETE-cascades the tenant in teardown so nothing
+leaks. Same pattern used by other integration tests in the suite.
 """
 from __future__ import annotations
 
+import os
 import uuid
-from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import JSON, String, create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-from sqlalchemy.types import TypeDecorator
 
-from app.db.base import Base
+# This file is Postgres-only (UUID/JSONB native types). Runs in the
+# api(integration, postgres+pgvector) CI job, NOT the SQLite unit
+# pass. The earlier shim-based approach fought SQLAlchemy's compile
+# cache; real Postgres avoids the issue entirely.
+pytestmark = pytest.mark.integration
+
+from sqlalchemy.orm import Session
+
+from app.db.session import SessionLocal
 from app.models.agent import Agent
-from app.models.agent_memory import AgentMemory  # noqa: F401 — registers table
+from app.models.agent_memory import AgentMemory  # noqa: F401 — FK chain
 from app.models.tenant import Tenant
 from app.schemas.metacog import ConfidencePrediction, OutcomeObservation
 from app.services.metacog_io import (
@@ -48,144 +41,40 @@ from app.services.metacog_io import (
 )
 
 
-# Single-threaded-only: this fixture mutates Base.metadata columns
-# for its lifetime. xdist would race. Same rule the existing
-# test_refresh_tokens.py file already uses.
-pytestmark = pytest.mark.serial
-
-
-# ── Per-test SQLite isolation harness ─────────────────────────────────
-
-
-class _SqliteUuidShim(TypeDecorator):
-    """UUID ↔ CHAR(36) bridge for SQLite.
-
-    cache_ok=False: SQLAlchemy compiles WHERE clauses with the
-    column's bind_processor baked in at first execution. If the
-    original postgresql.UUID was compiled BEFORE we monkey-patched
-    the column type to this shim, the cached bind_processor wins
-    and our process_bind_param never fires. Disabling cache forces
-    re-compile on every query so the shim is honored. CI failure
-    pattern on PR #617 traced to exactly this.
-    """
-
-    impl = String(36)
-    cache_ok = False
-
-    def process_bind_param(self, value, dialect):
-        if value is None:
-            return None
-        if isinstance(value, uuid.UUID):
-            return str(value)
-        return value
-
-    def process_result_value(self, value, dialect):
-        if value is None:
-            return None
-        return uuid.UUID(value) if isinstance(value, str) else value
-
-
-# Class-name-based dispatch is more robust than isinstance against
-# Postgres-only type classes — those classes are imported from
-# sqlalchemy.dialects.postgresql and pg_vector, so we don't want a
-# hard import dependency here.
-_PG_TYPE_CLASSES_TO_REPLACE = {
-    "UUID": lambda: _SqliteUuidShim(),
-    "JSONB": lambda: JSON(),
-    "ARRAY": lambda: JSON(),
-    "Vector": lambda: JSON(),
-    "INET": lambda: String(45),
-}
-
-
-def _swap_pg_types_on_table(table) -> dict:
-    """For each column whose type's class name is in
-    _PG_TYPE_CLASSES_TO_REPLACE, swap the type to a SQLite-friendly
-    fallback. Returns the {col_name: original_type} dict so the
-    caller can restore later.
-
-    Idempotent: skips columns whose type was already shimmed.
-    """
-    originals: dict[str, object] = {}
-    for col in table.c:
-        type_class_name = col.type.__class__.__name__
-        if type_class_name in _PG_TYPE_CLASSES_TO_REPLACE:
-            originals[col.name] = col.type
-            col.type = _PG_TYPE_CLASSES_TO_REPLACE[type_class_name]()
-    return originals
-
-
-@contextmanager
-def _per_test_sqlite():
-    """Yield a Session bound to a fresh in-memory SQLite engine with
-    the three tables metacog_io touches (tenants, agents,
-    agent_memories). All PG-only column types are swapped to
-    SQLite-friendly fallbacks for the duration; restored in
-    try/finally so nothing leaks out."""
-    original_types: dict[str, dict[str, object]] = {}
-    table_names = ("tenants", "agents", "agent_memories")
+@pytest.fixture(name="db")
+def db_fixture():
+    """A real Postgres session. Uses the production SessionLocal so
+    we exercise the same engine + connection pool the api uses."""
+    db = SessionLocal()
     try:
-        for tbl_name in table_names:
-            tbl = Base.metadata.tables[tbl_name]
-            original_types[tbl_name] = _swap_pg_types_on_table(tbl)
-
-        # StaticPool keeps every connection on the SAME in-memory
-        # SQLite. Without it, create_all() runs on connection A and
-        # the session's queries land on connection B which sees an
-        # empty database — that was the CI failure mode where
-        # write_prediction committed fine but refresh(row) raised
-        # ObjectDeletedError. Local container happened to dodge this
-        # because of an environment quirk in app.db.session.
-        engine = create_engine(
-            "sqlite:///:memory:",
-            future=True,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        Base.metadata.create_all(
-            engine,
-            tables=[Base.metadata.tables[n] for n in table_names],
-        )
-        # expire_on_commit=False keeps the fixture-built Tenant + Agent
-        # rows usable after db.commit() — without it, CI hit
-        # ObjectDeletedError on tenant.id refresh (local container
-        # didn't reproduce, but CI's pytest collection order tripped
-        # the default expire_on_commit=True semantics).
-        Session_ = sessionmaker(
-            bind=engine, future=True, expire_on_commit=False,
-        )
-        session = Session_()
-        try:
-            yield session
-        finally:
-            session.close()
-            engine.dispose()
+        yield db
     finally:
-        for tbl_name, by_col in original_types.items():
-            tbl = Base.metadata.tables[tbl_name]
-            for col_name, original in by_col.items():
-                tbl.c[col_name].type = original  # type: ignore[assignment]
+        db.close()
 
 
-@pytest.fixture
-def db():
-    with _per_test_sqlite() as session:
-        yield session
-
-
-@pytest.fixture
-def tenant_with_agent(db: Session):
-    """Returns (tenant, agent) — agent_memories.agent_id is a real
-    FK so we need a real agent row in the tenant before any
-    write_prediction / write_observation will land cleanly."""
-    tenant = Tenant(name="Metacog Test Tenant")
+@pytest.fixture(name="tenant_with_agent")
+def tenant_with_agent_fixture(db: Session):
+    """Throwaway Tenant + Agent. The tenant cascades to the agent and
+    to any agent_memory rows on delete (the FK is ON DELETE CASCADE
+    per app/models/agent_memory.py)."""
+    tenant = Tenant(name=f"metacog-test-{uuid.uuid4()}")
     db.add(tenant)
-    db.flush()  # populate tenant.id
-    agent = Agent(tenant_id=tenant.id, name="Test Agent")
-    db.add(agent)
     db.flush()
+    agent = Agent(tenant_id=tenant.id, name=f"metacog-test-agent-{uuid.uuid4()}")
+    db.add(agent)
     db.commit()
-    return tenant, agent
+    yield tenant, agent
+    # Teardown — delete cascades to agent + agent_memories.
+    try:
+        db.execute(
+            __import__("sqlalchemy").text(
+                "DELETE FROM tenants WHERE id = :tid"
+            ),
+            {"tid": tenant.id},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
 
 
 def _now() -> str:
@@ -239,24 +128,20 @@ def test_write_prediction_persists_and_roundtrips(db, tenant_with_agent):
 def test_write_prediction_rejects_tenant_boundary_violation(
     db, tenant_with_agent,
 ):
-    """A caller claiming to be tenant-A cannot persist a prediction
-    serialized for tenant-B."""
     tenant, agent = tenant_with_agent
     other_tenant_id = uuid.uuid4()
     foreign_pred = _make_prediction(other_tenant_id, agent.id)
     row_id = write_prediction(
         db,
         prediction=foreign_pred,
-        current_tenant_id=tenant.id,  # claim tenant
+        current_tenant_id=tenant.id,
     )
     assert row_id is None
-    # Nothing persisted for either tenant
     assert list_predictions(db, tenant_id=tenant.id) == []
     assert list_predictions(db, tenant_id=other_tenant_id) == []
 
 
 def test_write_prediction_rejects_malformed_uuids(db):
-    """Defensive: don't crash on garbage IDs, just return None."""
     bad = ConfidencePrediction(
         tenant_id="not-a-uuid",
         agent_id="also-not-a-uuid",
@@ -304,7 +189,7 @@ def test_write_observation_rejects_tenant_boundary_violation(
 
 def test_list_predictions_filters_by_agent(db, tenant_with_agent):
     tenant, agent_a = tenant_with_agent
-    agent_b = Agent(tenant_id=tenant.id, name="Other Agent")
+    agent_b = Agent(tenant_id=tenant.id, name=f"metacog-other-{uuid.uuid4()}")
     db.add(agent_b)
     db.commit()
 
@@ -342,11 +227,19 @@ def test_list_predictions_tenant_isolated(db, tenant_with_agent):
     tenant, agent = tenant_with_agent
     write_prediction(db, prediction=_make_prediction(tenant.id, agent.id))
 
-    other_tenant = Tenant(name="Other")
+    other_tenant = Tenant(name=f"metacog-other-{uuid.uuid4()}")
     db.add(other_tenant)
     db.commit()
-    # Other tenant has no agents → can't even write a prediction there
-    assert list_predictions(db, tenant_id=other_tenant.id) == []
+    try:
+        assert list_predictions(db, tenant_id=other_tenant.id) == []
+    finally:
+        db.execute(
+            __import__("sqlalchemy").text(
+                "DELETE FROM tenants WHERE id = :tid"
+            ),
+            {"tid": other_tenant.id},
+        )
+        db.commit()
 
 
 # ── list_traces (read-side join) ──────────────────────────────────────
@@ -370,17 +263,12 @@ def test_list_traces_pairs_prediction_with_observation(
 
 
 def test_list_traces_drops_unpaired_predictions(db, tenant_with_agent):
-    """A prediction without an observation = in-flight; not yet a
-    trace. The read path silently drops it."""
     tenant, agent = tenant_with_agent
     write_prediction(db, prediction=_make_prediction(tenant.id, agent.id))
-    # No observation written
     assert list_traces(db, tenant_id=tenant.id) == []
 
 
 def test_list_traces_drops_unpaired_observations(db, tenant_with_agent):
-    """An observation without a prediction = orphan; can't be
-    calibrated. Dropped silently."""
     tenant, agent = tenant_with_agent
     write_observation(
         db,
