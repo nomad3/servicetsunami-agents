@@ -676,6 +676,26 @@ def run_agent_session(
         latency_ms=latency_ms,
     )
 
+    # M3 (#621) — uncertainty escalation suffix. Off by default
+    # (gate env var) so we can ramp in production safely. Phase 1 the
+    # predicted_confidence is the hardcoded 0.5 from M2; when the RL
+    # policy lands (Phase 3, design §3.4 note 2), this threshold
+    # becomes meaningful. Wrap in try/except so the suffix layer
+    # NEVER breaks chat — same discipline as everything else here.
+    try:
+        response_text = _maybe_append_uncertainty_suffix(
+            db,
+            tenant_id=tenant_id,
+            db_session_memory=db_session_memory,
+            response_text=response_text,
+            predicted_confidence=0.5,  # Phase 1 hardcoded — matches prediction write
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "metacog uncertainty-suffix wrapper raised; suppressed.",
+            exc_info=True,
+        )
+
     # Phase 2 shadow comparison — wrapped in try/except so the shadow
     # path can never poison the response. Lazy-imported to avoid a
     # cycle at module load.
@@ -1572,6 +1592,20 @@ def _record_metacog_prediction(
             prediction=prediction,
             current_tenant_id=tenant_id,
         )
+
+        # M3 (#621): emit Prometheus counter + confidence histogram.
+        # Best-effort — metric emission failures must not bleed into
+        # the metacog layer's "never crash chat" contract.
+        try:
+            from app.services import metacog_metrics
+
+            metacog_metrics.record_prediction(
+                tenant_id=str(tenant_id),
+                decision_kind="rl_route_chat_response",
+                predicted_confidence=0.5,
+            )
+        except Exception:  # noqa: BLE001
+            pass
     except Exception:  # noqa: BLE001 — metacog layer never crashes chat
         logger.debug(
             "metacog prediction wire-in raised; suppressed.",
@@ -1632,8 +1666,117 @@ def _record_metacog_observation(
             observation=observation,
             current_tenant_id=tenant_id,
         )
+
+        # M3 (#621): emit Prometheus counter. Best-effort.
+        try:
+            from app.services import metacog_metrics
+
+            metacog_metrics.record_observation(
+                tenant_id=str(tenant_id),
+                decision_kind="rl_route_chat_response",
+            )
+        except Exception:  # noqa: BLE001
+            pass
     except Exception:  # noqa: BLE001 — metacog layer never crashes chat
         logger.debug(
             "metacog observation wire-in raised; suppressed.",
             exc_info=True,
         )
+
+
+# ── Metacognition uncertainty-escalation suffix (M3 of #616) ──────────
+#
+# When the predicted confidence is low AND the agent's affect dominance
+# is also low (i.e. the system feels "low agency / unsure"), surface a
+# single-line hedge to the user. Off by default behind
+# `METACOG_UNCERTAINTY_SUFFIX_ENABLED=false` so we can ramp in production.
+#
+# Luna's locked decision (canonical design §8.3): surface ONLY when it
+# changes the user's path — i.e. the response is short/declarative.
+# Long explanatory responses already self-hedge inside the body; a
+# trailing "I'm not entirely sure on this one" would feel patronising.
+# The line threshold is conservative on purpose; tune via env in
+# production rather than a code change.
+
+# Response is considered "short / declarative" (suffix-eligible) when it
+# has at most this many newline-separated paragraphs. 3 catches the
+# common chat reply ("here's the thing\n\nbut also X") without firing
+# on multi-section explanations.
+_UNCERTAINTY_SUFFIX_MAX_PARAGRAPHS = 3
+
+_UNCERTAINTY_SUFFIX_TEXT = (
+    "\n\n_I'm not entirely sure on this one — "
+    "want me to verify against another agent or Simon?_"
+)
+
+
+def _maybe_append_uncertainty_suffix(
+    db,
+    *,
+    tenant_id,
+    db_session_memory,
+    response_text: Optional[str],
+    predicted_confidence: float,
+) -> Optional[str]:
+    """Conditionally append the uncertainty hedge to the response.
+
+    Five gates, in cheapest-first order:
+      1. Feature flag (env var, default off) — short-circuit early.
+      2. Response is non-empty (no point hedging a None reply).
+      3. predicted_confidence < METACOG_UNCERTAINTY_THRESHOLD (default 0.4).
+      4. Latest affect_vector.dominance < 0.3 (low-agency signal).
+      5. Response is short/declarative (≤ N paragraphs).
+
+    Best-effort: any read/compute failure returns the response
+    unchanged. NEVER raises into the caller (the wrapper in
+    run_agent_session is also try/except'd, but defence-in-depth).
+    """
+    # Gate 1 — feature flag. Default off so production is unchanged
+    # until the operator explicitly opts in.
+    if os.environ.get(
+        "METACOG_UNCERTAINTY_SUFFIX_ENABLED", "false",
+    ).strip().lower() not in ("true", "1", "yes"):
+        return response_text
+
+    # Gate 2 — non-empty response.
+    if not response_text:
+        return response_text
+
+    # Gate 3 — confidence threshold.
+    try:
+        threshold = float(
+            os.environ.get("METACOG_UNCERTAINTY_THRESHOLD", "0.4")
+        )
+    except (TypeError, ValueError):
+        threshold = 0.4
+    if predicted_confidence >= threshold:
+        return response_text
+
+    # Gate 4 — affect dominance check. Read the session's latest
+    # affect_vector via the emotion engine IO module. Best-effort: a
+    # missing affect vector means we DON'T fire the hedge (we have no
+    # evidence the system feels low-agency).
+    try:
+        from app.services.emotion_engine_io import get_latest_session_affect
+
+        session_id_str = (db_session_memory or {}).get("chat_session_id") or ""
+        if not session_id_str:
+            return response_text
+        session_id = uuid.UUID(session_id_str)
+        affect = get_latest_session_affect(
+            db, session_id=session_id, tenant_id=tenant_id,
+        )
+        if affect is None or affect.dominance >= 0.3:
+            return response_text
+    except Exception:  # noqa: BLE001
+        return response_text
+
+    # Gate 5 — response is short/declarative. Skip multi-paragraph
+    # explanatory replies (they already self-hedge in-body). Split on
+    # blank-line separators rather than single \n so we don't count
+    # list items as paragraphs.
+    paragraphs = [p for p in response_text.split("\n\n") if p.strip()]
+    if len(paragraphs) > _UNCERTAINTY_SUFFIX_MAX_PARAGRAPHS:
+        return response_text
+
+    return response_text + _UNCERTAINTY_SUFFIX_TEXT
