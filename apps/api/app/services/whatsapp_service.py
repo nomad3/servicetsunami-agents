@@ -156,17 +156,160 @@ class WhatsAppService:
     MAX_RECONNECT_ATTEMPTS = 5
     RECONNECT_BASE_DELAY = 2  # seconds, doubles each attempt
 
+    # 2026-05-20 Option-A hardening (whatsapp-api-research.md §"Stay on
+    # neonize + harden"). Three thresholds gate the new safety nets:
+    STABLE_CONNECTION_SECONDS = 30  # connection must hold this long
+    # before the reconnect counter resets — otherwise a 2-second
+    # connect-disconnect flap (the failure mode we hit 2026-05-19
+    # repeatedly) keeps restarting at base delay instead of escalating.
+    HEARTBEAT_INTERVAL_SECONDS = 30  # IsConnected() poll cadence.
+    HEARTBEAT_TIMEOUT_SECONDS = 5    # asyncio.wait_for guard — if the
+    # Go callback hangs longer than this, treat as silent socket death.
+
     def __init__(self, db_url: str):
         _ensure_neonize()
         self._clients: Dict[str, NewAClient] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
         self._watchdog_tasks: Dict[str, asyncio.Task] = {}
+        self._heartbeat_tasks: Dict[str, asyncio.Task] = {}
+        self._stable_reset_tasks: Dict[str, asyncio.Task] = {}
         self._qr_codes: Dict[str, str] = {}
         self._statuses: Dict[str, str] = {}
         self._reconnect_counts: Dict[str, int] = {}
+        # asyncio.Lock per account-key to serialize SQLite session
+        # save/restore. Eliminates the concurrent-writer race that
+        # corrupts the on-disk DB and produces the
+        # "database disk image is malformed" decryption failures
+        # documented in whatsapp_sqlite_corruption_recovery.md.
+        self._session_locks: Dict[str, asyncio.Lock] = {}
         self._sent_message_ids: Dict[str, set] = {}  # Track bot-sent msg IDs to avoid echo loops
         self._lid_phone_cache: Dict[str, str] = {}  # LID→phone cache for resolved numbers
         self._db_url = db_url
+
+    def _get_session_lock(self, key: str) -> asyncio.Lock:
+        """Fetch-or-create the per-account asyncio.Lock used to
+        serialize SQLite session save/restore. Safe to call from any
+        async context; the dict insert is single-threaded under
+        asyncio's cooperative model so no further synchronization is
+        needed for the dict itself."""
+        lock = self._session_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[key] = lock
+        return lock
+
+    async def _save_session_locked(self, tenant_id: str, account_id: str) -> None:
+        """Async lock wrapper around `_save_session_to_db`. All async
+        event-handler call sites (on_connected, on_disconnected,
+        on_paired) go through this; the lock serializes them against
+        any concurrent _restore_session_from_db on the same key.
+
+        Best-effort: the underlying save can still raise; we let it
+        propagate so existing error paths (which currently swallow) keep
+        their semantics. The lock only prevents the race, not the
+        exception."""
+        key = self._key(tenant_id, account_id)
+        async with self._get_session_lock(key):
+            # `_save_session_to_db` is synchronous SQLite work + sync
+            # SQLAlchemy call; running it directly inside the async
+            # handler is fine — it's bounded (≤ a few hundred ms for
+            # the 7MB-class blob we've seen in production).
+            self._save_session_to_db(tenant_id, account_id)
+
+    async def _socket_heartbeat(self, tenant_id: str, account_id: str) -> None:
+        """Background coroutine that polls `client.IsConnected()` every
+        HEARTBEAT_INTERVAL_SECONDS. If the call returns False or hangs
+        beyond HEARTBEAT_TIMEOUT_SECONDS (silent socket death — the
+        whatsmeow event loop has wedged without firing DisconnectedEv),
+        trip the existing auto-reconnect path.
+
+        This is the Option-A core fix from
+        docs/plans/2026-05-18-whatsapp-api-research.md §"Stay on
+        neonize + harden": catches the silent-disconnect failure mode
+        that the existing DisconnectedEv-driven reconnect cannot see.
+
+        The task is started in connect_account and torn down on
+        explicit disconnect / logout. It MUST not raise into the event
+        loop — catch everything and log."""
+        key = self._key(tenant_id, account_id)
+        logger.info(f"_socket_heartbeat started for {key}")
+        try:
+            while True:
+                await asyncio.sleep(self.HEARTBEAT_INTERVAL_SECONDS)
+                status = self._statuses.get(key)
+                if status in ("logged_out", "disconnected", None):
+                    # Status went terminal — heartbeat owner stops.
+                    logger.info(f"_socket_heartbeat exiting for {key} (status={status})")
+                    return
+                client = self._clients.get(key)
+                if client is None:
+                    logger.info(f"_socket_heartbeat exiting for {key} (no client)")
+                    return
+                try:
+                    is_connected = await asyncio.wait_for(
+                        asyncio.to_thread(client.IsConnected),
+                        timeout=self.HEARTBEAT_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"_socket_heartbeat: IsConnected() hung > "
+                        f"{self.HEARTBEAT_TIMEOUT_SECONDS}s for {key} — "
+                        "treating as silent socket death; tripping reconnect"
+                    )
+                    self._statuses[key] = "disconnected"
+                    self._update_account_status(tenant_id, account_id, "disconnected")
+                    asyncio.ensure_future(self._auto_reconnect(tenant_id, account_id))
+                    return
+                except Exception:  # noqa: BLE001
+                    logger.exception(f"_socket_heartbeat: IsConnected() raised for {key}")
+                    # Don't trip reconnect on a single weird exception
+                    # — could be a transient FFI hiccup. Next tick
+                    # decides.
+                    continue
+                if not is_connected:
+                    logger.warning(
+                        f"_socket_heartbeat: IsConnected()=False for {key} — "
+                        "tripping reconnect"
+                    )
+                    self._statuses[key] = "disconnected"
+                    self._update_account_status(tenant_id, account_id, "disconnected")
+                    asyncio.ensure_future(self._auto_reconnect(tenant_id, account_id))
+                    return
+        except asyncio.CancelledError:
+            return
+
+    def _start_heartbeat(self, tenant_id: str, account_id: str) -> None:
+        """Cancel any existing heartbeat for this key + start a fresh
+        one. Called from on_connected. Idempotent."""
+        key = self._key(tenant_id, account_id)
+        prev = self._heartbeat_tasks.pop(key, None)
+        if prev and not prev.done():
+            prev.cancel()
+        self._heartbeat_tasks[key] = asyncio.ensure_future(
+            self._socket_heartbeat(tenant_id, account_id)
+        )
+
+    async def _delayed_counter_reset(self, key: str) -> None:
+        """Reset _reconnect_counts[key] to 0 ONLY after the connection
+        has been continuously up for STABLE_CONNECTION_SECONDS. If a
+        disconnect fires before this delay elapses, the task is
+        cancelled and the counter keeps its escalated value — so the
+        next reconnect uses the proper backoff delay instead of
+        restarting at base.
+
+        Without this, the 2026-05-19 incident pattern (every reconnect
+        succeeds for 2-3s then dies) hammered WhatsApp's server every
+        ~2s and got nowhere."""
+        try:
+            await asyncio.sleep(self.STABLE_CONNECTION_SECONDS)
+            self._reconnect_counts[key] = 0
+            logger.debug(
+                f"Stable-connection threshold reached for {key} "
+                f"({self.STABLE_CONNECTION_SECONDS}s) — reconnect "
+                "counter reset"
+            )
+        except asyncio.CancelledError:
+            return
 
     WHATSAPP_CONNECT_TIMEOUT = 5  # seconds for pre-flight check
 
@@ -418,7 +561,18 @@ class WhatsAppService:
         async def on_connected(c: NewAClient, event: ConnectedEv):
             logger.info(f"ConnectedEv fired for {key}")
             self._statuses[key] = "connected"
-            self._reconnect_counts[key] = 0  # Reset on successful connection
+            # 2026-05-20 fix: do NOT reset reconnect_counts here. The
+            # previous version reset on every ConnectedEv, which let a
+            # flapping connection restart at base delay every 2s and
+            # hammer WhatsApp's server (verified in the 2026-05-19
+            # incident logs). Counter resets via _delayed_counter_reset
+            # only after STABLE_CONNECTION_SECONDS of continuous up.
+            prev_reset = self._stable_reset_tasks.pop(key, None)
+            if prev_reset and not prev_reset.done():
+                prev_reset.cancel()
+            self._stable_reset_tasks[key] = asyncio.ensure_future(
+                self._delayed_counter_reset(key)
+            )
             self._qr_codes.pop(key, None)
             phone = None
             try:
@@ -429,7 +583,8 @@ class WhatsAppService:
                 pass
             self._update_account_status(tenant_id, account_id, "connected", phone=phone)
             self._log_event(tenant_id, account_id, "connection_opened")
-            self._save_session_to_db(tenant_id, account_id)
+            await self._save_session_locked(tenant_id, account_id)
+            self._start_heartbeat(tenant_id, account_id)
             # Register whatsapp shell in presence
             try:
                 from app.services import luna_presence_service
@@ -441,7 +596,16 @@ class WhatsAppService:
         @client.event(DisconnectedEv)
         async def on_disconnected(c: NewAClient, event: DisconnectedEv):
             logger.warning(f"DisconnectedEv for {key}")
-            self._save_session_to_db(tenant_id, account_id)
+            # Cancel the pending stable-counter-reset (if any) so the
+            # next reconnect sees the escalated count, not zero.
+            pending_reset = self._stable_reset_tasks.pop(key, None)
+            if pending_reset and not pending_reset.done():
+                pending_reset.cancel()
+            # Cancel the heartbeat — a new one starts on next ConnectedEv.
+            hb = self._heartbeat_tasks.pop(key, None)
+            if hb and not hb.done():
+                hb.cancel()
+            await self._save_session_locked(tenant_id, account_id)
             self._statuses[key] = "disconnected"
             self._update_account_status(tenant_id, account_id, "disconnected")
             self._log_event(tenant_id, account_id, "connection_closed")
