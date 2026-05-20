@@ -2,8 +2,26 @@
 
 PR #442 review finding B-4: the service module that mints, rotates,
 and burns chains on reuse detection had zero pytest coverage. This file
-exercises the contract end-to-end against an in-memory SQLite session so
-CI can run it without postgres.
+exercises the contract end-to-end.
+
+NOTE 2026-05-20: marked `integration` after the SQLite shim fixture
+proved fragile under cross-test interaction — when other branches added
+test files that import additional models (Agent, AgentMemory), the
+shared `Base.metadata` state caused intermittent `NoneType` failures on
+`user_id=user.id` inside `issue_refresh_token` (presented.user
+lazy-loading returned None across the fresh-engine boundary). The
+fixture's own comment flagged the global-mutation risk: "The
+shared-global mutation makes pytest-xdist unsafe for this file." That
+risk extends to any test that triggers metadata changes, not just
+xdist.
+
+The api(integration, postgres+pgvector) job already exercises this
+file's covered surface natively (UUID/INET column types are first-
+class on Postgres — no shim needed), so we move the file there and
+keep the slow-feedback trade-off on this one file. If we ever want
+SQLite-fast feedback back, the right fix is a dedicated per-test
+SQLite engine with explicit metadata containment, not the shared-
+metadata shim.
 
 What we test:
   * Successful rotation marks the parent rotated and links the child
@@ -32,6 +50,10 @@ from typing import Iterator
 import pytest
 
 pytest.importorskip("sqlalchemy")
+
+# 2026-05-20: see module docstring. SQLite shim fragile under
+# cross-file metadata sharing. Postgres job handles this file.
+pytestmark = pytest.mark.integration
 
 from sqlalchemy import String, create_engine
 from sqlalchemy.dialects import postgresql
