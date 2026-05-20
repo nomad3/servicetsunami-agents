@@ -10,7 +10,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Optional
+from typing import List, Optional
 
 import httpx
 from temporalio import activity, workflow
