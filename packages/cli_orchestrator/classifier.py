@@ -198,6 +198,33 @@ _STDERR_RULES: list[_Rule] = [
         legacy_label="quota",
         test_id="gemini_cli_quota_exceeded_is_quota_exhausted",
     ),
+    # 6b. gemini credential-loader connection failure. The Gemini CLI's
+    # OAuth refresh path tries to reach a local credential server; when
+    # that server is down (sidecar crash, network-namespace issue) the
+    # CLI emits "Failed to load Gemini credentials: [Errno 111]
+    # Connection refused" and the whole turn dies. Observed in prod
+    # 2026-05-20 on the AgentProvision tenant. Without a rule here, the
+    # CLI chain treats it as a generic failure, doesn't set a cooldown,
+    # and keeps re-picking Gemini every chat turn. Classifying as
+    # QUOTA_EXHAUSTED (despite not being a real quota) gives us the
+    # desired behaviour: 600s cooldown + chain skip to Codex. Status is
+    # semantic shorthand; the legacy_label "quota" is the trigger the
+    # cooldown-aware router consumes.
+    _Rule(
+        platform="gemini_cli",
+        pattern=re.compile(
+            r"failed\s+to\s+load\s+gemini\s+credentials"
+            # ECONNREFUSED variants in case the upstream message
+            # wording shifts but the connection-refused signature is
+            # still gemini-shaped:
+            r"|gemini.*\[errno\s*111\]\s*connection\s*refused"
+            r"|gemini.*credentials.*connection\s*refused",
+            re.IGNORECASE,
+        ),
+        status=Status.QUOTA_EXHAUSTED,
+        legacy_label="quota",
+        test_id="gemini_cli_credential_load_failure_is_quota_exhausted",
+    ),
     # 7. gemini workspace trust
     _Rule(
         platform="gemini_cli",

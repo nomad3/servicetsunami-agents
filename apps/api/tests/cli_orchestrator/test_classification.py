@@ -68,6 +68,17 @@ CLASSIFICATION_CASES: list[
         "Gemini API: resource_exhausted — quota_exceeded for project",
         1, None, Status.QUOTA_EXHAUSTED, "quota",
     ),
+    # ── 6b. gemini credential-loader connection refused ─────────────────
+    # Real prod stderr observed 2026-05-20 on AgentProvision tenant.
+    # Without this rule the chain treats it as generic failure, never
+    # cooldowns Gemini, and re-picks it every chat turn while Codex
+    # sits idle.
+    (
+        "gemini_cli_credential_load_failure_is_quota_exhausted",
+        "ChatCliWorkflow result: success=False error=Failed to load "
+        "Gemini credentials: [Errno 111] Connection refused response_len=0",
+        1, None, Status.QUOTA_EXHAUSTED, "quota",
+    ),
     # ── 7. gemini WORKSPACE_UNTRUSTED ───────────────────────────────────
     (
         "gemini_cli_workspace_setup_is_workspace_untrusted",
