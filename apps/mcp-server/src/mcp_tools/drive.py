@@ -2,12 +2,16 @@
 
 Search, list, read, and manage files in Google Drive via the Drive API v3.
 """
+import json
 import logging
 import os
+import uuid as _uuid
 from typing import Optional
 
 import httpx
 from mcp.server.fastmcp import Context
+
+GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
 
 from src.mcp_app import mcp
 from src.mcp_auth import resolve_tenant_id
@@ -198,36 +202,74 @@ async def create_drive_file(
     if folder_id:
         metadata["parents"] = [folder_id]
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        # Multipart upload: metadata + content
+    # For native Google Doc targets, the source body must be uploaded as
+    # text/plain (or text/html). Drive then converts on import because
+    # metadata.mimeType = application/vnd.google-apps.document. Sending
+    # the doc mime as the source Content-Type produces a 400 — that is
+    # the bug user testing flagged on 2026-05-20: report generated +
+    # emailed fine but the Drive→Doc upload silently dropped content.
+    is_native_doc = mime_type == GOOGLE_DOC_MIME
+    source_mime = "text/plain" if is_native_doc else mime_type
+
+    boundary = f"agentprovision-{_uuid.uuid4().hex}"
+    body = (
+        f"--{boundary}\r\n"
+        f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        f"{json.dumps(metadata)}\r\n"
+        f"--{boundary}\r\n"
+        f"Content-Type: {source_mime}\r\n\r\n"
+        f"{content}\r\n"
+        f"--{boundary}--"
+    ).encode("utf-8")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
             "https://www.googleapis.com/upload/drive/v3/files",
-            headers={**headers, "Content-Type": "application/json"},
+            headers={
+                **headers,
+                "Content-Type": f"multipart/related; boundary={boundary}",
+            },
             params={"uploadType": "multipart"},
+            content=body,
+        )
+        if resp.status_code == 200:
+            return {
+                "status": "success",
+                "id": resp.json().get("id"),
+                "name": name,
+            }
+
+        # Fallback for non-native targets only: create metadata then
+        # PATCH media. uploadType=media is invalid against a native
+        # Google Doc (the document body is owned by the Docs API, not
+        # the Drive bytes channel), so for Doc targets we surface the
+        # original error instead of producing an empty Doc.
+        if is_native_doc:
+            return {
+                "error": (
+                    f"Failed to create Google Doc: {resp.status_code} "
+                    f"{resp.text[:200]}"
+                )
+            }
+
+        create_resp = await client.post(
+            "https://www.googleapis.com/drive/v3/files",
+            headers={**headers, "Content-Type": "application/json"},
             json=metadata,
         )
-        # Simple create for text content
-        if resp.status_code != 200:
-            # Fallback: create metadata then update content
-            create_resp = await client.post(
-                "https://www.googleapis.com/drive/v3/files",
-                headers={**headers, "Content-Type": "application/json"},
-                json=metadata,
-            )
-            if create_resp.status_code != 200:
-                return {"error": f"Failed to create file: {create_resp.status_code}"}
+        if create_resp.status_code != 200:
+            return {
+                "error": f"Failed to create file: {create_resp.status_code}"
+            }
 
-            file_id = create_resp.json()["id"]
-            # Upload content
-            await client.patch(
-                f"https://www.googleapis.com/upload/drive/v3/files/{file_id}",
-                headers={**headers, "Content-Type": mime_type},
-                params={"uploadType": "media"},
-                content=content.encode(),
-            )
-            return {"status": "success", "id": file_id, "name": name}
-
-        return {"status": "success", "id": resp.json().get("id"), "name": name}
+        file_id = create_resp.json()["id"]
+        await client.patch(
+            f"https://www.googleapis.com/upload/drive/v3/files/{file_id}",
+            headers={**headers, "Content-Type": mime_type},
+            params={"uploadType": "media"},
+            content=content.encode(),
+        )
+        return {"status": "success", "id": file_id, "name": name}
 
 
 @mcp.tool()
