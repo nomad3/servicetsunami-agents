@@ -124,7 +124,14 @@ def _per_test_sqlite():
             engine,
             tables=[Base.metadata.tables[n] for n in table_names],
         )
-        Session_ = sessionmaker(bind=engine, future=True)
+        # expire_on_commit=False keeps the fixture-built Tenant + Agent
+        # rows usable after db.commit() — without it, CI hit
+        # ObjectDeletedError on tenant.id refresh (local container
+        # didn't reproduce, but CI's pytest collection order tripped
+        # the default expire_on_commit=True semantics).
+        Session_ = sessionmaker(
+            bind=engine, future=True, expire_on_commit=False,
+        )
         session = Session_()
         try:
             yield session
