@@ -75,6 +75,7 @@ from app.core.config import settings
 from app.models.agent_performance_snapshot import AgentPerformanceSnapshot
 from app.models.tenant_features import TenantFeatures
 from app.models.user import User
+from app.services.cli_platform_resolver import get_active_cooldowns
 from app.services.cost_estimator import estimate_fanout_cost
 
 router = APIRouter()
@@ -691,6 +692,46 @@ async def run_fanout(
             # floor. Closes design doc #1 follow-up (2026-05-18).
             effective_providers = [_resolve_default_provider(db, tenant_id)]
             effective_merge = "first-wins"
+
+        # Quota-aware preemptive filtering (task #304). Drop providers
+        # whose CLI is currently in cooldown from a recent quota / auth
+        # hit — otherwise we waste a Temporal child workflow per turn on
+        # a doomed call before the chain skip kicks in. Best-effort: any
+        # resolver-side failure falls through to the unfiltered list so a
+        # Redis hiccup doesn't block dispatch.
+        try:
+            _disallowed = get_active_cooldowns(tenant_id)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "tasks_fanout: get_active_cooldowns failed for tenant=%s — "
+                "skipping quota-aware filter (best-effort).",
+                tenant_id, exc_info=True,
+            )
+            _disallowed = set()
+        if _disallowed:
+            _requested = list(effective_providers)
+            effective_providers = [p for p in _requested if p not in _disallowed]
+            if not effective_providers:
+                # All providers in cooldown — return a clear actionable
+                # error rather than silently dispatching nothing or
+                # falling back to the safe-ship default (which would
+                # itself most likely be cooled). Caller can wait for
+                # cooldown TTL or pass `--providers opencode` to bypass.
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "all_providers_in_cooldown",
+                        "cooldowns": sorted(_disallowed & set(_requested)),
+                        "requested": _requested,
+                    },
+                )
+            if effective_providers != _requested:
+                logger.info(
+                    "tasks_fanout: quota-aware filter dropped providers — "
+                    "tenant=%s disallowed=%s requested=%s effective=%s",
+                    str(tenant_id)[:8], sorted(_disallowed),
+                    _requested, effective_providers,
+                )
 
         dispatch = await _dispatch_fanout_workflow(
             prompt=body.prompt,

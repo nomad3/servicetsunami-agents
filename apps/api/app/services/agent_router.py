@@ -20,6 +20,7 @@ from app.models.agent import Agent as AgentModel
 from app.services.cli_session_manager import run_agent_session
 from app.services.cli_platform_resolver import (
     classify_error as _classify_cli_error,
+    get_active_cooldowns as _get_active_cooldowns,
     mark_cooldown as _mark_cli_cooldown,
     resolve_cli_chain as _resolve_cli_chain,
 )
@@ -750,6 +751,27 @@ def route_and_execute(
     exploration_rate = float(os.environ.get("EXPLORATION_RATE", "0.0"))
     routing_source = "default"
 
+    # Quota-aware preemptive filtering (task #304). Before consulting the
+    # RL policy / exploration, fetch the set of CLIs currently in cooldown
+    # for this tenant so we can drop them from the candidate action space.
+    # Without this, the policy keeps picking a doomed CLI every turn after
+    # a quota hit, wasting one round-trip per turn before the chain skip
+    # kicks in. Best-effort: any lookup failure falls back to the existing
+    # chain-walk cooldown skip — routing must not break on resolver hiccups.
+    try:
+        _disallowed_clis: set[str] = _get_active_cooldowns(tenant_id)
+    except Exception as _cd_exc:
+        logger.debug("active-cooldown lookup failed (best-effort): %s", _cd_exc)
+        _disallowed_clis = set()
+
+    # If the operator-resolved initial `platform` itself is in cooldown,
+    # surrender it to the RL/exploration selection below so we don't waste
+    # the upcoming round-trip. The chain walker will still seat it back as
+    # the requested-platform anchor for telemetry attribution.
+    _platform_pre_cooldown = platform
+    if platform and platform in _disallowed_clis:
+        platform = None
+
     try:
         dp_config = db.execute(
             text("""
@@ -769,8 +791,9 @@ def route_and_execute(
 
     if exploration_mode != "off" and random.random() < exploration_rate:
         if exploration_mode == "codex":
-            platform = "codex"
-            routing_source = "exploration_codex"
+            if "codex" not in _disallowed_clis:
+                platform = "codex"
+                routing_source = "exploration_codex"
         elif exploration_mode == "balanced":
             # `qwen_code` is intentionally excluded from RL exploration
             # until adoption signals justify training a per-tenant Q-table
@@ -782,7 +805,14 @@ def route_and_execute(
                 from app.services.rl_routing import get_best_platform
                 rec = get_best_platform(db, tenant_id, inferred_type)
                 if rec.alternatives:
-                    valid = [a for a in rec.alternatives if a["platform"] in _VALID_EXPLORE]
+                    # Filter cooldowned platforms out of the candidate set
+                    # BEFORE picking the least-explored — otherwise the
+                    # policy keeps picking a doomed CLI every turn (#304).
+                    valid = [
+                        a for a in rec.alternatives
+                        if a["platform"] in _VALID_EXPLORE
+                        and a["platform"] not in _disallowed_clis
+                    ]
                     if valid:
                         least = min(valid, key=lambda a: a["total"])
                         platform = least["platform"]
@@ -804,12 +834,29 @@ def route_and_execute(
             # to learn anything useful. Explicit `platform=qwen_code`
             # still wins via the fast-pin path (see line ~607).
             _VALID_CLI = {"claude_code", "codex", "gemini_cli"}
-            if rl_rec.platform and rl_rec.platform in _VALID_CLI and rl_rec.platform_confidence >= 0.4:
+            if (
+                rl_rec.platform
+                and rl_rec.platform in _VALID_CLI
+                and rl_rec.platform not in _disallowed_clis
+                and rl_rec.platform_confidence >= 0.4
+            ):
                 platform = rl_rec.platform
                 routing_source = "rl_platform"
         except Exception as e:
             logger.debug("RL routing lookup failed: %s", e)
             safe_rollback(db)
+
+    # One INFO line per turn when we actually dropped candidates — keeps
+    # the log signal/noise ratio high while making the new behavior
+    # observable in production (task #304 acceptance criterion).
+    if _disallowed_clis:
+        logger.info(
+            "quota-aware routing filtered candidates — tenant=%s disallowed=%s chosen=%s requested_pre_cooldown=%s",
+            str(tenant_id)[:8],
+            sorted(_disallowed_clis),
+            platform,
+            _platform_pre_cooldown,
+        )
 
     # 6. Policy rollout
     rollout_experiment_id = None

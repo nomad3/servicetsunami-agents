@@ -169,6 +169,49 @@ def is_in_cooldown(tenant_id, platform: str) -> bool:
     return True
 
 
+def get_active_cooldowns(tenant_id) -> set[str]:
+    """Return the set of CLI platforms currently in cooldown for ``tenant_id``.
+
+    Used by the RL routing policy to filter the action space BEFORE a
+    selection is made, so the policy doesn't keep picking a doomed CLI on
+    every turn after a quota hit (task #304). Walks the known platform
+    list and probes Redis (or the in-process fallback dict) per key —
+    cheap relative to the savings of one round-trip per chat turn.
+
+    Best-effort: any Redis-side exception is swallowed and the result
+    falls through to the in-process dict, exactly like ``is_in_cooldown``.
+    Callers MUST treat a transient empty set as a non-event (existing
+    cooldown-skip logic in the chain walker still kicks in on the
+    in-flight quota error).
+    """
+    active: set[str] = set()
+    client = _redis_client()
+    now = time.time()
+    for platform in _DEFAULT_PRIORITY:
+        if platform == "opencode":
+            # Never cooled — universal floor.
+            continue
+        key = _cooldown_key(tenant_id, platform)
+        in_cooldown = False
+        if client is not None:
+            try:
+                in_cooldown = bool(client.exists(key))
+            except Exception:
+                # Fall through to in-process dict on Redis op failure.
+                expires_at = _local_cooldown.get(key)
+                in_cooldown = expires_at is not None and expires_at >= now
+                if expires_at is not None and expires_at < now:
+                    _local_cooldown.pop(key, None)
+        else:
+            expires_at = _local_cooldown.get(key)
+            in_cooldown = expires_at is not None and expires_at >= now
+            if expires_at is not None and expires_at < now:
+                _local_cooldown.pop(key, None)
+        if in_cooldown:
+            active.add(platform)
+    return active
+
+
 def mark_cooldown(tenant_id, platform: str, *, reason: str = "") -> None:
     """Mark this (tenant, platform) pair cool for the configured TTL."""
     if platform not in _VALID_PLATFORMS or platform == "opencode":
