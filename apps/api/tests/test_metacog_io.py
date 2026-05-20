@@ -221,18 +221,21 @@ def test_write_prediction_persists_and_roundtrips(db, tenant_with_agent):
     row_id = write_prediction(db, prediction=p)
     assert row_id is not None
 
-    # Diagnostic split: raw COUNT first to separate "row never
-    # persisted" (write_prediction bug) from "list_predictions
-    # query doesn't match the row" (read bug). CI was failing the
-    # combined `len(fetched) == 1` assertion → 0; the raw count
-    # tells us which side is broken.
+    # Diagnostic: raw count confirmed row persists; the bug is in
+    # the tenant_id filter inside list_predictions. Dump what's
+    # actually stored vs what we're filtering for.
     from sqlalchemy import text as _sql_text
-    raw_count = db.execute(_sql_text(
-        "SELECT COUNT(*) FROM agent_memories "
-        "WHERE memory_type = 'metacog_confidence_prediction'"
-    )).scalar()
-    assert raw_count == 1, (
-        f"raw COUNT found {raw_count} rows; write_prediction didn't persist"
+    raw_rows = db.execute(_sql_text(
+        "SELECT id, tenant_id, agent_id, memory_type FROM agent_memories"
+    )).fetchall()
+    assert len(raw_rows) == 1, (
+        f"raw rows found {len(raw_rows)}; expected 1"
+    )
+    stored_tenant_id = raw_rows[0][1]
+    queried_tenant_id = str(tenant.id)
+    assert stored_tenant_id == queried_tenant_id, (
+        f"stored tenant_id={stored_tenant_id!r} (type={type(stored_tenant_id).__name__}) "
+        f"!= queried tenant_id={queried_tenant_id!r}"
     )
 
     fetched = list_predictions(db, tenant_id=tenant.id)
