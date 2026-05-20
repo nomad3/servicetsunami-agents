@@ -1493,17 +1493,25 @@ def _resolve_chat_agent_id(db, db_session_memory, tenant_id) -> Optional[uuid.UU
     Mirrors the lookup in ``_record_tool_failure_affect``. Returns
     None when the lookup can't complete — callers must treat that as
     'skip the metacog write' (we can't attribute it to an agent, and
-    agent_id is required on both schemas)."""
+    agent_id is required on both schemas).
+
+    UUID filters cast to str — same dialect-shim story locked in for
+    metacog_io.list_predictions: ORM-side ``Column == uuid.UUID(...)``
+    silently returns zero rows under the SQLite test shim because the
+    postgresql.UUID bind_processor was baked in at first compile.
+    Casting to str works on Postgres (implicit string→uuid cast) and
+    SQLite (direct TEXT match). Production was unaffected; the bug
+    only manifests in the unit test shim, blocking PR #623/#624/#625
+    on the same downstream symptom."""
     try:
         from app.models.chat import ChatSession
 
         session_id_str = (db_session_memory or {}).get("chat_session_id") or ""
         if not session_id_str:
             return None
-        session_id = uuid.UUID(session_id_str)
         chat_session = db.query(ChatSession).filter(
-            ChatSession.id == session_id,
-            ChatSession.tenant_id == tenant_id,
+            ChatSession.id == str(session_id_str),
+            ChatSession.tenant_id == str(tenant_id),
         ).first()
         if chat_session is None:
             return None
