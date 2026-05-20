@@ -52,6 +52,7 @@ Tenant spoofing protection (round-1 B1):
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from collections import defaultdict
@@ -77,16 +78,49 @@ from app.models.user import User
 from app.services.cost_estimator import estimate_fanout_cost
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
-# ── Phase 2 (#177 follow-up, 2026-05-18) ──────────────────────────────
 # Default provider when the caller passes neither `providers` nor
-# `fanout`. Design doc open question #1 wants this auto-detected from
-# `tenant_features.default_cli_platform`; until that lookup lands, we
-# hard-code the safe ship-default. claude_code is the most-tested
-# leaf CLI under ChatCliWorkflow and matches the chat hot path's
-# tenant default in cli_session_manager.
+# `fanout`. Used as the floor when the tenant has no
+# `tenant_features.default_cli_platform` set, OR when the lookup fails.
+# claude_code is the most-tested leaf CLI under ChatCliWorkflow and
+# matches the chat hot path's tenant default in cli_session_manager.
 DEFAULT_RUN_PROVIDER = "claude_code"
+
+
+def _resolve_default_provider(db: Session, tenant_id: uuid.UUID) -> str:
+    """Resolve the per-tenant default fanout provider.
+
+    Resolution order:
+      1. `tenant_features.default_cli_platform` if set + non-empty.
+      2. `DEFAULT_RUN_PROVIDER` (the safe ship-default).
+
+    Closes design doc open question #1 from
+    2026-05-18-alpha-run-real-dispatch.md and audit row #2 from
+    2026-05-19-pr-merge-plan-and-tech-debt-audit.md.
+
+    Best-effort: SQLAlchemy errors fall back to DEFAULT_RUN_PROVIDER
+    rather than raising. The caller is on the fanout dispatch hot
+    path and a transient DB error should not 500 the request.
+    """
+    try:
+        row = (
+            db.query(TenantFeatures.default_cli_platform)
+            .filter(TenantFeatures.tenant_id == tenant_id)
+            .first()
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "tasks_fanout._resolve_default_provider: tenant_features "
+            "lookup failed for tenant_id=%s — using ship default.",
+            tenant_id,
+            exc_info=True,
+        )
+        return DEFAULT_RUN_PROVIDER
+    if row is None or not row[0]:
+        return DEFAULT_RUN_PROVIDER
+    return row[0]
 
 
 def _verify_tenant_header(
@@ -652,10 +686,10 @@ async def run_fanout(
             effective_providers = list(body.providers)
             effective_merge = "first-wins"
         else:
-            # Single-provider default. design doc #1: tenant_features.
-            # default_cli_platform lookup is the long-term home; until
-            # that lands, use the safe ship-default.
-            effective_providers = [DEFAULT_RUN_PROVIDER]
+            # Single-provider default: resolved from tenant_features
+            # (per-tenant override) with the safe ship-default as the
+            # floor. Closes design doc #1 follow-up (2026-05-18).
+            effective_providers = [_resolve_default_provider(db, tenant_id)]
             effective_merge = "first-wins"
 
         dispatch = await _dispatch_fanout_workflow(
