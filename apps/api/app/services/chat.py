@@ -61,7 +61,7 @@ def create_session(
     db: Session,
     *,
     tenant_id: uuid.UUID,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
     agent_id: uuid.UUID | None = None,
     dataset_id: uuid.UUID | None = None,
     dataset_group_id: uuid.UUID | None = None,
@@ -144,6 +144,14 @@ def create_session(
     db.commit()
     db.refresh(session)
     return session
+
+
+# Alias for the test_chat_session_default_agent_and_title.py call sites.
+# PR #595 added the test file but didn't add the matching public name;
+# all existing callers use `create_session`. This thin pass-through
+# avoids renaming the canonical function. Discovered 2026-05-20 when
+# every PR off main had api(pytest) red.
+create_chat_session = create_session
 
 
 def _detect_emotion(text: str) -> str:
