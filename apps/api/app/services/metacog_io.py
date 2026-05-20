@@ -90,7 +90,10 @@ def write_prediction(
     try:
         db.add(row)
         db.commit()
-        db.refresh(row)
+        # AgentMemory.id has Column(default=uuid.uuid4) — Python-side
+        # default, populated at construction — so row.id is already
+        # available. db.refresh() was tripping 'Could not refresh
+        # instance' on CI's SQLite test engine; redundant here.
         return row.id
     except SQLAlchemyError as exc:
         logger.warning(
@@ -155,7 +158,7 @@ def write_observation(
     try:
         db.add(row)
         db.commit()
-        db.refresh(row)
+        # row.id is populated at construction (see write_prediction note).
         return row.id
     except SQLAlchemyError as exc:
         logger.warning(
