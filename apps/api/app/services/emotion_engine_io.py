@@ -318,14 +318,15 @@ def record_session_tool_failure(
     between the chat hot path and the emotion engine; it MUST NOT raise
     — the caller is in an exception handler already.
 
-    AGENT ATTRIBUTION CAVEAT (Phase 3 follow-up):
-    When `agent_id` is None we fall back to a random UUID so the baseline
-    lookup returns neutral. That keeps the appraisal correct but the
-    persisted `affect_vector` has no agent-of-record. Phase 3 should
-    resolve agent_id from db_session_memory or the most-recent
-    ExecutionTrace before persisting; without it, per-agent affect
-    analytics will be blind to failures originating from
-    `cli_session_manager`. TODO(phase-3): plumb agent_id through.
+    AGENT ATTRIBUTION:
+    `cli_session_manager._record_tool_failure_affect` now resolves the
+    agent_id from `chat_session.agent_id` and passes it through (2026-
+    05-20 Phase 3 plumbing). When agent_id is None (e.g. for orphan
+    chat sessions or alternate call sites that don't yet plumb it),
+    the fallback random UUID keeps the appraisal correct (baseline
+    lookup returns neutral) but leaves affect_vector without an
+    agent-of-record. The remaining call sites that still need
+    plumbing: future caller sites that don't go through cli_session_manager.
     """
     if session_id is None:
         return None
