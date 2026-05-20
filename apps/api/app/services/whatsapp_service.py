@@ -186,6 +186,45 @@ class WhatsAppService:
         self._lid_phone_cache: Dict[str, str] = {}  # LID→phone cache for resolved numbers
         self._db_url = db_url
 
+    def _purge_local_session_file(
+        self, tenant_id: str, account_id: str, *, reason: str
+    ) -> None:
+        """Delete the on-disk neonize SQLite session file for this
+        account so the next `start_pairing` has no credentials to
+        rehydrate and mints a fresh QR.
+
+        Called from `disable()` and `logout()`. Without this, those
+        endpoints clear the in-memory client + DB status but leave the
+        device credentials on disk, so when the user next clicks Link
+        Phone the api silently reconnects with the existing credentials
+        and never shows a QR — the failure mode the operator hit 4+
+        times on 2026-05-20.
+
+        Best-effort: never raises into the caller. If the file is
+        already absent (already purged, never created, or another
+        concurrent op cleared it) the function is a no-op. Backups
+        created earlier in the session (e.g. .corrupt-backup,
+        .pre-repair) are not touched.
+        """
+        import os
+        try:
+            path = self._client_name(tenant_id, account_id)
+            if os.path.exists(path):
+                os.remove(path)
+                logger.info(
+                    "Purged neonize session file (%s): %s", reason, path
+                )
+            else:
+                logger.debug(
+                    "_purge_local_session_file: no file at %s (already gone)",
+                    path,
+                )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Failed to purge neonize session file for %s:%s (%s)",
+                tenant_id, account_id, reason,
+            )
+
     def _get_session_lock(self, key: str) -> asyncio.Lock:
         """Fetch-or-create the per-account asyncio.Lock used to
         serialize SQLite session save/restore. Safe to call from any
@@ -1245,10 +1284,13 @@ class WhatsAppService:
         key = self._key(tenant_id, account_id)
         # Prevent auto-reconnect
         self._statuses[key] = "logged_out"
-        # Cancel watchdog
+        # Cancel watchdog + heartbeat
         watchdog = self._watchdog_tasks.pop(key, None)
         if watchdog and not watchdog.done():
             watchdog.cancel()
+        hb = self._heartbeat_tasks.pop(key, None)
+        if hb and not hb.done():
+            hb.cancel()
         # Disconnect if active
         if key in self._clients:
             try:
@@ -1261,6 +1303,14 @@ class WhatsAppService:
         task = self._tasks.pop(key, None)
         if task and not task.done():
             task.cancel()
+
+        # Purge the on-disk neonize SQLite session file. Without this,
+        # the next `start_pairing` rehydrates the existing device
+        # credentials and never shows a QR — diagnosed 2026-05-20 with
+        # Simon (4 incidents in one session). See
+        # whatsapp_sqlite_corruption_recovery.md + Luna observation
+        # 3d01949b.
+        self._purge_local_session_file(tenant_id, account_id, reason="disable")
 
         db = self._get_db()
         try:
@@ -1539,10 +1589,13 @@ class WhatsAppService:
         key = self._key(tenant_id, account_id)
         # Prevent auto-reconnect
         self._statuses[key] = "logged_out"
-        # Cancel watchdog
+        # Cancel watchdog + heartbeat
         watchdog = self._watchdog_tasks.pop(key, None)
         if watchdog and not watchdog.done():
             watchdog.cancel()
+        hb = self._heartbeat_tasks.pop(key, None)
+        if hb and not hb.done():
+            hb.cancel()
         client = self._clients.get(key)
         if client:
             try:
@@ -1559,6 +1612,12 @@ class WhatsAppService:
         task = self._tasks.pop(key, None)
         if task and not task.done():
             task.cancel()
+
+        # Purge the on-disk neonize SQLite session file so the next
+        # start_pairing has no credentials to rehydrate and mints a
+        # fresh QR. See disable() for the rationale comment + memory
+        # references.
+        self._purge_local_session_file(tenant_id, account_id, reason="logout")
 
         self._statuses[key] = "logged_out"
         self._update_account_status(tenant_id, account_id, "logged_out")
