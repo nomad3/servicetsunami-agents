@@ -23,6 +23,7 @@ from app.api.v1 import (
     chat,
     internal,
     emotion,
+    habits,
     metacog,
     reflections,
     memories,
@@ -166,6 +167,9 @@ router.include_router(team.router, prefix="", tags=["team"])
 # tenant-scoped /api/v1/metacog namespace per the canonical design.
 router.include_router(metacog.router, prefix="", tags=["metacog"])
 router.include_router(reflections.router, prefix="", tags=["reflections"])
+# Habit observation ingestion (#297) — Tauri client writes vision-derived
+# signals via the internal POST endpoint (X-Internal-Key + X-Tenant-Id auth).
+router.include_router(habits.router, prefix="", tags=["habits"])
 # `alpha usage` + `alpha costs` (Phase 4 of the CLI roadmap, #181).
 # Aggregates chat_messages per-provider and per-day for the tenant.
 # Mounted at root (no prefix) so the routes read `/usage` and
