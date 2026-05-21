@@ -49,7 +49,7 @@ def test_kill_switch_missing_features_row_defaults_false(db_session):
     """No tenant_features row → default OFF. The 5 consultation
     points see allow/kill_switch_off in this state."""
     tenant, _ = _make_tenant_agent(db_session)
-    assert io.is_value_layer_enabled(db_session, tenant.id) is False
+    assert io.is_value_layer_enabled(db_session, tenant_id=tenant.id) is False
 
 
 def test_kill_switch_flag_false_returns_false(db_session):
@@ -59,7 +59,7 @@ def test_kill_switch_flag_false_returns_false(db_session):
         value_layer_enabled=False,
     ))
     db_session.commit()
-    assert io.is_value_layer_enabled(db_session, tenant.id) is False
+    assert io.is_value_layer_enabled(db_session, tenant_id=tenant.id) is False
 
 
 def test_kill_switch_flag_true_returns_true(db_session):
@@ -69,7 +69,7 @@ def test_kill_switch_flag_true_returns_true(db_session):
         value_layer_enabled=True,
     ))
     db_session.commit()
-    assert io.is_value_layer_enabled(db_session, tenant.id) is True
+    assert io.is_value_layer_enabled(db_session, tenant_id=tenant.id) is True
 
 
 # ── read / write ──────────────────────────────────────────────────────
