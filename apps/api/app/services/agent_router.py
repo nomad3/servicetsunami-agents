@@ -33,6 +33,7 @@ from app.services.local_inference import generate_agent_response_sync
 from app.services.tool_groups import TIER_LIMITS
 from app.memory.feature_flag import is_v2_enabled
 from app.services.agent_identity import resolve_primary_agent_slug
+from app.services import agent_value_set_io
 
 logger = logging.getLogger(__name__)
 
@@ -605,6 +606,13 @@ def route_and_execute(
     # "copilot-studio-bot" matches the row "Copilot Studio Bot". Exact-match
     # in SQL — no ILIKE — to avoid `%` / `_` wildcard collisions on names
     # like `"Sales_Manager"` or hand-crafted slugs.
+    # Resolve the agent row ONCE per turn — reused by the
+    # preferred_cli override below AND by the value-layer routing
+    # gate (#647 PR 3). The earlier "lookup twice" anti-pattern got
+    # called out by the holistic 2026-05-02 review C4 for cli chain
+    # resolution; the value-layer wire-in re-introduced it briefly
+    # and got the same reviewer flag in #650. Consolidated here.
+    _agent_row = None
     try:
         normalized_slug = (
             agent_slug.lower().replace(" ", "-").replace("_", "-")
@@ -636,6 +644,7 @@ def route_and_execute(
             agent_slug, tenant_id, e,
         )
         safe_rollback(db)
+        _agent_row = None
 
     # When the tenant has a CLI subscription (gemini_cli, claude_code, codex,
     # copilot_cli), always route through it — don't fall back to local Gemma 4
@@ -709,6 +718,69 @@ def route_and_execute(
         agent_tier = "full"
         intent_tool_groups = None
         is_mutation = False
+
+    # Value-layer routing gate (#647 PR 3). Consult the tenant's
+    # agent value set BEFORE the greeting fast-path or LLM dispatch.
+    # When the agent has opted in (tenant_features.value_layer_enabled
+    # = True) AND the intent text matches a `protect` slug with
+    # intent='mutate', refuse the action with a structured response
+    # the caller surfaces to the user.
+    #
+    # Reuses _agent_row resolved above (slug normalization mirrors
+    # the per-agent CLI override block). The reviewer's IMPORTANT-1
+    # in #650 caught the prior version which had asymmetric
+    # normalization (Python side only lowercased; DB side replaced
+    # underscores too) → `Sales_Manager` slug never matched its row
+    # → gate silently skipped. Now both sides go through the same
+    # normalized_slug computed once.
+    #
+    # If _agent_row is None (unresolved slug OR upstream DB error
+    # already caught + logged), we skip the consult cleanly — the
+    # chat hot path stays alive. Locked by
+    # test_value_layer_consult_skipped_when_agent_slug_unresolved.
+    value_verdict = None
+    if _agent_row is not None:
+        try:
+            value_verdict = agent_value_set_io.consult_routing(
+                db,
+                tenant_id=tenant_id,
+                agent_id=_agent_row.id,
+                intent_text=message,
+                intent_classifier_says_mutate=bool(is_mutation),
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Value-layer consult must never crash the chat hot
+            # path. Catch + log + skip (fail-open). The pure
+            # consult() itself is total; this catch covers DB
+            # transient errors inside consult_with_audit (e.g.
+            # tenant_features lookup hitting a pool exhaustion).
+            logger.warning(
+                "agent_router: value-layer consult crashed "
+                "tenant=%s agent_id=%s err=%s; proceeding without gate",
+                tenant_id, _agent_row.id, exc,
+            )
+            value_verdict = None
+
+    if value_verdict is not None and value_verdict.decision == "block":
+        blocked_item = (value_verdict.matched_item or {})
+        slug = blocked_item.get("slug", "(unknown)")
+        description = blocked_item.get("description") or slug
+        return (
+            f"I can't do that — it would touch a protected value "
+            f"('{description}'). If this is intentional, an operator "
+            f"can remove the value from /api/v1/luna/values first.",
+            {
+                "platform": "value_layer_block",
+                "agent_tier": "value_layer",
+                "agent_slug": agent_slug,
+                "value_verdict": value_verdict.to_dict(),
+                "routing_summary": _build_routing_summary(
+                    served_by="value_layer_block",
+                    requested=None, chain_length=0,
+                    fallback_reason=value_verdict.reason,
+                ),
+            },
+        )
 
     # Greeting fast-path (Tier-1 #1 from the latency reduction plan).
     # Bench v4 measured: a "hola luna" turn spent 21 s in 2 Gemma 4
