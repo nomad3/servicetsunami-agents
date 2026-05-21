@@ -168,11 +168,16 @@ def read_value_set(
                 AgentMemory.memory_type == VALUE_SET_MEMORY_TYPE,
             )
             .order_by(
-                # Order by integer-cast of the embedded version
-                # field — same expression the migration 144 index
-                # uses. Defensive guards in the WHERE clause keep
-                # malformed rows from tripping the cast.
-                AgentMemory.created_at.desc(),  # secondary
+                # (Review NIT 2026-05-21) The SQL-side ORDER BY is
+                # NOT load-bearing for latest-wins anymore — the
+                # Python sort by parsed version DESC at L185 is
+                # authoritative. Kept as a defensive tiebreaker for
+                # the (impossible-under-migration-144 unique index)
+                # case where two rows share the same parsed version:
+                # the newer row wins by created_at. Also keeps the
+                # batch order deterministic for the corruption-walk
+                # error messages.
+                AgentMemory.created_at.desc(),
             )
             .all()
         )
@@ -264,12 +269,38 @@ def read_value_set(
             corruption_count += 1
             continue
 
-    # Every row corrupted. Operator must investigate.
-    log.error(
-        "read_value_set: ALL %s value-set rows corrupted for "
-        "tenant=%s agent=%s; returning empty (default-OFF safety)",
-        len(rows), tenant_id, agent_id,
-    )
+    # Every row exhausted. Distinguish two operationally-different
+    # cases so the alerting / dashboards don't mis-route:
+    #   - corrupted: needs an immediate investigation (real data loss
+    #     risk on the value set)
+    #   - expired: benign (all break-glass overrides have run out and
+    #     there's no underlying non-break-glass version — usually the
+    #     tenant was created with only break-glass versions, which
+    #     shouldn't happen in practice but is recoverable by writing
+    #     a normal value set)
+    # (Review NIT 2026-05-21) Calling all-expired "corrupted" mis-
+    # routes the operator. Log distinct messages per case.
+    if corruption_count > 0 and expired_count == 0:
+        log.error(
+            "read_value_set: ALL %s value-set rows corrupted for "
+            "tenant=%s agent=%s; returning empty (default-OFF safety)",
+            len(rows), tenant_id, agent_id,
+        )
+    elif expired_count > 0 and corruption_count == 0:
+        log.warning(
+            "read_value_set: ALL %s value-set rows are EXPIRED "
+            "break-glass for tenant=%s agent=%s; returning empty "
+            "(no underlying non-break-glass version found)",
+            len(rows), tenant_id, agent_id,
+        )
+    else:
+        log.error(
+            "read_value_set: exhausted all %s rows for tenant=%s "
+            "agent=%s (corrupted=%s expired=%s); returning empty "
+            "(default-OFF safety)",
+            len(rows), tenant_id, agent_id,
+            corruption_count, expired_count,
+        )
     return AgentValueSet.empty()
 
 
