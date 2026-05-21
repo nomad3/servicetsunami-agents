@@ -79,6 +79,24 @@ CLASSIFICATION_CASES: list[
         "Gemini credentials: [Errno 111] Connection refused response_len=0",
         1, None, Status.QUOTA_EXHAUSTED, "quota",
     ),
+    # ── 6c. gemini upstream 5xx (Google API outage) ─────────────────────
+    # Real prod stderr observed 2026-05-21 — Gemini CLI got 502 from
+    # generativelanguage.googleapis.com mid-task. Generic rule #12
+    # alone would classify as RETRYABLE_NETWORK_FAILURE with no
+    # cooldown, leaving the chain stuck re-picking Gemini while Google
+    # is down. This rule routes around the outage to Codex.
+    (
+        "gemini_cli_upstream_5xx_gaxios_is_quota_exhausted",
+        "Attempt 1 failed with status 502. Retrying with backoff... "
+        "_GaxiosError: <html>Error 502 (Server Error)!!1 ...",
+        1, None, Status.QUOTA_EXHAUSTED, "quota",
+    ),
+    (
+        "gemini_cli_upstream_5xx_googleapis_is_quota_exhausted",
+        "POST https://generativelanguage.googleapis.com/v1beta/models/"
+        "gemini-2.5-pro:generateContent — got 503 Service Unavailable",
+        1, None, Status.QUOTA_EXHAUSTED, "quota",
+    ),
     # ── 7. gemini WORKSPACE_UNTRUSTED ───────────────────────────────────
     (
         "gemini_cli_workspace_setup_is_workspace_untrusted",

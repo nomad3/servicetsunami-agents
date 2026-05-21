@@ -225,6 +225,31 @@ _STDERR_RULES: list[_Rule] = [
         legacy_label="quota",
         test_id="gemini_cli_credential_load_failure_is_quota_exhausted",
     ),
+    # 6c. gemini upstream 5xx (Google API outage / 502 / 503 / GaxiosError).
+    # Observed 2026-05-20: Gemini CLI emits "Attempt 1 failed with status
+    # 502. Retrying with backoff..." + "_GaxiosError: <html>Error 502
+    # (Server Error)!!1" when generativelanguage.googleapis.com is having
+    # a transient outage. The CLI does its OWN internal retries, so by
+    # the time we see this stderr the upstream really is down. Without
+    # this rule, generic rule #12 matches and emits
+    # RETRYABLE_NETWORK_FAILURE with legacy_label=None — no cooldown,
+    # and the chain handler keeps re-picking Gemini for the next chat
+    # turn while Google is down. Cooldown + skip to Codex is the right
+    # call: classify as QUOTA_EXHAUSTED (same shape as the credential
+    # rule 6b — semantic shorthand for "don't try Gemini for a while").
+    _Rule(
+        platform="gemini_cli",
+        pattern=re.compile(
+            r"_?gaxios\s*error"
+            r"|attempt\s*\d+\s*failed\s*with\s*status\s*5\d\d"
+            r"|generativelanguage\.googleapis\.com.*\b50[23]\b"
+            r"|gemini.*\b50[23]\b.*(server\s*error|temporary\s*error)",
+            re.IGNORECASE,
+        ),
+        status=Status.QUOTA_EXHAUSTED,
+        legacy_label="quota",
+        test_id="gemini_cli_upstream_5xx_is_quota_exhausted",
+    ),
     # 7. gemini workspace trust
     _Rule(
         platform="gemini_cli",
