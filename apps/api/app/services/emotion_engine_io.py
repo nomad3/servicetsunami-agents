@@ -485,3 +485,128 @@ def appraise_and_record_tool_outcome(
         dominance=new_vector.dominance,
     )
     return new_vector
+
+
+# ── User-signal wire-in (PR 5 — value-layer aware) ────────────────────
+
+
+# Pursue-match scale factor (design §4.2 Q3 round-1 resolution by Luna).
+# When the value-layer consult surfaces a `pursue` match on this user
+# turn, amplify the user_signal pleasure axis by this factor. The pure
+# layer enforces the TOOL_OUTCOME_PLEASURE_GAIN cap, so even if this is
+# bumped above ~2.0 in the future, a pursue user signal can never
+# exceed a real tool success.
+_PURSUE_GAIN_SCALE = 1.5
+
+
+def appraise_and_record_user_signal(
+    db: Session,
+    *,
+    episode_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    payload: dict,
+    user_text: str,
+) -> Optional[PADVector]:
+    """Value-layer aware user_signal wire-in (#647 PR 5).
+
+    Args:
+        payload: classifier output from ``classify_user_signal``. Shape
+            {"pleasure": float, "arousal": float, "dominance": float}
+            each in [-1, 1]. Raw user text NEVER reaches the pure
+            ``_appraise_user_signal`` — only the bounded classifier
+            output does (constitutive-vs-performative defence, design
+            § Open questions §5).
+        user_text: the original user message, passed to the value-layer
+            consult (which has its OWN slug-match boundary) so a
+            ``pursue`` slug match can scale the pleasure axis upward.
+
+    Order of operations:
+      1. Look up episode + baseline (same shape as tool_outcome path)
+      2. Consult value layer with ``point='user_signal'``,
+         ``intent='read'``. Fail-open on crash — emotion layer must
+         never crash chat hot path.
+      3. Derive scale: 1.5x if verdict.decision=='allow' AND
+         reason startswith 'pursue_match' AND matched_item is set.
+         Otherwise 1.0.
+      4. Call pure ``appraise_event('user_signal', ...,
+         pursue_gain_scale=scale)`` which enforces the cap.
+      5. Persist new vector to episode + record metrics.
+
+    Returns the post-appraisal PAD vector, or None if the episode
+    doesn't exist / is tenant-foreign.
+    """
+    episode = (
+        db.query(ConversationEpisode)
+        .filter(
+            ConversationEpisode.id == episode_id,
+            ConversationEpisode.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if episode is None:
+        return None
+
+    baseline = get_affect_baseline(db, agent_id=agent_id, tenant_id=tenant_id)
+    current = (
+        PADVector.from_dict(episode.affect_vector)
+        if episode.affect_vector
+        else baseline
+    )
+
+    # Value-layer consult — fail-open. A crash here MUST NOT block the
+    # emotion update; we proceed with scale=1.0 (no pursue boost) and
+    # log for ops. Mirrors the agent_router fail-open pattern from PR 3.
+    pursue_gain_scale = 1.0
+    try:
+        from app.services.agent_value_set_io import (
+            appraise_user_signal_with_values,
+        )
+        verdict = appraise_user_signal_with_values(
+            db,
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            user_text=user_text,
+        )
+        if (
+            verdict.decision == "allow"
+            and verdict.reason.startswith("pursue_match")
+            and verdict.matched_item is not None
+        ):
+            pursue_gain_scale = _PURSUE_GAIN_SCALE
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "emotion_engine_io.appraise_and_record_user_signal: "
+            "value-layer consult crashed, proceeding without pursue "
+            "boost. tenant=%s agent=%s err=%s",
+            tenant_id, agent_id, exc,
+        )
+
+    new_vector = appraise_event(
+        "user_signal",
+        payload,
+        current=current,
+        baseline=baseline,
+        pursue_gain_scale=pursue_gain_scale,
+    )
+    record_appraise_event(tenant_id=str(tenant_id), event_type="user_signal")
+    episode.affect_vector = new_vector.to_dict()
+    try:
+        db.commit()
+        db.refresh(episode)
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "emotion_engine_io.appraise_and_record_user_signal: commit "
+            "failed, rolling back. episode_id=%s tenant_id=%s err=%s",
+            episode_id, tenant_id, exc,
+        )
+        db.rollback()
+        return None
+    record_affect_write(tenant_id=str(tenant_id))
+    record_clamp_events(
+        tenant_id=str(tenant_id),
+        pleasure=new_vector.pleasure,
+        arousal=new_vector.arousal,
+        dominance=new_vector.dominance,
+    )
+    return new_vector

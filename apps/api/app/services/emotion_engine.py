@@ -77,6 +77,7 @@ def appraise_event(
     *,
     current: PADVector,
     baseline: PADVector,
+    pursue_gain_scale: float = 1.0,
 ) -> PADVector:
     """Apply an event to the current PAD vector. Pure function — caller
     persists the result.
@@ -87,6 +88,12 @@ def appraise_event(
         current: pre-event PAD vector.
         baseline: agent's stable trait baseline (for peer signals that
             damp toward our own baseline rather than the peer's).
+        pursue_gain_scale: multiplier for the user_signal pleasure axis
+            when the value layer surfaces a ``pursue`` match (#647 PR 5).
+            Default 1.0 (no scaling). Only consumed by the user_signal
+            handler; ignored by other event types. The effective gain is
+            capped at TOOL_OUTCOME_PLEASURE_GAIN so a 'pursue' user
+            signal can NEVER exceed a real tool success (design §4.2 Q3).
 
     Returns:
         post-event PAD vector with refreshed `updated_at`.
@@ -104,7 +111,10 @@ def appraise_event(
     if event_type == "peer_signal":
         return _appraise_peer_signal(payload, current=current, baseline=baseline)
     if event_type == "user_signal":
-        return _appraise_user_signal(payload, current=current, baseline=baseline)
+        return _appraise_user_signal(
+            payload, current=current, baseline=baseline,
+            pursue_gain_scale=pursue_gain_scale,
+        )
     raise ValueError(
         f"emotion_engine.appraise_event: unknown event_type {event_type!r}. "
         "Phase 1 supports {tool_outcome, tool_failure, peer_signal}; "
@@ -190,6 +200,7 @@ def _appraise_user_signal(
     current: PADVector,
     baseline: PADVector,  # noqa: ARG001 — kept for API symmetry; user_signal
                           # doesn't anchor on baseline in Phase 1.5
+    pursue_gain_scale: float = 1.0,
 ) -> PADVector:
     """The user_signal classifier ran on a user turn and produced a
     bounded PAD estimate. Payload:
@@ -206,6 +217,14 @@ def _appraise_user_signal(
     the classifier's bounded output does. PADVector.from_dict + clamp
     in PADVector.from_components defend against adversarial classifier
     output (e.g. an LLM that hallucinates +10 on an axis).
+
+    ``pursue_gain_scale`` (#647 PR 5, design §4.2 Q3): when the value
+    layer surfaces a ``pursue`` match on this user turn, the caller
+    raises the scale (1.5x per Luna's round-1 resolution). The effective
+    pleasure gain is capped at TOOL_OUTCOME_PLEASURE_GAIN so a 'pursue'
+    user signal can never exceed a real tool success. Negative scale is
+    rejected (clamped to 0.0) — a 'pursue' match should never invert
+    the sign of an otherwise-positive signal.
     """
     p = float(payload.get("pleasure", 0.0))
     a = float(payload.get("arousal", 0.0))
@@ -215,8 +234,18 @@ def _appraise_user_signal(
     p = max(-1.0, min(1.0, p))
     a = max(-1.0, min(1.0, a))
     d = max(-1.0, min(1.0, d))
+    # Cap effective pleasure gain at TOOL_OUTCOME_PLEASURE_GAIN. Reject
+    # negative scale (defensive: a pursue match should amplify, never
+    # invert). The cap math at the default scale: 1.5 * 0.15 = 0.225 <
+    # 0.30 = TOOL_OUTCOME_PLEASURE_GAIN — so the cap is only active if
+    # tunables change in the future.
+    scale = max(0.0, float(pursue_gain_scale))
+    effective_pleasure_gain = min(
+        USER_SIGNAL_PLEASURE_GAIN * scale,
+        TOOL_OUTCOME_PLEASURE_GAIN,
+    )
     return PADVector.from_components(
-        pleasure=current.pleasure + p * USER_SIGNAL_PLEASURE_GAIN,
+        pleasure=current.pleasure + p * effective_pleasure_gain,
         arousal=current.arousal + a * USER_SIGNAL_AROUSAL_GAIN,
         dominance=current.dominance + d * USER_SIGNAL_DOMINANCE_GAIN,
     )

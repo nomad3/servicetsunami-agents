@@ -298,3 +298,22 @@ This doc is a draft for Luna's read + Simon's go-ahead. Once both sign off:
 - Move to PR 2.
 
 Status: **awaiting Luna review.**
+
+---
+
+## 12. Implementation log
+
+Updated as each PR lands. Captures what shipped, what was deferred,
+and any contract changes vs. the design.
+
+| PR | # | Shipped | Status | Notes |
+|---|---|---|---|---|
+| 1 | #648 | 2026-05-21 | merged | Migration 144, pure `consult()`, IO wrapper, 5 shim callers. Luna 7 rounds (R7 keyword-call-site + index-expression fixes). |
+| 2 | #649 | 2026-05-21 | merged | 4 operator routes + 1 internal route + `get_agent_value_set` MCP tool. Superpowers happy-path + cross-tenant + deterministic-default-agent fixes. |
+| 3 | #650 | 2026-05-21 | merged | `agent_router` wire-in; hoisted `_agent_row` lookup to be shared. **Latent ordering bug shipped — see PR #652.** |
+| 4 | #651 | 2026-05-21 | merged | `reflection_validators` wire-in with reflection-kind-aware intent flag. Superpowers B1/B2/I1/I3 fixed in same PR. |
+| 4.5 | #652 | 2026-05-21 | open | Fix for PR 3 ordering bug: pin-to-cli probe was running BEFORE the value-layer gate, so a block verdict never short-circuited dispatch. 3 sibling tests had a downstream-raise tripwire pattern that the router's own try/except swallowed — switched to counter + metadata assertions. |
+| 5 | #TBD | 2026-05-21 | in progress | `emotion_engine` user_signal wire-in. Pure `_appraise_user_signal` accepts `pursue_gain_scale` kwarg, capped at `TOOL_OUTCOME_PLEASURE_GAIN`. IO wrapper `appraise_and_record_user_signal` derives scale=1.5 only on `pursue_match` allow verdict (with `matched_item`); fail-open on consult crash. **Note:** Phase 1.5 user_signal classifier path is dead-wired upstream (no caller invokes `appraise_event("user_signal", ...)` yet), so this PR completes the contract surface but the live path activates when the upstream caller (chat-write hot path / `cli_session_manager`) wires `classify_user_signal → appraise_and_record_user_signal`. |
+| 6 | #TBD | TBD | pending | Break-glass endpoint. |
+| 7 | n/a | deferred | Phase 2 | `value_proposal` synthesis + operator confirm. |
+
