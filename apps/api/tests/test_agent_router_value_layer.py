@@ -252,6 +252,97 @@ def test_value_layer_consult_crash_fails_open(monkeypatch):
     )
 
 
+def test_value_layer_consult_fires_when_skill_slug_resolves_via_tool_groups(
+    monkeypatch,
+):
+    """(Issue #660 regression) When chat.py passes a SKILL slug like
+    'luna' that doesn't match any agent NAME, the early `_agent_row`
+    lookup misses → without the #660 fix, the consult was silently
+    skipped. Now the agent-by-tool-group selection runs BEFORE the
+    consult, so `responding_agent` is set and the consult fires
+    against the correct agent.
+    """
+    from app.services import agent_router
+    from app.services.agent_value_set import ValueVerdict
+
+    selected_agent = MagicMock()
+    selected_agent.id = uuid.uuid4()
+    selected_agent.name = "Luna General Assistant"
+    selected_agent.tenant_id = uuid.uuid4()
+    selected_agent.tool_groups = ["git"]
+    selected_agent.default_model_tier = "full"
+    selected_agent.memory_domains = []
+
+    db = MagicMock()
+
+    def _query(model):
+        chained = MagicMock()
+        # name-match lookup returns None (slug "luna" matches no agent name)
+        chained.filter.return_value.first.return_value = None
+        # tool-group selection finds the selected agent
+        chained.filter.return_value.all.return_value = [selected_agent]
+        return chained
+
+    db.query.side_effect = _query
+
+    blocked_verdict = ValueVerdict.block(
+        reason="protect_match: production-main",
+        point="routing",
+        item={
+            "slug": "production-main",
+            "description": "the prod main branch",
+            "added_at": "x", "added_by": "operator",
+            "evidence_memory_ids": [],
+        },
+    )
+    consult_calls = {"n": 0, "agent_ids": []}
+
+    def _consult(*a, **kw):
+        consult_calls["n"] += 1
+        consult_calls["agent_ids"].append(kw.get("agent_id"))
+        return blocked_verdict
+
+    monkeypatch.setattr(
+        agent_router.agent_value_set_io, "consult_routing", _consult,
+    )
+    monkeypatch.setattr(
+        agent_router, "match_intent",
+        lambda *a, **kw: {
+            "name": "git push",
+            "tier": "full",
+            "tools": ["git"],
+            "mutation": True,
+        },
+    )
+
+    chain_called = {"n": 0}
+
+    def _trip(*a, **kw):
+        chain_called["n"] += 1
+        return ["claude_code"]
+
+    monkeypatch.setattr(agent_router, "_resolve_cli_chain", _trip)
+
+    response, metadata = agent_router.route_and_execute(
+        db,
+        tenant_id=selected_agent.tenant_id,
+        user_id=uuid.uuid4(),
+        message="push production-main and force-merge it now",
+        agent_slug="luna",  # SKILL slug, not agent name
+    )
+
+    assert metadata["platform"] == "value_layer_block"
+    assert consult_calls["n"] == 1, (
+        "consult should have fired once via responding_agent fallback"
+    )
+    assert consult_calls["agent_ids"][0] == selected_agent.id, (
+        "consult should target the tool-group-selected agent, not None"
+    )
+    assert chain_called["n"] == 0, (
+        "CLI chain MUST NOT run on block path"
+    )
+
+
 def test_value_layer_consult_skipped_when_agent_slug_unresolved(
     monkeypatch,
 ):

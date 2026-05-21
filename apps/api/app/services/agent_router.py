@@ -695,45 +695,67 @@ def route_and_execute(
         intent_tool_groups = None
         is_mutation = False
 
-    # Value-layer routing gate (#647 PR 3). Consult the tenant's
-    # agent value set BEFORE the greeting fast-path or LLM dispatch.
-    # When the agent has opted in (tenant_features.value_layer_enabled
-    # = True) AND the intent text matches a `protect` slug with
-    # intent='mutate', refuse the action with a structured response
-    # the caller surfaces to the user.
+    # Agent selection by tool_groups (moved up from line ~825 by #660
+    # fix). When chat.py passes a SKILL slug ("luna") instead of an
+    # agent-name slug, the earlier `_agent_row` name lookup misses
+    # → without this earlier rewrite, the value-layer consult below
+    # would skip silently. Running selection here gives us the
+    # canonical responding agent BEFORE the value-layer gate.
     #
-    # Reuses _agent_row resolved above (slug normalization mirrors
-    # the per-agent CLI override block). The reviewer's IMPORTANT-1
-    # in #650 caught the prior version which had asymmetric
-    # normalization (Python side only lowercased; DB side replaced
-    # underscores too) → `Sales_Manager` slug never matched its row
-    # → gate silently skipped. Now both sides go through the same
-    # normalized_slug computed once.
-    #
-    # If _agent_row is None (unresolved slug OR upstream DB error
-    # already caught + logged), we skip the consult cleanly — the
-    # chat hot path stays alive. Locked by
-    # test_value_layer_consult_skipped_when_agent_slug_unresolved.
+    # Cost is cheap (~1 SQL filtered by tool_groups.isnot(None) +
+    # in-process scan) compared to the latency of LLM dispatch the
+    # block path avoids.
+    responding_agent = None
+    agent_tool_groups = None
+    agent_memory_domains = None
+    if intent_tool_groups:
+        try:
+            tenant_agents = db.query(AgentModel).filter(
+                AgentModel.tenant_id == tenant_id,
+                AgentModel.tool_groups.isnot(None),
+            ).all()
+            best_overlap = 0
+            for agent_candidate in tenant_agents:
+                if agent_candidate.tool_groups:
+                    overlap = len(
+                        set(intent_tool_groups)
+                        & set(agent_candidate.tool_groups)
+                    )
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        responding_agent = agent_candidate
+            if responding_agent and best_overlap > 0:
+                agent_slug = responding_agent.name.lower().replace(" ", "-")
+                agent_tier = responding_agent.default_model_tier or agent_tier
+                agent_tool_groups = responding_agent.tool_groups
+                agent_memory_domains = responding_agent.memory_domains
+        except Exception as e:
+            logger.warning("Agent selection by tool_groups failed: %s", e)
+            safe_rollback(db)
+
+    # Value-layer routing gate (#647 PR 3, repositioned by #660 fix).
+    # Consult against the agent we actually plan to route to:
+    #   (a) `responding_agent` from the tool-group selection above, or
+    #   (b) `_agent_row` from the earlier name-match lookup when chat
+    #       passed an agent-name slug directly.
+    # Skip cleanly when neither resolved (chat hot path stays alive,
+    # same fail-open shape as before).
     value_verdict = None
-    if _agent_row is not None:
+    consult_agent = responding_agent or _agent_row
+    if consult_agent is not None:
         try:
             value_verdict = agent_value_set_io.consult_routing(
                 db,
                 tenant_id=tenant_id,
-                agent_id=_agent_row.id,
+                agent_id=consult_agent.id,
                 intent_text=message,
                 intent_classifier_says_mutate=bool(is_mutation),
             )
         except Exception as exc:  # noqa: BLE001
-            # Value-layer consult must never crash the chat hot
-            # path. Catch + log + skip (fail-open). The pure
-            # consult() itself is total; this catch covers DB
-            # transient errors inside consult_with_audit (e.g.
-            # tenant_features lookup hitting a pool exhaustion).
             logger.warning(
                 "agent_router: value-layer consult crashed "
                 "tenant=%s agent_id=%s err=%s; proceeding without gate",
-                tenant_id, _agent_row.id, exc,
+                tenant_id, consult_agent.id, exc,
             )
             value_verdict = None
 
@@ -802,34 +824,12 @@ def route_and_execute(
             ),
         }
 
-    # 4. Agent selection
-    responding_agent = None
-    agent_tool_groups = None
-    agent_memory_domains = None
-
-    if intent_tool_groups:
-        try:
-            tenant_agents = db.query(AgentModel).filter(
-                AgentModel.tenant_id == tenant_id,
-                AgentModel.tool_groups.isnot(None),
-            ).all()
-
-            best_overlap = 0
-            for agent_candidate in tenant_agents:
-                if agent_candidate.tool_groups:
-                    overlap = len(set(intent_tool_groups) & set(agent_candidate.tool_groups))
-                    if overlap > best_overlap:
-                        best_overlap = overlap
-                        responding_agent = agent_candidate
-
-            if responding_agent and best_overlap > 0:
-                agent_slug = responding_agent.name.lower().replace(" ", "-")
-                agent_tier = responding_agent.default_model_tier or agent_tier
-                agent_tool_groups = responding_agent.tool_groups
-                agent_memory_domains = responding_agent.memory_domains
-        except Exception as e:
-            logger.warning("Agent selection by tool_groups failed: %s", e)
-            safe_rollback(db)
+    # (4. Agent selection by tool_groups + 5. value-layer gate were
+    # consolidated upstream — see the "Agent selection by tool_groups"
+    # block right after intent matching. Both `responding_agent`,
+    # `agent_tool_groups`, `agent_memory_domains`, and `value_verdict`
+    # are set there. The block-path early-return also lives there so
+    # pin-to-cli + greeting + RL never run on a blocked turn.)
 
     # 5. RL exploration & routing
     exploration_mode = os.environ.get("EXPLORATION_MODE", "off")
