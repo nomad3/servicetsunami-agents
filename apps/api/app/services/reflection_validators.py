@@ -363,6 +363,98 @@ def validate_reflection(
     if not r.ok:
         return r
 
+    # Value-layer reflection gate (#647 PR 4). Routes through
+    # consult_reflection which sets intent='mutate' when
+    # reflection.kind ∈ {next_move, value_proposal} and 'read'
+    # for descriptive kinds (risk/idea/tension/creative). The
+    # consult itself checks the per-tenant kill-switch — when
+    # the tenant hasn't opted in, this is a no-op (returns
+    # allow/kill_switch_off). When opted in, a protect-match on
+    # a mutating reflection blocks; an avoid-match warns; a
+    # protect-match on a descriptive reflection warns (still
+    # writes — see §6 "protect blocks MUTATION not mention").
+    r = _validate_against_value_set(
+        reflection,
+        db=db,
+        current_tenant_id=current_tenant_id,
+    )
+    if not r.ok:
+        return r
+
+    return ValidationResult.pass_()
+
+
+def _validate_against_value_set(
+    reflection: NightlyReflection,
+    *,
+    db: Session,
+    current_tenant_id: uuid.UUID,
+) -> ValidationResult:
+    """Bridge to ``agent_value_set_io.consult_reflection``.
+
+    Translates ValueVerdict into ValidationResult:
+      - allow → pass
+      - warn  → pass (the chain doesn't gate on warn; the
+                audit log captures it for operator review)
+      - block → fail with reason carrying the matched slug
+
+    Lazy import keeps the value-layer surface optional in
+    environments that haven't deployed PR 1 yet (test fixtures,
+    historical replay tooling). If the import fails OR the
+    consult itself crashes, the validator returns pass — same
+    fail-open discipline as the agent_router gate from PR 3."""
+    try:
+        from app.services import agent_value_set_io
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "validate_reflection: value-layer module unavailable, "
+            "skipping value gate. err=%s", exc,
+        )
+        return ValidationResult.pass_()
+
+    # (Review I1) Pre-parse agent_id outside the try so a malformed
+    # UUID surfaces under a specific log message instead of being
+    # mis-attributed as "consult_reflection crashed" during incident
+    # triage. NightlyReflection.agent_id is typed `str` and the
+    # schema's __post_init__ doesn't validate it as a UUID — bad
+    # data at this layer would otherwise look like a value-layer
+    # bug.
+    try:
+        agent_uuid = uuid.UUID(reflection.agent_id)
+    except (ValueError, AttributeError, TypeError) as exc:
+        log.warning(
+            "validate_reflection: reflection.agent_id is not a "
+            "valid UUID (%r); skipping value gate. err=%s",
+            reflection.agent_id, exc,
+        )
+        return ValidationResult.pass_()
+
+    try:
+        verdict = agent_value_set_io.consult_reflection(
+            db,
+            tenant_id=current_tenant_id,
+            agent_id=agent_uuid,
+            reflection_kind=reflection.kind,
+            reflection_content=reflection.content,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "validate_reflection: consult_reflection crashed "
+            "tenant=%s reflection_kind=%s err=%s; allowing reflection "
+            "to write (fail-open). NOTE: persistent audit-log table "
+            "write for warn verdicts is a Phase 1.5 follow-up — see "
+            "agent_value_set_io._record_verdict docstring.",
+            current_tenant_id, reflection.kind, exc,
+        )
+        return ValidationResult.pass_()
+
+    if verdict.decision == "block":
+        item = verdict.matched_item or {}
+        slug = item.get("slug", "(unknown)")
+        return ValidationResult.fail(
+            f"value_layer_block: kind={reflection.kind} "
+            f"matched_slug={slug} reason={verdict.reason}",
+        )
     return ValidationResult.pass_()
 
 
