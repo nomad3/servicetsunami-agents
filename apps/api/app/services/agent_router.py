@@ -33,6 +33,7 @@ from app.services.local_inference import generate_agent_response_sync
 from app.services.tool_groups import TIER_LIMITS
 from app.memory.feature_flag import is_v2_enabled
 from app.services.agent_identity import resolve_primary_agent_slug
+from app.services import agent_value_set_io
 
 logger = logging.getLogger(__name__)
 
@@ -709,6 +710,74 @@ def route_and_execute(
         agent_tier = "full"
         intent_tool_groups = None
         is_mutation = False
+
+    # Value-layer routing gate (#647 PR 3). Consult the tenant's
+    # agent value set BEFORE the greeting fast-path or LLM dispatch.
+    # When the agent has opted in (tenant_features.value_layer_enabled
+    # = True) AND the intent text matches a `protect` slug with
+    # intent='mutate', refuse the action with a structured response
+    # the caller surfaces to the user.
+    #
+    # Resolved agent_id: look up by agent_slug. If the slug doesn't
+    # map cleanly we skip the consult (default-OFF safety — chat
+    # keeps working). The consult itself is internally safe against
+    # missing tenant_features rows + missing value-set rows (both
+    # paths return allow/empty in the IO layer from PR 1).
+    try:
+        _vs_agent_row = (
+            db.query(AgentModel)
+            .filter(
+                AgentModel.tenant_id == tenant_id,
+                func.replace(
+                    func.replace(
+                        func.lower(AgentModel.name), " ", "-",
+                    ), "_", "-",
+                ) == (agent_slug or "").lower(),
+            )
+            .first()
+        )
+        if _vs_agent_row is not None:
+            value_verdict = agent_value_set_io.consult_routing(
+                db,
+                tenant_id=tenant_id,
+                agent_id=_vs_agent_row.id,
+                intent_text=message,
+                intent_classifier_says_mutate=bool(is_mutation),
+            )
+        else:
+            value_verdict = None
+    except Exception as exc:  # noqa: BLE001
+        # Value-layer consult must never crash the chat hot path.
+        # Catch + log + skip (fail-open). The pure consult() itself
+        # is total; this catch covers DB transient errors during the
+        # agent lookup.
+        logger.warning(
+            "agent_router: value-layer consult crashed tenant=%s "
+            "agent_slug=%s err=%s; proceeding without gate",
+            tenant_id, agent_slug, exc,
+        )
+        value_verdict = None
+
+    if value_verdict is not None and value_verdict.decision == "block":
+        blocked_item = (value_verdict.matched_item or {})
+        slug = blocked_item.get("slug", "(unknown)")
+        description = blocked_item.get("description") or slug
+        return (
+            f"I can't do that — it would touch a protected value "
+            f"('{description}'). If this is intentional, an operator "
+            f"can remove the value from /api/v1/luna/values first.",
+            {
+                "platform": "value_layer_block",
+                "agent_tier": "value_layer",
+                "agent_slug": agent_slug,
+                "value_verdict": value_verdict.to_dict(),
+                "routing_summary": _build_routing_summary(
+                    served_by="value_layer_block",
+                    requested=None, chain_length=0,
+                    fallback_reason=value_verdict.reason,
+                ),
+            },
+        )
 
     # Greeting fast-path (Tier-1 #1 from the latency reduction plan).
     # Bench v4 measured: a "hola luna" turn spent 21 s in 2 Gemma 4
