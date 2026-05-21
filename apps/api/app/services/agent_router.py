@@ -34,6 +34,7 @@ from app.services.tool_groups import TIER_LIMITS
 from app.memory.feature_flag import is_v2_enabled
 from app.services.agent_identity import resolve_primary_agent_slug
 from app.services import agent_value_set_io
+from app.services import platform_safety_io
 
 logger = logging.getLogger(__name__)
 
@@ -694,6 +695,57 @@ def route_and_execute(
         agent_tier = "full"
         intent_tool_groups = None
         is_mutation = False
+
+    # ── Platform Safety Floor (#665 PS1 — design 2026-05-21) ──────
+    #
+    # Always-on tier-1 regex screen. Runs BEFORE both the agent-by-
+    # tool-group selection AND the operator value layer. Catches
+    # things that are illegal or cause mass harm regardless of which
+    # tenant or operator is using the platform.
+    #
+    # No kill-switch, no break-glass on the hot path. The only
+    # override surface is the platform-admin endpoint shipping in
+    # PR 6 of the safety sequence (`/admin/platform-safety/escape`),
+    # which is operator-invisible.
+    #
+    # On block: short-circuit with a refusal that surfaces only the
+    # coarse-grained category label (never the trigger). The audit
+    # row records SHA256(message), not the raw text.
+    safety_session_id_str = (db_session_memory or {}).get(
+        "chat_session_id"
+    )
+    safety_session_id: Optional[uuid.UUID] = None
+    if safety_session_id_str:
+        try:
+            safety_session_id = uuid.UUID(str(safety_session_id_str))
+        except (ValueError, TypeError):
+            safety_session_id = None
+    safety_verdict = platform_safety_io.consult_with_audit(
+        db,
+        tenant_id=tenant_id,
+        agent_id=(_agent_row.id if _agent_row is not None else None),
+        session_id=safety_session_id,
+        user_id=user_id,
+        message=message,
+    )
+    if safety_verdict.decision == "block":
+        return (
+            safety_verdict.to_refusal_message(),
+            {
+                "platform": "platform_safety_block",
+                "agent_tier": "platform_safety",
+                "agent_slug": agent_slug,
+                "safety_verdict": safety_verdict.to_dict(),
+                "routing_summary": _build_routing_summary(
+                    served_by="platform_safety_block",
+                    requested=None, chain_length=0,
+                    fallback_reason=(
+                        f"category:{safety_verdict.category} "
+                        f"tier:{safety_verdict.detection_tier}"
+                    ),
+                ),
+            },
+        )
 
     # Agent selection by tool_groups (moved up from line ~825 by #660
     # fix). When chat.py passes a SKILL slug ("luna") instead of an
