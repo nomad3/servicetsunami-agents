@@ -201,10 +201,28 @@ def _strip_fences(text: str) -> str:
     return _JSON_FENCE_RE.sub("", text or "").strip()
 
 
-async def classify_ollama(text: str, *, timeout: float = 15.0) -> PADClassifierResult:
+async def classify_ollama(
+    text: str,
+    *,
+    timeout: float = 60.0,
+    model: Optional[str] = None,
+) -> PADClassifierResult:
     """Call the local Ollama instance for a PAD estimate. Falls back
     to the heuristic on any failure mode — bad JSON, out-of-range,
-    Ollama unreachable, timeout."""
+    Ollama unreachable, timeout.
+
+    Default timeout bumped to 60s after the 2026-05-21 backfill — a
+    cold Ollama model load on this M4 took ~27s, exceeding the prior
+    15s budget and producing an 85%+ heuristic-fallback rate on the
+    first burst of requests. After warm-up each call is 1-3s; 60s
+    is the cold-load envelope.
+
+    ``model`` is forwarded to ``local_inference.generate`` for
+    provenance — defaults to ``None`` (let local_inference pick its
+    DEFAULT_MODEL). Callers running a data migration should pin this
+    explicitly so the resulting agent_memory row can carry the model
+    name and downstream re-runs are reproducible.
+    """
     # Lazy import so tests that exercise only the heuristic don't need
     # httpx-Ollama plumbing.
     try:
@@ -221,6 +239,7 @@ async def classify_ollama(text: str, *, timeout: float = 15.0) -> PADClassifierR
     try:
         raw = await local_inference.generate(
             prompt=prompt,
+            model=model,
             system=_OLLAMA_SYSTEM_PROMPT,
             temperature=0.1,
             max_tokens=80,
