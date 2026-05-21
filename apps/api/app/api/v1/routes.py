@@ -24,6 +24,7 @@ from app.api.v1 import (
     internal,
     emotion,
     metacog,
+    reflections,
     memories,
     team,
     memory_remember,
@@ -164,6 +165,7 @@ router.include_router(team.router, prefix="", tags=["team"])
 # ECE dashboard. Empty prefix so GET /metacog/calibration lands at the
 # tenant-scoped /api/v1/metacog namespace per the canonical design.
 router.include_router(metacog.router, prefix="", tags=["metacog"])
+router.include_router(reflections.router, prefix="", tags=["reflections"])
 # `alpha usage` + `alpha costs` (Phase 4 of the CLI roadmap, #181).
 # Aggregates chat_messages per-provider and per-day for the tenant.
 # Mounted at root (no prefix) so the routes read `/usage` and
