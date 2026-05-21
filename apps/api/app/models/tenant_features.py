@@ -1,7 +1,7 @@
 """TenantFeatures model for feature flags and limits."""
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
@@ -63,7 +63,16 @@ class TenantFeatures(Base):
     # Resilient CLI orchestrator (Phase 2 cutover gate). Default OFF —
     # legacy chain-walk path runs at flag=False with byte-identical
     # behaviour. See migration 121 + design doc §3 for cutover plan.
-    use_resilient_executor = Column(Boolean, nullable=False, default=False)
+    #
+    # server_default added 2026-05-20 per #631 retroactive review I1:
+    # without it, an ORM INSERT against a pre-migration schema
+    # (operator-apply-after-deploy window) sends the column as part of
+    # the row and fails on environments where the column doesn't yet
+    # exist. server_default lets Postgres fill the missing column on
+    # default-bearing INSERTs.
+    use_resilient_executor = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     # Shadow-mode sub-flag. When `use_resilient_executor` is FALSE, we
     # run the new path in shadow alongside the legacy path so we can
@@ -71,7 +80,9 @@ class TenantFeatures(Base):
     # outcome, no real Temporal/LLM dispatch — the cheap mass path).
     # TRUE = real adapter dispatch (~2x cost; only for ~48h internal
     # tenant validation per the cutover plan).
-    shadow_mode_real_dispatch = Column(Boolean, nullable=False, default=False)
+    shadow_mode_real_dispatch = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     # CLI stream-output rollout gate (migration 134). When TRUE the
     # code-worker switches Claude Code to `--output-format stream-json`
@@ -79,14 +90,18 @@ class TenantFeatures(Base):
     # terminal card. Default OFF prod; seeded ON for the saguilera
     # test tenant. Plan:
     # docs/plans/2026-05-16-terminal-full-cli-output.md §9
-    cli_stream_output = Column(Boolean, nullable=False, default=False)
+    cli_stream_output = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     # NightlyReflectionWorkflow (O2 of #616) per-tenant kill-switch.
     # Default OFF in prod — locked decision #4 in the canonical design.
     # The workflow checks this flag at top-of-run and short-circuits
     # with reason='kill_switch_off' when FALSE. Operators flip per
     # tenant after reviewing dry-run output. Migration 142.
-    nightly_reflection_enabled = Column(Boolean, nullable=False, default=False)
+    nightly_reflection_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     # CPA software export format for the Bookkeeper Agent's weekly
     # categorized output. AAHA stays canonical — the Bookkeeper still

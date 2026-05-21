@@ -13,6 +13,7 @@ pattern.
 """
 from __future__ import annotations
 
+import uuid as _uuid
 from unittest.mock import AsyncMock
 
 import pytest
@@ -84,18 +85,12 @@ async def _run_with_activities(env: WorkflowEnvironment, mocks):
         return await env.client.execute_workflow(
             NightlyReflectionWorkflow.run,
             args=[TENANT, DAY],
-            id=f"test-nightly-{enabled_marker()}",
+            # UUID-based ID avoids the pytest-xdist parallel-run
+            # collision the prior global-counter approach risked.
+            # (#631 retroactive review I3.)
+            id=f"test-nightly-{_uuid.uuid4().hex[:12]}",
             task_queue=TASK_QUEUE,
         )
-
-
-_marker = 0
-
-
-def enabled_marker() -> str:
-    global _marker
-    _marker += 1
-    return str(_marker)
 
 
 async def test_killswitch_off_short_circuits_without_running_other_legs():
