@@ -91,13 +91,18 @@ def _already_backfilled(db: Session, message_id: uuid.UUID) -> bool:
     """A prediction or observation row whose content carries this
     decision_id means the message was already processed (either by
     this backfill or by M2's live hook on later messages)."""
+    # ``agent_memories.content`` is TEXT (not JSONB) in this schema —
+    # metacog rows serialize via json.dumps before write. Cast to
+    # jsonb on read and pull the decision_id key, then compare as
+    # text against the message UUID. Substring LIKE would also work
+    # but the cast is type-safe against malformed rows.
     row = db.execute(
         text(
             """
             SELECT 1
             FROM agent_memories
             WHERE memory_type IN (:pred_type, :obs_type)
-              AND (content ->> 'decision_id')::uuid = :msg_id
+              AND (content::jsonb ->> 'decision_id') = :msg_id
             LIMIT 1
             """
         ),
