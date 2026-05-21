@@ -606,6 +606,13 @@ def route_and_execute(
     # "copilot-studio-bot" matches the row "Copilot Studio Bot". Exact-match
     # in SQL — no ILIKE — to avoid `%` / `_` wildcard collisions on names
     # like `"Sales_Manager"` or hand-crafted slugs.
+    # Resolve the agent row ONCE per turn — reused by the
+    # preferred_cli override below AND by the value-layer routing
+    # gate (#647 PR 3). The earlier "lookup twice" anti-pattern got
+    # called out by the holistic 2026-05-02 review C4 for cli chain
+    # resolution; the value-layer wire-in re-introduced it briefly
+    # and got the same reviewer flag in #650. Consolidated here.
+    _agent_row = None
     try:
         normalized_slug = (
             agent_slug.lower().replace(" ", "-").replace("_", "-")
@@ -637,6 +644,7 @@ def route_and_execute(
             agent_slug, tenant_id, e,
         )
         safe_rollback(db)
+        _agent_row = None
 
     # When the tenant has a CLI subscription (gemini_cli, claude_code, codex,
     # copilot_cli), always route through it — don't fall back to local Gemma 4
@@ -718,45 +726,40 @@ def route_and_execute(
     # intent='mutate', refuse the action with a structured response
     # the caller surfaces to the user.
     #
-    # Resolved agent_id: look up by agent_slug. If the slug doesn't
-    # map cleanly we skip the consult (default-OFF safety — chat
-    # keeps working). The consult itself is internally safe against
-    # missing tenant_features rows + missing value-set rows (both
-    # paths return allow/empty in the IO layer from PR 1).
-    try:
-        _vs_agent_row = (
-            db.query(AgentModel)
-            .filter(
-                AgentModel.tenant_id == tenant_id,
-                func.replace(
-                    func.replace(
-                        func.lower(AgentModel.name), " ", "-",
-                    ), "_", "-",
-                ) == (agent_slug or "").lower(),
-            )
-            .first()
-        )
-        if _vs_agent_row is not None:
+    # Reuses _agent_row resolved above (slug normalization mirrors
+    # the per-agent CLI override block). The reviewer's IMPORTANT-1
+    # in #650 caught the prior version which had asymmetric
+    # normalization (Python side only lowercased; DB side replaced
+    # underscores too) → `Sales_Manager` slug never matched its row
+    # → gate silently skipped. Now both sides go through the same
+    # normalized_slug computed once.
+    #
+    # If _agent_row is None (unresolved slug OR upstream DB error
+    # already caught + logged), we skip the consult cleanly — the
+    # chat hot path stays alive. Locked by
+    # test_value_layer_consult_skipped_when_agent_slug_unresolved.
+    value_verdict = None
+    if _agent_row is not None:
+        try:
             value_verdict = agent_value_set_io.consult_routing(
                 db,
                 tenant_id=tenant_id,
-                agent_id=_vs_agent_row.id,
+                agent_id=_agent_row.id,
                 intent_text=message,
                 intent_classifier_says_mutate=bool(is_mutation),
             )
-        else:
+        except Exception as exc:  # noqa: BLE001
+            # Value-layer consult must never crash the chat hot
+            # path. Catch + log + skip (fail-open). The pure
+            # consult() itself is total; this catch covers DB
+            # transient errors inside consult_with_audit (e.g.
+            # tenant_features lookup hitting a pool exhaustion).
+            logger.warning(
+                "agent_router: value-layer consult crashed "
+                "tenant=%s agent_id=%s err=%s; proceeding without gate",
+                tenant_id, _agent_row.id, exc,
+            )
             value_verdict = None
-    except Exception as exc:  # noqa: BLE001
-        # Value-layer consult must never crash the chat hot path.
-        # Catch + log + skip (fail-open). The pure consult() itself
-        # is total; this catch covers DB transient errors during the
-        # agent lookup.
-        logger.warning(
-            "agent_router: value-layer consult crashed tenant=%s "
-            "agent_slug=%s err=%s; proceeding without gate",
-            tenant_id, agent_slug, exc,
-        )
-        value_verdict = None
 
     if value_verdict is not None and value_verdict.decision == "block":
         blocked_item = (value_verdict.matched_item or {})
