@@ -106,7 +106,10 @@ const BreakGlassBanner = ({ valueSet }) => {
       <div className="small text-muted mt-1">
         Until expiry, the protect/avoid items below are the relaxed set.
         After expiry, the prior ordinary version automatically takes over —
-        no action needed.
+        no action needed.{' '}
+        <strong>Saving here writes a new ordinary version and supersedes
+        the active override</strong> (the next read will pick up your
+        ordinary version, not this break-glass one).
       </div>
     </Alert>
   );
@@ -243,6 +246,21 @@ const ValueSetTabSection = ({ agentId }) => {
   const [showBreakGlass, setShowBreakGlass] = useState(false);
   const [breakGlassSubmitting, setBreakGlassSubmitting] = useState(false);
 
+  // (Review NIT-3) Friendlier error mapping. Surface short status-coded
+  // messages instead of forwarding raw backend prose; the FastAPI 503
+  // detail string is operator-noisy.
+  const friendlyError = (err, fallback) => {
+    const status = err?.response?.status;
+    const detail = err?.response?.data?.detail;
+    if (status === 401) return 'Session expired — please sign in again.';
+    if (status === 403) return "You don't have permission to change this agent's values.";
+    if (status === 404) return 'Agent not found (or in another tenant).';
+    if (status === 422) return typeof detail === 'string' ? detail : 'Request was rejected as invalid.';
+    if (status === 503) return 'The server is busy — please retry in a moment.';
+    if (typeof detail === 'string' && detail.length <= 200) return detail;
+    return fallback || err?.message || 'Request failed.';
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -255,7 +273,7 @@ const ValueSetTabSection = ({ agentId }) => {
         avoid: res.data.avoid.map((i) => ({ slug: i.slug, description: i.description })),
       });
     } catch (err) {
-      setError(err?.response?.data?.detail || err.message || 'Failed to load values');
+      setError(friendlyError(err, 'Failed to load values.'));
     } finally {
       setLoading(false);
     }
@@ -282,7 +300,7 @@ const ValueSetTabSection = ({ agentId }) => {
       setValueSet(res.data);
       setInfo(`Saved version ${res.data.version}`);
     } catch (err) {
-      setError(err?.response?.data?.detail || err.message || 'Save failed');
+      setError(friendlyError(err, 'Save failed.'));
     } finally {
       setSaving(false);
     }
@@ -306,7 +324,7 @@ const ValueSetTabSection = ({ agentId }) => {
           new Date(res.data.expires_at).toLocaleString()
       );
     } catch (err) {
-      setError(err?.response?.data?.detail || err.message || 'Break-glass failed');
+      setError(friendlyError(err, 'Break-glass failed.'));
     } finally {
       setBreakGlassSubmitting(false);
     }
@@ -314,11 +332,25 @@ const ValueSetTabSection = ({ agentId }) => {
 
   const hasChanges = useMemo(() => {
     if (!valueSet || !draft) return false;
-    return JSON.stringify(draft) !== JSON.stringify({
-      protect: valueSet.protect.map((i) => ({ slug: i.slug, description: i.description })),
-      pursue: valueSet.pursue.map((i) => ({ slug: i.slug, description: i.description })),
-      avoid: valueSet.avoid.map((i) => ({ slug: i.slug, description: i.description })),
-    });
+    // (Review NIT-1) Sort by slug before serializing. The backend doesn't
+    // promise stable item ordering across writes; a raw JSON.stringify
+    // would flag a no-op save as dirty if the API ever returned items in
+    // a different order. Slug is a stable canonical key per item.
+    const canonicalize = (items) =>
+      items
+        .map((i) => ({ slug: (i.slug || '').trim().toLowerCase(), description: i.description || '' }))
+        .sort((a, b) => a.slug.localeCompare(b.slug));
+    const draftCanonical = {
+      protect: canonicalize(draft.protect),
+      pursue: canonicalize(draft.pursue),
+      avoid: canonicalize(draft.avoid),
+    };
+    const persistedCanonical = {
+      protect: canonicalize(valueSet.protect),
+      pursue: canonicalize(valueSet.pursue),
+      avoid: canonicalize(valueSet.avoid),
+    };
+    return JSON.stringify(draftCanonical) !== JSON.stringify(persistedCanonical);
   }, [valueSet, draft]);
 
   if (loading) {
@@ -347,6 +379,12 @@ const ValueSetTabSection = ({ agentId }) => {
             size="sm"
             className="me-2"
             onClick={() => setShowBreakGlass(true)}
+            disabled={saving || breakGlassSubmitting}
+            title={
+              saving
+                ? 'Save in flight — wait for it to finish'
+                : 'Open a time-boxed override'
+            }
           >
             Open break-glass
           </Button>
@@ -354,7 +392,12 @@ const ValueSetTabSection = ({ agentId }) => {
             variant="primary"
             size="sm"
             onClick={handleSave}
-            disabled={!hasChanges || saving}
+            disabled={!hasChanges || saving || breakGlassSubmitting}
+            title={
+              breakGlassSubmitting
+                ? 'Break-glass in flight — wait for it to finish'
+                : undefined
+            }
           >
             {saving ? 'Saving…' : 'Save (new version)'}
           </Button>
