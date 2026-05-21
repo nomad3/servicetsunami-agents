@@ -112,7 +112,15 @@ def test_value_layer_allow_proceeds_to_dispatch(monkeypatch):
     """When consult returns allow (kill-switch OFF default), the
     existing dispatch path runs unchanged. This locks the
     no-regression property for the chat hot path until operators
-    opt in via the kill-switch."""
+    opt in via the kill-switch.
+
+    We can't use a "downstream-raise" tripwire here because
+    `route_and_execute` has its own try/except around
+    `_resolve_cli_chain` (line ~1100) that catches RuntimeError and
+    falls back to a single-platform chain — the raise gets
+    swallowed. Instead, count consult + chain calls and assert the
+    block early-return did NOT fire (no `platform=value_layer_block`).
+    """
     from app.services import agent_router
     from app.services.agent_value_set import ValueVerdict
 
@@ -121,28 +129,33 @@ def test_value_layer_allow_proceeds_to_dispatch(monkeypatch):
     )
 
     consult_calls = {"n": 0}
+    chain_calls = {"n": 0}
 
     def _consult(*a, **kw):
         consult_calls["n"] += 1
         return allow_verdict
 
+    def _chain(*a, **kw):
+        chain_calls["n"] += 1
+        # Single-element chain → router enters dispatch loop on it.
+        return ["opencode"]
+
     monkeypatch.setattr(
         agent_router.agent_value_set_io, "consult_routing", _consult,
     )
-    # Stub out everything downstream so the test stops as soon as
-    # the post-consult path is reached. We assert via the consult-
-    # called counter, not the actual response.
     monkeypatch.setattr(
-        agent_router, "match_intent",
-        lambda *a, **kw: None,
+        agent_router, "match_intent", lambda *a, **kw: None,
     )
-
-    # Greeting template won't fire on a non-greeting message; it
-    # returns None. Subsequent dispatch we let raise so the test
-    # exits early.
     monkeypatch.setattr(
-        agent_router, "_greeting_template",
-        lambda *a, **kw: None,
+        agent_router, "_greeting_template", lambda *a, **kw: None,
+    )
+    monkeypatch.setattr(agent_router, "_resolve_cli_chain", _chain)
+    # Short-circuit actual dispatch with a benign return so the test
+    # doesn't try to spin up real CLIs.
+    monkeypatch.setattr(
+        agent_router, "_dispatch_with_chain",
+        lambda *a, **kw: ("ok", {"platform": "opencode"}),
+        raising=False,
     )
 
     db = MagicMock()
@@ -150,6 +163,7 @@ def test_value_layer_allow_proceeds_to_dispatch(monkeypatch):
     fake_agent.id = uuid.uuid4()
     fake_agent.name = "Luna"
     fake_agent.tenant_id = uuid.uuid4()
+    fake_agent.config = None  # MagicMock would defeat the cfg-or-{} guard
 
     def _query(model):
         chained = MagicMock()
@@ -158,54 +172,63 @@ def test_value_layer_allow_proceeds_to_dispatch(monkeypatch):
 
     db.query.side_effect = _query
 
-    # We force a downstream raise so we know if the code reached
-    # past the value-layer gate. Then we check that consult fired.
-    monkeypatch.setattr(
-        agent_router, "_resolve_cli_chain",
-        lambda *a, **kw: (_ for _ in ()).throw(
-            RuntimeError("reached past value-layer gate as expected")
-        ),
+    response, metadata = agent_router.route_and_execute(
+        db,
+        tenant_id=fake_agent.tenant_id,
+        user_id=uuid.uuid4(),
+        message="what is 2 + 2",
+        agent_slug="luna",
     )
-
-    with pytest.raises(Exception):
-        agent_router.route_and_execute(
-            db,
-            tenant_id=fake_agent.tenant_id,
-            user_id=uuid.uuid4(),
-            message="what is 2 + 2",
-            agent_slug="luna",
-        )
 
     assert consult_calls["n"] == 1, (
         "consult_routing should be called exactly once per dispatch"
     )
+    # Block path NOT taken → platform != value_layer_block
+    assert metadata.get("platform") != "value_layer_block"
+    # Chain resolver should have fired (allow path proceeds to dispatch)
+    assert chain_calls["n"] >= 1
 
 
 def test_value_layer_consult_crash_fails_open(monkeypatch):
     """When consult_routing itself raises (DB transient error during
     agent lookup, etc.), the router logs + proceeds. The chat hot
-    path must NEVER die because the value layer hit a snag."""
+    path must NEVER die because the value layer hit a snag.
+
+    Assert via observable post-consult state: the block early-return
+    did NOT fire (`platform != value_layer_block`) and the chain
+    resolver DID get called (we proceeded past the gate)."""
     from app.services import agent_router
+
+    chain_calls = {"n": 0}
 
     def _crash(*a, **kw):
         raise RuntimeError("simulated DB transient error")
+
+    def _chain(*a, **kw):
+        chain_calls["n"] += 1
+        return ["opencode"]
 
     monkeypatch.setattr(
         agent_router.agent_value_set_io, "consult_routing", _crash,
     )
     monkeypatch.setattr(
-        agent_router, "match_intent",
-        lambda *a, **kw: None,
+        agent_router, "match_intent", lambda *a, **kw: None,
     )
     monkeypatch.setattr(
-        agent_router, "_greeting_template",
-        lambda *a, **kw: None,
+        agent_router, "_greeting_template", lambda *a, **kw: None,
+    )
+    monkeypatch.setattr(agent_router, "_resolve_cli_chain", _chain)
+    monkeypatch.setattr(
+        agent_router, "_dispatch_with_chain",
+        lambda *a, **kw: ("ok", {"platform": "opencode"}),
+        raising=False,
     )
 
     db = MagicMock()
     fake_agent = MagicMock()
     fake_agent.id = uuid.uuid4()
     fake_agent.tenant_id = uuid.uuid4()
+    fake_agent.config = None
 
     def _query(model):
         chained = MagicMock()
@@ -214,23 +237,19 @@ def test_value_layer_consult_crash_fails_open(monkeypatch):
 
     db.query.side_effect = _query
 
-    # Should NOT raise from the consult crash; downstream raise
-    # confirms we proceeded.
-    monkeypatch.setattr(
-        agent_router, "_resolve_cli_chain",
-        lambda *a, **kw: (_ for _ in ()).throw(
-            RuntimeError("reached past value-layer gate as expected")
-        ),
+    response, metadata = agent_router.route_and_execute(
+        db,
+        tenant_id=fake_agent.tenant_id,
+        user_id=uuid.uuid4(),
+        message="any message",
+        agent_slug="luna",
     )
 
-    with pytest.raises(Exception, match="reached past value-layer gate"):
-        agent_router.route_and_execute(
-            db,
-            tenant_id=fake_agent.tenant_id,
-            user_id=uuid.uuid4(),
-            message="any message",
-            agent_slug="luna",
-        )
+    # Fail-open: no block return, chain resolver fired.
+    assert metadata.get("platform") != "value_layer_block"
+    assert chain_calls["n"] >= 1, (
+        "consult crash must fail-open — chain resolver should still fire"
+    )
 
 
 def test_value_layer_consult_skipped_when_agent_slug_unresolved(
@@ -242,11 +261,16 @@ def test_value_layer_consult_skipped_when_agent_slug_unresolved(
     from app.services import agent_router
 
     consult_calls = {"n": 0}
+    chain_calls = {"n": 0}
 
     def _consult(*a, **kw):
         consult_calls["n"] += 1
         from app.services.agent_value_set import ValueVerdict
         return ValueVerdict.allow(reason="kill_switch_off", point="routing")
+
+    def _chain(*a, **kw):
+        chain_calls["n"] += 1
+        return ["opencode"]
 
     monkeypatch.setattr(
         agent_router.agent_value_set_io, "consult_routing", _consult,
@@ -256,6 +280,12 @@ def test_value_layer_consult_skipped_when_agent_slug_unresolved(
     )
     monkeypatch.setattr(
         agent_router, "_greeting_template", lambda *a, **kw: None,
+    )
+    monkeypatch.setattr(agent_router, "_resolve_cli_chain", _chain)
+    monkeypatch.setattr(
+        agent_router, "_dispatch_with_chain",
+        lambda *a, **kw: ("ok", {"platform": "opencode"}),
+        raising=False,
     )
 
     db = MagicMock()
@@ -268,22 +298,18 @@ def test_value_layer_consult_skipped_when_agent_slug_unresolved(
 
     db.query.side_effect = _query
 
-    monkeypatch.setattr(
-        agent_router, "_resolve_cli_chain",
-        lambda *a, **kw: (_ for _ in ()).throw(
-            RuntimeError("reached past value-layer gate")
-        ),
+    response, metadata = agent_router.route_and_execute(
+        db,
+        tenant_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        message="hi",
+        agent_slug="unknown-agent",
     )
-
-    with pytest.raises(Exception):
-        agent_router.route_and_execute(
-            db,
-            tenant_id=uuid.uuid4(),
-            user_id=uuid.uuid4(),
-            message="hi",
-            agent_slug="unknown-agent",
-        )
 
     assert consult_calls["n"] == 0, (
         "consult_routing should NOT fire when agent lookup returns None"
     )
+    # Router still proceeds — chain resolver fires on the unresolved-
+    # slug path (legacy dispatch path).
+    assert metadata.get("platform") != "value_layer_block"
+    assert chain_calls["n"] >= 1

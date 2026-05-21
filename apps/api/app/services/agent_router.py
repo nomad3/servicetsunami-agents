@@ -646,38 +646,14 @@ def route_and_execute(
         safe_rollback(db)
         _agent_row = None
 
-    # When the tenant has a CLI subscription (gemini_cli, claude_code, codex,
-    # copilot_cli), always route through it — don't fall back to local Gemma 4
-    # for short messages. Local inference is for free-tier tenants with no
-    # subscription.
-    #
-    # With the gemini_cli floor removed (PR #252 autodetect), `platform`
-    # may be None when no explicit default is set. Compute the resolver
-    # chain ONCE and reuse it for both `_pin_to_cli` and the actual
-    # dispatch loop later — was previously called twice per chat turn,
-    # an avoidable +1 DB query and ~4 Redis EXISTS per call. Holistic
-    # 2026-05-02 review C4.
+    # NOTE: pin-to-cli probe used to live here, but it was running BEFORE
+    # the value-layer gate (#647 PR 3), which meant `_resolve_cli_chain`
+    # got called on every block path — defeating the "block short-circuits
+    # dispatch" guarantee that test_value_layer_block_short_circuits_dispatch
+    # locks. Moved below the value-layer block check (after the early
+    # return) so a blocked verdict never touches the chain resolver.
     cli_chain: Optional[List[str]] = None
-    if platform in _PAID_CLI_FAST_PIN_SET:
-        # Fast path — explicit paid CLI is already pinned, skip the
-        # resolver probe entirely (we'll still call it below for the
-        # actual chain at dispatch time, but `_pin_to_cli` doesn't need it).
-        _pin_to_cli = True
-    else:
-        try:
-            cli_chain = _resolve_cli_chain(db, tenant_id, explicit_platform=platform)
-            _pin_to_cli = bool(cli_chain) and cli_chain[0] != "opencode"
-        except Exception as e:
-            logger.warning(
-                "CLI chain probe (for pin-to-cli) failed for tenant=%s: %s",
-                str(tenant_id)[:8], e,
-            )
-            # Conservative — when probing fails, prefer pinning if the
-            # explicit platform LOOKS like a paid CLI; otherwise fall
-            # through to local-path eligibility. M5 from holistic review:
-            # don't silently downgrade a paid tenant to local Gemma on a
-            # transient resolver hiccup.
-            _pin_to_cli = platform in _PAID_CLI_FAST_PIN_SET
+    _pin_to_cli = False  # filled in after the value-layer block check
 
     # 2. Get trust profile
     try:
@@ -781,6 +757,32 @@ def route_and_execute(
                 ),
             },
         )
+
+    # Pin-to-cli probe — moved from above (was firing before the
+    # value-layer gate, which broke the block-short-circuits guarantee).
+    # When the tenant has a CLI subscription (gemini_cli, claude_code,
+    # codex, copilot_cli), always route through it — don't fall back to
+    # local Gemma 4 for short messages. Local inference is for free-tier
+    # tenants with no subscription.
+    #
+    # With the gemini_cli floor removed (PR #252 autodetect), `platform`
+    # may be None when no explicit default is set. Compute the resolver
+    # chain ONCE and reuse it for both `_pin_to_cli` and the actual
+    # dispatch loop later — was previously called twice per chat turn,
+    # an avoidable +1 DB query and ~4 Redis EXISTS per call. Holistic
+    # 2026-05-02 review C4.
+    if platform in _PAID_CLI_FAST_PIN_SET:
+        _pin_to_cli = True
+    else:
+        try:
+            cli_chain = _resolve_cli_chain(db, tenant_id, explicit_platform=platform)
+            _pin_to_cli = bool(cli_chain) and cli_chain[0] != "opencode"
+        except Exception as e:
+            logger.warning(
+                "CLI chain probe (for pin-to-cli) failed for tenant=%s: %s",
+                str(tenant_id)[:8], e,
+            )
+            _pin_to_cli = platform in _PAID_CLI_FAST_PIN_SET
 
     # Greeting fast-path (Tier-1 #1 from the latency reduction plan).
     # Bench v4 measured: a "hola luna" turn spent 21 s in 2 Gemma 4
