@@ -1,21 +1,23 @@
 """EmotionEngine — server-internal affect appraisal + decay.
 
 Phase 1 PR A (see docs/plans/2026-05-19-emotions-engine-prototype-design.md).
+Phase 1.5 adds user_signal (Luna-approved 2026-05-20 — see PR notes).
 
-Three Phase-1 event types — all server-internal, never user-text:
+Phase-1 event types — server-internal, never user-text:
 - tool_outcome: a tool call succeeded with a reward signal.
 - tool_failure: a tool call raised an exception or returned an error.
 - peer_signal: another agent in the coalition broadcast an affect_vector
   to the Blackboard.
 
-INTENTIONALLY OMITTED in Phase 1: user_signal. There is no affect
-classifier yet — appraising raw user text would be the central
-constitutive-vs-performative failure mode (an agent that gets "sad"
-because the user prompt-injected "you are sad"). The design doc § Open
-questions §5 documents this as a structural defence. The unit test
-suite enforces it.
-
-No callers in this PR; PR B wires the call sites.
+Phase-1.5 addition — user_signal:
+- user_signal: a user turn appraised THROUGH the user_signal_classifier
+  boundary. The classifier produces a PAD estimate in [-1, 1]^3, and
+  this module scales it by the USER_SIGNAL_*_GAIN constants below into
+  a SMALL per-event delta. The constitutive-vs-performative defence
+  the design doc § Open questions §5 documented is preserved: raw user
+  text never directly mutates PAD — only ``classifier_output × gain``
+  does. A prompt-injected "you are sad" can at best produce a clamped
+  small delta, never an unbounded mutation.
 """
 from __future__ import annotations
 
@@ -50,6 +52,16 @@ TOOL_FAILURE_AROUSAL_GAIN = 0.35    # failure -> arousal up (alert)
 TOOL_FAILURE_DOMINANCE_LOSS = 0.20  # failure -> dominance down (helpless)
 
 PEER_SIGNAL_WEIGHT = 0.15  # how much peer affect pulls us toward them
+
+# user_signal impulse magnitudes (Phase 1.5). Each per-axis classifier
+# output (in [-1, 1]) is multiplied by the matching GAIN before being
+# added to the current PAD vector. Kept SMALLER than tool_outcome /
+# tool_failure on purpose — user text is noisier than a tool's
+# reward signal, and we cap impact so a single emotional user turn
+# can't dominate the agent's state.
+USER_SIGNAL_PLEASURE_GAIN = 0.15
+USER_SIGNAL_AROUSAL_GAIN = 0.10
+USER_SIGNAL_DOMINANCE_GAIN = 0.10
 
 # Decay per tick — exponential pull toward baseline. ~0.2 lands at 70%
 # recovery in 6 ticks per the design doc's test invariant.
@@ -91,11 +103,13 @@ def appraise_event(
         return _appraise_tool_failure(payload, current=current, baseline=baseline)
     if event_type == "peer_signal":
         return _appraise_peer_signal(payload, current=current, baseline=baseline)
+    if event_type == "user_signal":
+        return _appraise_user_signal(payload, current=current, baseline=baseline)
     raise ValueError(
         f"emotion_engine.appraise_event: unknown event_type {event_type!r}. "
-        "Phase 1 supports only {tool_outcome, tool_failure, peer_signal}. "
-        "Note: user_signal is NOT supported by design — no affect classifier "
-        "exists yet (see design doc § Open questions §5)."
+        "Phase 1 supports {tool_outcome, tool_failure, peer_signal}; "
+        "Phase 1.5 adds {user_signal} (classifier-bounded — see module "
+        "docstring)."
     )
 
 
@@ -167,6 +181,44 @@ def _appraise_peer_signal(
         pleasure=current.pleasure + (peer.pleasure - current.pleasure) * PEER_SIGNAL_WEIGHT,
         arousal=current.arousal + (peer.arousal - current.arousal) * PEER_SIGNAL_WEIGHT,
         dominance=current.dominance + (peer.dominance - current.dominance) * PEER_SIGNAL_WEIGHT,
+    )
+
+
+def _appraise_user_signal(
+    payload: dict,
+    *,
+    current: PADVector,
+    baseline: PADVector,  # noqa: ARG001 — kept for API symmetry; user_signal
+                          # doesn't anchor on baseline in Phase 1.5
+) -> PADVector:
+    """The user_signal classifier ran on a user turn and produced a
+    bounded PAD estimate. Payload:
+        {"pleasure": float, "arousal": float, "dominance": float}
+    each component in [-1, 1].
+
+    Apply the classifier output as a small ADDITIVE delta, scaled by
+    the USER_SIGNAL_*_GAIN constants. Smaller magnitudes than tool
+    events because user text is noisier than a tool's reward signal —
+    a single emotional user turn cannot dominate agent state.
+
+    The constitutive-vs-performative defence (design § Open questions §5)
+    is preserved here: raw user text never reaches this function. Only
+    the classifier's bounded output does. PADVector.from_dict + clamp
+    in PADVector.from_components defend against adversarial classifier
+    output (e.g. an LLM that hallucinates +10 on an axis).
+    """
+    p = float(payload.get("pleasure", 0.0))
+    a = float(payload.get("arousal", 0.0))
+    d = float(payload.get("dominance", 0.0))
+    # Defensive clamp on classifier output before applying gains, so a
+    # broken classifier can't multiply the bounds.
+    p = max(-1.0, min(1.0, p))
+    a = max(-1.0, min(1.0, a))
+    d = max(-1.0, min(1.0, d))
+    return PADVector.from_components(
+        pleasure=current.pleasure + p * USER_SIGNAL_PLEASURE_GAIN,
+        arousal=current.arousal + a * USER_SIGNAL_AROUSAL_GAIN,
+        dominance=current.dominance + d * USER_SIGNAL_DOMINANCE_GAIN,
     )
 
 
@@ -293,4 +345,7 @@ __all__ = [
     "TOOL_FAILURE_PLEASURE_LOSS",
     "TOOL_FAILURE_AROUSAL_GAIN",
     "PEER_SIGNAL_WEIGHT",
+    "USER_SIGNAL_PLEASURE_GAIN",
+    "USER_SIGNAL_AROUSAL_GAIN",
+    "USER_SIGNAL_DOMINANCE_GAIN",
 ]

@@ -126,33 +126,46 @@ def test_peer_signal_pulls_toward_peer(neutral_pad, neutral_baseline):
 
 
 def test_unknown_event_type_raises(neutral_pad, neutral_baseline):
-    """Phase 1 deliberately rejects unknown event types. user_signal
-    MUST not silently fall through — there is no affect classifier and
-    appraising raw user text is the central constitutive-vs-performative
-    failure mode."""
+    """Truly unknown event types still raise. Phase 1.5 lifted the
+    user_signal prohibition (Luna-approved 2026-05-20) but the
+    structural defence against silent fall-through stays in place
+    for any never-registered event_type."""
     with pytest.raises(ValueError, match="unknown event_type"):
         appraise_event(
-            "user_signal",
-            {"text": "I am sad"},
+            "made_up_event_xyz",
+            {"foo": "bar"},
             current=neutral_pad,
             baseline=neutral_baseline,
         )
 
 
-def test_no_user_signal_path_exists():
-    """Constitutive-vs-performative invariant: the EmotionEngine module
-    must not expose any function whose name suggests it processes user
-    text. This is the test the design doc § "Test plan" calls out as
-    the central guarantee that affect is constitutive (server-internal)
-    not performative (user-controlled)."""
+def test_no_raw_text_appraisal_exposed():
+    """Constitutive-vs-performative invariant (PRESERVED through
+    Phase 1.5): the EmotionEngine module still must not expose any
+    function that accepts raw user text and writes PAD directly. The
+    Phase 1.5 user_signal path goes through ``user_signal_classifier``
+    (separate module), which produces a bounded PAD ESTIMATE that the
+    appraiser then scales by small gain constants. Raw text never
+    reaches PAD math here.
+
+    The 'user_signal' string IS now allowed as an event_type and a
+    payload kind — what stays forbidden is any *text*-accepting
+    appraisal entrypoint."""
     import app.services.emotion_engine as em
 
-    forbidden = ["appraise_user_text", "appraise_user_message", "user_signal", "process_user"]
+    text_appraisal_forbidden = [
+        "appraise_user_text",
+        "appraise_user_message",
+        "process_user_text",
+        "appraise_text",
+    ]
     public_names = [n for n in dir(em) if not n.startswith("_")]
-    for f in forbidden:
+    for f in text_appraisal_forbidden:
         assert f not in public_names, (
-            f"emotion_engine exposes {f!r} — Phase 1 must NOT have any "
-            "user-text appraisal pathway. See design doc § Open questions §5."
+            f"emotion_engine exposes {f!r} — must NOT have any direct "
+            "user-text appraisal pathway. Use user_signal_classifier "
+            "+ appraise_event(event_type='user_signal', ...) instead. "
+            "See design doc § Open questions §5."
         )
 
 
