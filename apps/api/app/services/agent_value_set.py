@@ -102,6 +102,13 @@ class AgentValueSet:
     avoid: List[ValueItem] = field(default_factory=list)
     version: int = 1
     updated_at: str = ""
+    # Break-glass metadata (#647 PR 6). When set, this version is a
+    # time-boxed operator override that auto-expires. read_value_set
+    # walks back to the prior non-expired version once expires_at < now.
+    # None on ordinary versions.
+    expires_at: Optional[str] = None
+    break_glass_reason: Optional[str] = None
+    break_glass_operator_id: Optional[str] = None
 
     @classmethod
     def empty(cls) -> "AgentValueSet":
@@ -113,14 +120,32 @@ class AgentValueSet:
     def is_empty(self) -> bool:
         return not (self.protect or self.pursue or self.avoid)
 
+    def is_break_glass(self) -> bool:
+        """True when this version is an operator break-glass override
+        (has expires_at metadata). The pure layer doesn't decide
+        expiration — that's the IO layer's job (it knows wall-clock
+        time). consult() treats a break-glass version structurally
+        identical to any other version, so the match logic stays pure
+        + DB-clock-free."""
+        return self.expires_at is not None
+
     def to_dict(self) -> dict:
-        return {
+        d = {
             "protect": [i.to_dict() for i in self.protect],
             "pursue": [i.to_dict() for i in self.pursue],
             "avoid": [i.to_dict() for i in self.avoid],
             "version": self.version,
             "updated_at": self.updated_at,
         }
+        # Only emit break-glass fields when set, to keep ordinary
+        # versions' JSON tidy + back-compat with existing rows.
+        if self.expires_at is not None:
+            d["expires_at"] = self.expires_at
+        if self.break_glass_reason is not None:
+            d["break_glass_reason"] = self.break_glass_reason
+        if self.break_glass_operator_id is not None:
+            d["break_glass_operator_id"] = self.break_glass_operator_id
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "AgentValueSet":
@@ -130,6 +155,17 @@ class AgentValueSet:
             avoid=[ValueItem.from_dict(d) for d in data.get("avoid") or []],
             version=int(data.get("version", 1)),
             updated_at=str(data.get("updated_at", "")),
+            expires_at=(
+                str(data["expires_at"]) if data.get("expires_at") else None
+            ),
+            break_glass_reason=(
+                str(data["break_glass_reason"])
+                if data.get("break_glass_reason") else None
+            ),
+            break_glass_operator_id=(
+                str(data["break_glass_operator_id"])
+                if data.get("break_glass_operator_id") else None
+            ),
         )
 
 

@@ -107,6 +107,12 @@ class ValueSetOut(BaseModel):
     avoid: List[ValueItemOut]
     version: int
     updated_at: str
+    # Break-glass metadata (#647 PR 6). None on ordinary versions; ISO
+    # timestamps + operator id on a break-glass override version. Lets
+    # operator UI surface the active override clearly.
+    expires_at: Optional[str] = None
+    break_glass_reason: Optional[str] = None
+    break_glass_operator_id: Optional[str] = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -119,14 +125,15 @@ def _resolve_default_agent(
     """Pick the tenant's Luna persona agent (or first agent if
     none named luna).
 
-    Deterministic resolution by created_at ASC (oldest first) —
-    reviewer IMPORTANT-2 fix. Without an explicit order, a tenant
-    that adds a second Luna-like agent later may see its
-    previously-set values "disappear" because reads now resolve
-    to whichever row Postgres returns first. The oldest-agent
-    convention pins the canonical agent to whichever agent existed
-    when the operator first wrote the value set, so values follow
-    the agent that was originally tagged.
+    Deterministic resolution by ``id ASC``. The PR 2 implementation
+    sorted by ``created_at`` which doesn't exist on the Agent model
+    — every call to GET/PUT/POST /luna/values raised AttributeError
+    at runtime (caught in CI as a test failure, missed at merge
+    because the api (pytest) job is non-blocking). UUID v4 isn't
+    time-ordered, but it IS stable across reads, which is all the
+    determinism guarantee needs: a tenant that adds a second
+    Luna-like agent later won't see its previously-set values
+    'disappear' because the same UUID always sorts first.
     """
     agent = (
         db.query(Agent)
@@ -134,14 +141,14 @@ def _resolve_default_agent(
             Agent.tenant_id == tenant_id,
             Agent.name.ilike("%luna%"),
         )
-        .order_by(Agent.created_at.asc())
+        .order_by(Agent.id.asc())
         .first()
     )
     if agent is None:
         agent = (
             db.query(Agent)
             .filter(Agent.tenant_id == tenant_id)
-            .order_by(Agent.created_at.asc())
+            .order_by(Agent.id.asc())
             .first()
         )
     if agent is None:
@@ -166,6 +173,9 @@ def _vs_to_out(
         avoid=[ValueItemOut(**i.to_dict()) for i in vs.avoid],
         version=vs.version,
         updated_at=vs.updated_at,
+        expires_at=vs.expires_at,
+        break_glass_reason=vs.break_glass_reason,
+        break_glass_operator_id=vs.break_glass_operator_id,
     )
 
 
@@ -365,6 +375,136 @@ def put_values_for_agent(
         raise HTTPException(
             status_code=503,
             detail="value set write failed; please retry",
+        )
+    return _vs_to_out(
+        result,
+        tenant_id=current_user.tenant_id,
+        agent_id=agent.id,
+    )
+
+
+# ── Break-glass (PR 6) ────────────────────────────────────────────────
+
+
+_MAX_REASON_LEN = 500
+_MAX_KEEP_LIST_LEN = _MAX_ITEMS_PER_LIST  # same hygiene cap as the PUT route
+
+
+class BreakGlassBody(BaseModel):
+    """Open a time-boxed value-set override (design §6 / §10 PR 6).
+
+    Reason is required — a break-glass entry without justification is
+    useless for the audit trail. duration_seconds is clamped at the
+    service layer to [BREAK_GLASS_MIN_SECONDS, BREAK_GLASS_MAX_SECONDS]
+    but we also validate a sane upper bound here so a 5xx never comes
+    from a wildly out-of-range request.
+
+    keep_protect_slugs / keep_avoid_slugs are OPTIONAL lists of slugs
+    to PRESERVE on the new override version. Omitting / empty list =
+    drop everything (full break-glass). Used when the operator only
+    needs to relax one specific protect for the duration.
+    """
+
+    reason: str = Field(..., min_length=1, max_length=_MAX_REASON_LEN)
+    duration_seconds: int = Field(
+        default=agent_value_set_io.BREAK_GLASS_DEFAULT_SECONDS,
+        ge=agent_value_set_io.BREAK_GLASS_MIN_SECONDS,
+        le=agent_value_set_io.BREAK_GLASS_MAX_SECONDS,
+    )
+    keep_protect_slugs: List[str] = Field(default_factory=list)
+    keep_avoid_slugs: List[str] = Field(default_factory=list)
+
+    @validator("keep_protect_slugs", "keep_avoid_slugs")
+    def _cap_keep_lists(cls, v: List[str]) -> List[str]:
+        if len(v) > _MAX_KEEP_LIST_LEN:
+            raise ValueError(
+                f"keep lists may have at most {_MAX_KEEP_LIST_LEN} slugs"
+            )
+        return v
+
+
+@router.post(
+    "/luna/values/break-glass",
+    response_model=ValueSetOut,
+    status_code=201,
+)
+def open_break_glass_default(
+    body: BreakGlassBody,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Open a time-boxed override on the caller's tenant + Luna
+    persona agent. Default duration 1h; max 24h (clamped by service
+    layer). The operator id is taken from the authenticated user —
+    never from the body — so the audit-log entry can't be forged.
+
+    Audit: the service layer emits ONE structured INFO log line
+    ('BREAK_GLASS_OPENED ...') per use. Operator dashboards consume
+    that via the log aggregator.
+    """
+    agent = _resolve_default_agent(db, current_user.tenant_id)
+    result = agent_value_set_io.open_break_glass(
+        db,
+        tenant_id=current_user.tenant_id,
+        agent_id=agent.id,
+        operator_id=str(current_user.id),
+        reason=body.reason,
+        duration_seconds=body.duration_seconds,
+        keep_protect_slugs=body.keep_protect_slugs,
+        keep_avoid_slugs=body.keep_avoid_slugs,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "break-glass open failed (read-current or write retry "
+                "exhausted); please retry"
+            ),
+        )
+    return _vs_to_out(
+        result,
+        tenant_id=current_user.tenant_id,
+        agent_id=agent.id,
+    )
+
+
+@router.post(
+    "/luna/values/agents/{agent_id}/break-glass",
+    response_model=ValueSetOut,
+    status_code=201,
+)
+def open_break_glass_for_agent(
+    agent_id: uuid.UUID,
+    body: BreakGlassBody,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Per-agent break-glass companion. Cross-tenant protection same
+    as the per-agent PUT — foreign agent_id → 404."""
+    agent = (
+        db.query(Agent)
+        .filter(
+            Agent.id == agent_id,
+            Agent.tenant_id == current_user.tenant_id,
+        )
+        .first()
+    )
+    if agent is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    result = agent_value_set_io.open_break_glass(
+        db,
+        tenant_id=current_user.tenant_id,
+        agent_id=agent.id,
+        operator_id=str(current_user.id),
+        reason=body.reason,
+        duration_seconds=body.duration_seconds,
+        keep_protect_slugs=body.keep_protect_slugs,
+        keep_avoid_slugs=body.keep_avoid_slugs,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=503,
+            detail="break-glass open failed; please retry",
         )
     return _vs_to_out(
         result,
