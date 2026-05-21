@@ -125,6 +125,16 @@ _TENANT_WORKSPACE_BUDGET = int(
     os.environ.get("TENANT_WORKSPACE_BUDGET_BYTES", str(1_073_741_824))
 )
 
+# Separate quota for the skill-creator `skill_evals/` subdirectory
+# (#299). 512 MiB by default — smaller than the general workspace
+# budget so an eval-storm can't crowd out the tenant's other files.
+# Without this gate, a runaway skill-eval iteration loop could fill
+# the whole 1 GiB tenant quota in a few iterations and block the
+# user from cloning a new repo or pulling a model.
+_TENANT_SKILL_EVALS_BUDGET = int(
+    os.environ.get("SKILL_EVALS_WORKSPACE_BUDGET_BYTES", str(536_870_912))
+)
+
 # Redis lock TTL for the clone-in-flight guard. 10 minutes matches the
 # subprocess.run(clone) timeout (600s) in `_run_clone`.
 _CLONE_LOCK_TTL_SECONDS = 600
@@ -499,6 +509,32 @@ def _tenant_workspace_bytes(tenant_id: str) -> int:
     doesn't 500 the endpoint — we'd rather under-count than refuse.
     """
     root = Path(_WORKSPACES_ROOT).resolve() / tenant_id
+    if not root.exists():
+        return 0
+    total = 0
+    for p in root.rglob("*"):
+        try:
+            if p.is_file():
+                total += p.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def _tenant_skill_evals_bytes(tenant_id: str) -> int:
+    """Best-effort recursive size of the tenant's ``skill_evals/``
+    subdirectory (#299). Used by ``eval_runner.dispatch_iteration``
+    to gate new iterations against the separate skill-evals budget.
+
+    Same swallow-on-OSError discipline as the general workspace
+    walker — we'd rather under-count than refuse a legitimate
+    iteration on a flaky stat call.
+
+    Returns 0 when the subdirectory doesn't exist yet (fresh tenant,
+    no evals have been dispatched). This makes the first iteration
+    a no-op gate, exactly as intended.
+    """
+    root = Path(_WORKSPACES_ROOT).resolve() / tenant_id / "skill_evals"
     if not root.exists():
         return 0
     total = 0

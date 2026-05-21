@@ -25,6 +25,11 @@ from app.workflows.activities.reflection_activities import (
     synthesize_reflections as reflection_synthesize_reflections,
     write_reflections as reflection_write_reflections,
 )
+from app.workflows.skill_eval_iteration_workflow import SkillEvalIterationWorkflow
+from app.workflows.activities.skill_eval_activities import (
+    persist_run_artifacts as skill_eval_persist_run_artifacts,
+    aggregate_iteration as skill_eval_aggregate_iteration,
+)
 from app.workflows.teams_monitor import TeamsMonitorWorkflow
 from app.workflows.backfill_embeddings import BackfillEmbeddingsWorkflow
 from app.workflows.coalition_workflow import CoalitionWorkflow
@@ -256,6 +261,7 @@ async def run_orchestration_worker():
             TeamsMonitorWorkflow,
             TrainingIngestionWorkflow,
             NightlyReflectionWorkflow,
+            SkillEvalIterationWorkflow,
         ],
         activities=[
             dispatch_task,
@@ -393,6 +399,11 @@ async def run_orchestration_worker():
             reflection_cluster_episodes,
             reflection_synthesize_reflections,
             reflection_write_reflections,
+            # SkillEvalIterationWorkflow (#294) — Phase 3 scaffold.
+            # Default OFF in prod (eval_runner stays on thread-mode);
+            # operator flips via SKILL_EVAL_DISPATCH_MODE=workflow.
+            skill_eval_persist_run_artifacts,
+            skill_eval_aggregate_iteration,
         ],
     )
 

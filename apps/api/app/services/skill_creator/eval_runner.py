@@ -774,20 +774,33 @@ async def dispatch_iteration(
         )
 
     # I3 — eval artifacts count against the per-tenant workspace quota.
-    # Same 1 GiB cap and env knob as the git-clone endpoint; refuse
-    # dispatch BEFORE inserting any queued rows so an over-quota tenant
-    # doesn't accumulate orphan run rows. The check is best-effort: a
-    # transient OSError during the walk under-counts, which is the
-    # safer side to err on for an evaluator-internal feature.
+    # Two-layer check (#299):
+    #   - The general 1 GiB tenant workspace budget. Refuses when the
+    #     tenant's whole workspace tree is already over.
+    #   - The separate 512 MiB skill_evals/ subdirectory budget.
+    #     Refuses when the skill-evals subtree alone is over budget
+    #     even if the rest of the tenant has room — prevents an
+    #     eval-storm from starving the tenant's normal workspace.
+    # Both checks are best-effort: transient OSError during the walk
+    # under-counts, which is the safer side for an evaluator-internal
+    # feature. Either failure raises the same exception so callers
+    # don't need to switch on which gate tripped.
     try:
         from app.api.v1.workspace import (
+            _TENANT_SKILL_EVALS_BUDGET,
             _TENANT_WORKSPACE_BUDGET,
+            _tenant_skill_evals_bytes,
             _tenant_workspace_bytes,
         )
         used_bytes = _tenant_workspace_bytes(str(tenant_id))
         if used_bytes >= _TENANT_WORKSPACE_BUDGET:
             raise TenantWorkspaceQuotaExceeded(
                 used=used_bytes, budget=_TENANT_WORKSPACE_BUDGET
+            )
+        evals_bytes = _tenant_skill_evals_bytes(str(tenant_id))
+        if evals_bytes >= _TENANT_SKILL_EVALS_BUDGET:
+            raise TenantWorkspaceQuotaExceeded(
+                used=evals_bytes, budget=_TENANT_SKILL_EVALS_BUDGET
             )
     except TenantWorkspaceQuotaExceeded:
         raise
