@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import agentService from '../services/agent';
 import TestsTabSection from '../components/agent/TestsTabSection';
+import ValueSetTabSection from '../components/agent/ValueSetTabSection';
 import api from '../services/api';
 import './AgentDetailPage.css';
 
@@ -358,7 +359,7 @@ const AgentDetailPage = () => {
 
         {/* Tabs */}
         <Nav className="tab-nav" as="ul">
-          {['overview', 'relations', 'tasks', 'config', 'performance', 'audit', 'versions', 'integrations', 'tests'].map(tab => (
+          {['overview', 'relations', 'tasks', 'config', 'performance', 'audit', 'versions', 'integrations', 'tests', 'values'].map(tab => (
             <Nav.Item as="li" key={tab}>
               <Nav.Link
                 className={activeTab === tab ? 'active' : ''}
@@ -935,6 +936,7 @@ const AgentDetailPage = () => {
 
         {/* Tests Tab — ALM Pillar 10 */}
         {activeTab === 'tests' && <TestsTabSection agentId={id} />}
+        {activeTab === 'values' && <ValueSetTabSection agentId={id} />}
       </div>
 
       {/* Delete Modal */}
