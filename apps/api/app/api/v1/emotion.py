@@ -17,11 +17,13 @@ chance. The /affect/ prefix keeps the resolution clean.
 from __future__ import annotations
 
 import uuid
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
+from app.core.config import settings
 from app.models.agent import Agent
 from app.models.user import User
 from app.schemas.emotion import PADVector
@@ -127,6 +129,60 @@ def get_agent_affect(
     # yet so consumers can degrade gracefully.
     current: PADVector | None = _latest_affect_for_agent_tenant(
         db, agent_id=agent_id, tenant_id=current_user.tenant_id,
+    )
+
+    return {
+        "agent_id": str(agent_id),
+        "agent_name": agent.name,
+        "baseline": baseline.to_dict(),
+        "current": current.to_dict() if current else None,
+        "has_live_state": current is not None,
+    }
+
+
+@router.get("/internal/affect/agents/{agent_id}")
+def get_agent_affect_internal(
+    agent_id: uuid.UUID,
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+    x_tenant_id: Optional[uuid.UUID] = Header(None, alias="X-Tenant-Id"),
+    db: Session = Depends(get_db),
+):
+    """Internal variant of ``/affect/agents/{agent_id}`` for MCP tools.
+
+    Auth: ``X-Internal-Key`` matching ``settings.API_INTERNAL_KEY`` or
+    ``settings.MCP_API_KEY`` (same pattern as
+    ``/api/v1/internal/embed``). The caller MUST also supply
+    ``X-Tenant-Id`` — without an authenticated user we can't infer
+    tenant from the JWT, so the MCP layer passes it explicitly.
+
+    Tenant isolation is enforced by the same agent-lookup guard the
+    user-facing route uses: a foreign-tenant ``agent_id`` returns 404.
+    An attacker controlling X-Internal-Key STILL can't read another
+    tenant's affect unless they ALSO know that tenant's agent_id —
+    matches the existing internal-key threat model. Closes the
+    Luna-flagged 2026-05-21 gap: she couldn't independently verify
+    her own affect_baseline without going through her user JWT.
+    """
+    if x_internal_key not in (
+        settings.API_INTERNAL_KEY,
+        settings.MCP_API_KEY,
+    ):
+        raise HTTPException(status_code=401, detail="Invalid internal key")
+    if x_tenant_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="X-Tenant-Id required with X-Internal-Key",
+        )
+
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if agent is None or str(agent.tenant_id) != str(x_tenant_id):
+        raise HTTPException(status_code=404, detail="agent not found")
+
+    baseline = get_affect_baseline(
+        db, agent_id=agent_id, tenant_id=x_tenant_id,
+    )
+    current = _latest_affect_for_agent_tenant(
+        db, agent_id=agent_id, tenant_id=x_tenant_id,
     )
 
     return {
