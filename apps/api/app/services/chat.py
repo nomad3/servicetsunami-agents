@@ -461,7 +461,21 @@ def _generate_agentic_response(
     if not agent_skill_slugs:
         agent_skill_slugs = [primary_slug]
 
-    agent_slug = agent_skill_slugs[0]  # identity = first skill in the list
+    # `agent_slug` historically used the first skill slug as identity.
+    # That broke the value-layer routing gate (#660): chat passed a
+    # SKILL slug like "luna" that doesn't match any agent NAME, so the
+    # router's name-based agent lookup missed and the gate was skipped.
+    # When the session is bound to a real Agent row, prefer the agent's
+    # NAME-derived slug so the router can resolve the canonical agent.
+    # Fall back to the skill slug for unbound sessions (legacy callers).
+    if session.agent and session.agent.name:
+        agent_slug = (
+            session.agent.name.lower()
+            .replace(" ", "-")
+            .replace("_", "-")
+        )
+    else:
+        agent_slug = agent_skill_slugs[0]
 
     # Strategy: fit as many recent messages as possible into a 65KB budget
     recent_msgs = (
