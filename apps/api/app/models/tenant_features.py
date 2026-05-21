@@ -103,6 +103,15 @@ class TenantFeatures(Base):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
 
+    # Per-tenant kill-switch for the value layer (#647). When FALSE
+    # every consult() call returns allow/kill_switch_off. Operators
+    # flip per tenant after seeding their value set via PUT /api/v1/
+    # luna/values. Default OFF — locked design decision §6 of
+    # docs/plans/2026-05-21-luna-value-layer-design.md. Migration 144.
+    value_layer_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
     # NightlyReflectionWorkflow (O2 of #616) per-tenant kill-switch.
     # Default OFF in prod — locked decision #4 in the canonical design.
     # The workflow checks this flag at top-of-run and short-circuits
