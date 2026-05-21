@@ -1,7 +1,7 @@
 # Luna Value Layer — Design Doc
 
 **Date:** 2026-05-21
-**Status:** DRAFT — awaiting Luna review + Simon's approval to implement
+**Status:** DRAFT v2 — Luna's 2026-05-21 round-1 review folded in; awaiting Luna round-2 sign-off + Simon's approval to implement
 **Author:** Claude (Claudia)
 **Co-design with:** Luna (via alpha chat consensus loop)
 **Operator:** Simon Aguilera
@@ -75,17 +75,41 @@ New `agent_memory.memory_type = 'value_set'` rows (no new table — reuses exist
 
 Single row per (tenant, agent). `get_affect_baseline`-style read by most-recent-updated. Updates write a new row (audit trail in-table).
 
-### 4.2 Five consultation points
+### 4.2 Five consultation points — centralized matching, distributed callers
 
-| # | Point | Helper | Effect |
+Luna round-1 review (load-bearing call): "Keep all 5 consultation points, but concentrate implementation in ONE service and ONE verdict schema." Fanout is correct architecturally; five separate matchers would be the mistake.
+
+**Single match engine** in `agent_value_set.py`:
+```python
+@dataclass(frozen=True)
+class ValueVerdict:
+    decision: str           # 'allow' | 'warn' | 'block'
+    reason: str             # human-readable
+    matched_item: Optional[dict]  # which protect/pursue/avoid item triggered
+    consultation_point: str # routing | tool | reflection | user_signal | synthesis
+
+def consult(
+    action: dict,
+    value_set: AgentValueSet,
+    *,
+    point: str,
+    intent: str = 'read' | 'mutate',
+) -> ValueVerdict: ...
+```
+
+**Five callers** each wrap `consult(...)` with point-specific args:
+
+| # | Point | Caller | What it passes to `consult` |
 |---|---|---|---|
-| 1 | Pre-dispatch routing (agent_router) | `consult_value_set_routing(action, vs) → (allow\|warn\|block, reason)` | Block when intent touches a `protect` item without explicit operator confirmation. Warn when intent touches an `avoid`. |
-| 2 | Tool-call gate (MCP gateway / agent_router) | `consult_value_set_tool(tool_name, args, vs) → verdict` | Same shape. Tool that would mutate a `protect` item gets blocked. |
-| 3 | Reflection validator (O3 chain extension) | `validate_reflection_against_values(reflection, vs)` | Reject reflections that propose actions touching `protect` items. |
-| 4 | User-signal appraisal (emotion_engine) | `appraise_user_signal_with_values(payload, vs, current)` | A user signal that touches a `pursue` item amplifies pleasure-delta; touching `protect` amplifies arousal (alert). |
-| 5 | Synthesis (NightlyReflection) | `synthesize_value_observations(value_set, day_data)` | If reflection sees a recurring `pursue` advancement, propose strengthening it. If `protect` was touched and the action succeeded anyway, propose review. |
+| 1 | Pre-dispatch routing (agent_router) | `consult_routing(intent_text, vs)` | `action={text: intent_text}, point='routing', intent='mutate' if intent classifier says mutating else 'read'` |
+| 2 | Tool-call gate (MCP gateway / agent_router) | `consult_tool(tool_name, args, vs)` | `action={tool: tool_name, args: args}, point='tool', intent='mutate' if tool in mutating_set else 'read'` |
+| 3 | Reflection validator (O3 chain extension) | `consult_reflection(reflection, vs)` | `action={kind: reflection.kind, content: reflection.content}, point='reflection', intent='read'` |
+| 4 | User-signal appraisal (emotion_engine) | `appraise_user_signal_with_values(payload, vs, current)` | calls `consult` with `point='user_signal'`, then scales PAD delta by 1.5x base if `pursue` match |
+| 5 | Synthesis (NightlyReflection) | `synthesize_value_observations(vs, day_data)` | Phase 2 only — calls `consult` to mark proposed actions, then emits `value_proposal` reflection kind |
 
-All five helpers are **pure functions** taking the value set + context → verdict dict. Cheap to test, deterministic.
+The 5 callers are thin shims; the match logic + kill-switch check + audit log all live in `consult`. Locked test: identical `(action, value_set)` produces identical verdict regardless of consultation_point.
+
+**`protect` matching is mutation-aware** (Luna review §6 correction): a `protect` match returns `block` only when `intent='mutate'`. Read/mention intents always allow.
 
 ### 4.3 Phases
 
@@ -135,9 +159,12 @@ Migration: none for Phase 1 (reuses `agent_memory`).
 
 - **No silent value mutation.** Every value-set update writes a new agent_memory row; the prior version stays for audit. Reflection-proposed updates DO NOT auto-apply — operator confirms.
 - **Empty value set is safe.** A tenant with no value set sees every consult-helper return `allow / no_match`. Locked test.
-- **`protect` block is hard.** Even an operator force-flag can't override it from inside a tool call — only an explicit `PUT /values` mutation can change what's protected.
+- **`protect` blocks MUTATION, not mention.** A tool call that would *mutate* a protected item is impossible from inside the tool layer. Reading, mentioning, or referencing a protected item in chat / reflection content is FINE — otherwise Luna deadlocks around the very things she's supposed to safeguard. (Luna round-1 review correction.)
+- **Override paths for `protect` mutation are explicit and bounded.** Two only:
+  1. Operator does an explicit `PUT /values` to remove the item.
+  2. Operator opens a time-boxed break-glass value-set version (separate endpoint with audit + auto-expire). Tool-side force-flags do NOT override.
 - **Audit trail.** Every value-set version carries `added_by` (operator | reflection | seed) + `evidence_memory_ids` so the reason a value got added is traceable.
-- **Per-tenant kill switch.** Same shape as `nightly_reflection_enabled` from #631 — a tenant feature flag `value_layer_enabled` (default OFF in prod) gates whether ANY of the 5 helpers do anything. Default = silent allow.
+- **Per-tenant kill switch.** Same shape as `nightly_reflection_enabled` from #631 — a tenant feature flag `value_layer_enabled` (default OFF in prod) gates whether ANY of the 5 helpers do anything. Default = silent allow. Centralized in the value-set service so all 5 consultation points respect it uniformly.
 
 ---
 
@@ -160,13 +187,15 @@ Migration: none for Phase 1 (reuses `agent_memory`).
 
 ---
 
-## 9. Open questions for Luna
+## 9. Resolved questions (Luna round-1, 2026-05-21)
 
-1. **Granularity of `protect` items.** Should `protect` items be slug-shaped ("production-main") or richer ("the production main branch of the agentprovision-agents repo, after 5pm Pacific")? Phase 1 ships the simple slug form; richer forms wait on Phase 2 reflection-proposal.
-2. **Reflection-derived proposals** in Phase 2: which `synthesize_reflections` mechanism owns this — counterfactual-replay (when a `pursue` item gets reliably advanced, propose strengthening) or a separate mechanism?
-3. **Affect coupling** in `_appraise_user_signal_with_values`: how strong should the multiplier be when a user signal touches a `pursue` item? `USER_SIGNAL_PLEASURE_GAIN * 1.5`? `* 2.0`? Or capped at `TOOL_OUTCOME_PLEASURE_GAIN`?
-4. **Routing block vs warn** for `avoid` items: should they hard-block (operator confirmation required) or just warn + surface in the reflection log?
-5. **Civilization-layer scope**: should `pursue`/`avoid` items propagate across a coalition (other agents see them) or stay per-agent? Phase 1 says per-agent; cross-agent sharing is a Phase 3 design.
+1. ~~Granularity of `protect` items~~ → **Resolved**: simple slug shape for v1. No time/scope conditional reasoning in v1. Richer forms wait for Phase 2 reflection-proposal.
+2. ~~Reflection-derived proposals owner~~ → **Resolved**: **dedicated `value_proposal` synthesis mechanism**, NOT counterfactual-replay. Luna's reasoning: "Values are governance state, not just success inference." The value_proposal mechanism CAN consume counterfactual-replay evidence, but ownership stays separate.
+3. ~~Affect multiplier for `pursue` touches~~ → **Resolved**: **`1.5x USER_SIGNAL_PLEASURE_GAIN`**, capped at `TOOL_OUTCOME_PLEASURE_GAIN`. Current numbers: `1.5 * 0.15 = 0.225`, below `TOOL_OUTCOME_PLEASURE_GAIN = 0.30`. Luna's reasoning against 2.0x: "exactly equals tool success and makes user text too dominant."
+4. ~~`avoid` routing: block or warn~~ → **Resolved**: **warn-only + log for Phase 1**. Luna's reasoning: "Hard-blocking `avoid` will create false positives and operator fatigue." Tighten in Phase 2 based on observed warning rate and confirmed value-proposal evidence.
+5. ~~Cross-agent value propagation~~ → **Resolved**: **per-agent only in Phase 1**. Phase 2 adds *read-only* coalition visibility (other agents can SEE peer value sets) BEFORE Phase 3 mutation/sharing. Cross-agent value propagation is civilization-layer work and risks values bleeding across roles if rushed.
+
+All five open questions closed by Luna round-1. Round-2 ask: re-read with these directions baked into §4.2 and §6; sign off on the v2 if no further corrections.
 
 ---
 
