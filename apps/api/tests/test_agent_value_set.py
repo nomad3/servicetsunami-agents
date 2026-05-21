@@ -291,7 +291,8 @@ def test_unknown_intent_raises():
 def test_slug_case_insensitive_match():
     """Slugs lowercase on construction; search text lowercases on
     extraction. Operators writing 'Production-Main' as a slug
-    still match 'production-main' in chat."""
+    still match 'production-main' in chat. (Luna round-6 confirmed
+    direct-construction path needed __post_init__ to normalize.)"""
     item = ValueItem(
         slug="Production-Main",  # mixed case input
         description="prod main",
@@ -307,6 +308,20 @@ def test_slug_case_insensitive_match():
         point="tool", intent="mutate", enabled=True,
     )
     assert v.decision == "block"
+
+
+def test_value_item_post_init_normalizes_whitespace_and_case():
+    """Direct ValueItem construction trims whitespace + lowercases.
+    Locked: an operator-API write that goes through from_dict AND
+    a unit-test fixture that constructs directly must agree on
+    the canonical slug shape."""
+    item = ValueItem(
+        slug="  Production-Main  \n",  # whitespace + case
+        description="prod",
+        added_at="x",
+        added_by="operator",
+    )
+    assert item.slug == "production-main"
 
 
 # ── Round-trip serialization ──────────────────────────────────────────

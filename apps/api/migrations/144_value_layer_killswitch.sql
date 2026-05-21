@@ -36,25 +36,27 @@ COMMENT ON COLUMN tenant_features.value_layer_enabled IS
 -- version+1. Operator-only writes in Phase 1 means this is mostly
 -- defensive; Phase 2 reflection-derived proposals make it real.
 --
--- (Review B4 defense.) The partial-index expression evaluates
--- `(content::jsonb ->> 'version')::int` on every INSERT against
--- memory_type='value_set'. We add two extra WHERE filters so a
--- future malformed write (e.g. operator manual repair, import
--- script) trips a clear duplicate-key error rather than a confusing
--- "invalid input syntax for type integer" from the partial-index
--- expression:
+-- (Review B4 defense, round-6 correction.) The partial-index
+-- expression evaluates `(content::jsonb ->> 'version')::int` on
+-- every INSERT against memory_type='value_set'. The earlier
+-- attempt to guard via `jsonb_typeof(content::jsonb) = 'object'`
+-- still casts content::jsonb in the predicate — which raises on
+-- malformed text like '<<not valid json>>' BEFORE the predicate
+-- evaluates. So malformed rows still trip the index.
 --
---   - content IS NOT NULL: NULL content was never valid for the
---     value_set memory_type and shouldn't enter the uniqueness
---     namespace.
---   - jsonb_typeof(content::jsonb) = 'object' AND content::jsonb ?
---     'version' AND (content::jsonb ->> 'version') ~ '^[0-9]+$':
---     the version field must exist and be a numeric string before
---     the int cast runs. Rows that don't satisfy this skip the
---     index entirely — they're still in the table (the writer's
---     INSERT succeeds) but uniqueness isn't enforced. Caller-side
---     write_value_set guarantees the shape; this WHERE is the
---     defense-in-depth against bad writes from other code paths.
+-- Fix: use TEXT-side regex guards in the WHERE clause so we
+-- decide whether to apply the index BEFORE any jsonb cast runs.
+-- The guards reject:
+--   - NULL content.
+--   - text not starting with `{` (not a JSON object body).
+--   - text missing an integer `version` field (regex-detected).
+--
+-- Rows that fail any guard skip the index entirely; they're still
+-- in the table (writer's INSERT succeeds) but uniqueness isn't
+-- enforced for them. Caller-side write_value_set guarantees the
+-- shape for any value-set row it produces; this WHERE is the
+-- defense-in-depth against bad writes from other code paths
+-- (operator manual repair, import scripts, etc).
 CREATE UNIQUE INDEX IF NOT EXISTS uq_value_set_version
     ON agent_memories (
         tenant_id,
@@ -63,6 +65,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_value_set_version
     )
     WHERE memory_type = 'value_set'
       AND content IS NOT NULL
-      AND jsonb_typeof(content::jsonb) = 'object'
-      AND content::jsonb ? 'version'
-      AND (content::jsonb ->> 'version') ~ '^[0-9]+$';
+      AND content LIKE '{%}'
+      AND content ~ '"version"[[:space:]]*:[[:space:]]*[0-9]+';

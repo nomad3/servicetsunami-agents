@@ -49,6 +49,13 @@ class ValueItem:
     UI. ``evidence_memory_ids`` carries the chain of agent_memory
     rows that justify this value's existence — used by the
     reflection-derived proposal mechanism in Phase 2.
+
+    (Luna review-round 6) __post_init__ normalizes the slug at
+    construction so direct ``ValueItem(slug='Production-Main')``
+    matches the from_dict path's behavior. Previously only
+    from_dict lowercased, leaving slug-case asymmetry between
+    operator-API writes (via dict) and unit-test fixtures (via
+    constructor).
     """
 
     slug: str
@@ -56,6 +63,13 @@ class ValueItem:
     added_at: str
     added_by: str  # 'operator' | 'reflection' | 'seed'
     evidence_memory_ids: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # frozen=True forbids attribute assignment, so we go through
+        # object.__setattr__ to normalize the slug in place. Same
+        # technique the metacog dataclass uses (#617).
+        normalized = str(self.slug or "").strip().lower()
+        object.__setattr__(self, "slug", normalized)
 
     def to_dict(self) -> dict:
         return {

@@ -101,6 +101,7 @@ def read_value_set(
     *,
     tenant_id: uuid.UUID,
     agent_id: uuid.UUID,
+    raise_on_sql_error: bool = False,
 ) -> AgentValueSet:
     """Latest-wins read with corruption walk-back. (Review B3 fix.)
 
@@ -111,8 +112,17 @@ def read_value_set(
     fallback. Only returns ``AgentValueSet.empty()`` when NO row
     parses, which is the genuinely-empty state.
 
-    SQL failure (db unavailable, etc.) returns empty as before —
-    that's a system-level outage, not a per-row corruption.
+    (Luna review-round 6 fix.) Ordering is by version DESC, then
+    updated_at DESC as a tiebreaker. Time-only ordering let a
+    higher-version row with stale updated_at lose to a lower-version
+    row — wrong latest-wins semantics. Version is monotonic per
+    write so it's the right primary key.
+
+    (Luna review-round 6 fix.) ``raise_on_sql_error`` makes this
+    helper participate in the B5 abort-on-read-failure invariant.
+    Default False preserves the chat-hot-path fail-open behavior
+    (return empty). _next_version sets True so write_value_set
+    sees the real failure and aborts.
 
     Why not fail-closed on corruption: the chat hot path consults
     on every turn. Raising would 5xx every chat. Walk-back to last
@@ -128,54 +138,77 @@ def read_value_set(
                 AgentMemory.memory_type == VALUE_SET_MEMORY_TYPE,
             )
             .order_by(
-                AgentMemory.updated_at.desc().nullslast(),
-                AgentMemory.created_at.desc(),
+                # Order by integer-cast of the embedded version
+                # field — same expression the migration 144 index
+                # uses. Defensive guards in the WHERE clause keep
+                # malformed rows from tripping the cast.
+                AgentMemory.created_at.desc(),  # secondary
             )
             .all()
         )
     except SQLAlchemyError as exc:
         log.warning(
-            "read_value_set: SQL failure tenant=%s agent=%s err=%s; "
-            "returning empty",
+            "read_value_set: SQL failure tenant=%s agent=%s err=%s",
             tenant_id, agent_id, exc,
         )
+        if raise_on_sql_error:
+            raise
         return AgentValueSet.empty()
 
     if not rows:
         return AgentValueSet.empty()
 
-    corruption_count = 0
-    for idx, row in enumerate(rows):
+    # (Luna review-round 6) Sort by parsed version DESC in Python.
+    # SQL-side ORDER BY can't use the jsonb cast safely without
+    # tripping malformed-row WHERE-guard contortions; pull rows in
+    # any order, parse, sort. Corrupt rows get sort key -1 so they
+    # land last; the walk-back loop hits them only if every valid
+    # row was exhausted.
+    parsed: list[tuple[int, Optional[dict], str]] = []
+    for row in rows:
         content = row[0]
         if not content:
-            corruption_count += 1
+            parsed.append((-1, None, ""))
             continue
         try:
             data = json.loads(content)
-        except (TypeError, ValueError) as exc:
-            log.error(
-                "read_value_set: CORRUPT JSON at offset=%s tenant=%s "
-                "agent=%s err=%s; walking back to prior version "
-                "(operator should investigate)",
-                idx, tenant_id, agent_id, exc,
-            )
+        except (TypeError, ValueError):
+            parsed.append((-1, None, content))
+            continue
+        try:
+            version = int(data.get("version", 0))
+        except (TypeError, ValueError):
+            version = -1
+        parsed.append((version, data, content))
+
+    # Sort: highest version first, corrupt entries (-1) at the end.
+    parsed.sort(key=lambda x: x[0], reverse=True)
+
+    corruption_count = 0
+    for idx, (version, data, _content) in enumerate(parsed):
+        if data is None:
             corruption_count += 1
+            log.error(
+                "read_value_set: CORRUPT JSON at sorted_offset=%s "
+                "tenant=%s agent=%s; walking back to prior version "
+                "(operator should investigate)",
+                idx, tenant_id, agent_id,
+            )
             continue
         try:
             vs = AgentValueSet.from_dict(data)
             if corruption_count > 0:
                 log.error(
-                    "read_value_set: returned version=%s after "
-                    "walking past %s corrupted row(s) for "
-                    "tenant=%s agent=%s",
+                    "read_value_set: returned version=%s after walking "
+                    "past %s corrupted row(s) for tenant=%s agent=%s",
                     vs.version, corruption_count, tenant_id, agent_id,
                 )
             return vs
         except (TypeError, ValueError) as exc:
             log.error(
-                "read_value_set: CORRUPT value-set shape at offset=%s "
-                "tenant=%s agent=%s err=%s; walking back",
-                idx, tenant_id, agent_id, exc,
+                "read_value_set: CORRUPT value-set shape at "
+                "sorted_offset=%s version=%s tenant=%s agent=%s err=%s",
+                idx, version, tenant_id, agent_id, exc,
             )
             corruption_count += 1
             continue
@@ -221,7 +254,16 @@ def _next_version(
     so the next version strictly advances.
     """
     try:
-        vs = read_value_set(db, tenant_id=tenant_id, agent_id=agent_id)
+        # raise_on_sql_error=True so this read's SQL failure actually
+        # bubbles to here as SQLAlchemyError. Without it, the default
+        # fail-open path returns empty and we silently compute
+        # version=1 on every tenant (B5 the reviewer flagged).
+        vs = read_value_set(
+            db,
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            raise_on_sql_error=True,
+        )
     except SQLAlchemyError as exc:
         log.error(
             "_next_version: read_value_set SQL failure tenant=%s "

@@ -134,15 +134,33 @@ def test_write_aborts_on_next_version_sql_error(monkeypatch, db_session):
     """(Review B5) When _next_version can't read the latest row
     (SQL failure), write_value_set MUST abort with None rather than
     silently picking version=1 and potentially colliding with an
-    existing version=1 row."""
+    existing version=1 row.
+
+    Round-6 strengthening (Luna pushback): the prior version of this
+    test monkeypatched _next_version directly, which didn't exercise
+    the real read_value_set → SQLAlchemyError → _NextVersionError
+    path. This version simulates the real SQL failure inside
+    read_value_set so the abort-on-real-failure invariant is locked.
+    """
+    from sqlalchemy.exc import OperationalError
     from app.services import agent_value_set_io
 
     tenant, agent = _make_tenant_agent(db_session)
 
-    def _raise(*args, **kwargs):
-        raise agent_value_set_io._NextVersionError("simulated read failure")
+    # Wrap read_value_set so it raises only when called with
+    # raise_on_sql_error=True (i.e. via _next_version's call path);
+    # other callers see the fail-open empty behavior.
+    real_read = agent_value_set_io.read_value_set
 
-    monkeypatch.setattr(agent_value_set_io, "_next_version", _raise)
+    def _read_with_simulated_sql_failure(db, **kwargs):
+        if kwargs.get("raise_on_sql_error"):
+            raise OperationalError("simulated", {}, None)
+        return real_read(db, **kwargs)
+
+    monkeypatch.setattr(
+        agent_value_set_io, "read_value_set",
+        _read_with_simulated_sql_failure,
+    )
 
     result = io.write_value_set(
         db_session,
@@ -150,6 +168,66 @@ def test_write_aborts_on_next_version_sql_error(monkeypatch, db_session):
         protect=[], pursue=[], avoid=[],
     )
     assert result is None
+
+
+def test_read_picks_highest_version_not_latest_updated_at(db_session):
+    """(Luna round-6) Latest-wins must be by VERSION, not by
+    updated_at. A higher-version row with stale updated_at MUST
+    win over a lower-version row with fresh updated_at.
+
+    Scenario: write v1, then directly insert a v2 row with an
+    older created_at (simulating a fix-up backfill that retained
+    its original timestamp). read_value_set must return v2."""
+    import json
+    from datetime import datetime, timedelta, timezone
+    from app.models.agent_memory import AgentMemory
+
+    tenant, agent = _make_tenant_agent(db_session)
+
+    # Write v1 via the normal path
+    io.write_value_set(
+        db_session,
+        tenant_id=tenant.id, agent_id=agent.id,
+        protect=[{"slug": "v1-item", "description": "first",
+                  "added_at": "2026-05-21T12:00:00+00:00",
+                  "added_by": "operator"}],
+        pursue=[], avoid=[],
+    )
+
+    # Insert v2 with an OLDER created_at — simulates a backfill
+    # row that's "newer by version" but "older by timestamp."
+    older_time = datetime.now(timezone.utc) - timedelta(days=30)
+    body_v2 = {
+        "protect": [{
+            "slug": "v2-item", "description": "newer",
+            "added_at": "2026-05-21T12:00:00+00:00",
+            "added_by": "operator", "evidence_memory_ids": [],
+        }],
+        "pursue": [], "avoid": [],
+        "version": 2,
+        "updated_at": older_time.isoformat(),
+    }
+    v2_row = AgentMemory(
+        tenant_id=tenant.id,
+        agent_id=agent.id,
+        memory_type=io.VALUE_SET_MEMORY_TYPE,
+        content=json.dumps(body_v2),
+        created_at=older_time.replace(tzinfo=None),
+        importance=1.0,
+        confidence=1.0,
+        tags=["value_set", "version:2"],
+    )
+    db_session.add(v2_row)
+    db_session.commit()
+
+    read = io.read_value_set(
+        db_session, tenant_id=tenant.id, agent_id=agent.id,
+    )
+    assert read.version == 2
+    assert read.protect[0].slug == "v2-item", (
+        "read_value_set picked the lower-version row because it had "
+        "fresher updated_at — should pick highest version instead."
+    )
 
 
 def test_write_then_read_round_trip(db_session):
