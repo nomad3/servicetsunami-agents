@@ -30,6 +30,10 @@ from app.workflows.activities.skill_eval_activities import (
     persist_run_artifacts as skill_eval_persist_run_artifacts,
     aggregate_iteration as skill_eval_aggregate_iteration,
 )
+from app.workflows.oauth_handshake_workflow import OAuthHandshakeWorkflow
+from app.workflows.activities.oauth_handshake_activities import (
+    run_oauth_handshake as oauth_run_oauth_handshake,
+)
 from app.workflows.teams_monitor import TeamsMonitorWorkflow
 from app.workflows.backfill_embeddings import BackfillEmbeddingsWorkflow
 from app.workflows.coalition_workflow import CoalitionWorkflow
@@ -262,6 +266,7 @@ async def run_orchestration_worker():
             TrainingIngestionWorkflow,
             NightlyReflectionWorkflow,
             SkillEvalIterationWorkflow,
+            OAuthHandshakeWorkflow,
         ],
         activities=[
             dispatch_task,
@@ -404,6 +409,10 @@ async def run_orchestration_worker():
             # operator flips via SKILL_EVAL_DISPATCH_MODE=workflow.
             skill_eval_persist_run_artifacts,
             skill_eval_aggregate_iteration,
+            # OAuthHandshakeWorkflow (#295 Phase D-1) — scaffold only.
+            # Returns success=False; api-side OAuth handlers stay on
+            # subprocess.run until Phase D-2/D-3 wire this in.
+            oauth_run_oauth_handshake,
         ],
     )
 
