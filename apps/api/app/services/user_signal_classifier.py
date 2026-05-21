@@ -176,14 +176,19 @@ _OLLAMA_SYSTEM_PROMPT = (
 
 _OLLAMA_USER_TEMPLATE = (
     "Examples:\n"
+    # Double-brace literals — str.format() reads single {…} as a
+    # placeholder. The few-shot JSON examples must be escaped or every
+    # classifier call dies on KeyError: '"pleasure"' before reaching
+    # Ollama. (Production bug found in initial #634 backfill run on
+    # Simon's tenant — entire 582-message corpus errored out.)
     "- \"thanks that worked\" → "
-    "{\"pleasure\": 0.6, \"arousal\": -0.1, \"dominance\": 0.3}\n"
+    "{{\"pleasure\": 0.6, \"arousal\": -0.1, \"dominance\": 0.3}}\n"
     "- \"why isn't this working?!\" → "
-    "{\"pleasure\": -0.7, \"arousal\": 0.8, \"dominance\": -0.3}\n"
+    "{{\"pleasure\": -0.7, \"arousal\": 0.8, \"dominance\": -0.3}}\n"
     "- \"show me the latest deploys\" → "
-    "{\"pleasure\": 0.0, \"arousal\": 0.0, \"dominance\": 0.5}\n"
+    "{{\"pleasure\": 0.0, \"arousal\": 0.0, \"dominance\": 0.5}}\n"
     "- \"could you maybe try again?\" → "
-    "{\"pleasure\": -0.1, \"arousal\": 0.1, \"dominance\": -0.4}\n\n"
+    "{{\"pleasure\": -0.1, \"arousal\": 0.1, \"dominance\": -0.4}}\n\n"
     "User message:\n{text}\n\n"
     "JSON:"
 )

@@ -93,6 +93,27 @@ def test_heuristic_clamps_to_bounds():
 # ── Ollama backend (mocked) ───────────────────────────────────────────
 
 
+def test_ollama_template_can_be_formatted_with_arbitrary_text():
+    """Regression for the str.format brace-escaping bug found in
+    #634's first production backfill run: the few-shot JSON examples
+    in the template contain literal {…} that str.format reads as
+    placeholders. Without doubled braces, every classifier call dies
+    with KeyError: '"pleasure"' before reaching Ollama. This test
+    exercises the actual .format() step the mocked Ollama tests skip."""
+    # Strings that previously crashed
+    samples = [
+        "thanks that worked",
+        "why isn't this working?!",
+        "show me {curly braces} in user text",
+        "",
+    ]
+    for s in samples:
+        # Must not raise
+        result = usc._OLLAMA_USER_TEMPLATE.format(text=s)
+        assert "User message:" in result
+        assert s in result
+
+
 @pytest.mark.asyncio
 async def test_ollama_parses_well_formed_response():
     fake_json = '{"pleasure": 0.4, "arousal": -0.1, "dominance": 0.6}'
