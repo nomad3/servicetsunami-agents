@@ -1,7 +1,7 @@
 # Luna Value Layer — Design Doc
 
 **Date:** 2026-05-21
-**Status:** DRAFT v4 — Luna's 2026-05-21 round-1 + round-2 + round-3 reviews folded in; awaiting Luna sign-off + Simon's approval to implement
+**Status:** DRAFT v5 — Luna's 2026-05-21 round-1 + round-2 + round-3 + round-4 reviews folded in; awaiting Luna sign-off + Simon's approval to implement
 **Author:** Claude (Claudia)
 **Co-design with:** Luna (via alpha chat consensus loop)
 **Operator:** Simon Aguilera
@@ -84,7 +84,8 @@ New `agent_memory.memory_type = 'value_set'` rows. `agent_memory.content` is `Te
 
 Luna round-1 review (load-bearing call): "Keep all 5 consultation points, but concentrate implementation in ONE service and ONE verdict schema." Fanout is correct architecturally; five separate matchers would be the mistake.
 
-**Single match engine** in `agent_value_set.py`:
+**Single match engine** in `agent_value_set.py` — **pure function, no side effects** (Luna round-4 correction: audit logging happens at the IO wrapper, not in `consult`, so `consult` stays unit-testable without mocking the log):
+
 ```python
 @dataclass(frozen=True)
 class ValueVerdict:
@@ -98,9 +99,40 @@ def consult(
     value_set: AgentValueSet,
     *,
     point: str,
-    intent: str = 'read' | 'mutate',
-) -> ValueVerdict: ...
+    intent: str,          # 'read' | 'mutate'
+    enabled: bool,        # kill-switch state, passed by the IO wrapper
+) -> ValueVerdict:
+    """Pure. No DB, no logging, no side effects.
+
+    The IO wrapper (see consult_with_audit below) reads the
+    kill-switch + value-set from the DB, calls this, then records
+    the verdict to the audit log.
+    """
+    if not enabled:
+        return ValueVerdict('allow', 'kill_switch_off', None, point)
+    # ... match logic ...
 ```
+
+**IO wrapper** in `agent_value_set_io.py` is what the 5 shim callers actually invoke:
+
+```python
+def consult_with_audit(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    action: dict,
+    point: str,
+    intent: str,
+) -> ValueVerdict:
+    enabled = is_value_layer_enabled(db, tenant_id)
+    value_set = read_value_set(db, tenant_id, agent_id)
+    verdict = consult(action, value_set, point=point, intent=intent, enabled=enabled)
+    record_consult_verdict(db, tenant_id, agent_id, action, verdict)
+    return verdict
+```
+
+This split keeps `consult()` cheap to unit-test (no fixtures, no DB) and centralizes the audit-log + kill-switch behavior in one wrapper.
 
 **Five callers** each wrap `consult(...)` with point-specific args:
 
@@ -112,7 +144,7 @@ def consult(
 | 4 | User-signal appraisal (emotion_engine) | `appraise_user_signal_with_values(payload, vs, current)` | calls `consult` with `point='user_signal'`, then scales PAD delta by 1.5x base if `pursue` match |
 | 5 | Synthesis (NightlyReflection) | `synthesize_value_observations(vs, day_data)` | Phase 2 only — calls `consult` to mark proposed actions, then emits `value_proposal` reflection kind |
 
-The 5 callers are thin shims; the match logic + kill-switch check + audit log all live in `consult`. Locked test: identical `(action, value_set)` produces identical verdict regardless of consultation_point.
+The 5 callers are thin shims around `consult_with_audit(...)`. Match logic + kill-switch behavior is centralized in the IO wrapper. Locked test: identical `(action, value_set, intent, enabled)` produces identical verdict via `consult()` regardless of consultation_point. Audit logging is the IO wrapper's job, not `consult()`'s.
 
 **`protect` matching is mutation-aware** (Luna review §6 correction): a `protect` match returns `block` only when `intent='mutate'`. Read/mention intents always allow.
 
@@ -154,7 +186,8 @@ The 5 callers are thin shims; the match logic + kill-switch check + audit log al
 |---|---|
 | `apps/api/migrations/144_value_layer_killswitch.sql` (NEW) | `tenant_features.value_layer_enabled` column + unique partial index on value-set version |
 | `apps/api/app/models/tenant_features.py` | Map the new column with `server_default=text('false')` |
-| `app/services/agent_value_set.py` (NEW) | `AgentValueSet` dataclass, read/write helpers (append-only, latest-wins), single `consult()` engine + verdict schema, 5 thin shim callers |
+| `app/services/agent_value_set.py` (NEW) | Pure module: `AgentValueSet` dataclass, `ValueVerdict` dataclass, pure `consult()` engine (no DB, no logging) |
+| `app/services/agent_value_set_io.py` (NEW) | IO wrapper: read/write helpers (append-only, latest-wins), `consult_with_audit()` that reads kill-switch + value-set, calls `consult()`, records verdict. 5 thin shim callers that the integration sites use. |
 | `app/api/v1/values.py` (NEW) | GET / PUT for operators, mounted at `/api/v1/luna/values` |
 | `apps/mcp-server/src/mcp_tools/values.py` (NEW) | `get_agent_value_set` MCP tool (mirrors #640's affect MCP tool shape) |
 | `app/services/agent_router.py` | Call `consult_routing` shim before dispatch |
@@ -227,7 +260,15 @@ Two more — one contradiction, one clarity:
 9. ~~§4.2 said `consult_reflection` always passes `intent='read'`, but §8 success criterion #2 said "a reflection that mentions a protect item but proposes touching it gets blocked at write time"~~ → **Resolved**: reflection-kind-aware intent flag. `risk` / `idea` / `tension` / `creative` are descriptive → `intent='read'`. `next_move` / `value_proposal` propose action → `intent='mutate'`. This is what makes the §8 criterion actually true.
 10. ~~§6 mentioned break-glass as one of two override paths but §5/PR sequence didn't list where it lands~~ → **Resolved**: break-glass marked as **Phase 1.5** in §6 and added as PR 6 in §10. Not in v1 ship, but explicitly scoped + scheduled.
 
-All ten resolved. Round-4 ask: re-read v4; sign off if clean.
+All ten resolved.
+
+### Round-4 (Luna 2026-05-21)
+
+One last purity contradiction:
+
+11. ~~§4.2 said "match logic + kill-switch check + audit log all live in `consult`" while §7/§10 described `consult()` and shims as pure/unit-testable~~ → **Resolved**: split into pure `consult()` (no DB, no logging) in `agent_value_set.py` + IO wrapper `consult_with_audit()` in `agent_value_set_io.py`. The 5 shim callers invoke the IO wrapper. Audit logging happens AFTER `consult()` returns, in the wrapper. Break-glass §10 PR 6 explicit "one audit-log entry per use" added.
+
+All 11 resolved.
 
 ---
 
@@ -235,12 +276,12 @@ All ten resolved. Round-4 ask: re-read v4; sign off if clean.
 
 | PR | Scope |
 |---|---|
-| 1 | Migration 144 (kill-switch column + version uniqueness index). `agent_value_set.py` service + dataclass + single `consult()` engine + 5 thin shim callers (pure, no integration yet). Unit tests for `consult()` + all 5 shims. Locked-invariant tests (empty-set safe, kill-switch-off-no-op, identical-action-same-verdict). |
+| 1 | Migration 144 (kill-switch column + version uniqueness index). `agent_value_set.py` pure module (`AgentValueSet` + `ValueVerdict` + `consult()`). `agent_value_set_io.py` IO wrapper (read/write helpers + `consult_with_audit` + 5 thin shim callers). Unit tests for `consult()` (no DB, no fixtures). Integration tests for IO wrapper. Locked-invariant tests (empty-set safe, kill-switch-off-no-op, identical-action-same-verdict via `consult()`). |
 | 2 | GET / PUT endpoint + MCP tool. Operator can write values; Luna can read her own. Append-only audit trail with monotonic version. |
 | 3 | Wire `consult_routing` into `agent_router`. Per-tenant kill-switch (default OFF). |
 | 4 | Wire `consult_reflection` into `reflection_validators` (O3 extension). Reflection-kind-aware intent flag (see §4.2 round-3 correction). |
 | 5 | Wire `appraise_user_signal_with_values` into `emotion_engine`. 1.5x `USER_SIGNAL_PLEASURE_GAIN` on `pursue` match, capped at `TOOL_OUTCOME_PLEASURE_GAIN`. |
-| 6 (Phase 1.5) | **Break-glass endpoint**. `POST /api/v1/luna/values/break-glass` — time-boxed value-set version with auto-expire (default 1 hour, max 24 hours) + audit log. Required for the §6 override-path #2 invariant to actually exist in code. |
+| 6 (Phase 1.5) | **Break-glass endpoint**. `POST /api/v1/luna/values/break-glass` — time-boxed value-set version with auto-expire (default 1 hour, max 24 hours). Records ONE audit-log entry per use (operator id, expires_at, prior version, reason). Required for the §6 override-path #2 invariant to actually exist in code. |
 | 7 (deferred to Phase 2) | Reflection-derived `value_proposal` synthesis mechanism + operator confirm endpoint. |
 
 Each PR is independently shippable and reviewable. Total: ~5 PRs for v1, plus Phase 2 later.
