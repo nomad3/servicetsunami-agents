@@ -62,6 +62,14 @@ CLASSIFICATION_CASES: list[
         "401 Unauthorized: invalid_grant — token expired",
         1, None, Status.NEEDS_AUTH, "auth",
     ),
+    # ── 5b. codex credential-loader connection refused ──────────────────
+    # Real prod stderr 2026-05-21 on Simon's tenant. Same shape +
+    # mechanism as the Gemini case (rule 6b from #628).
+    (
+        "codex_credential_load_failure_is_quota_exhausted",
+        "Failed to load Codex credentials: [Errno 111] Connection refused",
+        1, None, Status.QUOTA_EXHAUSTED, "quota",
+    ),
     # ── 6. gemini QUOTA — quota_exceeded / resource_exhausted ───────────
     (
         "gemini_cli_quota_exceeded_is_quota_exhausted",
