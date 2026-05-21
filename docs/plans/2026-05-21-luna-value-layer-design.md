@@ -214,11 +214,12 @@ Migration: **144 (one migration)**. Adds the kill-switch column + the value-set 
 
 ## 7. Test plan
 
-- Unit tests for each of the 5 consult helpers — pure functions, parametrized over (verb × protect/pursue/avoid × empty/populated).
-- Integration test: read/write/audit-trail through the value-set IO.
-- Locked invariant test: empty value set never blocks anything.
-- Locked invariant test: `protect` block survives operator force-flag.
-- Locked invariant test: kill-switch OFF makes every helper return allow.
+- **Unit tests for `consult()`** (pure module, no DB) — parametrized over (verb × protect/pursue/avoid × empty/populated × intent={read,mutate}).
+- **Integration / arg-shape tests for the 5 shim callers** (`consult_routing`, `consult_tool`, `consult_reflection`, `appraise_user_signal_with_values`, `synthesize_value_observations`): each shim passes the right `point` + `intent` to `consult_with_audit`. (Luna round-4 nit folded — shims are NOT pure; they invoke the IO wrapper.)
+- **Integration test for `agent_value_set_io.py`**: read/write/audit-trail through the value-set IO, append-only semantics, version monotonicity, latest-wins read ordering.
+- Locked invariant test: empty value set never blocks anything (via pure `consult()` with empty `AgentValueSet`).
+- Locked invariant test: `protect` block survives operator force-flag (only `PUT /values` or break-glass endpoint can override).
+- Locked invariant test: kill-switch OFF (`enabled=False`) makes every `consult()` call return `allow / kill_switch_off`.
 
 ---
 
