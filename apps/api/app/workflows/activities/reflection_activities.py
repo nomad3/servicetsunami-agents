@@ -110,16 +110,19 @@ async def write_reflections(
         log.info("write_reflections stub tenant=%s n=0", tenant_id)
         return 0
 
-    # Phase 2 will reconstruct NightlyReflection from each dict and
-    # call reflection_io.write_reflection in a loop. Today, no caller
-    # produces non-empty input so we never reach this branch — but
-    # we keep the import lazy so the activity can be registered on a
-    # worker that doesn't have the schemas loaded.
+    # Lazy imports keep activity registration cheap and let the O3
+    # validators ship before any synthesis activity actually emits
+    # payloads (the validators are themselves dormant until the
+    # synthesize_reflections stub starts producing dicts).
     from app.db.session import SessionLocal
+    from app.models.agent_memory import AgentMemory
     from app.schemas.reflection import NightlyReflection
     from app.services import reflection_io
+    from app.services.reflection_validators import validate_reflection
 
+    tenant_uuid = uuid.UUID(tenant_id)
     written = 0
+    rejected = 0
     db = SessionLocal()
     try:
         for payload in reflections:
@@ -131,20 +134,63 @@ async def write_reflections(
                     "tenant=%s err=%s",
                     tenant_id, exc,
                 )
+                rejected += 1
                 continue
+
+            # Fetch cited source-memory contents for the entity
+            # grounding validator. Bounded by the citation list, so
+            # the IN-clause is cheap (≤ a handful of UUIDs).
+            source_contents: list[str] = []
+            try:
+                cited_uuids = [uuid.UUID(s) for s in reflection.source_memory_ids]
+                source_rows = (
+                    db.query(AgentMemory.content)
+                    .filter(
+                        AgentMemory.tenant_id == str(tenant_uuid),
+                        AgentMemory.id.in_([str(u) for u in cited_uuids]),
+                    )
+                    .all()
+                )
+                source_contents = [str(r[0]) for r in source_rows if r[0]]
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "write_reflections: failed to fetch source memories "
+                    "for grounding check (rejecting reflection). tenant=%s err=%s",
+                    tenant_id, exc,
+                )
+                rejected += 1
+                continue
+
+            verdict = validate_reflection(
+                reflection,
+                db=db,
+                current_tenant_id=tenant_uuid,
+                source_memory_contents=source_contents,
+            )
+            if not verdict.ok:
+                log.warning(
+                    "write_reflections: validator rejected reflection. "
+                    "tenant=%s kind=%s reason=%s",
+                    tenant_id, reflection.kind, verdict.reason,
+                )
+                rejected += 1
+                continue
+
             new_id: Optional[uuid.UUID] = reflection_io.write_reflection(
                 db,
                 reflection=reflection,
-                current_tenant_id=uuid.UUID(tenant_id),
+                current_tenant_id=tenant_uuid,
             )
             if new_id is not None:
                 written += 1
+            else:
+                rejected += 1
     finally:
         db.close()
 
     log.info(
-        "write_reflections wrote=%s/%s tenant=%s",
-        written, len(reflections), tenant_id,
+        "write_reflections tenant=%s wrote=%s rejected=%s of total=%s",
+        tenant_id, written, rejected, len(reflections),
     )
     return written
 

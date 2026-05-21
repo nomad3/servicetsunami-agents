@@ -94,6 +94,15 @@ class TenantFeatures(Base):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
 
+    # Per-tenant opt-in for `creative` reflection kind (O3 locked
+    # decision #1). Default OFF — the synthesis loop produces
+    # creative reflections only for tenants that flipped this.
+    # Enforced by reflection_validators.validate_creative_opt_in
+    # inside write_reflections. Migration 143.
+    creative_reflections_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
     # NightlyReflectionWorkflow (O2 of #616) per-tenant kill-switch.
     # Default OFF in prod — locked decision #4 in the canonical design.
     # The workflow checks this flag at top-of-run and short-circuits
