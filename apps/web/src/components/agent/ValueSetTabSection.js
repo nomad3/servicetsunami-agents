@@ -287,12 +287,26 @@ const ValueSetTabSection = ({ agentId }) => {
 
   // Read the tenant-wide kill-switch. Independent of the value-set
   // read so a 5xx on /features doesn't block the editor.
+  // (Review NIT-1) Distinguish 401 (session expired) from other errors.
+  // A 401 leaving the switch as `false` would invite an immediate flip
+  // that re-fails; clearer to surface the session issue and leave the
+  // switch in the loading/unknown state until the next render.
   const loadKillSwitch = useCallback(async () => {
     try {
       const res = await valuesService.getFeatures();
       setKillSwitchEnabled(!!res.data?.value_layer_enabled);
-    } catch {
-      setKillSwitchEnabled(false);
+    } catch (err) {
+      if (err?.response?.status === 401) {
+        setError('Session expired — please sign in again.');
+        // Leave killSwitchEnabled as-is (null on first load, prior
+        // value on a re-read). The switch stays disabled because
+        // null short-circuits in the render.
+      } else {
+        // Non-auth failure — default the UI to OFF so the editor stays
+        // usable. Operators can still edit values; the kill-switch
+        // shape is independent.
+        setKillSwitchEnabled(false);
+      }
     }
   }, []);
 
@@ -423,14 +437,24 @@ const ValueSetTabSection = ({ agentId }) => {
             <span><Badge bg="secondary">OFF</Badge> code is shipped but inert. Flip ON to start enforcing the value set.</span>
           )}
         </div>
-        <Form.Check
-          type="switch"
-          id="value-layer-killswitch"
-          checked={!!killSwitchEnabled}
-          onChange={(e) => handleKillSwitchFlip(e.target.checked)}
-          disabled={killSwitchFlipping || killSwitchEnabled === null}
-          aria-label="toggle value layer kill-switch"
-        />
+        <div className="d-flex align-items-center">
+          {killSwitchFlipping && (
+            <Spinner
+              animation="border"
+              size="sm"
+              className="me-2"
+              aria-label="flipping kill-switch"
+            />
+          )}
+          <Form.Check
+            type="switch"
+            id="value-layer-killswitch"
+            checked={!!killSwitchEnabled}
+            onChange={(e) => handleKillSwitchFlip(e.target.checked)}
+            disabled={killSwitchFlipping || killSwitchEnabled === null}
+            aria-label="toggle value layer kill-switch"
+          />
+        </div>
       </Alert>
 
       <BreakGlassBanner valueSet={valueSet} />
@@ -449,7 +473,7 @@ const ValueSetTabSection = ({ agentId }) => {
             size="sm"
             className="me-2"
             onClick={() => setShowBreakGlass(true)}
-            disabled={saving || breakGlassSubmitting}
+            disabled={saving || breakGlassSubmitting || killSwitchFlipping}
             title={
               saving
                 ? 'Save in flight — wait for it to finish'
@@ -462,7 +486,7 @@ const ValueSetTabSection = ({ agentId }) => {
             variant="primary"
             size="sm"
             onClick={handleSave}
-            disabled={!hasChanges || saving || breakGlassSubmitting}
+            disabled={!hasChanges || saving || breakGlassSubmitting || killSwitchFlipping}
             title={
               breakGlassSubmitting
                 ? 'Break-glass in flight — wait for it to finish'
