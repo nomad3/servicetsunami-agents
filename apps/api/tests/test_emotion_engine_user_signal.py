@@ -92,16 +92,32 @@ def test_user_signal_gains_are_smaller_than_tool_events():
     A single emotional user turn cannot move PAD as much as a
     successful tool call.
 
-    Comparing pleasure axis: TOOL_OUTCOME = 0.30 vs USER_SIGNAL = 0.15.
+    Locks each axis against the actual TOOL_* constants (not a
+    hard-coded ceiling) — superpowers review I3 fix. A regression
+    that bumped USER_SIGNAL_AROUSAL_GAIN above TOOL_OUTCOME_AROUSAL_GAIN
+    would now break the test.
     """
     from app.services.emotion_engine import (
+        TOOL_FAILURE_AROUSAL_GAIN,
+        TOOL_FAILURE_DOMINANCE_LOSS,
         TOOL_FAILURE_PLEASURE_LOSS,
+        TOOL_OUTCOME_AROUSAL_GAIN,
+        TOOL_OUTCOME_DOMINANCE_GAIN,
         TOOL_OUTCOME_PLEASURE_GAIN,
     )
+    # Pleasure: strictly smaller — pleasure is the most-load-bearing
+    # axis for "user dominance" prevention.
     assert USER_SIGNAL_PLEASURE_GAIN < TOOL_OUTCOME_PLEASURE_GAIN
     assert USER_SIGNAL_PLEASURE_GAIN < TOOL_FAILURE_PLEASURE_LOSS
-    assert USER_SIGNAL_AROUSAL_GAIN <= 0.15
-    assert USER_SIGNAL_DOMINANCE_GAIN <= 0.15
+    # Arousal and dominance: ≤ tool gains. Phase 1.5 deliberately ties
+    # USER_SIGNAL_AROUSAL_GAIN to TOOL_OUTCOME_AROUSAL_GAIN (both 0.10)
+    # since user-text arousal is the noisiest axis but tool outcomes
+    # also nudge arousal mildly. Strict-less would force a constant
+    # bump without strong design justification.
+    assert USER_SIGNAL_AROUSAL_GAIN <= TOOL_OUTCOME_AROUSAL_GAIN
+    assert USER_SIGNAL_AROUSAL_GAIN <= TOOL_FAILURE_AROUSAL_GAIN
+    assert USER_SIGNAL_DOMINANCE_GAIN <= TOOL_OUTCOME_DOMINANCE_GAIN
+    assert USER_SIGNAL_DOMINANCE_GAIN <= TOOL_FAILURE_DOMINANCE_LOSS
 
 
 def test_adversarial_classifier_output_cannot_exceed_bounds():

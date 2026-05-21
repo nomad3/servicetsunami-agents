@@ -94,6 +94,7 @@ def _iter_pair_messages(
         FROM chat_messages cm
         JOIN chat_sessions cs ON cm.session_id = cs.id
         WHERE cm.role = 'user'
+          AND cs.tenant_id IS NOT NULL
           AND COALESCE(cm.agent_id, cs.agent_id) IS NOT NULL
           AND cm.content IS NOT NULL
           AND length(trim(cm.content)) > 0
@@ -152,6 +153,14 @@ async def _run(
     dry_run: bool,
     force: bool,
 ) -> dict:
+    # Sync SQLAlchemy Session held across async awaits. This is SAFE
+    # here ONLY because no DB I/O happens during an await: the awaits
+    # are HTTP calls to Ollama, and the Session is touched only
+    # synchronously between them. Future refactors that introduce DB
+    # I/O inside an await MUST switch to per-pair sessions or an
+    # async session — otherwise the Postgres conn pool will deadlock
+    # under load. (Superpowers review I2 — design constraint locked
+    # here so the next maintainer knows what they're touching.)
     db: Session = SessionLocal()
     stats = {
         "pairs_seen": 0,
@@ -162,6 +171,11 @@ async def _run(
     }
     try:
         grouped = _iter_pair_messages(db, tenant_id, max_msgs_per_agent)
+        # Close the read transaction explicitly. Without this, the txn
+        # opened by the bulk SELECT stays open across the entire
+        # ~15-minute Ollama loop and Postgres may kill the conn for
+        # idle_in_transaction_session_timeout. Superpowers review I2.
+        db.commit()
         log.info(
             "found %s (tenant, agent) pairs; backend=%s cap=%s/pair",
             len(grouped), backend, max_msgs_per_agent,

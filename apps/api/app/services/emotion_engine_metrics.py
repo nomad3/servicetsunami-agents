@@ -74,13 +74,16 @@ emotion_appraise_clamp_events = Counter(
 )
 
 # Counts each event-type passed through appraise_event. Useful for
-# verifying the constitutive-vs-performative invariant in production
-# (a non-zero count for user_signal would be a regression).
+# verifying appraisal volume per tenant. Phase 1.5 (Luna-approved
+# 2026-05-20) introduced the user_signal event_type — it's now an
+# expected non-zero label, not a regression signal.
 emotion_appraise_events_total = Counter(
     "emotion_appraise_events_total",
     "Total appraisal events processed by the emotion engine, "
-    "labelled by event type. Should always be zero for user_signal "
-    "in Phase 1-2.",
+    "labelled by event type (tool_outcome, tool_failure, peer_signal, "
+    "user_signal). Phase 1.5+: user_signal is bounded by the "
+    "user_signal_classifier boundary + small gain constants — see "
+    "emotion_engine.py module docstring.",
     labelnames=("tenant_id", "event_type"),
 )
 
