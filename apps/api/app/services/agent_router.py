@@ -286,7 +286,18 @@ def _greeting_template(intent: dict | None, message: str, agent_slug: str) -> st
         name = agent_slug.replace("_", " ").replace("-", " ").title()
     if is_spanish:
         return f"¡Hola! Soy {name}. ¿En qué te puedo ayudar?"
-    return f"Hi! I'm {name}. How can I help?"
+    # English greetings fall through to the LLM (return None). The
+    # prior templated "Hi! I'm Luna. How can I help?" sounded robotic
+    # and stripped Luna's persona out of every first-message reply
+    # (Simon's 2026-05-21 call). The Spanish template stays because
+    # the Spanish-first design call is separate and the canned reply
+    # there hasn't been flagged as off-tone.
+    #
+    # Latency cost: ~21s on Gemma 4 cold for the LLM path that this
+    # template was originally avoiding. Accepted because persona
+    # authenticity beats the 21s saving on a sub-5%-of-traffic class
+    # of messages.
+    return None
 
 
 # Display labels for CLI platforms surfaced in the chat UI's routing
