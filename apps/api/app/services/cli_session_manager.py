@@ -781,32 +781,109 @@ def _run_agent_session_legacy(
 
     _mark("setup")
 
-    primary_slug = resolve_primary_agent_slug(db, tenant_id)
-    skill = skill_manager.get_skill_by_slug(agent_slug, str(tenant_id))
-    if not skill and agent_slug != primary_slug:
-        logger.info("Skill '%s' not found, falling back to primary '%s'", agent_slug, primary_slug)
-        skill = skill_manager.get_skill_by_slug(primary_slug, str(tenant_id))
-        if skill:
-            agent_slug = primary_slug
-    if not skill:
-        err = f"No agent skill found (tried '{agent_slug}' and '{primary_slug}')"
-        logger.error(err)
-        metadata["error"] = err
-        return None, metadata
-
-    skill_body = skill.description or ""
-
-    # Compose additional skill bodies (PR2). The identity slug already
-    # provided `skill_body`; append the rest of the declared list with a
-    # clear section header so the model can tell them apart.
+    # (#663 Path B per Luna's design call) — when the chat session is
+    # bound to a real Agent row, that row's ``persona_prompt`` is the
+    # primary identity mandate. Skills declared in
+    # ``agent.config.skills`` are additive on top. Look up the agent
+    # by the normalized name slug (mirrors the agent_router lookup).
     #
-    # Dedup against the identity slug AND any earlier appearance — a
-    # config like `skills: [luna, calculator, calculator]` composes
-    # calculator exactly once.
-    composed_slugs = list(agent_skill_slugs) if agent_skill_slugs else [agent_slug]
+    # If persona_prompt is set: use it as ``skill_body``. Don't fall
+    # back to a marketplace skill of the same slug — persona wins.
+    #
+    # If persona_prompt is empty AND no marketplace skill matches the
+    # slug: try the primary-slug fallback (legacy behavior preserved
+    # for unbound callers + tenants with empty persona).
+    #
+    # If both miss: run on a minimal "clean base persona" rather than
+    # erroring or ghosting Luna. (Luna's "clean persona, not
+    # accidental Luna-clone" rule.)
+    from sqlalchemy import func as _sa_func
+    from app.models.agent import Agent as _AgentModel
+
+    persona_prompt: Optional[str] = None
+    try:
+        agent_row_for_persona = (
+            db.query(_AgentModel)
+            .filter(
+                _AgentModel.tenant_id == tenant_id,
+                _sa_func.replace(
+                    _sa_func.replace(
+                        _sa_func.lower(_AgentModel.name), " ", "-"
+                    ),
+                    "_", "-",
+                ) == agent_slug.lower().replace(" ", "-").replace("_", "-"),
+            )
+            .first()
+        )
+        if agent_row_for_persona is not None:
+            persona_prompt = (
+                agent_row_for_persona.persona_prompt or None
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.debug(
+            "persona_prompt lookup failed for slug=%r tenant=%s: %s",
+            agent_slug, str(tenant_id)[:8], e,
+        )
+
+    primary_slug = resolve_primary_agent_slug(db, tenant_id)
+    skill_body: str
+    if persona_prompt:
+        # Persona-driven identity. Marketplace skills append on top
+        # below; the identity-skill lookup is skipped entirely so a
+        # missing skill named after the agent (the common case)
+        # doesn't trip the luna fallback.
+        skill_body = persona_prompt
+        skill = None
+        logger.info(
+            "Loaded persona_prompt identity for agent slug=%s tenant=%s "
+            "(%d chars); skill-by-slug lookup skipped",
+            agent_slug, str(tenant_id)[:8], len(persona_prompt),
+        )
+    else:
+        skill = skill_manager.get_skill_by_slug(agent_slug, str(tenant_id))
+        if not skill and agent_slug != primary_slug:
+            logger.info(
+                "Skill '%s' not found, falling back to primary '%s'",
+                agent_slug, primary_slug,
+            )
+            skill = skill_manager.get_skill_by_slug(primary_slug, str(tenant_id))
+            if skill:
+                agent_slug = primary_slug
+        if skill:
+            skill_body = skill.description or ""
+        else:
+            # Both persona AND skill missed. Use a minimal clean base
+            # persona — better than the legacy 5xx that broke chats on
+            # agents without an explicit identity skill.
+            logger.warning(
+                "No persona_prompt or marketplace skill found for "
+                "slug=%r tenant=%s; running on clean base persona",
+                agent_slug, str(tenant_id)[:8],
+            )
+            skill_body = (
+                "You are an AI assistant. Be clear, accurate, and concise. "
+                "When the user asks for an action you cannot take, say so."
+            )
+
+    # Compose additional skill bodies (PR2). With Path B, two cases:
+    #   - persona-driven identity (persona_prompt loaded): ALL slugs in
+    #     `agent_skill_slugs` are extras to append.
+    #   - skill-driven identity (legacy): `agent_slug` is the identity
+    #     (already in `skill_body`); slugs beyond [0] are extras.
+    # Dedup against the identity AND any earlier appearance — a config
+    # like `skills: [luna, calculator, calculator]` composes calculator
+    # exactly once.
+    composed_slugs = list(agent_skill_slugs) if agent_skill_slugs else (
+        [] if persona_prompt else [agent_slug]
+    )
     seen: set[str] = {agent_slug}
+    if persona_prompt:
+        # Identity didn't come from a skill — start extras at [0].
+        start_idx = 0
+    else:
+        start_idx = 1
     extra_slugs: list[str] = []
-    for s in composed_slugs[1:]:
+    for s in composed_slugs[start_idx:]:
         if not s or s in seen:
             continue
         seen.add(s)

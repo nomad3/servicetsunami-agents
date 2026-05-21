@@ -449,16 +449,18 @@ def _generate_agentic_response(
             agent_skill_slugs = [str(s) for s in skills_list if s]
         elif agent_config.get("skill_slug"):
             agent_skill_slugs = [str(agent_config["skill_slug"])]
-        else:
-            # Try to find a matching skill by agent name (case-insensitive).
-            # Existing fallback for agents created before either field was set.
-            agent_name_lower = (session.agent.name or "").lower()
-            for skill in skill_manager.list_skills():
-                if skill.slug == agent_name_lower or agent_name_lower.startswith(skill.slug):
-                    agent_skill_slugs = [skill.slug]
-                    break
 
-    if not agent_skill_slugs:
+    # (#663 Path B per Luna's design call) — when the chat session is
+    # bound to an Agent row, do NOT fall back to primary_slug ("luna")
+    # when the agent has no declared skills. That was the legacy
+    # behaviour that ghosted Luna onto every new agent. The agent's
+    # `persona_prompt` is the primary mandate; skills are additive on
+    # top. cli_session_manager handles the empty-skills case by
+    # running on persona alone.
+    #
+    # Unbound legacy callers (no session.agent) keep the primary_slug
+    # fallback — that's the WhatsApp / one-off-prompt path.
+    if not agent_skill_slugs and not session.agent:
         agent_skill_slugs = [primary_slug]
 
     # `agent_slug` historically used the first skill slug as identity.
