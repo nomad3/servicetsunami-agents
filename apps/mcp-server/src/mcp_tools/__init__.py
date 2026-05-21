@@ -34,3 +34,4 @@ from src.mcp_tools import web  # noqa: F401  # web_search + fetch_url + discover
 from src.mcp_tools import session_events  # noqa: F401  # Phase 2 — read_session_events
 from src.mcp_tools import habits  # noqa: F401  # #297 — log_habit_observation
 from src.mcp_tools import affect  # noqa: F401  # #332 — get_agent_affect
+from src.mcp_tools import values  # noqa: F401  # #647 PR 2 — get_agent_value_set

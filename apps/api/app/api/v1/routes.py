@@ -26,6 +26,7 @@ from app.api.v1 import (
     habits,
     metacog,
     reflections,
+    values,
     memories,
     team,
     memory_remember,
@@ -167,6 +168,9 @@ router.include_router(team.router, prefix="", tags=["team"])
 # tenant-scoped /api/v1/metacog namespace per the canonical design.
 router.include_router(metacog.router, prefix="", tags=["metacog"])
 router.include_router(reflections.router, prefix="", tags=["reflections"])
+# Luna value-layer operator endpoints (#647 PR 2). Empty prefix so
+# routes land at /api/v1/luna/values{,/agents/{id}}.
+router.include_router(values.router, prefix="", tags=["values"])
 # Habit observation ingestion (#297) — Tauri client writes vision-derived
 # signals via the internal POST endpoint (X-Internal-Key + X-Tenant-Id auth).
 router.include_router(habits.router, prefix="", tags=["habits"])
