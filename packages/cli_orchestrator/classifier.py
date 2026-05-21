@@ -187,6 +187,32 @@ _STDERR_RULES: list[_Rule] = [
         legacy_label="auth",
         test_id="codex_unauthorized_is_needs_auth",
     ),
+    # 5b. codex credential-loader connection refused. Same shape as
+    # gemini's rule 6b — Codex's OAuth refresh path tries to reach a
+    # local credential server, and when that server is down (sidecar
+    # crash, namespace issue, race during redeploy) the CLI emits
+    # "Failed to load Codex credentials: [Errno 111] Connection
+    # refused" and the whole turn dies. Observed in prod 2026-05-21
+    # on Simon's tenant. Without this rule the chain treats it as a
+    # generic failure, never cooldowns Codex, and keeps re-picking
+    # it every chat turn while Claude/Gemini sit idle. Classifying
+    # as QUOTA_EXHAUSTED + legacy_label='quota' triggers the 600s
+    # cooldown + chain skip (semantic shorthand for "don't try Codex
+    # for a while" — same playbook regardless of which Codex-side
+    # thing broke).
+    _Rule(
+        platform="codex",
+        pattern=re.compile(
+            r"failed\s+to\s+load\s+codex\s+credentials"
+            # ECONNREFUSED variants for wording-shift resilience:
+            r"|codex.*\[errno\s*111\]\s*connection\s*refused"
+            r"|codex.*credentials.*connection\s*refused",
+            re.IGNORECASE,
+        ),
+        status=Status.QUOTA_EXHAUSTED,
+        legacy_label="quota",
+        test_id="codex_credential_load_failure_is_quota_exhausted",
+    ),
     # 6. gemini quota — quota_exceeded / resource_exhausted
     _Rule(
         platform="gemini_cli",
