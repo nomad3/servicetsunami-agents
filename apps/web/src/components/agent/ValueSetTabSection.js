@@ -245,6 +245,8 @@ const ValueSetTabSection = ({ agentId }) => {
   const [info, setInfo] = useState(null);
   const [showBreakGlass, setShowBreakGlass] = useState(false);
   const [breakGlassSubmitting, setBreakGlassSubmitting] = useState(false);
+  const [killSwitchEnabled, setKillSwitchEnabled] = useState(null); // null = loading
+  const [killSwitchFlipping, setKillSwitchFlipping] = useState(false);
 
   // (Review NIT-3) Friendlier error mapping. Surface short status-coded
   // messages instead of forwarding raw backend prose; the FastAPI 503
@@ -282,6 +284,50 @@ const ValueSetTabSection = ({ agentId }) => {
   useEffect(() => {
     if (agentId) load();
   }, [agentId, load]);
+
+  // Read the tenant-wide kill-switch. Independent of the value-set
+  // read so a 5xx on /features doesn't block the editor.
+  const loadKillSwitch = useCallback(async () => {
+    try {
+      const res = await valuesService.getFeatures();
+      setKillSwitchEnabled(!!res.data?.value_layer_enabled);
+    } catch {
+      setKillSwitchEnabled(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadKillSwitch();
+  }, [loadKillSwitch]);
+
+  const handleKillSwitchFlip = async (nextEnabled) => {
+    setKillSwitchFlipping(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const res = await valuesService.setValueLayerEnabled(nextEnabled);
+      const persisted = !!res.data?.value_layer_enabled;
+      setKillSwitchEnabled(persisted);
+      if (persisted !== nextEnabled) {
+        // Backend silently dropped the field — caller isn't superuser.
+        setError(
+          'Only a superuser can change the tenant kill-switch. ' +
+            'Your request was dropped server-side.'
+        );
+      } else {
+        setInfo(
+          nextEnabled
+            ? 'Value layer is now ACTIVE for this tenant.'
+            : 'Value layer is now OFF (inert) for this tenant.'
+        );
+      }
+    } catch (err) {
+      setError(friendlyError(err, 'Could not flip kill-switch.'));
+      loadKillSwitch();
+    } finally {
+      setKillSwitchFlipping(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!draft) return;
@@ -363,6 +409,30 @@ const ValueSetTabSection = ({ agentId }) => {
 
   return (
     <div>
+      {/* Tenant-wide kill-switch row. value_layer_enabled gates whether
+          ANY of the 5 consultation points (routing/tool/reflection/
+          user_signal/synthesis) actually fire — default OFF. */}
+      <Alert variant={killSwitchEnabled ? 'success' : 'secondary'} className="d-flex align-items-center justify-content-between mb-3">
+        <div>
+          <strong>Tenant kill-switch</strong>:{' '}
+          {killSwitchEnabled === null ? (
+            <span className="text-muted">loading…</span>
+          ) : killSwitchEnabled ? (
+            <span><Badge bg="success">ACTIVE</Badge> blocks + warnings fire on chat turns matching your protect/avoid slugs.</span>
+          ) : (
+            <span><Badge bg="secondary">OFF</Badge> code is shipped but inert. Flip ON to start enforcing the value set.</span>
+          )}
+        </div>
+        <Form.Check
+          type="switch"
+          id="value-layer-killswitch"
+          checked={!!killSwitchEnabled}
+          onChange={(e) => handleKillSwitchFlip(e.target.checked)}
+          disabled={killSwitchFlipping || killSwitchEnabled === null}
+          aria-label="toggle value layer kill-switch"
+        />
+      </Alert>
+
       <BreakGlassBanner valueSet={valueSet} />
 
       <div className="d-flex align-items-center justify-content-between mb-3">

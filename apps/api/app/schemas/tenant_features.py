@@ -40,6 +40,11 @@ class TenantFeaturesBase(BaseModel):
     # Reinforcement Learning
     rl_enabled: bool = False
     rl_settings: Optional[Dict[str, Any]] = None
+    # Luna Value Layer (#647). Per-tenant kill-switch. Default OFF so a
+    # tenant that seeded a draft value set never has blocks fire against
+    # their chat path until an operator explicitly opts in. Mirrors the
+    # nightly_reflection_enabled pattern.
+    value_layer_enabled: bool = False
 
 
 class TenantFeaturesCreate(TenantFeaturesBase):
@@ -69,6 +74,7 @@ class TenantFeaturesUpdate(BaseModel):
     cpa_export_format: Optional[str] = None
     rl_enabled: Optional[bool] = None
     rl_settings: Optional[Dict[str, Any]] = None
+    value_layer_enabled: Optional[bool] = None
 
 
 class TenantFeatures(TenantFeaturesBase):

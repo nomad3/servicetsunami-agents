@@ -52,6 +52,7 @@ def _make_row(**overrides):
         storage_limit_gb=10.0,
         hide_agentprovision_branding=False,
         plan_type="starter",
+        value_layer_enabled=False,
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -152,6 +153,34 @@ def test_is_superuser_defaults_to_false(patched_get, db):
     # No is_superuser kwarg — default path.
     service.update_features(db, patched_get.tenant_id, update)
     assert patched_get.max_agents == 10
+
+
+def test_value_layer_enabled_is_superuser_only(patched_get, db, caplog):
+    """The value-layer kill-switch (#647) is a tenant-wide policy
+    switch — must require superuser. A non-superuser PUT must NOT
+    flip it; the field gets dropped + logged."""
+    update = TenantFeaturesUpdate(value_layer_enabled=True)
+    with caplog.at_level(logging.WARNING, logger="app.services.features"):
+        service.update_features(
+            db, patched_get.tenant_id, update, is_superuser=False
+        )
+    assert patched_get.value_layer_enabled is False, (
+        "non-superuser flipped value_layer_enabled — security regression"
+    )
+    assert any(
+        "dropped superuser-only fields" in rec.message
+        and "value_layer_enabled" in rec.message
+        for rec in caplog.records
+    )
+
+
+def test_superuser_can_flip_value_layer_enabled(patched_get, db):
+    """A superuser PUT with value_layer_enabled=True must persist."""
+    update = TenantFeaturesUpdate(value_layer_enabled=True)
+    service.update_features(
+        db, patched_get.tenant_id, update, is_superuser=True
+    )
+    assert patched_get.value_layer_enabled is True
 
 
 def test_returns_none_when_row_missing(monkeypatch, db):

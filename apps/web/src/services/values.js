@@ -31,6 +31,16 @@ const valuesService = {
   breakGlassDefault: (body) => api.post('/luna/values/break-glass', body),
   breakGlassForAgent: (agentId, body) =>
     api.post(`/luna/values/agents/${agentId}/break-glass`, body),
+
+  // Tenant-level kill-switch (tenant_features.value_layer_enabled).
+  // GET reads the full features payload; the caller picks out
+  // value_layer_enabled. PUT only sends the one field; the backend's
+  // _MEMBER_WRITABLE_FIELDS allowlist silently drops it for
+  // non-superusers (and logs at WARNING). The UI re-reads after PUT
+  // to show whether the change actually persisted.
+  getFeatures: () => api.get('/features'),
+  setValueLayerEnabled: (enabled) =>
+    api.put('/features', { value_layer_enabled: !!enabled }),
 };
 
 export default valuesService;
