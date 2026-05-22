@@ -176,6 +176,23 @@ def consult_with_audit(
             tenant_id, agent_id, verdict.category,
             verdict.detection_tier, verdict.trigger_id,
         )
+        # (PR 7) Repeat-attempt detection — runs AFTER the verdict
+        # has been recorded so the new row is counted. Best-effort:
+        # any failure here is bookkeeping; the user-facing refusal
+        # already returned.
+        try:
+            from app.services.platform_safety_rate_limit import (
+                check_repeat_attempts,
+            )
+            check_repeat_attempts(
+                db, tenant_id=tenant_id, user_id=user_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.debug(
+                "platform_safety.rate_limit check raised (%s); "
+                "ignored — refusal already fired",
+                exc,
+            )
         return verdict
 
     # Tier 3 — LLM classifier. Runs only when tier 1+2 missed AND
