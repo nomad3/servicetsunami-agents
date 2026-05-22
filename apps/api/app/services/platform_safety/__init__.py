@@ -186,6 +186,49 @@ _TIER1_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
         "bulk_malware",
         "bm-001-ransomware-deploy-intent",
     ),
+    # ── Spanish-language tier-1 patterns (PR 8 — design §8) ─────────
+    # Cover the same intent shapes in Spanish so a multilingual
+    # tenant gets line-speed coverage in either language. Tier 2's
+    # multilingual embeddings cover the long tail across all
+    # languages we may host; tier 1 stays narrow + bilingual for
+    # the cheap path.
+    (
+        _compile(
+            r"\b(sintetiz[a-z]*|fabric[a-z]*|produc[a-z]*|"
+            r"armament[a-z]*)\b[\s\S]{0,80}\b"
+            r"(ántrax|antrax|viruela|sarín|sarin|"
+            r"ricina|botulinum|tabún|tabun|novichok)\b"
+        ),
+        "mass_harm_synthesis",
+        "mh-001-es-bioweapon-synthesis-verb",
+    ),
+    (
+        _compile(
+            r"\b(constru[ií]r|ensamblar|fabricar|montar)\b"
+            r"[\s\S]{0,60}\b"
+            r"(arma[\s_-]*nuclear|bomba[\s_-]*at[óo]mica|"
+            r"dispositivo[\s_-]*de[\s_-]*fisi[óo]n|"
+            r"uranio[\s_-]*enriquecido)\b"
+        ),
+        "mass_harm_synthesis",
+        "mh-002-es-nuclear-construction-verb",
+    ),
+    (
+        _compile(
+            # Conjugated verb stems — match all common forms
+            # (escribir/escribe/escribió/escriba/escribiendo etc.)
+            r"\b(escrib[a-záéíóú]+|gener[a-záéíóú]+|cre[a-záéíóú]+|"
+            r"constru[a-záéíóú]+|fabric[a-záéíóú]+)\b"
+            r"[\s\S]{0,40}\b"
+            r"(ransomware|malware[\s_-]*destructivo|"
+            r"crypter[\s_-]*polim[óo]rfico)\b[\s\S]{0,80}\b"
+            r"(despleg[a-záéíóú]+|distribu[ií]r|distribuy[a-záéíóú]+|"
+            r"propag[a-záéíóú]+|infect[a-záéíóú]+|atac[a-záéíóú]+)\b"
+        ),
+        "bulk_malware",
+        "bm-001-es-ransomware-deploy-intent",
+    ),
+
     # NOTE: CSAM, child-safety grooming, and detailed terror-planning
     # patterns are NOT in this public file. They are loaded at runtime
     # from the curated private corpus (PR 4 mechanism). Including them
