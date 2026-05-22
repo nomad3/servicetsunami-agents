@@ -197,23 +197,27 @@ _TIER1_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
 # ── Pure consult ─────────────────────────────────────────────────────
 
 
-def consult(message: str) -> PlatformSafetyVerdict:
-    """Tier-1 regex screen.
+def consult(message: str, *, embed_fn=None) -> PlatformSafetyVerdict:
+    """Layered detection: tier 1 → tier 2.
 
-    Pure function — no DB, no logging, no IO. The IO wrapper in
-    ``platform_safety_io.py`` is responsible for audit recording +
-    fail-open/closed policy on classifier crashes (tier 2+).
+    Pure function from the IO layer's perspective — no DB, no
+    logging, no DB-backed audit. ``embed_fn`` is the only IO seam
+    (the tier-2 embedding call), injectable for tests.
 
-    Tier 1 is line-speed: returns in <1ms for typical messages.
+    Tier 1 runs unconditionally (regex, line-speed, ~1ms p99).
+    Tier 2 runs ONLY when tier 1 misses AND the message hits a
+    ``candidate_categories()`` pre-screen. ~10-30ms when it runs;
+    skipped (~99% of turns) when the pre-screen misses.
+
+    Returns the FIRST matching pattern's verdict at tier 1; the
+    highest-similarity corpus hit above its threshold at tier 2.
+
     Empty/whitespace-only messages allow trivially.
-
-    Returns the FIRST matching pattern's verdict. We don't continue
-    scanning after the first match — a message that hits any tier-1
-    pattern is already blocked.
     """
     if not message or not message.strip():
         return PlatformSafetyVerdict.allow()
 
+    # Tier 1: regex pass
     for pattern, category, trigger_id in _TIER1_PATTERNS:
         if pattern.search(message):
             return PlatformSafetyVerdict.block(
@@ -221,6 +225,21 @@ def consult(message: str) -> PlatformSafetyVerdict:
                 detection_tier=1,
                 trigger_id=trigger_id,
             )
+
+    # Tier 2: embedding pass (escalated only when pre-screen flags
+    # the message as potentially sensitive). Catches the long tail
+    # tier 1 misses. Empty corpus = no-op (the PR 4 default until
+    # operators mount a curated corpus via PLATFORM_SAFETY_CORPUS_PATH).
+    from app.services.platform_safety.tier2 import evaluate
+
+    hit = evaluate(message, embed_fn=embed_fn)
+    if hit.hit is not None:
+        return PlatformSafetyVerdict.block(
+            category=hit.hit.category,
+            detection_tier=2,
+            confidence=hit.confidence,
+            trigger_id=hit.hit.trigger_id,
+        )
 
     return PlatformSafetyVerdict.allow()
 
