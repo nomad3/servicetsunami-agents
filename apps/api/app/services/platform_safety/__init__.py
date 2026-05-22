@@ -194,8 +194,15 @@ _TIER1_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     # the cheap path.
     (
         _compile(
+            # (Review PR 8 NIT) `elaborar` is the most natural
+            # Spanish verb for synthesizing a substance — added
+            # alongside sintetizar/fabricar/producir/armamentizar.
+            # Skipping `preparar` (too broad — "prepare a
+            # presentation about anthrax" would false-positive);
+            # tier 2 catches that via embedding.
             r"\b(sintetiz[a-z]*|fabric[a-z]*|produc[a-z]*|"
-            r"armament[a-z]*)\b[\s\S]{0,80}\b"
+            r"armament[a-z]*|elabor[a-záéíóú]+)\b"
+            r"[\s\S]{0,80}\b"
             r"(ántrax|antrax|viruela|sarín|sarin|"
             r"ricina|botulinum|tabún|tabun|novichok)\b"
         ),
