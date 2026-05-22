@@ -365,6 +365,46 @@ def test_tier3_classifier_crash_returns_allow(monkeypatch):
     assert verdict.decision == "allow"
 
 
+def test_gate_drift_defense_unknown_category_allows(monkeypatch):
+    """(Review NIT) Belt-and-suspenders: if a future refactor lets a
+    non-VALID Tier3Result.category bypass the parse-layer drift
+    defense, the IO gate's category_for_label() ValueError catch
+    must still allow + log. No audit row, no block."""
+    from app.services import platform_safety_io
+    from app.services.platform_safety import PlatformSafetyVerdict
+
+    monkeypatch.setattr(
+        platform_safety_io, "consult",
+        lambda m: PlatformSafetyVerdict.allow(),
+    )
+    monkeypatch.setattr(
+        "app.services.platform_safety.tier2.candidate_categories",
+        lambda m: ("bulk_malware",),
+    )
+    # Bypass the parse-layer drift defense by returning a result
+    # with a category that's NOT in VALID_CATEGORIES
+    monkeypatch.setattr(
+        "app.services.platform_safety.tier3.classify",
+        lambda m, c: Tier3Result(
+            True, "ghost_category_bypassed_parse", 0.9, "anthropic",
+            trigger_id="t3-ghost",
+        ),
+    )
+
+    db, tenant_id, agent_id = _stub_db_and_user()
+    verdict = platform_safety_io.consult_with_audit(
+        db,
+        tenant_id=tenant_id, agent_id=agent_id,
+        session_id=None, user_id=None,
+        message="some malware-ish text",
+    )
+    assert verdict.decision == "allow", (
+        "unknown category from tier 3 must allow (drift defense)"
+    )
+    # No audit row written — drift case logged but not recorded
+    assert db.add.call_count == 0
+
+
 def test_all_categories_default_to_shadow_mode():
     """Locks the v1 invariant — every category ships with
     tier3_enforcement=False. The 14-day shadow window is the

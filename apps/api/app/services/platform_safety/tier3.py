@@ -114,6 +114,11 @@ def _build_user_prompt(message: str, candidate_categories: tuple[str, ...]) -> s
 # ── JSON extraction ──────────────────────────────────────────────────
 
 
+# (Review NIT) Single-level brace match — assumes the classifier
+# response is a flat JSON object. The _CLASSIFIER_SYSTEM prompt
+# forbids nested structures (decision/category/confidence are scalars),
+# so this is sufficient. If we ever add a nested `evidence` field,
+# upgrade to a balanced-brace parser.
 _JSON_OBJ_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
 
 
@@ -199,7 +204,10 @@ def _parse_classifier_response(
 
 
 _ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
-_ANTHROPIC_TIMEOUT_S = 8.0
+# (Review NIT) Tighter timeout so a slow-but-not-failed Anthropic
+# doesn't pin the chat hot path. We fall back to Gemma 4 on timeout,
+# so 4s primary + ~3s gemma is the worst-case latency envelope.
+_ANTHROPIC_TIMEOUT_S = 4.0
 
 
 def _classify_via_anthropic(
@@ -237,10 +245,21 @@ def _classify_via_anthropic(
                 "content": _build_user_prompt(message, candidate_categories),
             }],
         )
-        # resp.content is a list of content blocks; concatenate text
+        # resp.content is a list of content blocks; concatenate text.
+        # (Review NIT) `getattr(..., "text", "")` silently treats
+        # non-text content blocks (tool_use, etc.) as empty. The
+        # classifier prompt should never produce those, but log if
+        # the assembled raw text is empty so we can diagnose.
         raw = "".join(
             getattr(blk, "text", "") for blk in (resp.content or [])
         )
+        if not raw:
+            log.debug(
+                "platform_safety.tier3: anthropic returned empty text "
+                "(blocks=%d, types=%s)",
+                len(resp.content or []),
+                [type(b).__name__ for b in (resp.content or [])],
+            )
         return _parse_classifier_response(raw, provider="anthropic")
     except Exception as exc:  # noqa: BLE001
         log.warning(
