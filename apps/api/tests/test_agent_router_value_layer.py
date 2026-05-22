@@ -404,3 +404,109 @@ def test_value_layer_consult_skipped_when_agent_slug_unresolved(
     # slug path (legacy dispatch path).
     assert metadata.get("platform") != "value_layer_block"
     assert chain_calls["n"] >= 1
+
+
+def test_session_bound_agent_not_overridden_by_tool_group_match(
+    monkeypatch,
+):
+    """(#338 fix) When chat.py passes an agent-name slug like
+    "triage-agent" that resolves to a real Agent row via the early
+    `_agent_row` lookup, the session binding is AUTHORITATIVE — the
+    tool-group selection block below MUST NOT reassign agent_slug to
+    a different agent that happens to have better tool_group overlap
+    with the message intent.
+
+    Bug: a user binds a session to Triage Agent, sends "who are
+    you?", intent matcher returns a generic tool_group set, and the
+    tool-group scan picks Luna General Assistant (best overlap) →
+    response identity becomes Luna, not Triage. The session binding
+    is ghosted.
+
+    Fix: pre-seed responding_agent from _agent_row and gate the
+    tool-group scan on `_agent_row is None` so it only fills the
+    blank for unbound channels (WhatsApp / one-off prompts).
+    """
+    from app.services import agent_router
+    from app.services.agent_value_set import ValueVerdict
+
+    tenant_id = uuid.uuid4()
+    bound_agent = MagicMock()
+    bound_agent.id = uuid.uuid4()
+    bound_agent.name = "Triage Agent"
+    bound_agent.tenant_id = tenant_id
+    bound_agent.config = {}
+    bound_agent.tool_groups = None  # bound agent has no tool_groups
+    bound_agent.default_model_tier = "full"
+    bound_agent.memory_domains = []
+
+    # The TEMPTING-but-wrong winner of the tool-group scan. If the bug
+    # is still live this agent's name-slug ends up in agent_slug.
+    distractor = MagicMock()
+    distractor.id = uuid.uuid4()
+    distractor.name = "Luna General Assistant"
+    distractor.tenant_id = tenant_id
+    distractor.tool_groups = ["git", "shell"]
+    distractor.default_model_tier = "full"
+    distractor.memory_domains = []
+
+    db = MagicMock()
+
+    def _query(model):
+        chained = MagicMock()
+        # name-match lookup returns the bound Triage Agent
+        chained.filter.return_value.first.return_value = bound_agent
+        # If the buggy tool-group scan runs, it would see the distractor
+        chained.filter.return_value.all.return_value = [distractor]
+        return chained
+
+    db.query.side_effect = _query
+
+    allow_verdict = ValueVerdict.allow(
+        reason="kill_switch_off", point="routing",
+    )
+    consult_calls = {"agent_ids": []}
+
+    def _consult(*a, **kw):
+        consult_calls["agent_ids"].append(kw.get("agent_id"))
+        return allow_verdict
+
+    monkeypatch.setattr(
+        agent_router.agent_value_set_io,
+        "consult_routing",
+        _consult,
+    )
+    monkeypatch.setattr(
+        agent_router,
+        "match_intent",
+        lambda *a, **kw: {
+            "name": "git push",
+            "tier": "full",
+            "tools": ["git", "shell"],  # would best-match the distractor
+            "mutation": False,
+        },
+    )
+    monkeypatch.setattr(
+        agent_router, "_resolve_cli_chain", lambda *a, **kw: ["opencode"],
+    )
+    monkeypatch.setattr(
+        agent_router,
+        "_dispatch_with_chain",
+        lambda *a, **kw: ("ok", {"platform": "opencode"}),
+        raising=False,
+    )
+
+    response, metadata = agent_router.route_and_execute(
+        db,
+        tenant_id=tenant_id,
+        user_id=uuid.uuid4(),
+        message="push the config",
+        agent_slug="triage-agent",
+    )
+
+    # The bound agent's id is what the value-layer consults against —
+    # NOT the distractor's. Locks the binding-authoritative behavior.
+    assert consult_calls["agent_ids"] == [bound_agent.id], (
+        f"value-layer should consult against the SESSION-BOUND agent "
+        f"(Triage Agent {bound_agent.id}), not the tool-group winner "
+        f"({distractor.id}). got={consult_calls['agent_ids']}"
+    )

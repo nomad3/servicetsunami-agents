@@ -754,13 +754,25 @@ def route_and_execute(
     # would skip silently. Running selection here gives us the
     # canonical responding agent BEFORE the value-layer gate.
     #
+    # (#338 fix) When ``_agent_row`` already resolved from chat.py's
+    # session-bound agent-name slug, that binding is AUTHORITATIVE —
+    # the user explicitly picked this agent and tool-group overlap is
+    # a heuristic, not a vote. Pre-seed ``responding_agent`` from
+    # ``_agent_row`` and skip the rewrite. Tool-group selection still
+    # runs to fill the blank for unbound channels (WhatsApp legacy)
+    # where ``_agent_row is None``.
+    #
     # Cost is cheap (~1 SQL filtered by tool_groups.isnot(None) +
     # in-process scan) compared to the latency of LLM dispatch the
     # block path avoids.
-    responding_agent = None
-    agent_tool_groups = None
-    agent_memory_domains = None
-    if intent_tool_groups:
+    responding_agent = _agent_row
+    agent_tool_groups = (
+        getattr(_agent_row, "tool_groups", None) if _agent_row else None
+    )
+    agent_memory_domains = (
+        getattr(_agent_row, "memory_domains", None) if _agent_row else None
+    )
+    if intent_tool_groups and _agent_row is None:
         try:
             tenant_agents = db.query(AgentModel).filter(
                 AgentModel.tenant_id == tenant_id,
