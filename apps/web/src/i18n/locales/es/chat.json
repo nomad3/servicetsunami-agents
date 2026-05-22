@@ -57,6 +57,7 @@
       "election_interference_bulk": "integridad electoral",
       "bulk_malware": "creación de malware",
       "targeted_doxing": "daño dirigido a la privacidad"
-    }
+    },
+    "badge": "política de plataforma"
   }
 }

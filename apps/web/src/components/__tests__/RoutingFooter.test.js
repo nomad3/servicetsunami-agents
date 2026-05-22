@@ -187,3 +187,85 @@ describe('RoutingFooter', () => {
     expect(screen.getByText('Gemini CLI')).toBeInTheDocument();
   });
 });
+
+
+// ── Platform Safety Floor branch (PR 2 of safety floor sequence) ─────
+
+describe('RoutingFooter / Platform Safety Floor refusal', () => {
+  test('renders shield + category label when served_by is platform_safety_block', () => {
+    const ctx = {
+      routing_summary: {
+        served_by: 'platform_safety_block',
+        requested: null,
+        chain_length: 0,
+        fallback_reason: 'category:mass_harm_synthesis tier:1',
+      },
+      safety_verdict: {
+        decision: 'block',
+        category: 'mass_harm_synthesis',
+        detection_tier: 1,
+        // NOTE: deliberately NO trigger_id here — PR 1 scrubbed it
+        // from the client-visible to_dict(). The next test
+        // enforces that a leaked trigger_id never renders.
+      },
+    };
+    render(<RoutingFooter context={ctx} />);
+    // The discriminator testid is the load-bearing assertion. The
+    // i18n-resolved labels depend on locale loading which isn't
+    // mocked in this test setup (matches existing tests like the
+    // happy-path one above which check raw `served_by` strings, not
+    // translated labels — that's the convention here).
+    const banner = screen.getByTestId('routing-platform-safety-block');
+    expect(banner).toBeInTheDocument();
+    // Category surfaces somewhere in the banner (key passthrough
+    // when i18next returns the key; production loads the
+    // translation).
+    expect(banner.textContent).toMatch(
+      /mass_harm_synthesis|mass-harm/,
+    );
+  });
+
+  test('trigger_id never renders even if backend leaks it in safety_verdict', () => {
+    // Regression guard for the PR 1 IMPORTANT-1 fix. If a future
+    // backend change accidentally puts trigger_id into the
+    // client-visible to_dict(), this test catches it: the
+    // RoutingFooter must NOT include the trigger string anywhere in
+    // its DOM output.
+    const leakedTriggerId = 'mh-001-bioweapon-synthesis-verb';
+    const ctx = {
+      routing_summary: {
+        served_by: 'platform_safety_block',
+        chain_length: 0,
+        fallback_reason: 'category:mass_harm_synthesis tier:1',
+      },
+      safety_verdict: {
+        decision: 'block',
+        category: 'mass_harm_synthesis',
+        detection_tier: 1,
+        trigger_id: leakedTriggerId,  // hostile backend
+      },
+    };
+    const { container } = render(<RoutingFooter context={ctx} />);
+    expect(container.textContent).not.toContain(leakedTriggerId);
+    // Defensive: no DOM attribute carries it either
+    expect(container.innerHTML).not.toContain(leakedTriggerId);
+  });
+
+  test('falls back to raw category key when locale entry is missing', () => {
+    const ctx = {
+      routing_summary: {
+        served_by: 'platform_safety_block',
+        chain_length: 0,
+      },
+      safety_verdict: {
+        decision: 'block',
+        category: 'totally_unknown_category',
+        detection_tier: 1,
+      },
+    };
+    render(<RoutingFooter context={ctx} />);
+    // Renders the raw key as the fallback (still coarse-grained,
+    // never a trigger phrase)
+    expect(screen.getByText(/totally_unknown_category/)).toBeInTheDocument();
+  });
+});

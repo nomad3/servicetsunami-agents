@@ -86,10 +86,13 @@ const RoutingFooter = ({ context }) => {
           defaultValue: category,
         })
       : tChat('platformSafetyBlock.subtitle');
+    const title = tChat('platformSafetyBlock.title');
+    const mistake = tChat('platformSafetyBlock.mistake');
+    // (Review NIT-4) Fuller aria-label so screen-reader users get the
+    // same context as hearing users — title + category + mistake hint.
+    const safetyAriaLabel = `${title} — ${categoryLabel}. ${mistake}`;
     const safetyTip = (
-      <Tooltip id="routing-tip-platform-safety">
-        {tChat('platformSafetyBlock.mistake')}
-      </Tooltip>
+      <Tooltip id="routing-tip-platform-safety">{mistake}</Tooltip>
     );
     return (
       <OverlayTrigger placement="top" overlay={safetyTip}>
@@ -102,15 +105,15 @@ const RoutingFooter = ({ context }) => {
           }}
           tabIndex={0}
           role="group"
-          aria-label={tChat('platformSafetyBlock.title')}
+          aria-label={safetyAriaLabel}
           data-testid="routing-platform-safety-block"
         >
           <FaShieldAlt size={10} aria-hidden="true" />
           <span>
-            {tChat('platformSafetyBlock.title')} — <em>{categoryLabel}</em>
+            {title} — <em>{categoryLabel}</em>
           </span>
           <Badge bg="warning" pill style={{ fontSize: '0.6rem' }}>
-            platform policy
+            {tChat('platformSafetyBlock.badge')}
           </Badge>
         </div>
       </OverlayTrigger>
