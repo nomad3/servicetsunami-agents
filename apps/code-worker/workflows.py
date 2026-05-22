@@ -170,19 +170,49 @@ class AgentReview:
     summary: str
 
 
-def _run(cmd: str, cwd: str = WORKSPACE, timeout: int = 600, extra_env: dict | None = None) -> str:
-    """Run a shell command and return stdout. Raises on failure."""
-    logger.info("Running: %s", cmd)
+def _run(
+    argv: list[str],
+    cwd: str = WORKSPACE,
+    timeout: int = 600,
+    extra_env: dict | None = None,
+    input: str | None = None,
+) -> str:
+    """Run a subprocess from an argv list and return stdout.
+
+    Uses ``shell=False`` always — shell metacharacters in argv elements
+    become literal text, never expanded. For commands that need to read
+    a long/user-derived string (e.g. git commit messages), pass it via
+    ``input=`` which is fed to the subprocess on stdin. The argv stays
+    free of user data.
+
+    Raises RuntimeError on non-zero exit.
+
+    Spec: docs/superpowers/specs/2026-05-22-subproject-a-infra-secret-hardening-design.md
+    PR1 (F1 shell=True removal).
+    """
+    logger.info("Running: %s", " ".join(argv))
     env = None
     if extra_env:
         env = {**os.environ, **extra_env}
     result = subprocess.run(
-        cmd, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env
+        argv,
+        shell=False,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+        input=input,
     )
     if result.returncode != 0:
         error_detail = result.stderr or result.stdout
-        logger.error("Command failed: %s\nstderr: %s\nstdout: %s", cmd, result.stderr, result.stdout[:2000])
-        raise RuntimeError(f"Command failed: {cmd}\n{error_detail}")
+        logger.error(
+            "Command failed: %s\nstderr: %s\nstdout: %s",
+            " ".join(argv), result.stderr, result.stdout[:2000],
+        )
+        raise RuntimeError(
+            f"Command failed: {' '.join(argv)}\n{error_detail}"
+        )
     return result.stdout.strip()
 
 
