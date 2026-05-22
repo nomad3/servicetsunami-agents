@@ -35,7 +35,7 @@ class TestRunHelper:
             )
 
         monkeypatch.setattr(wf.subprocess, "run", fake_run)
-        assert wf._run("echo hello") == "hello"
+        assert wf._run(["echo", "hello"]) == "hello"
 
     def test_raises_runtime_error_on_non_zero(self, monkeypatch):
         def fake_run(cmd, **kwargs):
@@ -45,7 +45,7 @@ class TestRunHelper:
 
         monkeypatch.setattr(wf.subprocess, "run", fake_run)
         with pytest.raises(RuntimeError, match="Command failed"):
-            wf._run("false")
+            wf._run(["false"])
 
     def test_passes_extra_env(self, monkeypatch):
         captured = {}
@@ -57,7 +57,7 @@ class TestRunHelper:
             )
 
         monkeypatch.setattr(wf.subprocess, "run", fake_run)
-        wf._run("noop", extra_env={"FOO": "bar"})
+        wf._run(["noop"], extra_env={"FOO": "bar"})
         assert captured["env"]["FOO"] == "bar"
 
 

@@ -190,7 +190,14 @@ def _run(
     Spec: docs/superpowers/specs/2026-05-22-subproject-a-infra-secret-hardening-design.md
     PR1 (F1 shell=True removal).
     """
-    logger.info("Running: %s", " ".join(argv))
+    # Defensive str-cast: if a future caller passes a non-string in argv
+    # (Path, int), ``" ".join(argv)`` would TypeError BEFORE the
+    # subprocess runs, masking the real bug. ``map(str, ...)`` keeps the
+    # log/error sites robust without changing what's passed to
+    # ``subprocess.run`` itself (which already accepts Path-like via
+    # os.fspath).
+    argv_display = " ".join(map(str, argv))
+    logger.info("Running: %s", argv_display)
     env = None
     if extra_env:
         env = {**os.environ, **extra_env}
@@ -208,10 +215,10 @@ def _run(
         error_detail = result.stderr or result.stdout
         logger.error(
             "Command failed: %s\nstderr: %s\nstdout: %s",
-            " ".join(argv), result.stderr, result.stdout[:2000],
+            argv_display, result.stderr, result.stdout[:2000],
         )
         raise RuntimeError(
-            f"Command failed: {' '.join(argv)}\n{error_detail}"
+            f"Command failed: {argv_display}\n{error_detail}"
         )
     return result.stdout.strip()
 

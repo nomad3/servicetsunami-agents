@@ -58,6 +58,7 @@ def test_dollar_paren_substitution_is_literal(
         wf._run(
             ["git", "checkout", "-b", branch_name],
             cwd=str(workspace_with_git),
+            timeout=10,
         )
     except RuntimeError:
         # Git may reject the branch name itself — that's fine. What we care
@@ -77,12 +78,13 @@ def test_backtick_substitution_is_literal(
     commit_msg = f"msg`touch {canary_path}`"
     # Create initial commit so `git commit` succeeds
     (workspace_with_git / "f.txt").write_text("x")
-    wf._run(["git", "add", "-A"], cwd=str(workspace_with_git))
+    wf._run(["git", "add", "-A"], cwd=str(workspace_with_git), timeout=10)
     try:
         wf._run(
             ["git", "commit", "-F", "-"],
             cwd=str(workspace_with_git),
             input=commit_msg,
+            timeout=10,
         )
     except RuntimeError:
         pass
@@ -100,6 +102,7 @@ def test_semicolon_chain_is_literal(
         wf._run(
             ["git", "checkout", "-b", branch_name],
             cwd=str(workspace_with_git),
+            timeout=10,
         )
     except RuntimeError:
         pass
@@ -114,12 +117,13 @@ def test_double_ampersand_is_literal(
     """`&& command` MUST NOT chain to a new shell command."""
     commit_msg = f"msg && touch {canary_path}"
     (workspace_with_git / "g.txt").write_text("x")
-    wf._run(["git", "add", "-A"], cwd=str(workspace_with_git))
+    wf._run(["git", "add", "-A"], cwd=str(workspace_with_git), timeout=10)
     try:
         wf._run(
             ["git", "commit", "-F", "-"],
             cwd=str(workspace_with_git),
             input=commit_msg,
+            timeout=10,
         )
     except RuntimeError:
         pass
@@ -137,6 +141,7 @@ def test_pipe_is_literal(
         wf._run(
             ["git", "checkout", "-b", branch_name],
             cwd=str(workspace_with_git),
+            timeout=10,
         )
     except RuntimeError:
         pass
@@ -151,12 +156,13 @@ def test_output_redirect_is_literal(
     """`> file` MUST NOT redirect to a new file."""
     commit_msg = f"msg > {canary_path}"
     (workspace_with_git / "h.txt").write_text("x")
-    wf._run(["git", "add", "-A"], cwd=str(workspace_with_git))
+    wf._run(["git", "add", "-A"], cwd=str(workspace_with_git), timeout=10)
     try:
         wf._run(
             ["git", "commit", "-F", "-"],
             cwd=str(workspace_with_git),
             input=commit_msg,
+            timeout=10,
         )
     except RuntimeError:
         pass
@@ -180,6 +186,7 @@ def test_input_redirect_combined_with_output_is_literal(
         wf._run(
             ["git", "checkout", "-b", branch_name],
             cwd=str(workspace_with_git),
+            timeout=10,
         )
     except RuntimeError:
         # Git rejects branch names with spaces / metachars — fine.
@@ -197,7 +204,7 @@ def test_newline_in_commit_message_is_literal_multiline(
     command. They should produce a legitimate multi-line commit."""
     commit_msg = "subject line\n\nbody line one\nbody line two"
     (workspace_with_git / "i.txt").write_text("x")
-    wf._run(["git", "add", "-A"], cwd=str(workspace_with_git))
+    wf._run(["git", "add", "-A"], cwd=str(workspace_with_git), timeout=10)
     wf._run(
         ["git", "commit", "-F", "-"],
         cwd=str(workspace_with_git),
@@ -207,6 +214,7 @@ def test_newline_in_commit_message_is_literal_multiline(
     log = wf._run(
         ["git", "log", "-1", "--pretty=format:%B"],
         cwd=str(workspace_with_git),
+        timeout=10,
     )
     assert "body line one" in log
     assert "body line two" in log
