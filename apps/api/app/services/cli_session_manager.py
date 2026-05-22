@@ -926,6 +926,20 @@ def _run_agent_session_legacy(
 
     _mark("setup")
 
+    # Phase 1.5 value-layer activation (task #336 — Luna 2026-05-22
+    # audit P0 #1). Best-effort emotion-engine wire-in for the user
+    # message arrival. Classifies the user text via the heuristic
+    # backend (synchronous, microsecond cost), then forwards through
+    # the value-layer aware ``appraise_and_record_user_signal``. A
+    # ``pursue`` slug match scales the PAD pleasure axis by 1.5x.
+    # Never crashes chat — fail-open at every layer inside.
+    _record_user_signal_affect(
+        db,
+        db_session_memory,
+        tenant_id,
+        user_text=message,
+    )
+
     # (#663 Path B per Luna's design call) — when the chat session is
     # bound to a real Agent row, that row's ``persona_prompt`` is the
     # primary identity mandate. Skills declared in
@@ -1686,6 +1700,75 @@ def _record_tool_failure_affect(
     except Exception:  # noqa: BLE001 — emotion layer never crashes chat
         logger.debug(
             "emotion_engine tool_failure wire-in raised; suppressed.",
+            exc_info=True,
+        )
+
+
+def _record_user_signal_affect(
+    db,
+    db_session_memory,
+    tenant_id,
+    *,
+    user_text: str,
+) -> None:
+    """Emotion-engine wire-in for the chat hot path's user-message
+    arrival (task #336 — Luna value-layer Phase 1.5 activation).
+
+    Mirrors ``_record_tool_failure_affect`` shape: looks up the
+    session's agent_id, then forwards to the session-level
+    ``record_session_user_signal`` helper which handles episode
+    resolution, classifier dispatch, and PAD vector commit.
+
+    Why this exists: PR #653 shipped the
+    ``appraise_and_record_user_signal`` contract but it was dead-
+    wired upstream — Luna's 2026-05-22 audit P0 #1 flagged the gap.
+    This is the missing caller. Without it, the value-layer
+    ``pursue`` boost (1.5x pleasure axis) on user_signal never fires
+    in production.
+
+    NEVER raises into the caller. Failures log debug + return; the
+    emotion layer MUST NOT crash chat.
+    """
+    try:
+        from app.models.chat import ChatSession
+        from app.services.emotion_engine_io import (
+            record_session_user_signal,
+        )
+
+        session_id_str = (db_session_memory or {}).get(
+            "chat_session_id"
+        ) or ""
+        if not session_id_str:
+            return
+        try:
+            session_id = uuid.UUID(session_id_str)
+        except (TypeError, ValueError):
+            return
+
+        # Resolve the agent owner of the chat session so the
+        # appraisal lands on the right agent's baseline. Same
+        # pattern as _record_tool_failure_affect.
+        agent_id = None
+        try:
+            chat_session = db.query(ChatSession).filter(
+                ChatSession.id == session_id,
+                ChatSession.tenant_id == tenant_id,
+            ).first()
+            if chat_session is not None:
+                agent_id = chat_session.agent_id
+        except Exception:  # noqa: BLE001
+            pass
+
+        record_session_user_signal(
+            db,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            user_text=user_text,
+        )
+    except Exception:  # noqa: BLE001 — emotion layer never crashes chat
+        logger.debug(
+            "emotion_engine user_signal wire-in raised; suppressed.",
             exc_info=True,
         )
 

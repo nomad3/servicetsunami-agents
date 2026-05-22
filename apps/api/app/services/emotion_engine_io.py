@@ -610,3 +610,133 @@ def appraise_and_record_user_signal(
         dominance=new_vector.dominance,
     )
     return new_vector
+
+
+# ── Phase 1.5 user_signal session-level wire-in (task #336) ──────────
+#
+# PR #653 shipped ``appraise_and_record_user_signal`` (the contract).
+# It was dead-wired upstream — no caller invoked it from production.
+# Luna's 2026-05-22 audit P0 #1 flagged it as the biggest unfinished
+# bit of the value-layer work. This is the missing caller.
+#
+# Mirrors ``record_session_tool_failure`` shape: takes a session_id,
+# resolves to the most recent episode, classifies the user text via
+# the heuristic backend (synchronous, microsecond cost — adequate for
+# the pursue-match PAD scaling signal), then calls the existing
+# ``appraise_and_record_user_signal``. Fail-open at every layer; the
+# chat hot path NEVER blocks on this.
+
+
+def record_session_user_signal(
+    db: Session,
+    *,
+    session_id: Optional[uuid.UUID],
+    tenant_id: uuid.UUID,
+    agent_id: Optional[uuid.UUID] = None,
+    user_text: str,
+    backend: Optional[str] = None,
+) -> Optional[PADVector]:
+    """Session-level wire-in for user_signal events from the chat
+    hot path. The companion to ``record_session_tool_failure``.
+
+    Steps:
+      1. Bail gracefully on empty session_id or empty user_text.
+      2. Find the most recent conversation_episode for this session
+         + tenant. If none exists (first turns of a fresh session
+         before PostChatMemoryWorkflow has run), no-op.
+      3. Classify the user text via ``user_signal_classifier``. Default
+         backend is ``heuristic`` (synchronous, microsecond cost) so
+         the chat hot path doesn't pay the ~1s ollama latency on every
+         turn. Operators can promote to ollama via the
+         ``USER_SIGNAL_CHAT_BACKEND`` env var when the precision is
+         worth the latency.
+      4. Forward (classifier_payload, user_text) to
+         ``appraise_and_record_user_signal`` which handles the value-
+         layer consult, pursue-match boost, and PAD vector commit.
+
+    Returns the post-appraisal PAD vector, or None on any defensive
+    no-op. NEVER raises — callers are typically inside a bare
+    except.
+    """
+    import os as _os
+
+    if session_id is None:
+        return None
+    if not user_text or not user_text.strip():
+        return None
+    try:
+        episode = (
+            db.query(ConversationEpisode)
+            .filter(
+                ConversationEpisode.session_id == session_id,
+                ConversationEpisode.tenant_id == tenant_id,
+            )
+            .order_by(ConversationEpisode.created_at.desc())
+            .first()
+        )
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "emotion_engine_io.record_session_user_signal: episode "
+            "lookup failed. session_id=%s tenant_id=%s err=%s",
+            session_id, tenant_id, exc,
+        )
+        return None
+    if episode is None:
+        return None
+
+    # Default to heuristic backend on the chat hot path — synchronous
+    # microsecond cost. Operators can opt in to ollama via env var
+    # when the higher-accuracy classifier is worth the ~1s/turn cost.
+    effective_backend = (
+        backend
+        or _os.environ.get("USER_SIGNAL_CHAT_BACKEND", "heuristic")
+    )
+    try:
+        from app.services.user_signal_classifier import (
+            classify_user_signal,
+        )
+        result = classify_user_signal(
+            user_text, backend=effective_backend,
+        )
+        payload = result.to_dict()
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        logger.warning(
+            "emotion_engine_io.record_session_user_signal: "
+            "classify_user_signal raised. session_id=%s tenant_id=%s "
+            "err=%s — skipping appraisal",
+            session_id, tenant_id, exc,
+        )
+        return None
+
+    # Mirror the agent_id-fallback pattern from
+    # ``record_session_tool_failure``: emit a WARN + use a random
+    # UUID so the appraisal lands on a neutral baseline without
+    # corrupting another agent's affect state.
+    effective_agent_id = agent_id
+    if effective_agent_id is None:
+        effective_agent_id = uuid.uuid4()
+        logger.warning(
+            "emotion_engine_io.record_session_user_signal: agent_id "
+            "fallback triggered. session_id=%s tenant_id=%s → using "
+            "random UUID %s. Appraisal lands on neutral baseline; "
+            "affect won't be attributable to a real agent.",
+            session_id, tenant_id, effective_agent_id,
+        )
+
+    try:
+        return appraise_and_record_user_signal(
+            db,
+            episode_id=episode.id,
+            tenant_id=tenant_id,
+            agent_id=effective_agent_id,
+            payload=payload,
+            user_text=user_text,
+        )
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        logger.warning(
+            "emotion_engine_io.record_session_user_signal: "
+            "appraise_and_record_user_signal raised. session_id=%s "
+            "tenant_id=%s err=%s",
+            session_id, tenant_id, exc,
+        )
+        return None
