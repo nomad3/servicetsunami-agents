@@ -26,6 +26,7 @@ from app.api.v1 import (
     habits,
     metacog,
     reflections,
+    platform_safety_admin,
     values,
     memories,
     team,
@@ -171,6 +172,13 @@ router.include_router(reflections.router, prefix="", tags=["reflections"])
 # Luna value-layer operator endpoints (#647 PR 2). Empty prefix so
 # routes land at /api/v1/luna/values{,/agents/{id}}.
 router.include_router(values.router, prefix="", tags=["values"])
+# Platform Safety Floor admin + operator-counter endpoints (PR 3 of
+# the safety floor sequence). Empty prefix so:
+#   GET /api/v1/luna/values/safety-counter  → operator (jittered, count-only)
+#   GET /api/v1/admin/safety-events         → platform admin (full visibility)
+router.include_router(
+    platform_safety_admin.router, prefix="", tags=["platform-safety"],
+)
 # Habit observation ingestion (#297) — Tauri client writes vision-derived
 # signals via the internal POST endpoint (X-Internal-Key + X-Tenant-Id auth).
 router.include_router(habits.router, prefix="", tags=["habits"])
