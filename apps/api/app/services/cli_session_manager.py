@@ -37,6 +37,99 @@ _CLEAN_BASE_PERSONA = (
 )
 
 
+def _load_persona_prompt(
+    db: Session, tenant_id, agent_slug: str
+) -> Optional[str]:
+    """Resolve an agent's ``persona_prompt`` from a name-derived slug.
+
+    Two-tier lookup — addresses live-bug 2026-05-22 where every non-
+    Luna agent (Triage, Data Investigator, Root Cause, Incident
+    Commander) ghosted as Luna because the SQL-side ``func.replace``
+    normalize filter returned None even though the row existed in the
+    DB with a non-empty ``persona_prompt`` (same query in isolation
+    found the row — most likely a poisoned SQLAlchemy session state
+    from an earlier failed query in the request, since the next-
+    statement skill-by-slug lookup also missed in the same pattern).
+
+    Path 1 (cheap, happy):
+        ``SELECT * FROM agents WHERE tenant_id=$1 AND
+        REPLACE(REPLACE(LOWER(name), ' ', '-'), '_', '-') = $2``.
+
+    Path 2 (fallback, defensive):
+        Iterate ``WHERE tenant_id=$1`` and compare normalized names
+        in Python. Bounded cost — typical tenant has <100 agents.
+
+    Returns ``None`` when no agent matches the slug OR the matched
+    agent's persona_prompt is empty/NULL. Logs at WARNING when SQL
+    path raises and at INFO when fallback recovered a row Path 1 had
+    silently missed.
+    """
+    target_slug = (
+        agent_slug.lower().replace(" ", "-").replace("_", "-")
+        if agent_slug else ""
+    )
+    if not target_slug:
+        return None
+
+    agent_row = None
+    try:
+        agent_row = (
+            db.query(_AgentModel)
+            .filter(
+                _AgentModel.tenant_id == tenant_id,
+                _sa_func.replace(
+                    _sa_func.replace(
+                        _sa_func.lower(_AgentModel.name), " ", "-"
+                    ),
+                    "_", "-",
+                ) == target_slug,
+            )
+            .first()
+        )
+    except Exception as e:  # noqa: BLE001
+        safe_rollback(db)
+        logger.warning(
+            "persona_prompt SQL lookup raised for slug=%r tenant=%s: "
+            "%s — trying Python-side fallback",
+            agent_slug, str(tenant_id)[:8], e,
+        )
+
+    if agent_row is None:
+        try:
+            candidates = (
+                db.query(_AgentModel)
+                .filter(_AgentModel.tenant_id == tenant_id)
+                .all()
+            )
+            for cand in candidates:
+                cand_slug = (
+                    (cand.name or "")
+                    .lower()
+                    .replace(" ", "-")
+                    .replace("_", "-")
+                )
+                if cand_slug == target_slug:
+                    agent_row = cand
+                    logger.info(
+                        "persona_prompt Python-side fallback found "
+                        "agent name=%r for slug=%r tenant=%s "
+                        "(SQL-side normalize missed)",
+                        cand.name, agent_slug, str(tenant_id)[:8],
+                    )
+                    break
+        except Exception as e:  # noqa: BLE001
+            safe_rollback(db)
+            logger.warning(
+                "persona_prompt Python fallback raised for "
+                "slug=%r tenant=%s: %s",
+                agent_slug, str(tenant_id)[:8], e,
+            )
+
+    if agent_row is None:
+        return None
+    return agent_row.persona_prompt or None
+
+
 # Universal anti-hallucination preamble. Lifted from aremko's "REGLA DE ORO"
 # pattern to a platform-wide rule. Imported by both the CLI hot path
 # (generate_cli_instructions) and the local-Gemma fallback path
@@ -810,30 +903,7 @@ def _run_agent_session_legacy(
     # If both miss: run on a minimal "clean base persona" rather than
     # erroring or ghosting Luna. (Luna's "clean persona, not
     # accidental Luna-clone" rule.)
-    persona_prompt: Optional[str] = None
-    try:
-        agent_row_for_persona = (
-            db.query(_AgentModel)
-            .filter(
-                _AgentModel.tenant_id == tenant_id,
-                _sa_func.replace(
-                    _sa_func.replace(
-                        _sa_func.lower(_AgentModel.name), " ", "-"
-                    ),
-                    "_", "-",
-                ) == agent_slug.lower().replace(" ", "-").replace("_", "-"),
-            )
-            .first()
-        )
-        if agent_row_for_persona is not None:
-            persona_prompt = (
-                agent_row_for_persona.persona_prompt or None
-            )
-    except Exception as e:  # noqa: BLE001
-        logger.debug(
-            "persona_prompt lookup failed for slug=%r tenant=%s: %s",
-            agent_slug, str(tenant_id)[:8], e,
-        )
+    persona_prompt = _load_persona_prompt(db, tenant_id, agent_slug)
 
     primary_slug = resolve_primary_agent_slug(db, tenant_id)
     skill_body: str
