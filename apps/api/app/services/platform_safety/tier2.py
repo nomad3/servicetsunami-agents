@@ -179,6 +179,7 @@ def _reset_corpus_for_tests() -> None:
 # Each pattern is paired with the categories it could escalate to,
 # so the tier-2 embedding lookup can scope its corpus search.
 _SENSITIVITY_PATTERNS: list[tuple[re.Pattern[str], tuple[str, ...]]] = [
+    # English (PR 4)
     (
         re.compile(
             r"\b(weapon|bomb|nuclear|chemical|biological|"
@@ -216,6 +217,50 @@ _SENSITIVITY_PATTERNS: list[tuple[re.Pattern[str], tuple[str, ...]]] = [
         re.compile(
             r"\b(child|minor|underage)\b",
             re.IGNORECASE,
+        ),
+        ("csam", "child_safety"),
+    ),
+    # Spanish (PR 8 — design §8). Same intent clusters, ES
+    # vocabulary. UNICODE flag is set by re.IGNORECASE on a
+    # \b boundary so accents in 'químic[ao]' match cleanly.
+    (
+        re.compile(
+            r"\b(arma|bomba|nuclear|qu[íi]mic[ao]|biol[óo]gic[ao]|"
+            r"radiol[óo]gic[ao]|explosivo|veneno|toxina|"
+            r"pat[óo]geno)\b",
+            re.IGNORECASE | re.UNICODE,
+        ),
+        ("mass_harm_synthesis", "terrorism_planning"),
+    ),
+    (
+        re.compile(
+            r"\b(malware|exploit|virus|troyano|rootkit|"
+            r"ransomware|puerta[\s_-]*trasera|payload|shellcode)\b",
+            re.IGNORECASE | re.UNICODE,
+        ),
+        ("bulk_malware",),
+    ),
+    (
+        re.compile(
+            r"\b(direcci[óo]n[\s_-]*personal|miembro[\s_-]*de[\s_-]*la[\s_-]*familia|"
+            r"tel[ée]fono[\s_-]*privado|historial[\s_-]*m[ée]dico|"
+            r"n[úu]mero[\s_-]*de[\s_-]*identidad)\b",
+            re.IGNORECASE | re.UNICODE,
+        ),
+        ("targeted_doxing",),
+    ),
+    (
+        re.compile(
+            r"\b(deepfake|lista[\s_-]*electoral|elecci[óo]n|"
+            r"boleta|colegio[\s_-]*electoral|votaci[óo]n)\b",
+            re.IGNORECASE | re.UNICODE,
+        ),
+        ("election_interference_bulk",),
+    ),
+    (
+        re.compile(
+            r"\b(ni[ñn][oa]|menor|menor[\s_-]*de[\s_-]*edad)\b",
+            re.IGNORECASE | re.UNICODE,
         ),
         ("csam", "child_safety"),
     ),
