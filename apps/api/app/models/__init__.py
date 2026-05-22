@@ -84,9 +84,15 @@ from .agent_marketplace_listing import AgentMarketplaceListing, AgentMarketplace
 from .agent_test_suite import AgentTestCase, AgentTestRun
 from .training_run import TrainingRun
 from .platform_safety_event import PlatformSafetyEvent
+from .platform_safety_escape import (
+    PlatformSafetyAdminAudit,
+    PlatformSafetyEscapeGrant,
+)
 
 __all__ = [
     "PlatformSafetyEvent",
+    "PlatformSafetyAdminAudit",
+    "PlatformSafetyEscapeGrant",
     "Tenant", "User",
     "Agent", "AgentGroup", "AgentMemory", "AgentPermission", "AgentPerformanceSnapshot", "AgentVersion", "AgentPolicy", "AgentAuditLog",
     "AgentRelationship", "AgentSkill", "AgentTask",
