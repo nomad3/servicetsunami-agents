@@ -655,7 +655,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
 
         # 3. Create feature branch
         activity.heartbeat("Creating feature branch...")
-        _run(f"git checkout -b {branch_name}")
+        _run(["git", "checkout", "-b", branch_name])
 
         # ── PHASE 1: Planning ────────────────────────────────────────────────
         # 4a. Architect agent reads the task + CLAUDE.md and writes a plan file
@@ -1021,8 +1021,11 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         activity.heartbeat("Pushing changes...")
         _run(["git", "add", "-A"])
         commit_msg = _extract_goal(task_input.task_description)[:100].replace('"', '\\"')
-        _run(f'git commit -m "{tag}: {commit_msg}"')
-        _run(f'git push origin {branch_name}')
+        _run(
+            ["git", "commit", "-F", "-"],
+            input=f"{tag}: {commit_msg}",
+        )
+        _run(["git", "push", "origin", branch_name])
 
         # 9. Get changed files
         files_changed = _run(["git", "diff", "--name-only", "main"]).split("\n")
@@ -1033,7 +1036,12 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         pr_title = f"{tag}: {_extract_goal(task_input.task_description)[:67]}"
 
         # Gather commit log and claude summary for traceability
-        commit_log = _run(f"git log main..{branch_name} --pretty=format:'- %h %s' --reverse")
+        commit_log = _run([
+            "git", "log",
+            f"main..{branch_name}",
+            "--pretty=format:- %h %s",
+            "--reverse",
+        ])
         claude_summary = ""
         if isinstance(claude_data, dict):
             claude_summary = str(claude_data.get("result", ""))[:1500]
