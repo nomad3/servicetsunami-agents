@@ -26,6 +26,13 @@ CREATE TABLE platform_safety_escape_grants (
     -- consult skip ONLY happens when both match. A grant for
     -- (user=A, session=X) does NOT relax the floor for (user=B,
     -- session=Y).
+    -- scoped_user_id + scoped_session_id deliberately have NO FK
+    -- constraints (Review PR 6 IMPORTANT-1). A grant's audit record
+    -- must survive the underlying user/session being deleted later
+    -- — otherwise CASCADE would erase the evidence of who was
+    -- granted what. The lookup in `is_active_grant_for` filters
+    -- by both UUIDs as opaque tokens; there's no relational integrity
+    -- to preserve at the floor layer.
     scoped_user_id  UUID NOT NULL,
     scoped_session_id UUID NOT NULL,
     -- One of the platform safety category keys, or '*' for any

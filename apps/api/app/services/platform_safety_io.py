@@ -35,6 +35,9 @@ from app.services.platform_safety import (
     PlatformSafetyVerdict,
     consult,
 )
+# (PR 6 Review IMPORTANT-2) Module-top import. No circular-import
+# risk: platform_safety_escape doesn't import platform_safety_io.
+from app.services import platform_safety_escape as _ps_escape
 
 log = logging.getLogger(__name__)
 
@@ -279,8 +282,7 @@ def _run_tier3_with_shadow_gate(
     grant_active = None
     if enforce:  # only relevant for the user-blocking path
         try:
-            from app.services import platform_safety_escape
-            grant_active = platform_safety_escape.is_active_grant_for(
+            grant_active = _ps_escape.is_active_grant_for(
                 db,
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -306,8 +308,7 @@ def _run_tier3_with_shadow_gate(
     )
     if grant_active is not None:
         try:
-            from app.services import platform_safety_escape
-            platform_safety_escape.record_block_during_grant(
+            _ps_escape.record_block_during_grant(
                 db, tenant_id=tenant_id, grant=grant_active,
                 blocked_category=result.category,
             )
