@@ -40,10 +40,11 @@ def test_load_persona_prompt_happy_path():
 
     db.query.side_effect = _query
 
-    result = cli_session_manager._load_persona_prompt(
+    persona, display_name = cli_session_manager._load_persona_prompt(
         db, uuid.uuid4(), "triage-agent",
     )
-    assert result == "You are a triage specialist."
+    assert persona == "You are a triage specialist."
+    assert display_name == "Triage Agent"
 
 
 def test_load_persona_prompt_falls_back_to_python_when_sql_misses():
@@ -79,10 +80,11 @@ def test_load_persona_prompt_falls_back_to_python_when_sql_misses():
 
     db.query.side_effect = _query
 
-    result = cli_session_manager._load_persona_prompt(
+    persona, display_name = cli_session_manager._load_persona_prompt(
         db, uuid.uuid4(), "triage-agent",
     )
-    assert result == "You are a triage specialist."
+    assert persona == "You are a triage specialist."
+    assert display_name == "Triage Agent"
     assert call_count["first"] == 1
     assert call_count["all"] == 1, "Python fallback should have run"
 
@@ -113,10 +115,11 @@ def test_load_persona_prompt_rolls_back_on_sql_raise():
 
     db.query.side_effect = _query
 
-    result = cli_session_manager._load_persona_prompt(
+    persona, display_name = cli_session_manager._load_persona_prompt(
         db, uuid.uuid4(), "triage-agent",
     )
-    assert result == "You are a triage specialist."
+    assert persona == "You are a triage specialist."
+    assert display_name == "Triage Agent"
     assert rollback_called["n"] >= 1, (
         "safe_rollback should have fired after the SQL-side raise"
     )
@@ -137,10 +140,11 @@ def test_load_persona_prompt_returns_none_when_agent_missing():
 
     db.query.side_effect = _query
 
-    result = cli_session_manager._load_persona_prompt(
+    persona, display_name = cli_session_manager._load_persona_prompt(
         db, uuid.uuid4(), "unknown-agent",
     )
-    assert result is None
+    assert persona is None
+    assert display_name is None
 
 
 def test_load_persona_prompt_returns_none_when_persona_empty():
@@ -163,10 +167,14 @@ def test_load_persona_prompt_returns_none_when_persona_empty():
 
     db.query.side_effect = _query
 
-    result = cli_session_manager._load_persona_prompt(
+    persona, display_name = cli_session_manager._load_persona_prompt(
         db, uuid.uuid4(), "empty-persona-agent",
     )
-    assert result is None
+    assert persona is None
+    # display_name still surfaces — caller may use it for the IDENTITY
+    # block even when persona is empty (Luna falls back to skill-driven
+    # identity, but the agent's name is still known).
+    assert display_name == "Empty Persona Agent"
 
 
 def test_load_persona_prompt_empty_slug_returns_none_without_query():
@@ -176,8 +184,73 @@ def test_load_persona_prompt_empty_slug_returns_none_without_query():
 
     db = MagicMock()
 
-    result = cli_session_manager._load_persona_prompt(
+    persona, display_name = cli_session_manager._load_persona_prompt(
         db, uuid.uuid4(), "",
     )
-    assert result is None
+    assert persona is None
+    assert display_name is None
     db.query.assert_not_called()
+
+
+# ── generate_cli_instructions persona_driven identity block ──────────
+
+
+def test_persona_driven_identity_block_uses_agent_name_not_luna():
+    """The IDENTITY block must use the agent's display name when
+    persona_driven=True. Live-bug 2026-05-22b: even with the
+    persona_prompt loaded correctly, every non-Luna agent still
+    introduced themselves as "I'm Luna, your <persona-role>
+    assistant" because the IDENTITY system-prompt section
+    hardcoded "Your user-facing identity is Luna" as the fallback.
+    Persona-driven runs MUST defer identity to the Agent
+    Instructions section, naming the agent (not Luna)."""
+    from app.services import cli_session_manager
+
+    md = cli_session_manager.generate_cli_instructions(
+        skill_body=(
+            "You are a triage specialist for Levi's MDM incidents. "
+            "Classify severity, identify affected systems, scope blast radius."
+        ),
+        tenant_name="acme",
+        user_name="simon",
+        channel="web",
+        conversation_summary="",
+        memory_context={},
+        agent_slug="triage-agent",
+        tier="full",
+        persona_driven=True,
+        agent_display_name="Triage Agent",
+    )
+    # The IDENTITY block names the agent
+    assert "Your user-facing identity is Triage Agent" in md
+    # And explicitly steers AWAY from Luna
+    assert "Do NOT introduce yourself as Luna" in md
+    # Persona-driven runs MUST NOT contain the legacy hardcoded line
+    # "Your user-facing identity is Luna." anywhere
+    assert "Your user-facing identity is Luna" not in md
+    assert "you are Luna" not in md
+    # Persona-driven runs MUST NOT emit the generalist tool-surface
+    # paragraph that mis-scopes specialist agents like Triage / Root
+    # Cause whose persona restricts the tools they should use.
+    assert "full access to email, calendar, knowledge graph, Jira" not in md
+
+
+def test_legacy_unbound_path_still_uses_luna_identity():
+    """When persona_driven=False (legacy unbound caller), the
+    Luna IDENTITY fallback still fires — preserves WhatsApp + one-off
+    callers that don't bind to an Agent row."""
+    from app.services import cli_session_manager
+
+    md = cli_session_manager.generate_cli_instructions(
+        skill_body="Luna identity body",
+        tenant_name="acme",
+        user_name="simon",
+        channel="web",
+        conversation_summary="",
+        memory_context={},
+        agent_slug="luna",
+        tier="full",
+        persona_driven=False,
+    )
+    assert "Your user-facing identity is Luna." in md
+    assert "you are luna" in md.lower()

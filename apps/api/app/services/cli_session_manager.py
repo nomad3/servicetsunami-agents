@@ -39,8 +39,8 @@ _CLEAN_BASE_PERSONA = (
 
 def _load_persona_prompt(
     db: Session, tenant_id, agent_slug: str
-) -> Optional[str]:
-    """Resolve an agent's ``persona_prompt`` from a name-derived slug.
+) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve an agent's ``(persona_prompt, display_name)`` from a name-derived slug.
 
     Two-tier lookup — addresses live-bug 2026-05-22 where every non-
     Luna agent (Triage, Data Investigator, Root Cause, Incident
@@ -69,7 +69,7 @@ def _load_persona_prompt(
         if agent_slug else ""
     )
     if not target_slug:
-        return None
+        return None, None
 
     agent_row = None
     try:
@@ -126,8 +126,8 @@ def _load_persona_prompt(
             )
 
     if agent_row is None:
-        return None
-    return agent_row.persona_prompt or None
+        return None, None
+    return (agent_row.persona_prompt or None), agent_row.name
 
 
 # Universal anti-hallucination preamble. Lifted from aremko's "REGLA DE ORO"
@@ -215,6 +215,8 @@ def generate_cli_instructions(
     agent_slug: str = "luna",
     tier: str = "full",
     connected_integrations: list | None = None,
+    persona_driven: bool = False,
+    agent_display_name: Optional[str] = None,
 ) -> str:
     """Generate provider-neutral instruction markdown from agent skill + tenant context."""
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["full"])
@@ -232,9 +234,39 @@ def generate_cli_instructions(
     lines.append("If a tool described as `foo_bar` returns `not found`, retry with `mcp_agentprovision_foo_bar` (Gemini) or `mcp__agentprovision__foo_bar` (Claude Code). Never retry with `default_api:foo_bar` — that namespace does not exist on this platform.")
     lines.append(f"Session: tenant={tenant_name} user={user_name} channel={channel}")
     lines.append("")
-    # Identity section: use identity profile if available, otherwise default to Luna
+    # Identity section.
+    #
+    # Persona-driven identity (#663 Path B + Luna 2026-05-22 follow-up):
+    # When the session is bound to an Agent row with a non-empty
+    # persona_prompt, that persona is the source of truth for identity.
+    # The fallback "Your user-facing identity is Luna" block from the
+    # legacy unbound path was being prepended ABOVE the persona,
+    # causing every non-Luna agent (Triage, Root Cause, Incident
+    # Commander) to introduce themselves as "I'm Luna, your <persona-
+    # role> assistant" — conflicting signals the LLM averaged together.
+    #
+    # When persona_driven=True we use the agent's display name (or
+    # the slug as fallback) and explicitly tell the model the rest of
+    # the role definition lives in the Agent Instructions section
+    # below — so persona_prompt is the single identity source.
     identity_profile = (memory_context.get("self_model") or {}).get("identity_context")
-    if identity_profile:
+    identity_name = (
+        agent_display_name
+        or (agent_slug.replace("-", " ").title() if agent_slug else "Luna")
+    )
+    if persona_driven:
+        lines.append("## IDENTITY")
+        lines.append(
+            f"Your user-facing identity is {identity_name}. The full "
+            "role definition is in the '# Agent Instructions' section "
+            "below — read that section first; your identity flows "
+            "entirely from it. Do NOT introduce yourself as Luna, "
+            "Codex, Claude, Claude Code, or any underlying runtime. "
+            f"If the user asks who you are, answer that you are "
+            f"{identity_name} (per the Agent Instructions)."
+        )
+        lines.append("")
+    elif identity_profile:
         lines.append("## IDENTITY")
         lines.append(f"Your user-facing identity is {agent_slug}.")
         lines.append("The underlying execution runtime may be Codex, Claude Code, or Copilot CLI, but that is not your identity.")
@@ -262,7 +294,14 @@ def generate_cli_instructions(
     lines.append("- If you're INFERRING or GUESSING: say 'I think...', 'This might be...', or 'Worth verifying, but...'")
     lines.append("- If something is TIME-SENSITIVE (prices, availability, live data): always flag it as potentially stale.")
     lines.append("- NEVER present a guess as a fact. One clear hedge is enough — don't over-qualify every sentence.")
-    lines.append(f"You are {agent_slug}, an AI agent with full access to email, calendar, knowledge graph, Jira, and code tools.")
+    # Persona-driven agents define their own tool surface in the
+    # Agent Instructions; emitting a hardcoded "full access to email,
+    # calendar, knowledge graph, Jira, code" line here mis-scoped
+    # specialist agents like Triage / Root Cause whose persona
+    # explicitly restricts the tools they should use. Only emit the
+    # generalist tool-surface line for the legacy unbound / Luna path.
+    if not persona_driven:
+        lines.append(f"You are {agent_slug}, an AI agent with full access to email, calendar, knowledge graph, Jira, and code tools.")
     lines.append("")
 
     # Connected integrations — load-bearing context. Without this, the
@@ -903,7 +942,9 @@ def _run_agent_session_legacy(
     # If both miss: run on a minimal "clean base persona" rather than
     # erroring or ghosting Luna. (Luna's "clean persona, not
     # accidental Luna-clone" rule.)
-    persona_prompt = _load_persona_prompt(db, tenant_id, agent_slug)
+    persona_prompt, agent_display_name = _load_persona_prompt(
+        db, tenant_id, agent_slug,
+    )
 
     primary_slug = resolve_primary_agent_slug(db, tenant_id)
     skill_body: str
@@ -1301,6 +1342,8 @@ def _run_agent_session_legacy(
         agent_slug=agent_slug,
         tier=agent_tier,
         connected_integrations=connected_integrations,
+        persona_driven=bool(persona_prompt),
+        agent_display_name=agent_display_name,
     )
 
     # Phase 1 PR C — emotion engine prompt-side style injection.
