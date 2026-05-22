@@ -76,14 +76,17 @@ def stub_run_helpers(monkeypatch):
         "diff_files": "apps/api/foo.py\napps/web/bar.js",
     }
 
-    def fake_run(cmd, cwd=None, timeout=600, extra_env=None):
+    def fake_run(cmd, cwd=None, timeout=600, extra_env=None, input=None):
         state["run_calls"].append(cmd)
-        # Return canned outputs based on what's being asked.
-        if "git status --porcelain" in cmd:
+        # _run now accepts argv lists post-PR1 (F1 shell=True removal).
+        # Normalize to a flat string for the substring match the canned-
+        # outputs dispatcher uses.
+        cmd_str = " ".join(cmd) if isinstance(cmd, (list, tuple)) else cmd
+        if "git status --porcelain" in cmd_str:
             return state["git_status_output"]
-        if "git diff --name-only" in cmd:
+        if "git diff --name-only" in cmd_str:
             return state["diff_files"]
-        if "git log" in cmd:
+        if "git log" in cmd_str:
             return state["git_log_output"]
         return ""
 

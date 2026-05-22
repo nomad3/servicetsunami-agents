@@ -649,7 +649,9 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
 
         # 2. Pull latest code
         activity.heartbeat("Pulling latest code...")
-        _run("git fetch origin && git checkout main && git pull origin main")
+        _run(["git", "fetch", "origin"])
+        _run(["git", "checkout", "main"])
+        _run(["git", "pull", "origin", "main"])
 
         # 3. Create feature branch
         activity.heartbeat("Creating feature branch...")
@@ -837,7 +839,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
                 claude_data = {"raw": claude_output}
 
         # 7. Check if there are any changes to commit
-        status = _run("git status --porcelain")
+        status = _run(["git", "status", "--porcelain"])
         if not status:
             return CodeTaskResult(
                 pr_url="",
@@ -1017,13 +1019,13 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
 
         # 8. Stage, commit and push
         activity.heartbeat("Pushing changes...")
-        _run("git add -A")
+        _run(["git", "add", "-A"])
         commit_msg = _extract_goal(task_input.task_description)[:100].replace('"', '\\"')
         _run(f'git commit -m "{tag}: {commit_msg}"')
         _run(f'git push origin {branch_name}')
 
         # 9. Get changed files
-        files_changed = _run("git diff --name-only main").split("\n")
+        files_changed = _run(["git", "diff", "--name-only", "main"]).split("\n")
         files_changed = [f for f in files_changed if f]
 
         # 10. Create PR
@@ -1099,7 +1101,7 @@ async def execute_code_task(task_input: CodeTaskInput) -> CodeTaskResult:
         logger.exception("Code task failed: %s", e)
         # Clean up: switch back to main
         try:
-            _run("git checkout main", timeout=10)
+            _run(["git", "checkout", "main"], timeout=10)
         except Exception:
             pass
 
