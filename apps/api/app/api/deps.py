@@ -67,11 +67,8 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(
-            token,
-            settings.SECRET_KEY,
-            algorithms=[settings.ALGORITHM]
-        )
+        from app.core.jwt_signing import verify_token
+        payload = verify_token(token, expected_domain="user")
         email: str = payload.get("sub")
         if email is None:
             raise credentials_exception
@@ -101,11 +98,8 @@ def get_current_user_optional(
     if not token:
         return None
     try:
-        payload = jwt.decode(
-            token,
-            settings.SECRET_KEY,
-            algorithms=[settings.ALGORITHM],
-        )
+        from app.core.jwt_signing import verify_token
+        payload = verify_token(token, expected_domain="user")
         email: str = payload.get("sub")
         if email is None:
             return None
