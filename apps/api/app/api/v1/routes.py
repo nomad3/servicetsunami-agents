@@ -27,6 +27,7 @@ from app.api.v1 import (
     metacog,
     reflections,
     platform_safety_admin,
+    platform_safety_escape,
     values,
     memories,
     team,
@@ -178,6 +179,15 @@ router.include_router(values.router, prefix="", tags=["values"])
 #   GET /api/v1/admin/safety-events         → platform admin (full visibility)
 router.include_router(
     platform_safety_admin.router, prefix="", tags=["platform-safety"],
+)
+# Admin escape endpoints (PR 6 of safety floor). Empty prefix so:
+#   POST /api/v1/admin/platform-safety/escape
+#   POST /api/v1/admin/platform-safety/escape/{id}/revoke
+#   GET  /api/v1/admin/platform-safety/escape
+#   GET  /api/v1/admin/platform-safety/escape/audit
+router.include_router(
+    platform_safety_escape.router, prefix="",
+    tags=["platform-safety-admin"],
 )
 # Habit observation ingestion (#297) — Tauri client writes vision-derived
 # signals via the internal POST endpoint (X-Internal-Key + X-Tenant-Id auth).

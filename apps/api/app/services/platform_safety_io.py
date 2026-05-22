@@ -270,6 +270,30 @@ def _run_tier3_with_shadow_gate(
         confidence=result.confidence,
         trigger_id=result.trigger_id,
     )
+
+    # (PR 6) Admin escape check. If an active grant covers this
+    # (tenant, user, session, category), the user proceeds AND we
+    # write a block_in_window audit row to the admin audit table.
+    # The grant DOES NOT silence the platform_safety_events audit
+    # row — the safety event still records what would have blocked.
+    grant_active = None
+    if enforce:  # only relevant for the user-blocking path
+        try:
+            from app.services import platform_safety_escape
+            grant_active = platform_safety_escape.is_active_grant_for(
+                db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                session_id=session_id,
+                category=result.category,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "platform_safety_escape: grant check raised (%s); "
+                "treating as no-grant (block stands)",
+                exc,
+            )
+
     _record_event(
         db,
         tenant_id=tenant_id,
@@ -280,16 +304,32 @@ def _run_tier3_with_shadow_gate(
         verdict=block_verdict,
         enforcement_mode=mode,
     )
+    if grant_active is not None:
+        try:
+            from app.services import platform_safety_escape
+            platform_safety_escape.record_block_during_grant(
+                db, tenant_id=tenant_id, grant=grant_active,
+                blocked_category=result.category,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "platform_safety_escape: block_in_window audit "
+                "failed (%s); the escape grant still relaxes the "
+                "user-facing block",
+                exc,
+            )
+
     log.info(
         "platform_safety.tier3 %s tenant=%s agent=%s category=%s "
-        "confidence=%s provider=%s",
+        "confidence=%s provider=%s grant_active=%s",
         mode, tenant_id, agent_id, result.category,
-        result.confidence, result.provider,
+        result.confidence, result.provider, bool(grant_active),
     )
 
-    if enforce:
+    if enforce and grant_active is None:
         return block_verdict
-    # Shadow mode — would-have-blocked recorded; user proceeds.
+    # Shadow mode OR active escape grant — would-have-blocked
+    # recorded; user proceeds.
     return PlatformSafetyVerdict.allow()
 
 
