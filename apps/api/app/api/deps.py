@@ -3,7 +3,9 @@ import uuid
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt, JWTError
+from jose import JWTError
+
+from app.core.jwt_signing import verify_token
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -67,7 +69,6 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        from app.core.jwt_signing import verify_token
         payload = verify_token(token, expected_domain="user")
         email: str = payload.get("sub")
         if email is None:
@@ -98,7 +99,6 @@ def get_current_user_optional(
     if not token:
         return None
     try:
-        from app.core.jwt_signing import verify_token
         payload = verify_token(token, expected_domain="user")
         email: str = payload.get("sub")
         if email is None:

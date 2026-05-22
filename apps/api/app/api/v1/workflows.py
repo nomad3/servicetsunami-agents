@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user
 from app.core.config import settings
+from app.core.jwt_signing import verify_token
 
 
 _optional_oauth2 = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
@@ -37,7 +38,6 @@ def _get_tenant_id_from_internal_or_user(
     # Fall back to JWT
     if token:
         try:
-            from app.core.jwt_signing import verify_token
             payload = verify_token(token, expected_domain="user")
             email = payload.get("sub")
             if email:

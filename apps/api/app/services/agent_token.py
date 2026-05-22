@@ -34,7 +34,9 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Optional, Sequence, TypedDict
 
-from jose import ExpiredSignatureError, JWTError, jwt
+from jose import ExpiredSignatureError, JWTError
+
+from app.core.jwt_signing import mint_token, verify_token
 
 from app.core.config import settings
 
@@ -109,7 +111,6 @@ def mint_agent_token(
         "iat": now,
         "exp": exp,
     }
-    from app.core.jwt_signing import mint_token
     return mint_token(claims, domain="agent")
 
 
@@ -123,7 +124,6 @@ def verify_agent_token(token: str) -> AgentTokenClaims:
             "shape failure" exception).
     """
     try:
-        from app.core.jwt_signing import verify_token
         payload = verify_token(token, expected_domain="agent")
     except ExpiredSignatureError:
         raise

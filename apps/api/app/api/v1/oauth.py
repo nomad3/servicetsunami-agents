@@ -20,7 +20,9 @@ from typing import Dict, Optional
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
-from jose import jwt, JWTError
+from jose import JWTError
+
+from app.core.jwt_signing import mint_token, verify_token
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -365,7 +367,6 @@ def oauth_authorize(
         "nonce": secrets.token_urlsafe(16),
         "exp": datetime.utcnow() + timedelta(minutes=10),
     }
-    from app.core.jwt_signing import mint_token
     state_token = mint_token(state_payload, domain="oauth_state")
 
     # Build authorization URL
@@ -439,7 +440,6 @@ def oauth_callback(
 
     # Verify state JWT
     try:
-        from app.core.jwt_signing import verify_token
         payload = verify_token(state, expected_domain="oauth_state")
         if payload.get("provider") != provider:
             raise JWTError("Provider mismatch")

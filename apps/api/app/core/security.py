@@ -2,10 +2,10 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Union
 
-from jose import jwt
 from passlib.context import CryptContext
 
 from app.core.config import settings
+from app.core.jwt_signing import mint_token
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -31,8 +31,6 @@ def create_access_token(
     until PR4) signs the token. Behavior unchanged at this PR; PR4
     introduces real distinct key material.
     """
-    from app.core.jwt_signing import mint_token
-
     now = datetime.utcnow()
     if expires_delta:
         expire = now + expires_delta
