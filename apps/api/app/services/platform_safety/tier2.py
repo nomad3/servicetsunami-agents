@@ -354,9 +354,19 @@ def evaluate(
         embed_fn = _default_embed
 
     msg_vec = embed_fn(message)
-    if not msg_vec:
+    # (Review NIT-2) Defensive against numpy.ndarray returns from a
+    # future embedding-service change: truthiness on ndarray raises
+    # ValueError for >1 elements. Be explicit about the None-or-empty
+    # check instead of relying on `if not msg_vec:`.
+    if msg_vec is None or len(msg_vec) == 0:
         return Tier2Hit(hit=None, confidence=0.0)
 
+    # Track the highest similarity AMONG entries that ALSO clear
+    # their own per-category threshold. A higher-sim entry below
+    # threshold loses to a lower-sim entry above its threshold —
+    # that's correct, because the floor's promise is "block at this
+    # sensitivity for this category," not "block on max similarity
+    # regardless of category." (Review NIT-1 clarification.)
     best_hit: Optional[CorpusEntry] = None
     best_sim = 0.0
     candidate_set = set(candidates)
