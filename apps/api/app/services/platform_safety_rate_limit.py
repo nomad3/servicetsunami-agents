@@ -102,6 +102,12 @@ def check_repeat_attempts(
                 PlatformSafetyEvent.tenant_id == tenant_id,
                 PlatformSafetyEvent.user_id == user_id,
                 PlatformSafetyEvent.enforcement_mode == "enforced",
+                # (Review PR 7 NIT-2) `>= cutoff` is intentionally
+                # inclusive on the boundary — a row landing exactly
+                # at -60s is counted. Harmless in practice;
+                # intentional so the window edge doesn't accidentally
+                # exclude a just-recorded event the IO wrapper wrote
+                # ~ms before this query.
                 PlatformSafetyEvent.created_at >= cutoff,
             )
             .scalar()
