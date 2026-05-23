@@ -102,3 +102,18 @@ Two worker modules live in this app:
 - `workers/scheduler_worker.py` — polls cron/interval pipelines every 60s.
 
 The CLI worker runs in a separate service: see [`../code-worker/`](../code-worker/).
+
+## Dependencies — hashed lock file (F15 supply-chain hardening)
+
+- `requirements.in` — human-edited source of truth. Add new direct deps here.
+- `requirements.lock` — pip-compile output. Pinned + hashed. The Dockerfile and CI workflow install from this with `--require-hashes`, which rejects any wheel whose SHA256 doesn't match.
+
+Regenerating the lock after editing `.in`:
+
+```bash
+cd apps/api
+pip install pip-tools  # one-time
+pip-compile --generate-hashes --output-file=requirements.lock requirements.in
+```
+
+Commit BOTH files. CI catches any drift via the same `--require-hashes` install.
