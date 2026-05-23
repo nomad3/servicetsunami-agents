@@ -45,6 +45,11 @@ from app.services import platform_safety_escape as _ps_escape
 from app.services.platform_safety_rate_limit import (
     check_repeat_attempts as _check_repeat_attempts,
 )
+# P0c (2026-05-23): audit_metrics gives ERROR-path Prometheus counters
+# for the two swallow sites promoted from P1 to P0c after Luna review.
+# Import-safe: audit_metrics falls back to no-op if prometheus_client
+# isn't installed, so the safety hot path never crashes.
+from app.services import audit_metrics
 
 log = logging.getLogger(__name__)
 
@@ -92,26 +97,44 @@ def _record_event(
         db.add(row)
         db.commit()
     except SQLAlchemyError as exc:
-        log.warning(
-            "platform_safety: audit row insert failed "
-            "tenant=%s category=%s err=%s; refusal still fired",
-            tenant_id, verdict.category, exc,
+        # P0c promotion: ERROR + Prometheus counter. A safety-floor
+        # verdict fired but the audit row write failed — operators
+        # have no DB record of the event. Luna review 2026-05-23:
+        # "if safety IO fails silently, the safety floor has been
+        # bypassed." The refusal still fired (user-facing path
+        # unaffected), but accountability is degraded.
+        log.error(
+            "platform_safety: audit row insert FAILED "
+            "tenant=%s category=%s tier=%s err=%s — "
+            "platform_safety_events row LOST; refusal still fired",
+            tenant_id, verdict.category, verdict.detection_tier, exc,
+        )
+        audit_metrics.record_platform_safety_record_event_failure(
+            category=verdict.category,
+            tier=verdict.detection_tier,
         )
         try:
             db.rollback()
         except SQLAlchemyError:
             pass
     except Exception as exc:  # noqa: BLE001
-        # (Review NIT-5) Catch non-SQL crashes too — e.g. an
-        # AttributeError on a malformed verdict shape. The verdict
-        # has already been computed and is the authoritative refusal
-        # signal; the audit row is bookkeeping. A crash here MUST
-        # NOT propagate up into consult_with_audit (which would
-        # then fail-OPEN the refusal we just decided to fire).
-        log.warning(
-            "platform_safety: audit row unexpected error "
-            "tenant=%s category=%s err=%s; refusal still fired",
-            tenant_id, verdict.category, exc,
+        # P0c promotion: same treatment as the SQLAlchemyError branch.
+        # Catch non-SQL crashes too — e.g. an AttributeError on a
+        # malformed verdict shape. The verdict has already been
+        # computed and is the authoritative refusal signal; the audit
+        # row is bookkeeping. A crash here MUST NOT propagate up into
+        # consult_with_audit (which would then fail-OPEN the refusal
+        # we just decided to fire) — but it MUST be visible.
+        log.error(
+            "platform_safety: audit row unexpected ERROR "
+            "tenant=%s category=%s tier=%s err=%s — "
+            "platform_safety_events row LOST; refusal still fired",
+            tenant_id, verdict.category, verdict.detection_tier, exc,
+            exc_info=True,
+        )
+        audit_metrics.record_platform_safety_record_event_failure(
+            category=verdict.category,
+            tier=verdict.detection_tier,
         )
         try:
             db.rollback()
@@ -187,15 +210,25 @@ def consult_with_audit(
         # has been recorded so the new row is counted. Best-effort:
         # any failure here is bookkeeping; the user-facing refusal
         # already returned.
+        #
+        # P0c promotion (Luna review 2026-05-23): adversary-probe
+        # detector failure must be VISIBLE — silent failure here means
+        # we lose the only signal of someone probing the safety floor.
+        # Was log.debug; now log.error + Prometheus counter.
         try:
             _check_repeat_attempts(
                 db, tenant_id=tenant_id, user_id=user_id,
             )
         except Exception as exc:  # noqa: BLE001
-            log.debug(
-                "platform_safety.rate_limit check raised (%s); "
-                "ignored — refusal already fired",
-                exc,
+            log.error(
+                "platform_safety.repeat_check FAILED tenant=%s "
+                "err=%s — adversary-probe detector blind for this "
+                "attempt; user-facing refusal still fired",
+                tenant_id, exc,
+                exc_info=True,
+            )
+            audit_metrics.record_platform_safety_repeat_check_failure(
+                tenant_id=str(tenant_id) if tenant_id else None,
             )
         return verdict
 

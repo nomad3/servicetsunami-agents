@@ -31,6 +31,13 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from src.mcp_auth import resolve_auth_context, resolve_tenant_id
+# P0c (2026-05-23): fail-loud across the three drop sites in this
+# module. Counters live in audit_metrics; breadcrumb writes go to
+# audit_breadcrumb on a separate small connection pool so a
+# saturated main DB doesn't starve the safety-net writes too.
+# Import-safe — both modules degrade to no-op if their underlying
+# deps (prometheus_client, sqlalchemy create_engine) are unavailable.
+from src import audit_breadcrumb, audit_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +128,30 @@ def _log_call(
     if eng is None:
         return
     if not tenant_id:
-        # Visible-but-rate-limited so we can spot tools whose tenant resolution
-        # fails. Don't blow up the log with one entry per call.
-        logger.debug("tool_audit: skip %s — no tenant_id resolved", tool_name)
+        # P0c drop site #1: tenant_id unresolvable. This is the path
+        # that hid the round-3 breach — tier=tenant_header without an
+        # arg-resolvable tenant_id used to log.debug + return silently.
+        # Now: ERROR + Prometheus counter + breadcrumb to
+        # tool_audit_drops so operators have a persistent record even
+        # when we cannot write the proper tool_calls row.
+        logger.error(
+            "tool_audit: DROPPED audit row for %s — no tenant_id "
+            "resolved. This is a security-relevant audit-integrity "
+            "failure. arguments_keys=%s",
+            tool_name,
+            list((arguments or {}).keys())[:5],
+        )
+        audit_metrics.record_drop(
+            reason="no_tenant_id",
+            tool_name=tool_name,
+        )
+        audit_breadcrumb.write_drop(
+            tool_name=tool_name,
+            drop_reason="no_tenant_id",
+            tier=None,  # tier wasn't enough to resolve tenant_id either
+            args_keys=list((arguments or {}).keys()),
+            error_message=None,
+        )
         return
     try:
         # Three-layer redaction:
@@ -167,8 +195,33 @@ def _log_call(
                     "started_at": started_at_unix,
                 },
             )
-    except Exception as e:
-        logger.warning("tool_audit: write failed for %s: %s", tool_name, e)
+    except Exception as e:  # noqa: BLE001
+        # P0c drop site #2: SQL INSERT into tool_calls failed.
+        # Reasons range from NOT NULL violation (the audit row should
+        # have been complete by this point — investigate) to schema
+        # drift to DB pool exhaustion. ERROR + counter + breadcrumb;
+        # the breadcrumb attempt uses a separate small pool so even
+        # main-pool exhaustion still leaves a "we tried" footprint.
+        logger.error(
+            "tool_audit: SQL write FAILED for %s — audit row LOST. "
+            "tenant_id=%s status=%s err=%s",
+            tool_name, tenant_id, result_status, e,
+            exc_info=True,
+        )
+        audit_metrics.record_write_failure(
+            tool_name=tool_name, exception=e,
+        )
+        try:
+            audit_breadcrumb.write_drop(
+                tool_name=tool_name,
+                drop_reason="sql_insert_failed",
+                tier=None,
+                args_keys=list((arguments or {}).keys())
+                if arguments else None,
+                error_message=f"{type(e).__name__}: {e}",
+            )
+        except Exception:  # noqa: BLE001 — breadcrumb is last line
+            pass
 
 
 def install_audit(mcp_server) -> None:
@@ -302,8 +355,35 @@ def install_audit(mcp_server) -> None:
                 }
                 loop = asyncio.get_running_loop()
                 loop.run_in_executor(None, lambda p=payload: _log_call(**p))
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001
+                # P0c drop site #3: executor scheduling failed (loop
+                # closed, executor full, asyncio teardown race).
+                # Operationally serious — every subsequent tool call
+                # may be silently un-audited until the executor
+                # recovers. The tool path itself already returned
+                # successfully; this is purely about the audit write
+                # being lost. ERROR + counter; breadcrumb attempt is
+                # also best-effort here since the surrounding asyncio
+                # state may be unhealthy.
+                logger.error(
+                    "tool_audit: executor scheduling FAILED for %s — "
+                    "audit row LOST. tool path will continue but "
+                    "audit trail is degraded. err=%s",
+                    tool_name, e, exc_info=True,
+                )
+                audit_metrics.record_scheduling_failure(
+                    tool_name=tool_name,
+                )
+                try:
+                    audit_breadcrumb.write_drop(
+                        tool_name=tool_name,
+                        drop_reason="scheduling_failed",
+                        tier=None,
+                        args_keys=None,
+                        error_message=f"{type(e).__name__}: {e}",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
 
     handlers[CallToolRequest] = audited_handler
     mcp_server._tool_audit_installed = True
