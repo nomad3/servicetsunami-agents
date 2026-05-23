@@ -1386,96 +1386,119 @@ def _run_agent_session_legacy(
 
     internal_key = settings.MCP_API_KEY or "dev_mcp_key"
 
-    # ── Phase 4 commit 3 — agent-token mint (gated by resilient flag) ──
-    # When use_resilient_executor is TRUE, mint an agent-scoped JWT and
-    # plumb it through generate_mcp_config so the leaf authenticates via
-    # the third auth tier on apps/mcp-server. When FALSE (the default
-    # during cutover), agent_token is None and behavior is byte-identical
-    # to Phase 3 — the leaf still uses X-Internal-Key + X-Tenant-Id.
+    # ── P0a (2026-05-23): agent-token mint is UNCONDITIONAL ──
+    # The prior `use_resilient_executor` flag gated this mint path per
+    # tenant. Round 3 of the 2026-05-23 hard-tests showed Simon's
+    # tenant (and every tenant in production) had the flag = FALSE,
+    # which meant the chat→code-worker subprocess connected to MCP
+    # WITHOUT a scoped agent_token. That fell through to tier=
+    # tenant_header where auth_ctx.scope is None, and the scope check
+    # at tool_audit.py:245 was skipped — Luna ran execute_shell
+    # despite `shell` not being in her tool_groups.
+    #
+    # The fix per docs/plans/2026-05-23-p0a-tool-permission-gate-fix.md
+    # is to make minting unconditional. Per-tenant opt-out of *security*
+    # enforcement was a misfeature; the prior flag was Phase 4 cutover-
+    # staging that never finished.
+    #
+    # Mint failure is now FATAL to dispatch — we don't silently fall
+    # back to legacy auth, because that's the exact path the breach
+    # used. The caller receives a dispatch error and the user gets a
+    # "tool dispatch failed — please retry" message instead of a
+    # silent execution under wrong auth.
     agent_token: Optional[str] = None
     try:
-        from app.services.cli_orchestrator_shadow import read_flags
-        use_resilient, _ = read_flags(db, tenant_id)
-    except Exception:  # noqa: BLE001
-        use_resilient = False
+        from app.models.agent import Agent
+        from app.services.agent_token import mint_agent_token
+        from sqlalchemy import func as _sa_func
 
-    if use_resilient:
-        try:
-            from app.models.agent import Agent
-            from app.services.agent_token import mint_agent_token
-
-            # `resolve_tool_names` is already imported at module scope (line 20).
-            # Re-importing it here turned it into a function-local in the parent
-            # `dispatch_chat_cli` scope, which then shadowed the module global
-            # for the nested `_run_workflow` closure further down. When
-            # `use_resilient` was False, the local was never bound and the
-            # closure lookup raised:
-            #   NameError: cannot access free variable 'resolve_tool_names'
-            #   where it is not associated with a value in enclosing scope
-            # — which silently aborted ChatCliWorkflow dispatch for every
-            # tenant where the resilient flag wasn't set (Luna in WhatsApp,
-            # most notably). Don't re-import.
-
-            # Agent has no `slug` column; the chat hot path passes a slug
-            # form like "luna". Match case-insensitively against Agent.name
-            # which is the closest analogue (display name).
-            from sqlalchemy import func as _sa_func
-
-            agent_row = (
-                db.query(Agent)
-                .filter(
-                    Agent.tenant_id == tenant_id,
-                    _sa_func.lower(Agent.name) == agent_slug.lower(),
-                )
-                .first()
+        # Agent has no `slug` column; the chat hot path passes a slug
+        # form like "luna". Match case-insensitively against Agent.name
+        # which is the closest analogue (display name).
+        agent_row = (
+            db.query(Agent)
+            .filter(
+                Agent.tenant_id == tenant_id,
+                _sa_func.lower(Agent.name) == agent_slug.lower(),
             )
-            if agent_row is not None:
-                # Scope claim from agent.tool_groups (per plan correction
-                # #2). resolve_tool_names returns None when tool_groups
-                # is None, meaning "all tools" — propagate that to the
-                # claim so the server-side scope check is a no-op.
-                scope = resolve_tool_names(agent_row.tool_groups)
-                # task_id: the chat hot path doesn't have a persisted
-                # AgentTask row (the chat workflow doesn't create one),
-                # so we mint a synthetic one. The MCP server's audit
-                # boundary (apps/mcp-server/src/tool_audit.py) writes
-                # this id to the ``tool_calls`` table only — there is
-                # no FK to agent_tasks and no execution_trace row is
-                # written for chat-driven leafs in this phase.
-                # Phase 4.5+ will persist a synthetic AgentTask row
-                # (kind="chat") to close the audit-trace gap.
-                synth_task_id = str(uuid.uuid4())
-                parent_chain = tuple(
-                    str(x) for x in (
-                        (db_session_memory or {}).get("parent_chain") or ()
-                    )
+            .first()
+        )
+        if agent_row is not None:
+            # Scope claim from agent.tool_groups. After the NULL-
+            # backfill migration ships (147_agent_tool_groups_review
+            # _required), no agent should have tool_groups=NULL —
+            # they are backfilled with the read-only default
+            # ['knowledge', 'meta'] + tool_groups_review_required=TRUE.
+            # If we somehow see NULL anyway, resolve_tool_names returns
+            # None (which would mean "all tools" downstream) — we
+            # explicitly substitute the safe default to fail-CLOSED.
+            scope = resolve_tool_names(agent_row.tool_groups)
+            if scope is None:
+                logger.error(
+                    "P0a: agent %s (tenant %s) has tool_groups=NULL "
+                    "or unresolvable — substituting fail-closed default "
+                    "['knowledge', 'meta']. This should not happen "
+                    "post-migration 147 — check the backfill.",
+                    agent_row.id, tenant_id,
                 )
-                agent_token = mint_agent_token(
-                    tenant_id=str(tenant_id),
-                    agent_id=str(agent_row.id),
-                    task_id=synth_task_id,
-                    parent_workflow_id=None,  # set per-run by Temporal
-                    scope=scope,
-                    parent_chain=parent_chain,
+                scope = resolve_tool_names(["knowledge", "meta"]) or []
+            # task_id: the chat hot path doesn't have a persisted
+            # AgentTask row (the chat workflow doesn't create one),
+            # so we mint a synthetic one. The MCP server's audit
+            # boundary (apps/mcp-server/src/tool_audit.py) writes
+            # this id to the ``tool_calls`` table only.
+            synth_task_id = str(uuid.uuid4())
+            parent_chain = tuple(
+                str(x) for x in (
+                    (db_session_memory or {}).get("parent_chain") or ()
                 )
-        except Exception as exc:  # noqa: BLE001
-            # Mint failure is non-fatal — fall back to legacy auth path.
-            # WARN, not DEBUG: silent fallback at INFO+ would mask JWT
-            # secret rotation bugs, malformed tool_groups data, or DB
-            # outages on every chat turn. Mirror worker-side severity
-            # (apps/code-worker/app/workflows.py:574) — Phase 4 review C3.
-            #
-            # Rollback is required: the try-block ran `db.query(Agent)` and
-            # `read_flags(db, ...)`. A NameError or DB hiccup mid-block
-            # (this is exactly the failure mode behind PR #349) leaves the
-            # session in InFailedSqlTransaction. The very next line calls
-            # generate_mcp_config(..., db=db) which would otherwise cascade.
-            safe_rollback(db)
+            )
+            agent_token = mint_agent_token(
+                tenant_id=str(tenant_id),
+                agent_id=str(agent_row.id),
+                task_id=synth_task_id,
+                parent_workflow_id=None,  # set per-run by Temporal
+                scope=scope,
+                parent_chain=parent_chain,
+            )
+        else:
+            # Agent name didn't resolve — no token to mint. This
+            # branch existed before too; the dispatch path downstream
+            # handles agent_token=None by relying on internal_key
+            # auth, but ONLY for legitimate non-agent contexts. We
+            # log loudly here so operators can spot
+            # missing-agent-name dispatches.
             logger.warning(
-                "agent_token mint failed (falling back to legacy auth): %s",
-                exc, exc_info=True,
+                "P0a: no Agent row matched slug=%s in tenant %s — "
+                "dispatching without agent_token (internal_key only). "
+                "Verify this slug is intentional.",
+                agent_slug, tenant_id,
             )
-            agent_token = None
+    except Exception as exc:  # noqa: BLE001
+        # P0a hardening: mint failure is no longer silently
+        # downgraded to legacy auth. The original "non-fatal" fallback
+        # IS the breach path — it produces a dispatch with no scoped
+        # JWT, which fails the MCP-server scope check (skipped because
+        # tier != agent_token), and the tool runs unchecked.
+        #
+        # Roll back the txn (db.query(Agent) may have left the session
+        # in InFailedSqlTransaction state) and re-raise as a hard
+        # dispatch failure. The caller sees a clear error rather than
+        # a silently-degraded execution.
+        safe_rollback(db)
+        logger.error(
+            "P0a: agent_token mint FAILED for tenant=%s slug=%s — "
+            "dispatch ABORTED to prevent legacy-auth fallback breach. "
+            "err=%s",
+            tenant_id, agent_slug, exc, exc_info=True,
+        )
+        # TODO(p0a): emit Prometheus counter
+        # cli_session_manager_mint_failed_total{tenant_id, agent_id}
+        # once the api-side metrics module from P0c is merged.
+        raise RuntimeError(
+            f"agent_token mint failed for tenant={tenant_id} "
+            f"slug={agent_slug}: {exc}"
+        ) from exc
 
     mcp_config = generate_mcp_config(
         str(tenant_id), internal_key, db=db,

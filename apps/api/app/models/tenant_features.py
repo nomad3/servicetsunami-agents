@@ -130,6 +130,18 @@ class TenantFeatures(Base):
     #               xero_csv | sage_intacct_csv
     cpa_export_format = Column(String(32), nullable=False, default="xlsx")
 
+    # P0a (2026-05-23): per-tenant ramp gate for the tool_audit.py
+    # fail-closed default. FALSE = shadow-log denials only (don't
+    # enforce). TRUE = enforce (any non-internal_key non-agent_token
+    # call to a non-allowlisted tool is rejected with tier_denied).
+    # Rollout sequence per docs/plans/2026-05-23-p0a-tool-permission-
+    # gate-fix.md §5: flip TRUE for Simon's tenant first (24h watch),
+    # then all other tenants, then remove this flag entirely in a
+    # follow-up migration after 1 week stable. Migration 149.
+    enforce_strict_tool_scope = Column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
     # GitHub primary account for repo operations.
     # Pins which connected GitHub account the MCP github tools use as
     # default when the caller doesn't pass an explicit account_email.
