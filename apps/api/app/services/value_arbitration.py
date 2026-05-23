@@ -38,6 +38,34 @@ Veto rule corrections from Luna review 2026-05-23 (binding):
     not ``blocked``. Throttled = "valid action, substrate cannot run it
     now" (retriable; does NOT train the value layer as moral refusal).
 
+Precedence reorder from Luna review 2026-05-23 (binding, supersedes
+earlier "substrate before other veto-bearing" ordering):
+  1. ``safety_floor`` absolute veto → ``blocked``.
+  2. Any other veto-bearing normative veto (e.g. ``tenant_norm``) →
+     ``blocked``.
+  3. ``substrate_integrity`` veto alone (no normative veto present) →
+     ``throttled``.
+  4. Advisory / score arbitration.
+
+Luna's framing: *"if the arbitrator has already received a valid
+tenant_norm veto, then the moral/policy evaluation has occurred
+enough to be actionable. Returning throttled at that point discards
+a stronger governance fact in favor of an operational fact. That
+weakens 'wanting is not authority' and creates misleading retry
+semantics."* Throttled is reserved for the case where substrate is
+the ONLY blocking signal — i.e. the moral layer is silent or the
+substrate degradation prevents acquiring reliable normative
+signals at all.
+
+Veto targeting (Luna review 2026-05-23): every veto pass — absolute,
+other veto-bearing, substrate — must only fire if the veto signal
+actually targets a candidate under arbitration (i.e.
+``match_signal_to_candidate(sig, cand) > 0`` for at least one
+``cand``). A ``safety_floor`` veto whose target is
+``workflow_step:foo`` does NOT block a ``tool_call:send_email``
+candidate. Untargeted vetoes are recorded in the trace and
+otherwise ignored.
+
 Provenance contract (§4.2): every ``ValueSignal`` MUST carry
 ``{source, source_id, timestamp, tenant_id, confidence}`` and
 ``agent_id`` unless ``source`` is ``safety_floor`` or ``tenant_norm``.
@@ -262,8 +290,17 @@ class TrustWeights:
         source_class: SourceClass,
         agent_id: Optional[uuid.UUID],
     ) -> float:
-        if (tenant_id, source_class, agent_id) in self.weights:
-            return float(self.weights[(tenant_id, source_class, agent_id)])
+        # safety_floor / tenant_norm are agent-agnostic sources (see
+        # ``_AGENT_OPTIONAL_SOURCES``). Looking them up with a concrete
+        # agent_id would silently fall through to the tenant-fallback or
+        # default in the common case and break callers who set per-tenant
+        # weights for those sources without per-agent overrides. Force the
+        # agent-scope to ``None`` for these sources before lookup.
+        effective_agent_id = (
+            None if source_class in _AGENT_OPTIONAL_SOURCES else agent_id
+        )
+        if (tenant_id, source_class, effective_agent_id) in self.weights:
+            return float(self.weights[(tenant_id, source_class, effective_agent_id)])
         if (tenant_id, source_class, None) in self.weights:
             return float(self.weights[(tenant_id, source_class, None)])
         return float(self.default)
@@ -406,6 +443,14 @@ def validate_signal(sig: ValueSignal) -> bool:
         raise MissingProvenance(
             f"ValueSignal confidence out of [0,1]: {sig.confidence}"
         )
+    # timestamp MUST be timezone-aware. Naive datetimes ambiguate ordering
+    # across tenants/regions and break audit reproducibility. Reject at the
+    # boundary per Luna review 2026-05-23.
+    if sig.timestamp.tzinfo is None:
+        raise MissingProvenance(
+            f"ValueSignal timestamp must be timezone-aware (got naive): "
+            f"{sig.timestamp!r}"
+        )
     return True
 
 
@@ -436,8 +481,30 @@ def _sign_for_direction(d: Direction) -> int:
         return +1
     if d in (Direction.avoid, Direction.veto):
         return -1
-    # preserve / unknown → no contribution to weighted sum
+    # ``Direction.preserve`` is intentionally inert in the weighted sum:
+    # we cannot cleanly express "do not mutate target X" via a scalar
+    # contribution without knowing each candidate's mutation footprint.
+    # Until we have that footprint metadata on ``Candidate``, preserve
+    # signals are admitted into the trace (with rule
+    # ``unsupported_preserve``) so audit replay surfaces the gap, but
+    # they do not contribute to scoring. See Luna review 2026-05-23.
     return 0
+
+
+def _veto_targets_any(sig: ValueSignal, candidates: list) -> bool:
+    """Does ``sig`` actually target at least one candidate under arbitration?
+
+    Used to gate every veto pass (absolute / substrate / other
+    veto-bearing). A veto signal whose target does not match any
+    candidate must not block — otherwise a ``safety_floor`` veto on
+    ``workflow_step:foo`` would also block an unrelated
+    ``tool_call:send_email``. See B1 / Luna review 2026-05-23.
+
+    If ``candidates`` is empty the veto trivially cannot target anything;
+    that case is handled at the top of ``arbitrate()`` with an
+    ``abstain(reason="no_candidates")`` short-circuit.
+    """
+    return any(match_signal_to_candidate(sig, c) > 0 for c in candidates)
 
 
 def arbitrate(
@@ -451,35 +518,66 @@ def arbitrate(
 
     Steps (per design §4.3, with Luna review corrections folded in):
 
+      0. EMPTY-CANDIDATES short-circuit — if ``candidates`` is empty,
+         return ``abstain(reason="no_candidates")``. Without candidates,
+         no veto can target anything and no weighted sum is meaningful.
       1. Validate every signal at the boundary. Provenance-rejected
          signals enter the trace as ``rejected`` with reason; they do
-         NOT contribute to scoring.
-      2. ABSOLUTE pass — any single absolute veto blocks (hierarchical
-         override; no lower-standing signal can rescue).
-      3. SUBSTRATE-INTEGRITY pass — any single substrate_integrity
-         veto produces ``throttled``, NOT ``blocked``. Throttled is
-         operational deferral, distinct from moral refusal (§9
-         Luna-resolved). Runs BEFORE other veto-bearing so substrate
-         vetoes don't get mis-classified as moral.
-      4. VETO-BEARING pass (excluding substrate_integrity) — any
-         single veto from a veto-bearing source blocks. DISJUNCTIVE
-         per Luna review correction; earlier unanimity draft was
-         fail-open.
+         NOT contribute to scoring. Rejected entries store
+         ``repr(sig)`` so audit replay sees the actual offending shape
+         (Luna review I2 / 2026-05-23) instead of fabricated defaults.
+      2. ABSOLUTE pass — any single absolute veto THAT ACTUALLY TARGETS
+         a candidate under arbitration blocks (hierarchical override).
+         Untargeted absolute vetoes are traced and ignored (B1 fix).
+      3. NORMATIVE VETO-BEARING pass (excluding substrate_integrity) —
+         any single targeted veto from a veto-bearing source blocks.
+         DISJUNCTIVE. Runs BEFORE substrate_integrity per Luna review
+         2026-05-23: once a tenant_norm veto has fired, the moral
+         evaluation has already happened — returning throttled would
+         discard a stronger governance fact in favor of an operational
+         one and create misleading retry semantics.
+      4. SUBSTRATE-INTEGRITY pass — only reached if no normative veto
+         fired. Any single targeted substrate_integrity veto produces
+         ``throttled`` (operational deferral, distinct from moral
+         refusal — §9 Luna-resolved).
       5. WEIGHTED SUM — every admitted signal contributes
          ``sign * applicability * weight * confidence`` to each
          candidate. ``weight`` is clamped to the standing class's
          bounds at read time.
-      6. TIE-BREAK — top two candidates within ``tie_epsilon`` →
+      6. NEGATIVE-TOP short-circuit — if the top candidate's weighted
+         sum is <= 0 (e.g. only avoid signals fired), return
+         ``abstain(reason="no_positive_candidate")``. Returning
+         ``preferred`` for a net-negative score would silently endorse
+         an action the value layer is actively pushing back on (B3).
+      7. TIE-BREAK — top two candidates within ``tie_epsilon`` →
          abstain. Surface indeterminacy; do NOT coin-flip.
 
     Audit + persistence belong in the IO wrapper. This function is
     pure and side-effect-free.
     """
+    # Step 0: empty-candidates short-circuit. Without candidates, every
+    # veto targeting check fails by definition and the weighted sum is
+    # meaningless; abstain explicitly so callers can't silently mistake
+    # an empty ordering for a positive preference (B2 fix).
+    if not candidates:
+        return ArbitrationResult.abstain(
+            reason="no_candidates",
+            trace=(),
+            rejected=(),
+        )
+
     # Step 1: boundary validation. We catch MissingProvenance here to
     # build a rejected-signal trace; the rest of the system upstream of
     # arbitrate() is what is forbidden from swallowing the exception
     # silently (per §4.2). Including rejected signals in the trace is
-    # explicit per §4.3 final bullet.
+    # explicit per §4.3 final bullet. Per Luna review I2 / 2026-05-23,
+    # rejected entries store ``repr(sig)`` in ``rejected_reason`` so
+    # audit replay sees the actual offending shape rather than
+    # fabricated default fields. (Note: ``trace`` and ``rejected`` on
+    # ArbitrationResult intentionally surface the same rejected entries
+    # by reference — ``trace`` is the unified replay log, ``rejected``
+    # is the projected subset for IO wrappers that route rejections
+    # separately. Treat them as views, not duplicates.)
     valid: list = []
     rejected_entries: list = []
     for sig in signals:
@@ -500,22 +598,33 @@ def arbitrate(
                     weight_clamped=0.0,
                     contribution_per_candidate={},
                     rule="rejected",
-                    rejected_reason=str(exc),
+                    rejected_reason=f"{exc} | raw={sig!r}",
                 )
             )
 
     trace: list = list(rejected_entries)
 
     # Step 2: absolute pass — hierarchical override.
+    # B1 fix: only fire if the veto actually targets a candidate under
+    # arbitration. Untargeted absolute vetoes are traced as
+    # ``absolute_veto_untargeted`` and skipped.
     absolute_signals = [s for s in valid if s.standing == Standing.absolute]
-    absolute_vetoes = [s for s in absolute_signals if s.direction == Direction.veto]
+    absolute_vetoes_all = [s for s in absolute_signals if s.direction == Direction.veto]
+    absolute_vetoes = [
+        s for s in absolute_vetoes_all if _veto_targets_any(s, candidates)
+    ]
+    untargeted_absolute = [
+        s for s in absolute_vetoes_all if not _veto_targets_any(s, candidates)
+    ]
+    for s in untargeted_absolute:
+        trace.append(_trace_for_veto(s, rule="absolute_veto_untargeted"))
     if absolute_vetoes:
         for s in absolute_vetoes:
             trace.append(_trace_for_veto(s, rule="absolute_veto"))
         # Carry the remaining admitted signals into trace too, marked as
         # bypassed-by-absolute, so audit replay is complete.
         for s in valid:
-            if s in absolute_vetoes:
+            if s in absolute_vetoes or s in untargeted_absolute:
                 continue
             trace.append(_trace_for_bypass(s, rule="bypassed_by_absolute"))
         return ArbitrationResult.blocked(
@@ -524,39 +633,36 @@ def arbitrate(
             rejected=tuple(rejected_entries),
         )
 
-    # Step 3: substrate-integrity pass — DISTINCT throttled outcome.
-    substrate_vetoes = [
-        s
-        for s in valid
-        if s.source == SourceClass.substrate_integrity and s.direction == Direction.veto
-    ]
-    if substrate_vetoes:
-        for s in substrate_vetoes:
-            trace.append(_trace_for_veto(s, rule="substrate_throttle"))
-        for s in valid:
-            if s in substrate_vetoes:
-                continue
-            trace.append(_trace_for_bypass(s, rule="bypassed_by_substrate"))
-        return ArbitrationResult.throttled(
-            reason="substrate_integrity_throttle",
-            trace=tuple(trace),
-            rejected=tuple(rejected_entries),
-        )
-
-    # Step 4: veto-bearing pass — DISJUNCTIVE (Luna correction).
-    # Excludes substrate_integrity (handled above with throttle outcome).
-    veto_class = [
+    # Step 3: normative veto-bearing pass — DISJUNCTIVE (Luna correction).
+    # Excludes substrate_integrity. Per Luna review 2026-05-23 this runs
+    # BEFORE the substrate pass: "if the arbitrator has already received
+    # a valid tenant_norm veto, then the moral/policy evaluation has
+    # occurred enough to be actionable. Returning throttled at that
+    # point discards a stronger governance fact in favor of an
+    # operational fact. That weakens 'wanting is not authority' and
+    # creates misleading retry semantics."
+    normative_veto_class = [
         s
         for s in valid
         if s.standing == Standing.veto_bearing
         and s.source != SourceClass.substrate_integrity
     ]
-    vetoes = [s for s in veto_class if s.direction == Direction.veto]
-    if vetoes:
-        for s in vetoes:
+    normative_vetoes_all = [
+        s for s in normative_veto_class if s.direction == Direction.veto
+    ]
+    normative_vetoes = [
+        s for s in normative_vetoes_all if _veto_targets_any(s, candidates)
+    ]
+    untargeted_normative = [
+        s for s in normative_vetoes_all if not _veto_targets_any(s, candidates)
+    ]
+    for s in untargeted_normative:
+        trace.append(_trace_for_veto(s, rule="veto_bearing_untargeted"))
+    if normative_vetoes:
+        for s in normative_vetoes:
             trace.append(_trace_for_veto(s, rule="veto_bearing_block"))
         for s in valid:
-            if s in vetoes:
+            if s in normative_vetoes or s in untargeted_normative:
                 continue
             trace.append(_trace_for_bypass(s, rule="bypassed_by_veto_bearing"))
         return ArbitrationResult.blocked(
@@ -565,7 +671,40 @@ def arbitrate(
             rejected=tuple(rejected_entries),
         )
 
-    # Step 5: weighted sum.
+    # Step 4: substrate-integrity pass — DISTINCT throttled outcome.
+    # Only reached if no normative veto fired (per Luna reorder above).
+    # Throttled is reserved for "valid action, substrate cannot run it
+    # now" — retriable, NOT moral refusal.
+    substrate_vetoes_all = [
+        s
+        for s in valid
+        if s.source == SourceClass.substrate_integrity and s.direction == Direction.veto
+    ]
+    substrate_vetoes = [
+        s for s in substrate_vetoes_all if _veto_targets_any(s, candidates)
+    ]
+    untargeted_substrate = [
+        s for s in substrate_vetoes_all if not _veto_targets_any(s, candidates)
+    ]
+    for s in untargeted_substrate:
+        trace.append(_trace_for_veto(s, rule="substrate_throttle_untargeted"))
+    if substrate_vetoes:
+        for s in substrate_vetoes:
+            trace.append(_trace_for_veto(s, rule="substrate_throttle"))
+        for s in valid:
+            if s in substrate_vetoes or s in untargeted_substrate:
+                continue
+            trace.append(_trace_for_bypass(s, rule="bypassed_by_substrate"))
+        return ArbitrationResult.throttled(
+            reason="substrate_integrity_throttle",
+            trace=tuple(trace),
+            rejected=tuple(rejected_entries),
+        )
+
+    # Step 5: weighted sum. ``preserve`` signals get sign=0 and produce
+    # zero contribution; we still trace them with rule
+    # ``unsupported_preserve`` so audit replay surfaces the gap (Luna
+    # review I1 / 2026-05-23). All other signals trace as ``weighted``.
     scores: dict = {(c.kind, c.ref): 0.0 for c in candidates}
     for sig in valid:
         raw = trust_weights.get(
@@ -582,6 +721,11 @@ def arbitrate(
             contrib = sign * applicability * clamped * float(sig.confidence)
             scores[(cand.kind, cand.ref)] += contrib
             contributions[cand.ref] = contrib
+        rule = (
+            "unsupported_preserve"
+            if sig.direction == Direction.preserve
+            else "weighted"
+        )
         trace.append(
             TraceEntry(
                 source=sig.source,
@@ -594,20 +738,34 @@ def arbitrate(
                 weight_raw=raw,
                 weight_clamped=clamped,
                 contribution_per_candidate=contributions,
-                rule="weighted",
+                rule=rule,
             )
         )
 
-    # Step 6: tie-break.
+    # Step 6: tie-break + negative-top short-circuit.
     ordering = sorted(
         candidates, key=lambda c: -scores[(c.kind, c.ref)]
     )
     scores_by_ref = {f"{c.kind}:{c.ref}": scores[(c.kind, c.ref)] for c in candidates}
 
+    # B3 fix: if the best candidate has a non-positive weighted sum,
+    # there is no positive-valenced candidate to prefer. Returning
+    # ``preferred`` here would silently endorse an action the value
+    # layer is actively pushing back on (e.g. a lone ``avoid`` against
+    # a single candidate yields top score = -1.0).
+    top_score = scores[(ordering[0].kind, ordering[0].ref)]
+    if top_score <= 0:
+        return ArbitrationResult.abstain(
+            reason="no_positive_candidate",
+            trace=tuple(trace),
+            rejected=tuple(rejected_entries),
+            scores=scores_by_ref,
+            ordering=tuple(ordering),
+        )
+
     if len(ordering) >= 2:
-        top = scores[(ordering[0].kind, ordering[0].ref)]
         runner = scores[(ordering[1].kind, ordering[1].ref)]
-        if abs(top - runner) < tie_epsilon:
+        if abs(top_score - runner) < tie_epsilon:
             return ArbitrationResult.abstain(
                 reason="tie_within_epsilon",
                 trace=tuple(trace),
