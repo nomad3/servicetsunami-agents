@@ -85,25 +85,20 @@ jobs:
             -e cloudflared/credentials.json \
             -e cloudflared/cert.pem
 
-      - name: Symlink env files
+      - name: Load runtime secrets (Keychain → $HOME fallback)
         run: |
-          # The .env files are gitignored but persist on the self-hosted runner's
-          # main working copy. Symlink them into the checkout so docker compose
-          # can read them.
-          SRC="$HOME/Documents/GitHub/agentprovision-agents"
-          for envfile in apps/api/.env .env; do
-            if [ -f "$SRC/$envfile" ] && [ ! -f "$envfile" ]; then
-              ln -sf "$SRC/$envfile" "$envfile"
-              echo "Linked $envfile"
-            fi
-          done
-          # Copy cloudflared credentials that are gitignored but required for the tunnel
-          for cffile in cloudflared/credentials.json cloudflared/cert.pem; do
-            if [ -f "$SRC/$cffile" ] && [ ! -f "$cffile" ]; then
-              cp "$SRC/$cffile" "$cffile"
-              echo "Copied $cffile"
-            fi
-          done
+          # PR3 / F2: dual-source loader. Reads each secret from the
+          # macOS login keychain first (svc names listed in
+          # scripts/runner-secrets/load-from-keychain.sh) and falls
+          # back to the legacy $HOME/Documents/GitHub/agentprovision-agents
+          # path only if the Keychain entry is missing. Writes into
+          # the workspace with 0600 perms.
+          #
+          # After the verification gate passes (tunnel up + api healthy
+          # reading from Keychain), a follow-up commit deletes the
+          # $HOME source files + drops the fallback branch. Until then
+          # both sources coexist.
+          bash scripts/runner-secrets/load-from-keychain.sh
 
       - name: Detect changed services
         id: changes
