@@ -21,7 +21,7 @@ dependencies = [
     "redis>=5.0.0",
     # JWT verification for the Phase 4 agent-token tier — see
     # src/agent_token_verify.py. Mirrors the python-jose dep in
-    # apps/api/requirements.txt so the verifier stays in sync with
+    # apps/api/requirements.in so the verifier stays in sync with
     # the API-side minter (HS256, settings.SECRET_KEY).
     "python-jose>=3.3.0",
     # web_research tool module — DuckDuckGo HTML result parsing +

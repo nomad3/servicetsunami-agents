@@ -21,10 +21,18 @@ ENV PATH="/opt/venv/bin:$PATH"
 # COPY paths are now repo-rooted so packages/cli_orchestrator/ is
 # reachable alongside the API source.
 
-# Install Python dependencies
-COPY apps/api/requirements.txt .
+# Install Python dependencies from the hash-locked file (F15 P1
+# supply-chain hardening). ``requirements.in`` is the human-edited
+# source of truth; ``requirements.lock`` is the pip-compile output
+# pinned + hashed. ``--require-hashes`` rejects any wheel whose
+# sha256 doesn't match the lock, defeating PyPI typosquats and
+# compromised-release supply-chain attacks on direct AND transitive
+# deps. Regenerate via:
+#     pip-compile --generate-hashes --output-file=requirements.lock \
+#       requirements.in
+COPY apps/api/requirements.lock .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # Install grpcio-tools (build-time only, needs protobuf<7) and compile protos.
 # The generated *_pb2*.py files will be copied to the production stage;
