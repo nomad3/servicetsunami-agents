@@ -53,8 +53,8 @@ def remember(
     # Cross-tenant defense: `entity_id` lands on the observation row
     # verbatim. Without an existence + tenant check here, a caller
     # could attach their observation to another tenant's entity UUID.
-    # Reviewer BLOCKER B1 on PR #446. Match the pattern used in
-    # agent_policies.py — look up + 404 on cross-tenant lookup.
+    # Reviewer BLOCKER B1 on PR #446. Pattern: tenant-scoped lookup +
+    # 404 on cross-tenant access.
     if payload.entity_id is not None:
         exists = (
             db.query(KnowledgeEntity.id)

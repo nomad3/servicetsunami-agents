@@ -3,7 +3,7 @@
 use clap::{Parser, Subcommand};
 
 use crate::commands::{
-    agent, cancel, chat, coalition, completions, goal, integration, login, logout, memory, policy,
+    agent, cancel, chat, coalition, completions, goal, integration, login, logout, memory,
     quickstart, recall, recipes, remember, review, run, session, sessions, skill, status, tasks,
     upgrade, usage, watch, workflow, workspace,
 };
@@ -134,13 +134,6 @@ pub enum Command {
     /// Phase 2 (#179) companion to `alpha recall`.
     Remember(remember::RememberArgs),
 
-    /// Inspect agent governance policies (rate limits, allowed tools,
-    /// approval gates, escalation chains). Read-only — policy
-    /// mutation goes through the web UI for audit trail. Phase 2
-    /// (#179) of the CLI roadmap.
-    #[command(subcommand)]
-    Policy(policy::PolicyCommand),
-
     /// Dispatch and inspect multi-agent coalitions (incident
     /// investigations, plan/verify, research/synthesize, debate/
     /// resolve, propose/critique/revise). Backed by the existing
@@ -236,7 +229,6 @@ pub async fn dispatch(args: Cli, ctx: Context) -> anyhow::Result<()> {
         Command::Memory(cmd) => memory::dispatch(cmd, ctx).await,
         Command::Recall(a) => recall::run(a, ctx).await,
         Command::Remember(a) => remember::run(a, ctx).await,
-        Command::Policy(cmd) => policy::run(policy::PolicyArgs { command: cmd }, ctx).await,
         Command::Coalition(cmd) => coalition::dispatch(cmd, ctx).await,
         Command::Review(cmd) => review::dispatch(cmd, ctx).await,
         Command::Recipes(cmd) => recipes::run(recipes::RecipesArgs { command: cmd }, ctx).await,

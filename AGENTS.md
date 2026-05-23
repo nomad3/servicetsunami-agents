@@ -91,7 +91,7 @@ Governance layer for production agents:
 - **Versioning**: every promote snapshots config to `agent_versions`. `POST /agents/{id}/rollback/{version}`.
 - **Audit log**: `agent_audit_log` rows for create/update/promote/deprecate/rollback/integration-change. `GET /agents/{id}/audit-log`.
 - **Performance**: hourly Temporal rollup → `agent_performance_snapshots`. `GET /agents/{id}/performance`.
-- **Policies**: `agent_policies` — rate limits, approval gates, allowed tools, blocked actions.
+- **Governance** (NOT a single table): tool permissions live in `agent.tool_groups` (resolved to JWT scope, enforced at the MCP server in `apps/mcp-server/src/tool_audit.py`); content gating in `platform_safety_io` (regex/classifier safety floor); per-endpoint rate limits in `core.rate_limit.limiter`; per-(tenant,agent) declared values via the AgentValueSet design (`docs/plans/2026-05-21-luna-value-layer-design.md`) and cross-source reconciliation via Value Arbitration (`docs/plans/2026-05-23-value-arbitration-design.md`). The historical `agent_policies` table was dead infrastructure with zero rows and zero enforcement call sites — removed in P0b 2026-05-23.
 - **RBAC**: `agent_permissions` — owner/editor/viewer per user or team. Enforced by `deps.require_agent_permission`.
 - **Registry**: Redis-backed capability discovery. `GET /agents/discover?capability=<x>`.
 - **Heartbeat**: `POST /agents/{id}/heartbeat` for external/long-running agents.

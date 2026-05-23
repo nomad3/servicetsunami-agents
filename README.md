@@ -365,7 +365,7 @@ Enterprise governance layer for agents in production. Shipped 2026-04-18 (PR #15
 | **Versioning** | Every promote creates a config snapshot (`agent_versions`). `POST /agents/{id}/rollback/{version}` restores. |
 | **Audit log** | `agent_audit_log` captures create/update/promote/deprecate/rollback with actor, before/after, reason. `GET /agents/{id}/audit-log`, `GET /audit/agents`. |
 | **Performance snapshots** | Hourly Temporal rollup: success rate, p95 latency, tokens, cost, quality score. `GET /agents/{id}/performance`. |
-| **Governance policies** | `agent_policies` — rate limits, approval gates, allowed tool allowlist, blocked actions. |
+| **Governance** | Distributed (not a single table — `agent_policies` was removed in P0b 2026-05-23 as dead infra): tool permissions via `agent.tool_groups` + MCP scope check; content gating via `platform_safety_io` safety floor; rate limits via `core.rate_limit.limiter`; declared values via AgentValueSet; cross-source arbitration via Value Arbitration. See `docs/plans/2026-05-23-p0b-agent-policy-decision.md`. |
 | **RBAC** | `agent_permissions` — per-user/team role (owner / editor / viewer). |
 | **Registry discovery** | Redis-backed capability index. `GET /agents/discover?capability=<x>` returns matching active agents. |
 | **External agents** | `external_agents` table + adapters for OpenAI Assistants, webhook endpoints, MCP protocol. |

@@ -372,8 +372,8 @@ def _load_skill_body(*, skill_slug: str, tenant_id: uuid.UUID) -> str:
 #
 # Identical shape to cli_session_manager._run_workflow but stripped of the
 # chat-session bookkeeping (no chat_session_id, no streaming, no MCP config
-# generation). Phase 3 will add agent-policy plumbing so the eval runs
-# under the same RL-routed CLI the live tenant session uses.
+# generation). Phase 3 will route eval dispatch through the same RL-routed
+# CLI the live tenant session uses.
 # ──────────────────────────────────────────────────────────────────────────
 
 

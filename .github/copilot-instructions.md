@@ -120,7 +120,7 @@ Response  →  Auto Quality Scorer (Gemma 4, 6-dim rubric)  →  RL experience
 ### Service Organization
 
 `apps/api`:
-- **Models** (`app/models/`) — SQLAlchemy ORM, every model carries `tenant_id`. Includes ALM tables (`agent_versions`, `agent_audit_log`, `agent_policies`, `agent_permissions`, `agent_performance_snapshots`, `external_agents`).
+- **Models** (`app/models/`) — SQLAlchemy ORM, every model carries `tenant_id`. Includes ALM tables (`agent_versions`, `agent_audit_log`, `agent_permissions`, `agent_performance_snapshots`, `external_agents`). The historical `agent_policies` table was removed in P0b 2026-05-23 (dead infra, zero rows, zero enforcement) — governance now distributed across `agent.tool_groups`, `platform_safety_io`, `core.rate_limit.limiter`, AgentValueSet, and Value Arbitration.
 - **Services** (`app/services/`) — business logic, CRUD, embeddings, RL, agent router, A2A coalition.
 - **Routes** (`app/api/v1/`) — REST + SSE endpoints, dependency-injected.
 - **Workers** (`app/workers/`) — Temporal worker registration (orchestration, postgres, scheduler).
@@ -173,7 +173,7 @@ Startup `ValidationError` if missing:
 
 ### Agent Lifecycle Management (ALM, shipped 2026-04-18)
 
-`draft → staging → production → deprecated` with `successor_agent_id`. Versioned snapshots in `agent_versions`, audit in `agent_audit_log`, hourly performance rollup in `agent_performance_snapshots`, RBAC in `agent_permissions`, governance rules in `agent_policies`. Redis-backed capability registry. External agents (OpenAI Assistants, MCP servers, webhooks, Copilot Studio, Azure AI Foundry) via `external_agents` + adapter service.
+`draft → staging → production → deprecated` with `successor_agent_id`. Versioned snapshots in `agent_versions`, audit in `agent_audit_log`, hourly performance rollup in `agent_performance_snapshots`, RBAC in `agent_permissions`. Governance is NOT a single table (the `agent_policies` table was removed in P0b 2026-05-23 as dead infra with zero enforcement) — concerns are distributed: tool permissions via `agent.tool_groups` + MCP scope check in `apps/mcp-server/src/tool_audit.py`; content gating via `platform_safety_io`; per-endpoint rate limits via `core.rate_limit.limiter`; declared values via AgentValueSet; cross-source reconciliation via Value Arbitration. Redis-backed capability registry. External agents (OpenAI Assistants, MCP servers, webhooks, Copilot Studio, Azure AI Foundry) via `external_agents` + adapter service.
 
 ### A2A Collaboration (shipped 2026-04-12, v2 2026-04-26)
 

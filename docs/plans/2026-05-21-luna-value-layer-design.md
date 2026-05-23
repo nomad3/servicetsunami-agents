@@ -17,7 +17,6 @@ Today, the pieces exist but are scattered:
 
 | Surface | Carries some value info | Limitation |
 |---|---|---|
-| `agent_policies` | RL routing exploration constraints | Mechanical — about exploration rates, not "what matters" |
 | `safety_trust` service | Trust scores per channel | Per-channel, not per-value |
 | O3 validators (#641) | Citation, entity grounding, next_move harm, creative opt-in | Reflection-write only — not consulted pre-dispatch |
 | `emotion_engine` gain constants | Bounds adversarial inputs | Defensive clamps, not declarative values |
@@ -173,7 +172,6 @@ The 5 callers are thin shims around `consult_with_audit(...)`. Match logic + kil
 ### 4.4 What this is NOT
 
 - NOT Constitutional AI's training-time value layer (we operate at runtime, per-action).
-- NOT a replacement for `agent_policies` (those carry exploration-rate / RL config).
 - NOT a replacement for `safety_trust` (channel-level trust stays where it is).
 - NOT free-form text constraints — `persona_prompt` keeps doing that.
 - NOT a generic "rules engine" — the slug+description+evidence shape is deliberately narrow.

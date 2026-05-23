@@ -29,6 +29,12 @@ dependencies = [
     # de-facto stdlib add-on and keeps the dep tree small (playwright is
     # already there for cases where JS rendering is required).
     "beautifulsoup4>=4.12.0",
+    # P0c (2026-05-23): Prometheus counters for tool_audit drop sites
+    # (apps/mcp-server/src/audit_metrics.py). Import-safe fallback in
+    # audit_metrics so missing dep degrades to no-op rather than
+    # crashing the tool path. /metrics endpoint exposure for
+    # mcp-server is a follow-up (counters exist in-process).
+    "prometheus_client>=0.20.0",
 ]
 
 [project.optional-dependencies]

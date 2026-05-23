@@ -344,8 +344,20 @@ def _classify_exception(exc: BaseException) -> str:
     "transient error" — the conservative default).
 
     I4 from the PR #256 review.
+
+    P0a review I5: a RuntimeError raised from cli_session_manager's
+    agent_token mint path carries a security-relevant message
+    "agent_token mint failed for tenant=… slug=…". The mint path is
+    the security gate; bucketing it as generic "exception" would
+    cause the routing layer to silently try the next CLI in the
+    chain with the same mint failure, losing the operator signal.
+    Surface a distinct "mint_failed" reason so it appears in
+    telemetry and dashboards.
     """
     name = type(exc).__name__
+    # P0a I5: distinct bucket for agent_token mint failures.
+    if name == "RuntimeError" and "agent_token mint failed" in str(exc):
+        return "mint_failed"
     # Network / Temporal cancellation — genuinely transient
     if name in ("CancelledError", "TimeoutError", "ConnectionError",
                 "ConnectionResetError", "ConnectionRefusedError",
@@ -1350,6 +1362,19 @@ def _legacy_chain_walk(
                 "error": err_class_local,
                 "error_detail": str(exc)[:240],
             })
+            # P0a review I5: agent_token mint failure is the security
+            # gate. Don't retry the next CLI in the chain — they all
+            # go through the same mint path and would hit the same
+            # failure, but each retry obscures the original signal.
+            # Abort the chain and surface mint_failed to the user.
+            if err_class_local == "mint_failed":
+                logger.error(
+                    "CLI chain aborted on mint_failed — tenant=%s "
+                    "platform=%s. Not retrying remaining chain "
+                    "(would hit same mint path).",
+                    str(tenant_id)[:8], attempt_platform,
+                )
+                break
             continue
 
         # Successful response — done. Log chain telemetry to ops logs;

@@ -76,7 +76,6 @@ from .user_activity import UserActivity
 from .device_registry import DeviceRegistry
 from .session_journal import SessionJournal
 from .behavioral_signal import BehavioralSignal
-from .agent_policy import AgentPolicy
 from .agent_audit_log import AgentAuditLog
 from .agent_integration_config import AgentIntegrationConfig
 from .external_agent import ExternalAgent
@@ -88,13 +87,17 @@ from .platform_safety_escape import (
     PlatformSafetyAdminAudit,
     PlatformSafetyEscapeGrant,
 )
+# P0c (2026-05-23) — breadcrumb table for audit drops that couldn't
+# resolve a tenant. Surfaced via operator dashboard / alert queries.
+from .tool_audit_drop import ToolAuditDrop
 
 __all__ = [
     "PlatformSafetyEvent",
     "PlatformSafetyAdminAudit",
     "PlatformSafetyEscapeGrant",
+    "ToolAuditDrop",
     "Tenant", "User",
-    "Agent", "AgentGroup", "AgentMemory", "AgentPermission", "AgentPerformanceSnapshot", "AgentVersion", "AgentPolicy", "AgentAuditLog",
+    "Agent", "AgentGroup", "AgentMemory", "AgentPermission", "AgentPerformanceSnapshot", "AgentVersion", "AgentAuditLog",
     "AgentRelationship", "AgentSkill", "AgentTask",
     "ChannelAccount", "ChannelEvent",
     "ChatSession", "ChatMessage",

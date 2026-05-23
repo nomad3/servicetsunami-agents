@@ -31,8 +31,119 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from src.mcp_auth import resolve_auth_context, resolve_tenant_id
+# P0c (2026-05-23): fail-loud across the three drop sites in this
+# module. Counters live in audit_metrics; breadcrumb writes go to
+# audit_breadcrumb on a separate small connection pool so a
+# saturated main DB doesn't starve the safety-net writes too.
+# Import-safe — both modules degrade to no-op if their underlying
+# deps (prometheus_client, sqlalchemy create_engine) are unavailable.
+from src import audit_breadcrumb, audit_metrics
 
 logger = logging.getLogger(__name__)
+
+# ── P0a per-tenant ramp gate cache ────────────────────────────────────
+# The `enforce_strict_tool_scope` flag on `tenant_features` controls
+# whether the fail-closed default actually rejects or just shadow-logs.
+# To avoid a per-tool-call DB round trip, we cache the flag per tenant
+# with a 60-second TTL. False-positive risk (cached TRUE while operator
+# flipped it FALSE) is acceptable for a 60s window during rollback.
+# False-negative risk (cached FALSE while flipped TRUE) is acceptable
+# during enforcement ramp — operators see denials appear ~60s after
+# flipping. After step 5 of the rollout removes the flag entirely,
+# this cache becomes dead code and the function returns the
+# unconditional fail-closed default.
+_STRICT_SCOPE_CACHE_TTL_SECONDS = 60
+# P0a review I1: hard cap on the cache to prevent unbounded growth
+# under a hostile caller spamming unique tenant_id strings (the
+# arg-resolution path at line 343-345 accepts any 32+ char string).
+# When the cap is hit, we clear the cache wholesale — cheap, and any
+# subsequent calls re-fetch within the next 60s anyway.
+_STRICT_SCOPE_CACHE_MAX_ENTRIES = 10_000
+_strict_scope_cache: dict[str, tuple[bool, float]] = {}
+
+
+def invalidate_strict_scope_cache() -> None:
+    """Clear all cached enforce_strict_tool_scope decisions.
+
+    P0a review B2: provides an explicit invalidation entrypoint for
+    operator-driven rollback. When an operator flips
+    `enforce_strict_tool_scope` from TRUE → FALSE during an incident,
+    the 60s TTL means cached TRUE entries keep blocking legitimate
+    calls for up to 60s × N workers. Operators can wire this to
+    SIGUSR1 / an /admin/cache/clear endpoint / a CLI command to
+    accelerate rollback. Documented in the rollout plan §5.
+    """
+    _strict_scope_cache.clear()
+    logger.info("tool_audit: enforce_strict_tool_scope cache cleared")
+
+
+def _get_enforce_strict_tool_scope(tenant_id: str | None) -> bool:
+    """Return whether strict tool-scope enforcement is active for tenant.
+
+    Cache hits are O(1). Cache misses do a single SELECT against
+    tenant_features. Falls back to FALSE (= shadow-log only, no
+    enforcement) on any error, so a tenant_features outage cannot
+    accidentally lock all callers out. The fail-closed default applies
+    only when this returns TRUE.
+
+    Thread safety (P0a review I2): the async-handler context means
+    multiple coroutines may race-fetch the same tenant during a cache
+    miss. CPython dict assignment is atomic so the dict itself stays
+    consistent; the worst case is N duplicate SELECTs in the cache-
+    miss burst. Acceptable — not worth a per-tenant asyncio.Lock for
+    the overhead.
+    """
+    if not tenant_id:
+        # No tenant context → can't look up the flag → default to FALSE
+        # (shadow only). The drop site #1 path in this same module
+        # already records this as a no_tenant_id audit drop.
+        return False
+    now = time.time()
+    cached = _strict_scope_cache.get(tenant_id)
+    if cached is not None:
+        value, fetched_at = cached
+        if now - fetched_at < _STRICT_SCOPE_CACHE_TTL_SECONDS:
+            return value
+    eng = _get_engine()
+    if eng is None:
+        return False
+    try:
+        with eng.begin() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT enforce_strict_tool_scope FROM tenant_features "
+                    "WHERE tenant_id = CAST(:tid AS uuid)"
+                ),
+                {"tid": tenant_id},
+            ).first()
+        value = bool(row[0]) if row is not None and row[0] is not None else False
+    except Exception as e:  # noqa: BLE001 — cache fallback is fail-OPEN to shadow
+        logger.warning(
+            "tool_audit: enforce_strict_tool_scope lookup failed for "
+            "tenant=%s err=%s — defaulting to FALSE (shadow only)",
+            tenant_id, e,
+        )
+        value = False
+    # P0a review I1: hard cap. If we hit it, clear the whole cache
+    # rather than implementing an LRU eviction policy — drops are
+    # rare, cap is high, full clear costs nothing.
+    if len(_strict_scope_cache) >= _STRICT_SCOPE_CACHE_MAX_ENTRIES:
+        logger.warning(
+            "tool_audit: enforce_strict_tool_scope cache hit cap %d, "
+            "clearing wholesale (likely hostile tenant_id spam)",
+            _STRICT_SCOPE_CACHE_MAX_ENTRIES,
+        )
+        _strict_scope_cache.clear()
+    _strict_scope_cache[tenant_id] = (value, now)
+    return value
+
+
+# Module-scope (P0a review N1). Discovery allowlist is intentionally
+# small and reviewed at deploy time — only tools that have NO
+# operational side effect AND no data exfil risk. Add conservatively.
+# Empty allowlist means every non-internal_key caller must use
+# agent_token tier.
+_DISCOVERY_TOOL_ALLOWLIST: frozenset[str] = frozenset()
 
 _engine: Engine | None = None
 
@@ -121,9 +232,30 @@ def _log_call(
     if eng is None:
         return
     if not tenant_id:
-        # Visible-but-rate-limited so we can spot tools whose tenant resolution
-        # fails. Don't blow up the log with one entry per call.
-        logger.debug("tool_audit: skip %s — no tenant_id resolved", tool_name)
+        # P0c drop site #1: tenant_id unresolvable. This is the path
+        # that hid the round-3 breach — tier=tenant_header without an
+        # arg-resolvable tenant_id used to log.debug + return silently.
+        # Now: ERROR + Prometheus counter + breadcrumb to
+        # tool_audit_drops so operators have a persistent record even
+        # when we cannot write the proper tool_calls row.
+        logger.error(
+            "tool_audit: DROPPED audit row for %s — no tenant_id "
+            "resolved. This is a security-relevant audit-integrity "
+            "failure. arguments_keys=%s",
+            tool_name,
+            list((arguments or {}).keys())[:5],
+        )
+        audit_metrics.record_drop(
+            reason="no_tenant_id",
+            tool_name=tool_name,
+        )
+        audit_breadcrumb.write_drop(
+            tool_name=tool_name,
+            drop_reason="no_tenant_id",
+            tier=None,  # tier wasn't enough to resolve tenant_id either
+            args_keys=list((arguments or {}).keys()),
+            error_message=None,
+        )
         return
     try:
         # Three-layer redaction:
@@ -167,8 +299,33 @@ def _log_call(
                     "started_at": started_at_unix,
                 },
             )
-    except Exception as e:
-        logger.warning("tool_audit: write failed for %s: %s", tool_name, e)
+    except Exception as e:  # noqa: BLE001
+        # P0c drop site #2: SQL INSERT into tool_calls failed.
+        # Reasons range from NOT NULL violation (the audit row should
+        # have been complete by this point — investigate) to schema
+        # drift to DB pool exhaustion. ERROR + counter + breadcrumb;
+        # the breadcrumb attempt uses a separate small pool so even
+        # main-pool exhaustion still leaves a "we tried" footprint.
+        logger.error(
+            "tool_audit: SQL write FAILED for %s — audit row LOST. "
+            "tenant_id=%s status=%s err=%s",
+            tool_name, tenant_id, result_status, e,
+            exc_info=True,
+        )
+        audit_metrics.record_write_failure(
+            tool_name=tool_name, exception=e,
+        )
+        try:
+            audit_breadcrumb.write_drop(
+                tool_name=tool_name,
+                drop_reason="sql_insert_failed",
+                tier=None,
+                args_keys=list((arguments or {}).keys())
+                if arguments else None,
+                error_message=f"{type(e).__name__}: {e}",
+            )
+        except Exception:  # noqa: BLE001 — breadcrumb is last line
+            pass
 
 
 def install_audit(mcp_server) -> None:
@@ -236,43 +393,139 @@ def install_audit(mcp_server) -> None:
         error_msg = None
         status = "ok"
 
-        # ── Phase 4 commit 7: scope enforcement gate ───────────────────
-        # When tier=agent_token AND scope is not None AND tool_name not
-        # in scope → 403 + audit-log entry. Bare tool name (no
-        # mcp__agentprovision__ prefix) is the canonical scope-list
-        # form (resolve_tool_names returns bare names; the prefix is
-        # added only at the --allowedTools CLI flag stage).
-        if (
-            auth_ctx is not None
-            and auth_ctx.tier == "agent_token"
-            and auth_ctx.scope is not None
-            and tool_name not in auth_ctx.scope
-        ):
-            status = "scope_denied"
-            error_msg = (
-                f"tool {tool_name!r} not in agent_token scope "
-                f"(allowed: {sorted(auth_ctx.scope)[:10]})"
+        # ── Scope enforcement gate (Phase 4 + P0a 2026-05-23) ──────────
+        # Original Phase 4 logic: when tier=agent_token AND scope is not
+        # None AND tool_name not in scope → 403 + audit row.
+        #
+        # P0a (2026-05-23) adds a fail-CLOSED default for non-internal,
+        # non-agent_token tiers (tenant_header, anonymous). Round 3 of
+        # the 2026-05-23 hard-tests showed Luna's chat→code-worker path
+        # was using tier=tenant_header where scope is None, so the
+        # original check skipped silently → execute_shell ran outside
+        # tool_groups. After this change, only `internal_key` (MCP
+        # self-calls, platform ops) bypasses; everything else REQUIRES
+        # agent_token with an in-scope match OR membership in the tiny
+        # discovery allowlist.
+        #
+        # P0a review B1: auth_ctx is None when resolve_auth_context()
+        # raised (transient SQLAlchemy hiccup, malformed JWT, header
+        # parse error). The previous guard `if auth_ctx is not None`
+        # SKIPPED the whole scope block in that case — same class of
+        # silent fail-open as the original breach. Now: treat None as
+        # the most-untrusted tier and route through the fail-closed
+        # branch with tier_label="auth_resolution_failed".
+        #
+        # Discovery allowlist moved to module scope (review N1).
+        if tool_name:
+            tier_label = (
+                auth_ctx.tier if auth_ctx is not None
+                else "auth_resolution_failed"
             )
-            # Log the scope-denial audit row synchronously — we MUST
-            # surface it before raising.
-            try:
-                duration_ms = int((time.monotonic() - started) * 1000)
-                _log_call(
-                    tenant_id=tenant_id,
-                    tool_name=tool_name,
-                    arguments=dict(arguments) if arguments else {},
-                    result_status=status,
-                    result_summary="",
-                    error=error_msg,
-                    duration_ms=duration_ms,
-                    started_at_unix=started_unix,
-                )
-            except Exception:
-                logger.warning(
-                    "tool_audit: scope-denial audit write failed",
-                    exc_info=True,
-                )
-            raise PermissionError(error_msg)
+            if auth_ctx is not None and auth_ctx.tier == "internal_key":
+                # MCP server self-calls + platform ops — bypass scope
+                # enforcement entirely. Audit row still written.
+                pass
+            elif auth_ctx is not None and auth_ctx.tier == "agent_token":
+                if auth_ctx.scope is not None and tool_name not in auth_ctx.scope:
+                    status = "scope_denied"
+                    error_msg = (
+                        f"tool {tool_name!r} not in agent_token scope "
+                        f"(allowed: {sorted(auth_ctx.scope)[:10]})"
+                    )
+                    try:
+                        duration_ms = int(
+                            (time.monotonic() - started) * 1000
+                        )
+                        _log_call(
+                            tenant_id=tenant_id,
+                            tool_name=tool_name,
+                            arguments=dict(arguments) if arguments else {},
+                            result_status=status,
+                            result_summary="",
+                            error=error_msg,
+                            duration_ms=duration_ms,
+                            started_at_unix=started_unix,
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.warning(
+                            "tool_audit: scope-denial audit write failed",
+                            exc_info=True,
+                        )
+                    raise PermissionError(error_msg)
+                # scope is None for agent_token: caller intentionally
+                # has unscoped access (admin token, etc.). Backstop:
+                # log INFO so we can spot it in dashboards. Not an
+                # error — this is a legitimate path until we deprecate
+                # unscoped agent_tokens entirely.
+                if auth_ctx.scope is None:
+                    logger.info(
+                        "tool_audit: agent_token with scope=None "
+                        "called %s — admin/unscoped path",
+                        tool_name,
+                    )
+            else:
+                # tier in {tenant_header, anonymous, unknown,
+                # auth_resolution_failed (B1)}. P0a fail-CLOSED
+                # default — but gated by per-tenant
+                # `enforce_strict_tool_scope` flag during the ramp.
+                # When the flag is FALSE (default during steps 1-2 of
+                # rollout), we log the would-be denial at INFO so it
+                # appears in shadow dashboards but the tool still
+                # executes. When the flag is TRUE (steps 3-4), we
+                # actually reject. After step 5 removes the flag
+                # entirely, this becomes unconditional fail-closed.
+                #
+                # P0a review B1: auth_resolution_failed tier ALWAYS
+                # fails closed even when the per-tenant flag is FALSE.
+                # We can't trust shadow-only on a path where we don't
+                # know which tenant we are — the cache key would be
+                # `None` and could be poisoned. Treat it as the most-
+                # untrusted state: hard refuse regardless of ramp.
+                if tool_name not in _DISCOVERY_TOOL_ALLOWLIST:
+                    if tier_label == "auth_resolution_failed":
+                        enforce = True  # B1: never shadow-only here
+                    else:
+                        enforce = _get_enforce_strict_tool_scope(tenant_id)
+                    if enforce:
+                        status = "tier_denied"
+                        error_msg = (
+                            f"tool {tool_name!r} requires agent_token tier "
+                            f"or internal_key; got tier={tier_label}. "
+                            f"P0a 2026-05-23 fail-closed enforcement."
+                        )
+                        try:
+                            duration_ms = int(
+                                (time.monotonic() - started) * 1000
+                            )
+                            _log_call(
+                                tenant_id=tenant_id,
+                                tool_name=tool_name,
+                                arguments=dict(arguments) if arguments else {},
+                                result_status=status,
+                                result_summary="",
+                                error=error_msg,
+                                duration_ms=duration_ms,
+                                started_at_unix=started_unix,
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.warning(
+                                "tool_audit: tier-denial audit write failed",
+                                exc_info=True,
+                            )
+                        raise PermissionError(error_msg)
+                    else:
+                        # Shadow-only mode. The denial would happen
+                        # once the operator flips enforce_strict_
+                        # tool_scope to TRUE. INFO log so operators
+                        # can dashboard pending denials and confirm
+                        # no legitimate workflow gets bricked when
+                        # they flip the flag.
+                        logger.info(
+                            "tool_audit: SHADOW tier-denial — tool=%s "
+                            "tier=%s tenant=%s would be tier_denied "
+                            "when enforce_strict_tool_scope=TRUE",
+                            tool_name, tier_label, tenant_id,
+                        )
 
         try:
             result = await original_handler(req)
@@ -302,8 +555,44 @@ def install_audit(mcp_server) -> None:
                 }
                 loop = asyncio.get_running_loop()
                 loop.run_in_executor(None, lambda p=payload: _log_call(**p))
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001
+                # P0c drop site #3: executor scheduling failed (loop
+                # closed, executor full, asyncio teardown race).
+                # Operationally serious — every subsequent tool call
+                # may be silently un-audited until the executor
+                # recovers. The tool path itself already returned
+                # successfully; this is purely about the audit write
+                # being lost. ERROR + counter; breadcrumb attempt is
+                # also best-effort here since the surrounding asyncio
+                # state may be unhealthy.
+                logger.error(
+                    "tool_audit: executor scheduling FAILED for %s — "
+                    "audit row LOST. tool path will continue but "
+                    "audit trail is degraded. err=%s",
+                    tool_name, e, exc_info=True,
+                )
+                audit_metrics.record_scheduling_failure(
+                    tool_name=tool_name,
+                )
+                # P0c review B1: this branch fires when the event loop
+                # is unhealthy (executor full, loop teardown race).
+                # Calling write_drop() directly on the event loop
+                # thread would do sync DB I/O on the loop. Use the
+                # async-safe wrapper that spawns a daemon thread.
+                try:
+                    audit_breadcrumb.write_drop_async(
+                        tool_name=tool_name,
+                        drop_reason="scheduling_failed",
+                        tier=(
+                            auth_ctx.tier
+                            if auth_ctx is not None
+                            else None
+                        ),
+                        args_keys=None,
+                        error_message=f"{type(e).__name__}: {e}",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
 
     handlers[CallToolRequest] = audited_handler
     mcp_server._tool_audit_installed = True
