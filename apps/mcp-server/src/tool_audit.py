@@ -481,9 +481,26 @@ def install_audit(mcp_server) -> None:
                 # know which tenant we are — the cache key would be
                 # `None` and could be poisoned. Treat it as the most-
                 # untrusted state: hard refuse regardless of ramp.
+                #
+                # P0a HOTFIX 2026-05-23 evening: same rule extended.
+                # If tenant_id is None for ANY non-(internal_key|
+                # agent_token) tier, we cannot look up the per-tenant
+                # ramp flag — _get_enforce_strict_tool_scope(None)
+                # returns False (defensive default for missing
+                # tenant), which silently keeps the breach open even
+                # after operators flip the flag. The first deploy of
+                # P0a left this gap: the chat→code-worker dispatch
+                # produces `tier=anonymous tenant=None` calls
+                # (agent_token JWT not propagated through the
+                # subprocess MCP client), and those were going through
+                # in shadow-only mode even with the flag flipped TRUE.
+                # Fix: if tenant_id is None, fail closed regardless
+                # of the per-tenant flag — same rationale as B1.
                 if tool_name not in _DISCOVERY_TOOL_ALLOWLIST:
                     if tier_label == "auth_resolution_failed":
                         enforce = True  # B1: never shadow-only here
+                    elif not tenant_id:
+                        enforce = True  # HOTFIX: no-tenant = always closed
                     else:
                         enforce = _get_enforce_strict_tool_scope(tenant_id)
                     if enforce:
