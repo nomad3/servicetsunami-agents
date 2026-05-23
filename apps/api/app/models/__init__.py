@@ -88,11 +88,15 @@ from .platform_safety_escape import (
     PlatformSafetyAdminAudit,
     PlatformSafetyEscapeGrant,
 )
+# P0c (2026-05-23) — breadcrumb table for audit drops that couldn't
+# resolve a tenant. Surfaced via operator dashboard / alert queries.
+from .tool_audit_drop import ToolAuditDrop
 
 __all__ = [
     "PlatformSafetyEvent",
     "PlatformSafetyAdminAudit",
     "PlatformSafetyEscapeGrant",
+    "ToolAuditDrop",
     "Tenant", "User",
     "Agent", "AgentGroup", "AgentMemory", "AgentPermission", "AgentPerformanceSnapshot", "AgentVersion", "AgentPolicy", "AgentAuditLog",
     "AgentRelationship", "AgentSkill", "AgentTask",
