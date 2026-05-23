@@ -44,12 +44,6 @@ const CARDS = [
     example: 'alpha recipes run daily-briefing',
   },
   {
-    cmd: 'alpha policy show',
-    title: 'Governance built in',
-    body: 'Rate limits, allowed tools, approval gates. Inspect what governs every agent.',
-    example: 'alpha policy show code-agent',
-  },
-  {
     cmd: 'alpha usage / costs',
     title: 'Cost attribution',
     body: 'See exactly what each provider cost this month. Per-team, per-agent, per-day.',
@@ -63,7 +57,7 @@ export default function AlphaCommands() {
     <section className="alpha-commands" id="commands">
       <div className="alpha-commands__inner">
         <h2 className="alpha-commands__title">
-          Eight surfaces. One binary. Zero plumbing.
+          Seven surfaces. One binary. Zero plumbing.
         </h2>
         <p className="alpha-commands__subtitle">
           Every command is backed by the AgentProvision platform —

@@ -47,7 +47,7 @@ if [[ -z "${AGENTPROVISION_ALLOWED_TOOLS:-}" ]]; then
 fi
 case " ${AGENTPROVISION_ALLOWED_TOOLS} " in
   *" ${TOOL} "*) exit 0 ;;
-  *) echo "tool ${TOOL} not in agent_policy.allowed_tools" >&2; exit 2 ;;
+  *) echo "tool ${TOOL} not in agent.tool_groups allowlist" >&2; exit 2 ;;
 esac
 '''
 

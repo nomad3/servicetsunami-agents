@@ -8,7 +8,6 @@ pub mod integration;
 pub mod login;
 pub mod logout;
 pub mod memory;
-pub mod policy;
 pub mod quickstart;
 pub mod recall;
 pub mod recipes;

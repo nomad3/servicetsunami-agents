@@ -14,8 +14,8 @@ Why we need both:
   worker passes X-Internal-Key — no user context is involved.
 * This endpoint exists so the `alpha` CLI can pass the user's Bearer JWT
   and get back an agent-scoped token to inject into a local Claude Code
-  / Codex / Gemini / Copilot subprocess. The same agent_policy + scope
-  constrains the leaf either way; only the dispatch path differs.
+  / Codex / Gemini / Copilot subprocess. The same agent.tool_groups +
+  scope constrains the leaf either way; only the dispatch path differs.
 
 Security boundaries:
 * Caller must have at least `editor` permission on the target agent
@@ -57,9 +57,9 @@ class UserMintAgentTokenBody(BaseModel):
         None,
         description=(
             "Optional scope claim — list of allowed bare MCP tool names. "
-            "When set, the agent_policy still applies; this is an *additional* "
+            "When set, the agent's tool_groups still apply; this is an *additional* "
             "per-call narrowing (intersection semantics). `None` means "
-            "'use the agent's full allowlist as configured on the policy'."
+            "'use the agent's full allowlist as configured via tool_groups'."
         ),
     )
     heartbeat_timeout_seconds: int = Field(

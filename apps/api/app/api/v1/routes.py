@@ -32,7 +32,6 @@ from app.api.v1 import (
     memories,
     team,
     memory_remember,
-    agent_policies,
     knowledge,
     llm,
     branding,
@@ -210,11 +209,11 @@ router.include_router(luna_impact.router, prefix="/luna", tags=["luna-impact"])
 # `alpha remember` (Phase 2 of the CLI roadmap, #179) — free-form
 # fact ingestion via knowledge.create_observation.
 router.include_router(memory_remember.router, prefix="/memory", tags=["memory"])
-# `alpha policy show` (Phase 2 of the CLI roadmap, #179) — read-only
-# inspection of agent_policies. Mounted after agents.router; verified
-# no `/{agent_id}/policies` route exists there, so registration order
-# is moot. Kept here for OpenAPI tag grouping.
-router.include_router(agent_policies.router, prefix="/agents", tags=["agents"])
+# `alpha policy show` and the `/api/v1/agents/{id}/policies` endpoint
+# were removed in P0b (2026-05-23). The AgentPolicy table had zero
+# rows in production across 42 tenants and no enforcement call sites;
+# policy concerns moved to the Value Arbitration layer
+# (docs/plans/2026-05-23-value-arbitration-design.md).
 router.include_router(knowledge.router, prefix="/knowledge", tags=["knowledge"])
 router.include_router(llm.router, prefix="/llm", tags=["llm"])
 router.include_router(branding.router, prefix="/branding", tags=["branding"])

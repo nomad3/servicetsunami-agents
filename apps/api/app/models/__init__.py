@@ -76,7 +76,6 @@ from .user_activity import UserActivity
 from .device_registry import DeviceRegistry
 from .session_journal import SessionJournal
 from .behavioral_signal import BehavioralSignal
-from .agent_policy import AgentPolicy
 from .agent_audit_log import AgentAuditLog
 from .agent_integration_config import AgentIntegrationConfig
 from .external_agent import ExternalAgent
@@ -94,7 +93,7 @@ __all__ = [
     "PlatformSafetyAdminAudit",
     "PlatformSafetyEscapeGrant",
     "Tenant", "User",
-    "Agent", "AgentGroup", "AgentMemory", "AgentPermission", "AgentPerformanceSnapshot", "AgentVersion", "AgentPolicy", "AgentAuditLog",
+    "Agent", "AgentGroup", "AgentMemory", "AgentPermission", "AgentPerformanceSnapshot", "AgentVersion", "AgentAuditLog",
     "AgentRelationship", "AgentSkill", "AgentTask",
     "ChannelAccount", "ChannelEvent",
     "ChatSession", "ChatMessage",

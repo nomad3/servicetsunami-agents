@@ -19,10 +19,10 @@ new `apps/api/app/services/agent_token.py` mint/verify helpers (HS256, signed wi
 - Decode side: `jose.jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])` (`apps/api/app/api/deps.py:34-44`)
 - `additional_claims` is free-form — agent claims (`kind`, `tenant_id`, `agent_id`, `task_id`, `parent_workflow_id`, `scope`, `parent_chain`) can ride this without a new mint helper. Still want a dedicated wrapper to centralise verify-side claim-shape validation.
 
-**`agent_policy.allowed_tools` does NOT exist** (`apps/api/app/models/agent_policy.py:11-30`)
-- The `agent_policies` table holds `policy_type` ∈ {`output_filter`, `input_filter`, `data_access`, `rate_limit`} with a free-form `config` JSONB. **No `allowed_tools` field.** The design (§8 step 1) says `scope: <agent_policy.allowed_tools as array>` — incorrect to schema.
+**`agent_policy.allowed_tools` does NOT exist** *(historical — `agent_policies` deleted in P0b 2026-05-23)*
+- *Historical recon:* the `agent_policies` table held `policy_type` ∈ {`output_filter`, `input_filter`, `data_access`, `rate_limit`} with a free-form `config` JSONB. **No `allowed_tools` field.** The original design (§8 step 1) said `scope: <agent_policy.allowed_tools as array>` — incorrect to schema even at the time.
 - Actual allowed-tools set is computed from `Agent.tool_groups` (`apps/api/app/models/agent.py:30`, JSONB list of group names) → `tool_groups.resolve_tool_names()` (`apps/api/app/services/tool_groups.py:215-226`) → flat list of MCP tool names. This is what the chat hot path already uses to populate `--allowedTools`.
-- **Decision:** the agent-token `scope` claim is populated from `resolve_tool_names(agent.tool_groups)`; if `tool_groups is None`, scope is `None` meaning "all tools" (matches the established §3.1.1 invariant in `tool_groups.py:218-221`). The `agent_policies` table is left untouched.
+- **Decision (vindicated):** the agent-token `scope` claim is populated from `resolve_tool_names(agent.tool_groups)`; if `tool_groups is None`, scope is `None` meaning "all tools" (matches the established §3.1.1 invariant in `tool_groups.py:218-221`). Phase 4 correctly chose `tool_groups` over the (nonexistent) `agent_policies.allowed_tools` for the scope claim — a choice now permanent because P0b (2026-05-23) deleted the `agent_policies` table entirely after it shipped with zero enforcement and zero rows across 42 tenants. See `docs/plans/2026-05-23-p0b-agent-policy-decision.md`.
 
 **`execution_trace` schema lacks `parent_task_id`** (`apps/api/app/models/execution_trace.py:23-28`)
 - `task_id` exists (FK to `agent_tasks.id`), and `parent_step_id` exists (self-FK for nested steps within ONE trace tree). **No `parent_task_id` column** linking THIS trace row to a different agent_task that dispatched the agent producing this trace.
@@ -44,7 +44,7 @@ new `apps/api/app/services/agent_token.py` mint/verify helpers (HS256, signed wi
 
 **(D1) JWT mint location → new module `apps/api/app/services/agent_token.py`.** Not extending `core/security.py`. Different claim shape, different verification, different consumers. Reuses `settings.SECRET_KEY` + `ALGORITHM` (no new secret per SR-2).
 
-**(D2) Scope claim source → `Agent.tool_groups` resolved via `tool_groups.resolve_tool_names()`.** Not `agent_policy.allowed_tools` (does not exist). When `tool_groups is None`, `scope` is `None` in the claim, meaning "no scope restriction".
+**(D2) Scope claim source → `Agent.tool_groups` resolved via `tool_groups.resolve_tool_names()`.** Not `agent_policy.allowed_tools` (never existed; the `agent_policies` table itself was deleted in P0b 2026-05-23). When `tool_groups is None`, `scope` is `None` in the claim, meaning "no scope restriction".
 
 **(D3) Auth-tier discrimination location → `mcp_auth.resolve_auth_context()`, called once per tool by the audit-wrapped handler.** Not a per-tool decorator. Existing call sites' `resolve_tenant_id(ctx)` becomes thin wrapper delegating to `resolve_auth_context().tenant_id`.
 

@@ -262,48 +262,28 @@ $ alpha coalition watch c_x9k2
 
 **Effort:** 4 days (CLI + SSE consumer; no new backend).
 
-### 6. Governance & policy gates (`alpha run` with policy enforcement, `alpha policy`)
+### 6. Governance & policy gates — DEFERRED to Value Arbitration
 
-**User story:** "When I ask the agent to do something destructive in
-production, the system should block it pending human approval — not pop
-a confirm prompt that I'll dismiss without reading."
-
-**CLI UX:**
-
-```
-$ alpha run "drop the staging database" --tenant prod
-[alpha] policy: destructive action requires human approval (rule=destructive_action_approval)
-[alpha] approval request t_b9 sent to #sre-oncall in Slack
-[alpha] waiting… (Ctrl-C to detach; alpha watch t_b9 to resume later)
-
-$ alpha policy show code-agent
-agent_policies for code-agent (tenant=prod):
-  rate_limit:           60/min, 800/hour
-  allowed_tools:        sql_query (readonly), knowledge_search, ...
-  blocked_actions:      DROP DATABASE, DROP TABLE, DELETE FROM users
-  approval_gate:        destructive_action_approval (cluster=prod)
-  escalation_agent:     sre-supervisor
-```
-
-**Backend deps:**
-
-| Need | Status |
-|---|---|
-| `agent_policies` table | ✅ migration 097 |
-| `human_approval` step in dynamic workflows | ✅ |
-| Slack/email approval dispatch | ⚠️ Slack integration exists but approval gateway is per-tenant config |
-| CLI read of policy | ❌ thin GET wrapper |
-
-**Acceptance:**
-- `alpha run` honors policies; blocks with informative message + task ID for
-  resume.
-- `alpha policy show <agent>` prints the active policy (rate limits, allowed
-  tools, approval gates, escalation).
-- `alpha policy set` is deliberately **not** in v1 (governance changes go
-  through web UI or API for audit trail).
-
-**Effort:** 3 days (CLI surfaces + plumbing of existing policy enforcement
-through the run pipeline).
+> **Status update (2026-05-23, P0b):** the original §6 proposed an
+> `alpha policy` CLI surface backed by the `agent_policies` table
+> (migration 097). That table shipped with no enforcement call sites
+> and recorded zero rows across 42 tenants over ~1 year of production.
+> P0b deleted the model, the API endpoint, the `alpha policy`
+> subcommand, and the table itself.
+>
+> Governance is moving to the Value Arbitration layer designed in
+> `docs/plans/2026-05-23-value-arbitration-design.md`. Tenant norms
+> ("never prescribe", "destructive actions require approval", etc.)
+> are expressed as `standing=tenant_norm` signals with `direction`
+> ∈ {`veto`, `avoid`, `pursue`} against typed `target` actions. The
+> arbitration layer reconciles conflicts and emits a reasoned audit
+> trace — something the old `agent_policies` schema could not do.
+>
+> The future CLI surface for governance will read arbitration
+> outcomes, not policies — definition TBD with the ValueArbitration
+> rollout. Rate limiting remains on `core.rate_limit.limiter` (per
+> endpoint, already operational). Allowed-tools gating remains on
+> `agent.tool_groups` (hardened in P0a).
 
 ### 7. Cost & usage attribution (`alpha usage`, `alpha costs`)
 
@@ -417,19 +397,25 @@ in the delegation-pattern doc.
 
 ### Phase 2 (Weeks 3–4) — Memory + governance
 
-- **Ship:** `alpha recall`, `alpha remember`, `alpha policy show`, policy enforcement
-  inside `alpha run`
-- **Backend:** None new — wrappers around existing endpoints
+- **Ship:** `alpha recall`, `alpha remember`, governance via Value Arbitration
+  (replaced the original `alpha policy show` proposal — see §6 for context)
+- **Backend:** None new for `alpha recall`/`alpha remember` — wrappers around
+  existing endpoints. Governance routes through the ValueArbitration layer
+  whose CLI surface ships with that rollout.
 - **Demo:** "I asked the agent to drop the prod DB. It blocked me, asked
   for approval, and gave me a task ID to resume from when approved."
+  *(Will land on ValueArbitration `tenant_norm` signals rather than the
+  deprecated `agent_policies` table.)*
 
-**Phase 2 status (2026-05-18):** MOSTLY SHIPPED. `alpha recall`,
-`alpha remember`, and `alpha policy show` are live in v0.7.5. Policy
-enforcement inside `alpha run` rides on the existing
-`agent_policies` table + `human_approval` workflow step. Cross-CLI
-consensus review (`alpha review`) shipped today as PR #574 — that
-wasn't in the original Phase 2 list but slots here because it's a
-governance-shaped surface (consensus before reporting).
+**Phase 2 status (2026-05-23):** PARTIALLY SHIPPED. `alpha recall`
+and `alpha remember` are live in v0.7.5. `alpha policy show` and the
+backing `agent_policies` table were removed in P0b (2026-05-23) after
+production audit found zero rows across 42 tenants and zero
+enforcement call sites. Governance was reassigned to the
+ValueArbitration design (`docs/plans/2026-05-23-value-arbitration-design.md`).
+Cross-CLI consensus review (`alpha review`) shipped 2026-05-18 as
+PR #574 — wasn't in the original Phase 2 list but slots here because
+it's a governance-shaped surface (consensus before reporting).
 
 ### Phase 3 (Weeks 5–6) — Coalitions + recipes
 
@@ -449,7 +435,7 @@ governance-shaped surface (consensus before reporting).
 
 | Item | Why |
 |---|---|
-| `alpha policy set` | Governance changes go through web UI for audit trail |
+| `alpha policy` (any form) | Removed in P0b 2026-05-23. Governance lives in ValueArbitration (`docs/plans/2026-05-23-value-arbitration-design.md`); rate limiting in `core.rate_limit.limiter`; tool gating in `agent.tool_groups`. |
 | `alpha agent create` interactively | Already exists; web wizard is the canonical creation flow |
 | Voice-driven `alpha` | Luna desktop client owns voice; CLI is keyboard-first |
 | `alpha recipes publish` (community contribution) | Phase 5 — needs review/moderation pipeline |
