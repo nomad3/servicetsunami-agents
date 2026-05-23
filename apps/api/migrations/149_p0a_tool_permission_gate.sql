@@ -44,11 +44,40 @@ CREATE INDEX idx_agents_tool_groups_review_required
 -- integrations) AND mark review_required so operators can adjust
 -- after 24h shadow observation. This preserves running workflows
 -- while making the boundary visible.
+--
+-- P0a review I4: batched UPDATE. A single large UPDATE would take a
+-- full-table write lock and contend with the SELECTs in
+-- mint_agent_token during the migration window. The DO block below
+-- updates in chunks of 5000 with SKIP LOCKED + a brief pg_sleep
+-- between batches so concurrent SELECTs aren't starved. For tenants
+-- with few NULL agents the loop exits immediately; for large prod
+-- tenants it bounds the lock duration per chunk.
 
-UPDATE agents
-SET tool_groups = '["knowledge", "meta"]'::jsonb,
-    tool_groups_review_required = TRUE
-WHERE tool_groups IS NULL;
+DO $$
+DECLARE
+    rows_updated INTEGER;
+BEGIN
+    LOOP
+        WITH batch AS (
+            SELECT id
+            FROM agents
+            WHERE tool_groups IS NULL
+            LIMIT 5000
+            FOR UPDATE SKIP LOCKED
+        )
+        UPDATE agents
+        SET tool_groups = '["knowledge", "meta"]'::jsonb,
+            tool_groups_review_required = TRUE
+        WHERE id IN (SELECT id FROM batch);
+
+        GET DIAGNOSTICS rows_updated = ROW_COUNT;
+        EXIT WHEN rows_updated = 0;
+
+        -- Brief yield so concurrent SELECTs aren't starved between
+        -- chunks.
+        PERFORM pg_sleep(0.05);
+    END LOOP;
+END $$;
 
 -- ── 3. tenant_features.enforce_strict_tool_scope ──────────────────────
 --

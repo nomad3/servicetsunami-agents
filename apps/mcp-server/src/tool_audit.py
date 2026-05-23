@@ -53,7 +53,28 @@ logger = logging.getLogger(__name__)
 # this cache becomes dead code and the function returns the
 # unconditional fail-closed default.
 _STRICT_SCOPE_CACHE_TTL_SECONDS = 60
+# P0a review I1: hard cap on the cache to prevent unbounded growth
+# under a hostile caller spamming unique tenant_id strings (the
+# arg-resolution path at line 343-345 accepts any 32+ char string).
+# When the cap is hit, we clear the cache wholesale — cheap, and any
+# subsequent calls re-fetch within the next 60s anyway.
+_STRICT_SCOPE_CACHE_MAX_ENTRIES = 10_000
 _strict_scope_cache: dict[str, tuple[bool, float]] = {}
+
+
+def invalidate_strict_scope_cache() -> None:
+    """Clear all cached enforce_strict_tool_scope decisions.
+
+    P0a review B2: provides an explicit invalidation entrypoint for
+    operator-driven rollback. When an operator flips
+    `enforce_strict_tool_scope` from TRUE → FALSE during an incident,
+    the 60s TTL means cached TRUE entries keep blocking legitimate
+    calls for up to 60s × N workers. Operators can wire this to
+    SIGUSR1 / an /admin/cache/clear endpoint / a CLI command to
+    accelerate rollback. Documented in the rollout plan §5.
+    """
+    _strict_scope_cache.clear()
+    logger.info("tool_audit: enforce_strict_tool_scope cache cleared")
 
 
 def _get_enforce_strict_tool_scope(tenant_id: str | None) -> bool:
@@ -64,6 +85,13 @@ def _get_enforce_strict_tool_scope(tenant_id: str | None) -> bool:
     enforcement) on any error, so a tenant_features outage cannot
     accidentally lock all callers out. The fail-closed default applies
     only when this returns TRUE.
+
+    Thread safety (P0a review I2): the async-handler context means
+    multiple coroutines may race-fetch the same tenant during a cache
+    miss. CPython dict assignment is atomic so the dict itself stays
+    consistent; the worst case is N duplicate SELECTs in the cache-
+    miss burst. Acceptable — not worth a per-tenant asyncio.Lock for
+    the overhead.
     """
     if not tenant_id:
         # No tenant context → can't look up the flag → default to FALSE
@@ -96,8 +124,26 @@ def _get_enforce_strict_tool_scope(tenant_id: str | None) -> bool:
             tenant_id, e,
         )
         value = False
+    # P0a review I1: hard cap. If we hit it, clear the whole cache
+    # rather than implementing an LRU eviction policy — drops are
+    # rare, cap is high, full clear costs nothing.
+    if len(_strict_scope_cache) >= _STRICT_SCOPE_CACHE_MAX_ENTRIES:
+        logger.warning(
+            "tool_audit: enforce_strict_tool_scope cache hit cap %d, "
+            "clearing wholesale (likely hostile tenant_id spam)",
+            _STRICT_SCOPE_CACHE_MAX_ENTRIES,
+        )
+        _strict_scope_cache.clear()
     _strict_scope_cache[tenant_id] = (value, now)
     return value
+
+
+# Module-scope (P0a review N1). Discovery allowlist is intentionally
+# small and reviewed at deploy time — only tools that have NO
+# operational side effect AND no data exfil risk. Add conservatively.
+# Empty allowlist means every non-internal_key caller must use
+# agent_token tier.
+_DISCOVERY_TOOL_ALLOWLIST: frozenset[str] = frozenset()
 
 _engine: Engine | None = None
 
@@ -361,20 +407,25 @@ def install_audit(mcp_server) -> None:
         # agent_token with an in-scope match OR membership in the tiny
         # discovery allowlist.
         #
-        # The discovery allowlist is intentionally small and reviewed at
-        # deploy time — only tools that have NO operational side effect
-        # AND no data exfil risk. Add conservatively.
-        _DISCOVERY_TOOL_ALLOWLIST: frozenset[str] = frozenset({
-            # No discovery tools added yet. Empty allowlist means every
-            # non-internal_key caller must use agent_token tier.
-        })
-
-        if auth_ctx is not None and tool_name:
-            if auth_ctx.tier == "internal_key":
+        # P0a review B1: auth_ctx is None when resolve_auth_context()
+        # raised (transient SQLAlchemy hiccup, malformed JWT, header
+        # parse error). The previous guard `if auth_ctx is not None`
+        # SKIPPED the whole scope block in that case — same class of
+        # silent fail-open as the original breach. Now: treat None as
+        # the most-untrusted tier and route through the fail-closed
+        # branch with tier_label="auth_resolution_failed".
+        #
+        # Discovery allowlist moved to module scope (review N1).
+        if tool_name:
+            tier_label = (
+                auth_ctx.tier if auth_ctx is not None
+                else "auth_resolution_failed"
+            )
+            if auth_ctx is not None and auth_ctx.tier == "internal_key":
                 # MCP server self-calls + platform ops — bypass scope
                 # enforcement entirely. Audit row still written.
                 pass
-            elif auth_ctx.tier == "agent_token":
+            elif auth_ctx is not None and auth_ctx.tier == "agent_token":
                 if auth_ctx.scope is not None and tool_name not in auth_ctx.scope:
                     status = "scope_denied"
                     error_msg = (
@@ -413,8 +464,9 @@ def install_audit(mcp_server) -> None:
                         tool_name,
                     )
             else:
-                # tier in {tenant_header, anonymous, unknown}. P0a
-                # fail-CLOSED default — but gated by per-tenant
+                # tier in {tenant_header, anonymous, unknown,
+                # auth_resolution_failed (B1)}. P0a fail-CLOSED
+                # default — but gated by per-tenant
                 # `enforce_strict_tool_scope` flag during the ramp.
                 # When the flag is FALSE (default during steps 1-2 of
                 # rollout), we log the would-be denial at INFO so it
@@ -422,13 +474,23 @@ def install_audit(mcp_server) -> None:
                 # executes. When the flag is TRUE (steps 3-4), we
                 # actually reject. After step 5 removes the flag
                 # entirely, this becomes unconditional fail-closed.
+                #
+                # P0a review B1: auth_resolution_failed tier ALWAYS
+                # fails closed even when the per-tenant flag is FALSE.
+                # We can't trust shadow-only on a path where we don't
+                # know which tenant we are — the cache key would be
+                # `None` and could be poisoned. Treat it as the most-
+                # untrusted state: hard refuse regardless of ramp.
                 if tool_name not in _DISCOVERY_TOOL_ALLOWLIST:
-                    enforce = _get_enforce_strict_tool_scope(tenant_id)
+                    if tier_label == "auth_resolution_failed":
+                        enforce = True  # B1: never shadow-only here
+                    else:
+                        enforce = _get_enforce_strict_tool_scope(tenant_id)
                     if enforce:
                         status = "tier_denied"
                         error_msg = (
                             f"tool {tool_name!r} requires agent_token tier "
-                            f"or internal_key; got tier={auth_ctx.tier}. "
+                            f"or internal_key; got tier={tier_label}. "
                             f"P0a 2026-05-23 fail-closed enforcement."
                         )
                         try:
@@ -462,7 +524,7 @@ def install_audit(mcp_server) -> None:
                             "tool_audit: SHADOW tier-denial — tool=%s "
                             "tier=%s tenant=%s would be tier_denied "
                             "when enforce_strict_tool_scope=TRUE",
-                            tool_name, auth_ctx.tier, tenant_id,
+                            tool_name, tier_label, tenant_id,
                         )
 
         try:

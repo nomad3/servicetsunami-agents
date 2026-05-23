@@ -1425,11 +1425,11 @@ def _run_agent_session_legacy(
         )
         if agent_row is not None:
             # Scope claim from agent.tool_groups. After the NULL-
-            # backfill migration ships (147_agent_tool_groups_review
-            # _required), no agent should have tool_groups=NULL —
-            # they are backfilled with the read-only default
-            # ['knowledge', 'meta'] + tool_groups_review_required=TRUE.
-            # If we somehow see NULL anyway, resolve_tool_names returns
+            # backfill migration ships (149_p0a_tool_permission_gate),
+            # no agent should have tool_groups=NULL — they are
+            # backfilled with the read-only default ['knowledge',
+            # 'meta'] + tool_groups_review_required=TRUE. If we
+            # somehow see NULL anyway, resolve_tool_names returns
             # None (which would mean "all tools" downstream) — we
             # explicitly substitute the safe default to fail-CLOSED.
             scope = resolve_tool_names(agent_row.tool_groups)
@@ -1438,7 +1438,7 @@ def _run_agent_session_legacy(
                     "P0a: agent %s (tenant %s) has tool_groups=NULL "
                     "or unresolvable — substituting fail-closed default "
                     "['knowledge', 'meta']. This should not happen "
-                    "post-migration 147 — check the backfill.",
+                    "post-migration 149 — check the backfill.",
                     agent_row.id, tenant_id,
                 )
                 scope = resolve_tool_names(["knowledge", "meta"]) or []
