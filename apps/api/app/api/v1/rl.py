@@ -20,9 +20,46 @@ from app.services import rl_experience_service, rl_reward_service
 router = APIRouter()
 
 
+def _verify_internal_key_and_tenant(
+    body_tenant_id: str,
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+    x_tenant_id: Optional[uuid.UUID] = Header(None, alias="X-Tenant-Id"),
+):
+    """Internal-key + tenant-header gate for ``/internal/experience`` and
+    ``/internal/provider-council`` (F9 P1 hardening — red-team review
+    2026-05-22).
+
+    Before this gate, the body's ``tenant_id`` alone determined which
+    tenant's RL state was mutated, with only the internal key as the
+    auth wall. Code-worker / mcp-tools / orchestration-worker all
+    share that key, so RCE on any of them (cf. F1) → poison ANY
+    tenant's routing policy via a body that lies about its tenant_id.
+
+    The defense matches habits.py:69-101: require ``X-Tenant-Id``
+    alongside ``X-Internal-Key`` and reject any request where the
+    body's tenant_id doesn't match the header. The HEADER is the
+    tenant scope; the body is just data.
+    """
+    if x_internal_key not in (settings.API_INTERNAL_KEY, settings.MCP_API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid internal key")
+    if x_tenant_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="X-Tenant-Id required with X-Internal-Key",
+        )
+    if str(body_tenant_id) != str(x_tenant_id):
+        raise HTTPException(
+            status_code=400,
+            detail="body tenant_id does not match X-Tenant-Id",
+        )
+
+
 def _verify_internal_key(
     x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
 ):
+    """Legacy internal-key-only gate. KEEP — used by read-only endpoints
+    that don't take a tenant_id payload. The mutating endpoints (#371)
+    use ``_verify_internal_key_and_tenant`` instead."""
     if x_internal_key not in (settings.API_INTERNAL_KEY, settings.MCP_API_KEY):
         raise HTTPException(status_code=401, detail="Invalid internal key")
 
@@ -44,13 +81,30 @@ class ProviderCouncilUpdate(BaseModel):
 @router.post("/internal/provider-council")
 def update_provider_council(
     payload: ProviderCouncilUpdate,
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+    x_tenant_id: Optional[uuid.UUID] = Header(None, alias="X-Tenant-Id"),
     db: Session = Depends(deps.get_db),
-    _auth: None = Depends(_verify_internal_key),
 ):
-    """Merge provider council results into an existing RL experience."""
+    """Merge provider council results into an existing RL experience.
+
+    F9 P1: requires X-Tenant-Id header matching body tenant_id +
+    additionally checks that the target RLExperience row belongs to
+    the asserted tenant (so a leaked internal key + a stolen
+    experience_id from a different tenant cannot cross-write)."""
+    _verify_internal_key_and_tenant(
+        payload.tenant_id, x_internal_key, x_tenant_id,
+    )
     exp = db.query(RLExperience).filter(RLExperience.id == payload.experience_id).first()
     if not exp:
         raise HTTPException(404, "Experience not found")
+    if str(exp.tenant_id) != str(x_tenant_id):
+        # The internal caller knows the experience UUID but not the
+        # tenant it belongs to (e.g. via a leak in another service).
+        # Refuse cross-tenant mutation.
+        raise HTTPException(
+            status_code=403,
+            detail="experience_id belongs to a different tenant",
+        )
     # Merge provider council into existing reward_components
     components = exp.reward_components or {}
     components["provider_council"] = payload.provider_council
@@ -65,10 +119,19 @@ def update_provider_council(
 @router.post("/internal/experience")
 def create_internal_experience(
     payload: InternalExperienceCreate,
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+    x_tenant_id: Optional[uuid.UUID] = Header(None, alias="X-Tenant-Id"),
     db: Session = Depends(deps.get_db),
-    _auth: None = Depends(_verify_internal_key),
 ):
-    """Create an RL experience from internal services (code-worker, MCP tools)."""
+    """Create an RL experience from internal services (code-worker, MCP tools).
+
+    F9 P1: tenant scope comes from the X-Tenant-Id header, not the
+    body. Body's tenant_id MUST match the header or the call is
+    rejected — defense-in-depth against a body that lies about its
+    tenant."""
+    _verify_internal_key_and_tenant(
+        payload.tenant_id, x_internal_key, x_tenant_id,
+    )
     tid = uuid.UUID(payload.tenant_id)
     trajectory_id = uuid.uuid4()
     rl_experience_service.log_experience(

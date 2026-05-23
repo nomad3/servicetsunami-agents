@@ -419,7 +419,13 @@ def _log_code_task_rl(
     try:
         resp = httpx.post(
             f"{API_BASE_URL}/api/v1/rl/internal/experience",
-            headers={"X-Internal-Key": API_INTERNAL_KEY or "dev_mcp_key"},
+            headers={
+                "X-Internal-Key": API_INTERNAL_KEY or "dev_mcp_key",
+                # F9 P1: tenant scope MUST come from the header now;
+                # the api-side gate rejects the call if body tenant_id
+                # doesn't match. Same value in both places by design.
+                "X-Tenant-Id": tenant_id,
+            },
             json={
                 "tenant_id": tenant_id,
                 "decision_point": "code_task",
