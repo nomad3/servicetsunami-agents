@@ -11,7 +11,10 @@ python-multipart
 requests
 beautifulsoup4
 httpx==0.28.1
-pandas
+# F15 review IMPORTANT-1: cap pandas to 3.x to bound future churn.
+# Pandas 3.0 removed several legacy DataFrame APIs; pin until we
+# audit usage and decide on 4.x migration.
+pandas<3.1
 openpyxl
 duckdb
 pyarrow
@@ -44,7 +47,12 @@ pgvector>=0.3.6
 # path; callers handle ``EmbeddingServiceUnavailable`` (or use the
 # ``try_embed_*`` helpers) when the service is unreachable. Removed
 # sentence-transformers + einops (~600 MB of torch wheels) here.
-protobuf>=7.34.1
+# F15 review IMPORTANT-1: cap protobuf to 7.x. Dockerfile pins
+# protobuf<7 during proto-stub generation then re-installs >=7.34.1
+# for the runtime venv; leaving protobuf unbounded risks a future
+# resolution landing protobuf 8.x mid-build and breaking that
+# carefully-staged install. <8 keeps us in the same major.
+protobuf>=7.34.1,<8
 grpcio>=1.62.0
 # grpcio-tools is build-time only (proto compilation) — installed separately
 # in the Dockerfile builder stage to avoid the protobuf <7 vs >=7 conflict
