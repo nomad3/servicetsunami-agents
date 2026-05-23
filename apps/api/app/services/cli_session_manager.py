@@ -1410,16 +1410,35 @@ def _run_agent_session_legacy(
     try:
         from app.models.agent import Agent
         from app.services.agent_token import mint_agent_token
-        from sqlalchemy import func as _sa_func
+        from sqlalchemy import func as _sa_func, or_ as _sa_or
 
         # Agent has no `slug` column; the chat hot path passes a slug
-        # form like "luna". Match case-insensitively against Agent.name
-        # which is the closest analogue (display name).
+        # form like "luna" or "luna-supervisor". Match case-insensitively
+        # against Agent.name (the closest analogue) AND a slug-normalized
+        # form so "luna-supervisor" matches "Luna Supervisor".
+        #
+        # Slug normalization rule: lowercase + dashes/underscores → spaces.
+        # The reverse rule must also hold: a name like "Luna Supervisor"
+        # lower+space-to-dash should match an incoming "luna-supervisor".
+        # We compare BOTH directions so either canonical form works:
+        #   - lower(name) == lower(slug)                  → "luna" + "luna"
+        #   - lower(name) == lower(slug).replace("-"," ") → "luna supervisor" + "luna-supervisor"
+        #   - replace(lower(name)," ","-") == lower(slug) → "luna-supervisor" + "luna-supervisor"
+        # (Same for underscores in case any slug uses _ instead of -.)
+        slug_lower = agent_slug.lower()
+        slug_as_name = slug_lower.replace("-", " ").replace("_", " ")
         agent_row = (
             db.query(Agent)
             .filter(
                 Agent.tenant_id == tenant_id,
-                _sa_func.lower(Agent.name) == agent_slug.lower(),
+                _sa_or(
+                    _sa_func.lower(Agent.name) == slug_lower,
+                    _sa_func.lower(Agent.name) == slug_as_name,
+                    _sa_func.replace(
+                        _sa_func.replace(_sa_func.lower(Agent.name), " ", "-"),
+                        "_", "-",
+                    ) == slug_lower,
+                ),
             )
             .first()
         )
