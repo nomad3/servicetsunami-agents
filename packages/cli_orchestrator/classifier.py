@@ -354,6 +354,27 @@ _STDERR_RULES: list[_Rule] = [
         legacy_label="auth",
         test_id="copilot_cli_not_authorized_is_needs_auth",
     ),
+    # 11a. copilot missing_credential — classic GitHub PAT (ghp_*)
+    # rejected by Copilot CLI. Surface from a real 2026-05-22 WhatsApp
+    # incident: ``copilot`` (gh-copilot v0.x+) refuses classic personal
+    # access tokens and demands a fine-grained PAT. Without this rule
+    # the stderr fell through to UNKNOWN_FAILURE, the chain bubbled the
+    # raw multi-line error string back to the operator, and no cooldown
+    # was set. Classify as ``missing_credential`` (chain fallback only,
+    # no cooldown) because the failure is a stable config issue — a
+    # rotation to a fine-grained PAT fixes it the next turn; cooling
+    # for 10 min would mask that quick reconnect.
+    _Rule(
+        platform="copilot_cli",
+        pattern=re.compile(
+            r"classic\s*personal\s*access\s*tokens?\s*\(ghp_\)\s*"
+            r"are\s*not\s*supported\s*by\s*copilot",
+            re.IGNORECASE,
+        ),
+        status=Status.NEEDS_AUTH,
+        legacy_label="missing_credential",
+        test_id="copilot_cli_classic_pat_is_missing_credential",
+    ),
     # 12. any — retryable network failures (ECONNRESET, 502, 503, TLS)
     _Rule(
         platform="any",
