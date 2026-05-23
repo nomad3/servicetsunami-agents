@@ -41,6 +41,64 @@ from src import audit_breadcrumb, audit_metrics
 
 logger = logging.getLogger(__name__)
 
+# ── P0a per-tenant ramp gate cache ────────────────────────────────────
+# The `enforce_strict_tool_scope` flag on `tenant_features` controls
+# whether the fail-closed default actually rejects or just shadow-logs.
+# To avoid a per-tool-call DB round trip, we cache the flag per tenant
+# with a 60-second TTL. False-positive risk (cached TRUE while operator
+# flipped it FALSE) is acceptable for a 60s window during rollback.
+# False-negative risk (cached FALSE while flipped TRUE) is acceptable
+# during enforcement ramp — operators see denials appear ~60s after
+# flipping. After step 5 of the rollout removes the flag entirely,
+# this cache becomes dead code and the function returns the
+# unconditional fail-closed default.
+_STRICT_SCOPE_CACHE_TTL_SECONDS = 60
+_strict_scope_cache: dict[str, tuple[bool, float]] = {}
+
+
+def _get_enforce_strict_tool_scope(tenant_id: str | None) -> bool:
+    """Return whether strict tool-scope enforcement is active for tenant.
+
+    Cache hits are O(1). Cache misses do a single SELECT against
+    tenant_features. Falls back to FALSE (= shadow-log only, no
+    enforcement) on any error, so a tenant_features outage cannot
+    accidentally lock all callers out. The fail-closed default applies
+    only when this returns TRUE.
+    """
+    if not tenant_id:
+        # No tenant context → can't look up the flag → default to FALSE
+        # (shadow only). The drop site #1 path in this same module
+        # already records this as a no_tenant_id audit drop.
+        return False
+    now = time.time()
+    cached = _strict_scope_cache.get(tenant_id)
+    if cached is not None:
+        value, fetched_at = cached
+        if now - fetched_at < _STRICT_SCOPE_CACHE_TTL_SECONDS:
+            return value
+    eng = _get_engine()
+    if eng is None:
+        return False
+    try:
+        with eng.begin() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT enforce_strict_tool_scope FROM tenant_features "
+                    "WHERE tenant_id = CAST(:tid AS uuid)"
+                ),
+                {"tid": tenant_id},
+            ).first()
+        value = bool(row[0]) if row is not None and row[0] is not None else False
+    except Exception as e:  # noqa: BLE001 — cache fallback is fail-OPEN to shadow
+        logger.warning(
+            "tool_audit: enforce_strict_tool_scope lookup failed for "
+            "tenant=%s err=%s — defaulting to FALSE (shadow only)",
+            tenant_id, e,
+        )
+        value = False
+    _strict_scope_cache[tenant_id] = (value, now)
+    return value
+
 _engine: Engine | None = None
 
 # Tools whose arguments are inherently sensitive (auth tokens, raw PII bodies,
@@ -289,43 +347,123 @@ def install_audit(mcp_server) -> None:
         error_msg = None
         status = "ok"
 
-        # ── Phase 4 commit 7: scope enforcement gate ───────────────────
-        # When tier=agent_token AND scope is not None AND tool_name not
-        # in scope → 403 + audit-log entry. Bare tool name (no
-        # mcp__agentprovision__ prefix) is the canonical scope-list
-        # form (resolve_tool_names returns bare names; the prefix is
-        # added only at the --allowedTools CLI flag stage).
-        if (
-            auth_ctx is not None
-            and auth_ctx.tier == "agent_token"
-            and auth_ctx.scope is not None
-            and tool_name not in auth_ctx.scope
-        ):
-            status = "scope_denied"
-            error_msg = (
-                f"tool {tool_name!r} not in agent_token scope "
-                f"(allowed: {sorted(auth_ctx.scope)[:10]})"
-            )
-            # Log the scope-denial audit row synchronously — we MUST
-            # surface it before raising.
-            try:
-                duration_ms = int((time.monotonic() - started) * 1000)
-                _log_call(
-                    tenant_id=tenant_id,
-                    tool_name=tool_name,
-                    arguments=dict(arguments) if arguments else {},
-                    result_status=status,
-                    result_summary="",
-                    error=error_msg,
-                    duration_ms=duration_ms,
-                    started_at_unix=started_unix,
-                )
-            except Exception:
-                logger.warning(
-                    "tool_audit: scope-denial audit write failed",
-                    exc_info=True,
-                )
-            raise PermissionError(error_msg)
+        # ── Scope enforcement gate (Phase 4 + P0a 2026-05-23) ──────────
+        # Original Phase 4 logic: when tier=agent_token AND scope is not
+        # None AND tool_name not in scope → 403 + audit row.
+        #
+        # P0a (2026-05-23) adds a fail-CLOSED default for non-internal,
+        # non-agent_token tiers (tenant_header, anonymous). Round 3 of
+        # the 2026-05-23 hard-tests showed Luna's chat→code-worker path
+        # was using tier=tenant_header where scope is None, so the
+        # original check skipped silently → execute_shell ran outside
+        # tool_groups. After this change, only `internal_key` (MCP
+        # self-calls, platform ops) bypasses; everything else REQUIRES
+        # agent_token with an in-scope match OR membership in the tiny
+        # discovery allowlist.
+        #
+        # The discovery allowlist is intentionally small and reviewed at
+        # deploy time — only tools that have NO operational side effect
+        # AND no data exfil risk. Add conservatively.
+        _DISCOVERY_TOOL_ALLOWLIST: frozenset[str] = frozenset({
+            # No discovery tools added yet. Empty allowlist means every
+            # non-internal_key caller must use agent_token tier.
+        })
+
+        if auth_ctx is not None and tool_name:
+            if auth_ctx.tier == "internal_key":
+                # MCP server self-calls + platform ops — bypass scope
+                # enforcement entirely. Audit row still written.
+                pass
+            elif auth_ctx.tier == "agent_token":
+                if auth_ctx.scope is not None and tool_name not in auth_ctx.scope:
+                    status = "scope_denied"
+                    error_msg = (
+                        f"tool {tool_name!r} not in agent_token scope "
+                        f"(allowed: {sorted(auth_ctx.scope)[:10]})"
+                    )
+                    try:
+                        duration_ms = int(
+                            (time.monotonic() - started) * 1000
+                        )
+                        _log_call(
+                            tenant_id=tenant_id,
+                            tool_name=tool_name,
+                            arguments=dict(arguments) if arguments else {},
+                            result_status=status,
+                            result_summary="",
+                            error=error_msg,
+                            duration_ms=duration_ms,
+                            started_at_unix=started_unix,
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.warning(
+                            "tool_audit: scope-denial audit write failed",
+                            exc_info=True,
+                        )
+                    raise PermissionError(error_msg)
+                # scope is None for agent_token: caller intentionally
+                # has unscoped access (admin token, etc.). Backstop:
+                # log INFO so we can spot it in dashboards. Not an
+                # error — this is a legitimate path until we deprecate
+                # unscoped agent_tokens entirely.
+                if auth_ctx.scope is None:
+                    logger.info(
+                        "tool_audit: agent_token with scope=None "
+                        "called %s — admin/unscoped path",
+                        tool_name,
+                    )
+            else:
+                # tier in {tenant_header, anonymous, unknown}. P0a
+                # fail-CLOSED default — but gated by per-tenant
+                # `enforce_strict_tool_scope` flag during the ramp.
+                # When the flag is FALSE (default during steps 1-2 of
+                # rollout), we log the would-be denial at INFO so it
+                # appears in shadow dashboards but the tool still
+                # executes. When the flag is TRUE (steps 3-4), we
+                # actually reject. After step 5 removes the flag
+                # entirely, this becomes unconditional fail-closed.
+                if tool_name not in _DISCOVERY_TOOL_ALLOWLIST:
+                    enforce = _get_enforce_strict_tool_scope(tenant_id)
+                    if enforce:
+                        status = "tier_denied"
+                        error_msg = (
+                            f"tool {tool_name!r} requires agent_token tier "
+                            f"or internal_key; got tier={auth_ctx.tier}. "
+                            f"P0a 2026-05-23 fail-closed enforcement."
+                        )
+                        try:
+                            duration_ms = int(
+                                (time.monotonic() - started) * 1000
+                            )
+                            _log_call(
+                                tenant_id=tenant_id,
+                                tool_name=tool_name,
+                                arguments=dict(arguments) if arguments else {},
+                                result_status=status,
+                                result_summary="",
+                                error=error_msg,
+                                duration_ms=duration_ms,
+                                started_at_unix=started_unix,
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.warning(
+                                "tool_audit: tier-denial audit write failed",
+                                exc_info=True,
+                            )
+                        raise PermissionError(error_msg)
+                    else:
+                        # Shadow-only mode. The denial would happen
+                        # once the operator flips enforce_strict_
+                        # tool_scope to TRUE. INFO log so operators
+                        # can dashboard pending denials and confirm
+                        # no legitimate workflow gets bricked when
+                        # they flip the flag.
+                        logger.info(
+                            "tool_audit: SHADOW tier-denial — tool=%s "
+                            "tier=%s tenant=%s would be tier_denied "
+                            "when enforce_strict_tool_scope=TRUE",
+                            tool_name, auth_ctx.tier, tenant_id,
+                        )
 
         try:
             result = await original_handler(req)

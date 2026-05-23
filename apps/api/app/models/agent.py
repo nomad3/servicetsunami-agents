@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, ForeignKey, JSON, Integer, Text
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
@@ -28,6 +28,14 @@ class Agent(Base):
 
     # Agent-driven runtime fields
     tool_groups = Column(JSONB, nullable=True)  # list of tool group names to load
+    # P0a (2026-05-23) review flag for the NULL-tool_groups backfill.
+    # Set TRUE for any agent whose tool_groups was NULL at migration
+    # 149 time (auto-backfilled with read-only default ['knowledge',
+    # 'meta']). Operator dashboard surfaces these; cleared on review
+    # OR after 1-week auto-clear that requires BOTH zero shadow-denial
+    # activity AND observed activity (inactivity is not compatibility
+    # proof per Luna review 2026-05-23).
+    tool_groups_review_required = Column(Boolean, nullable=False, default=False)
     default_model_tier = Column(String(10), default="full")  # "light" (Haiku) or "full" (Sonnet)
     persona_prompt = Column(Text, nullable=True)  # compact persona instead of full skill file
     memory_domains = Column(JSONB, nullable=True)  # list of memory domain strings for scoped recall
