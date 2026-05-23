@@ -87,13 +87,50 @@ tool_audit_scheduling_failed_total = Counter(
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
+# P0c review I3 — cardinality guard. `tool_name` comes from MCP
+# request bodies, which can include made-up names from a hostile or
+# buggy caller. Without a guard, an attacker spamming unique
+# tool_name strings could balloon the label set into thousands of
+# series per metric. The helper folds anything not in the registered
+# MCP tool set to "_unknown" so cardinality stays bounded by
+# registered_tools + {None → "unknown", unrecognized → "_unknown"}.
+# Lazy-populated from FastMCP the first time it's referenced.
+_KNOWN_TOOL_NAMES: Optional[frozenset[str]] = None
+
+
+def _label_tool_name(tool_name: Optional[str]) -> str:
+    """Cardinality-bounded label value for tool_name (P0c review I3)."""
+    if tool_name is None:
+        return "unknown"
+    global _KNOWN_TOOL_NAMES
+    if _KNOWN_TOOL_NAMES is None:
+        # Lazy populate from FastMCP registry. Defer the import so
+        # this module loads even without the mcp dep present (tests,
+        # non-server contexts). On any failure we fall through with
+        # an empty set, which then accepts all names through with the
+        # 128-char length cap — a small bootstrap window where we
+        # accept unknowns rather than crashing the metric path.
+        try:
+            from src.mcp_app import mcp as _mcp  # type: ignore
+
+            registry = getattr(_mcp, "_tool_manager", None)
+            if registry is not None and hasattr(registry, "_tools"):
+                _KNOWN_TOOL_NAMES = frozenset(registry._tools.keys())
+            else:
+                _KNOWN_TOOL_NAMES = frozenset()
+        except Exception:  # noqa: BLE001
+            _KNOWN_TOOL_NAMES = frozenset()
+    if _KNOWN_TOOL_NAMES and tool_name not in _KNOWN_TOOL_NAMES:
+        return "_unknown"
+    return tool_name[:128]  # length cap as a last line
+
 
 def record_drop(*, reason: str, tool_name: Optional[str]) -> None:
     """Increment the drop counter. Best-effort: never raises."""
     try:
         tool_audit_drop_total.labels(
             reason=reason,
-            tool_name=tool_name or "unknown",
+            tool_name=_label_tool_name(tool_name),
         ).inc()
     except Exception:  # noqa: BLE001 — metrics layer is last line
         pass
@@ -107,7 +144,7 @@ def record_write_failure(
     """Increment the SQL-write-failure counter."""
     try:
         tool_audit_write_failed_total.labels(
-            tool_name=tool_name or "unknown",
+            tool_name=_label_tool_name(tool_name),
             reason=type(exception).__name__,
         ).inc()
     except Exception:  # noqa: BLE001
@@ -118,7 +155,7 @@ def record_scheduling_failure(*, tool_name: Optional[str]) -> None:
     """Increment the executor-scheduling-failure counter."""
     try:
         tool_audit_scheduling_failed_total.labels(
-            tool_name=tool_name or "unknown",
+            tool_name=_label_tool_name(tool_name),
         ).inc()
     except Exception:  # noqa: BLE001
         pass

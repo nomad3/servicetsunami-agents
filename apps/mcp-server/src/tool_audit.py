@@ -374,11 +374,20 @@ def install_audit(mcp_server) -> None:
                 audit_metrics.record_scheduling_failure(
                     tool_name=tool_name,
                 )
+                # P0c review B1: this branch fires when the event loop
+                # is unhealthy (executor full, loop teardown race).
+                # Calling write_drop() directly on the event loop
+                # thread would do sync DB I/O on the loop. Use the
+                # async-safe wrapper that spawns a daemon thread.
                 try:
-                    audit_breadcrumb.write_drop(
+                    audit_breadcrumb.write_drop_async(
                         tool_name=tool_name,
                         drop_reason="scheduling_failed",
-                        tier=None,
+                        tier=(
+                            auth_ctx.tier
+                            if auth_ctx is not None
+                            else None
+                        ),
                         args_keys=None,
                         error_message=f"{type(e).__name__}: {e}",
                     )

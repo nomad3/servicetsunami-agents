@@ -1,6 +1,6 @@
 """SQLAlchemy model for the `tool_audit_drops` breadcrumb table.
 
-Migration: apps/api/migrations/147_tool_audit_drops.sql
+Migration: apps/api/migrations/148_tool_audit_drops.sql
 Design: docs/plans/2026-05-23-p0c-audit-log-fail-loud.md §6.
 Writer: apps/mcp-server/src/audit_breadcrumb.py (mcp-server uses raw
 SQL via a separate connection pool; this model is for api-side reads

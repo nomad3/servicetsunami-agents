@@ -88,14 +88,21 @@ platform_safety_record_event_failed_total = Counter(
 # Adversary-probe detector — counts repeat attempts after a refusal
 # verdict. Silent failure here means we lose the only signal of
 # someone probing the safety floor. Alert: > 0 in 5min.
+#
+# P0c review I4: no labels. Per-tenant cardinality on a security
+# counter is the standard high-cardinality footgun (N tenants × one
+# series each, forever in TSDB). The log line at the call site
+# already carries tenant_id for forensic correlation; the counter
+# just needs to tick globally for the alert to fire.
 platform_safety_repeat_check_failed_total = Counter(
     "platform_safety_repeat_check_failed_total",
     "platform_safety_io._check_repeat_attempts swallowed an "
     "exception — adversary-probe detector failed. The single "
     "user-facing refusal still fired, but pattern-detection is "
     "blind for this attempt. Promoted from P1 to P0c after Luna "
-    "review 2026-05-23. Alert > 0 in 5min.",
-    labelnames=("tenant_id",),
+    "review 2026-05-23. Alert > 0 in 5min. No tenant_id label by "
+    "design — review I4. Operator finds the tenant via the ERROR "
+    "log line at the call site.",
 )
 
 
@@ -135,10 +142,15 @@ def record_platform_safety_repeat_check_failure(
     *,
     tenant_id: Optional[str],
 ) -> None:
-    """Increment the platform_safety_repeat_check_failed counter."""
+    """Increment the platform_safety_repeat_check_failed counter.
+
+    The tenant_id parameter is retained for call-site clarity but is
+    not used as a Prometheus label (P0c review I4 — cardinality).
+    Operators correlate to a specific tenant via the ERROR log line
+    fired at the same instant in platform_safety_io.
+    """
+    del tenant_id  # intentionally unused — see I4
     try:
-        platform_safety_repeat_check_failed_total.labels(
-            tenant_id=tenant_id or "unknown",
-        ).inc()
+        platform_safety_repeat_check_failed_total.inc()
     except Exception:  # noqa: BLE001
         pass
