@@ -14,6 +14,14 @@ class Settings(BaseSettings):
         return v
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
+    # F7 split — domain-specific JWT signing secrets.
+    # Default to SECRET_KEY (filled in model_post_init below) so PR2 is a
+    # no-behavior-change kid-plumbing step. PR4 introduces real distinct
+    # values via macOS Keychain hydration.
+    # Spec: docs/superpowers/specs/2026-05-22-subproject-a-infra-secret-hardening-design.md
+    JWT_USER_SECRET: str | None = None
+    JWT_AGENT_TOKEN_SECRET: str | None = None
+    JWT_OAUTH_STATE_SECRET: str | None = None
     # 24 hours. Long-running clients (Luna desktop) call /auth/refresh
     # proactively 5 minutes before expiry to avoid mid-session logouts.
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
@@ -152,6 +160,20 @@ class Settings(BaseSettings):
     # talking to localhost:25 in tests; SSL-from-the-start (port 465)
     # is uncommon enough we don't model it here yet.
     EMAIL_SMTP_USE_TLS: bool = True
+
+    def model_post_init(self, __context) -> None:
+        """Apply SECRET_KEY as the fallback for any unset JWT domain secret.
+
+        PR2 (F7a kid plumbing): all three secrets default to SECRET_KEY so
+        the cluster sees zero behavior change. PR4 (F7b) replaces these
+        defaults with distinct values hydrated from macOS Keychain.
+        """
+        if self.JWT_USER_SECRET is None:
+            self.JWT_USER_SECRET = self.SECRET_KEY
+        if self.JWT_AGENT_TOKEN_SECRET is None:
+            self.JWT_AGENT_TOKEN_SECRET = self.SECRET_KEY
+        if self.JWT_OAUTH_STATE_SECRET is None:
+            self.JWT_OAUTH_STATE_SECRET = self.SECRET_KEY
 
 
     class Config:

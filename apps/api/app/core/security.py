@@ -2,10 +2,10 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Union
 
-from jose import jwt
 from passlib.context import CryptContext
 
 from app.core.config import settings
+from app.core.jwt_signing import mint_token
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -18,12 +18,18 @@ def create_access_token(
     additional_claims: Dict[str, Any] | None = None,
     iat: int | None = None,
 ) -> str:
-    """Issue a signed access token.
+    """Issue a signed user access token.
 
     `iat` is the original issued-at Unix timestamp. On a fresh login it
     defaults to `now`. On `/auth/refresh` the caller passes the original
     iat from the incoming token so the chain has a bounded lifetime — see
     `MAX_TOKEN_CHAIN_AGE_SECONDS` in `auth.py`.
+
+    Sub-project A PR2 (F7a): delegates to ``app.core.jwt_signing.mint_token``
+    so the new ``kid="user-v1"`` claim lands in the header and the user
+    domain's secret (``JWT_USER_SECRET``, defaulting to ``SECRET_KEY``
+    until PR4) signs the token. Behavior unchanged at this PR; PR4
+    introduces real distinct key material.
     """
     now = datetime.utcnow()
     if expires_delta:
@@ -42,8 +48,7 @@ def create_access_token(
     }
     if additional_claims:
         to_encode.update(additional_claims)
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    return mint_token(to_encode, domain="user")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

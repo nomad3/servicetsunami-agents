@@ -9,7 +9,9 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Path, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from jose import JWTError, jwt
+from jose import JWTError
+
+from app.core.jwt_signing import verify_token
 from sqlalchemy.orm import Session
 
 from app.schemas import token as token_schema
@@ -162,11 +164,7 @@ def refresh_access_token(
     original_iat: int | None = None
     if raw_token:
         try:
-            decoded = jwt.decode(
-                raw_token,
-                settings.SECRET_KEY,
-                algorithms=[security.ALGORITHM],
-            )
+            decoded = verify_token(raw_token, expected_domain="user")
             iat_claim = decoded.get("iat")
             if isinstance(iat_claim, (int, float)):
                 original_iat = int(iat_claim)
