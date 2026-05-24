@@ -24,6 +24,12 @@ TOOL_GROUPS: dict[str, list[str]] = {
         "query_data_source",
     ],
     "knowledge": [
+        # NOTE: this group is the historical full set (read + write).
+        # Backwards-compatible. Prefer "knowledge_readonly" for new
+        # read-only agents (reviewers, sentinels) so claims like
+        # "this agent is read-only" actually hold. See the split
+        # introduced 2026-05-24 after Luna's step-4 self-application
+        # finding (concern observation b0533a44).
         "search_knowledge",
         "find_entities",
         "recall_memory",
@@ -35,6 +41,23 @@ TOOL_GROUPS: dict[str, list[str]] = {
         "ask_knowledge_graph",
         "merge_entities",
         "update_entity",
+        "get_entity_timeline",
+    ],
+    "knowledge_readonly": [
+        # Read-only subset of "knowledge". Agents claiming a read-only
+        # tool surface (Code Reviewer, Substrate Sentinel, audit
+        # agents) should use this group instead of "knowledge" so
+        # their advertised capability matches their actual capability.
+        # If an agent later needs to write observations or mutate
+        # entities, grant the full "knowledge" group — opt-in, not
+        # default. There is intentionally no "write-only" knowledge
+        # group; mutation requires read context.
+        "search_knowledge",
+        "find_entities",
+        "recall_memory",
+        "find_relations",
+        "get_neighborhood",
+        "ask_knowledge_graph",
         "get_entity_timeline",
     ],
     "sales": [

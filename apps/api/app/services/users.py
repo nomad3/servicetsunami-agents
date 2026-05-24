@@ -191,6 +191,13 @@ def create_user_with_tenant(db: Session, *, user_in: UserCreate, tenant_in: Tena
         persona_prompt=luna_persona_prompt,
         capabilities=luna_skills,
         tool_groups=["knowledge", "email", "meta"],
+        # Luna is the per-tenant default supervisor and is
+        # operator-curated by design — she ships with intentional
+        # mutating access (record_observation, etc. via the
+        # `knowledge` group). She does NOT belong in the operator
+        # review queue. Explicit here because the column default
+        # flipped to True in migration 153 (2026-05-24).
+        tool_groups_review_required=False,
         default_model_tier="light",
         memory_domains=["conversation", "user"],
         role="supervisor",
