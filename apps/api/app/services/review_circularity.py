@@ -28,9 +28,11 @@ from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
-
-
-BUNDLED_AGENTS_ROOT = "apps/api/app/agents/_bundled"
+from app.services.bundled_agents import (
+    BUNDLED_AGENTS_ROOT,
+    name_to_slug,
+    slug_to_name,
+)
 
 
 @dataclass(frozen=True)
@@ -66,24 +68,14 @@ def _bundled_paths_for_slug(slug: str) -> List[str]:
 def _slug_from_agent(agent: Agent) -> Optional[str]:
     """Best-effort slug lookup for an Agent row.
 
-    Agent doesn't carry the bundled slug directly. We derive it from
-    the role for our shipped bundled agents (Code Reviewer →
-    code-reviewer, Substrate Sentinel → substrate-sentinel, etc.)
-    by scanning the bundled directory and matching the row's name
-    against the slug's skill.md frontmatter `name` field. To keep
-    this dependency-light we use a small mapping seeded from what's
-    actually shipped under _bundled/; new bundled agents need a line
-    added here. Returns None when no match found (operator-curated
-    custom agents, etc.).
+    Agent doesn't carry the bundled slug directly. We resolve it
+    against the auto-discovered name→slug map maintained by
+    bundled_agents. Returns None when no match found
+    (operator-curated custom agents, etc.).
     """
-    name_to_slug = {
-        "code reviewer": "code-reviewer",
-        "substrate sentinel": "substrate-sentinel",
-        "luna": "luna",
-    }
     if not agent.name:
         return None
-    return name_to_slug.get(agent.name.strip().lower())
+    return name_to_slug(agent.name)
 
 
 def detect_self_modification(
@@ -106,8 +98,12 @@ def detect_self_modification(
     passed through unchanged. The function is a no-op for them.
     """
     # Normalize paths so callers can pass absolute or relative
-    # entries (gh pr diff vs. local path).
-    normalized = {_strip_repo_prefix(p) for p in changed_files}
+    # entries (gh pr diff vs. local path). Sorted so that the
+    # `bundled_path` field on each finding is deterministic across
+    # processes (otherwise the set's hash-randomized iteration order
+    # made dry-run /check-circularity calls flap between two runs of
+    # the same PR — see PR #706 review I3).
+    normalized = sorted({_strip_repo_prefix(p) for p in changed_files})
 
     filtered: List[str] = []
     findings: List[CircularityFinding] = []
@@ -115,7 +111,9 @@ def detect_self_modification(
     for slug in candidate_reviewer_slugs:
         prefixes = _bundled_paths_for_slug(slug)
         # Match if any changed file exactly matches the skill.md OR
-        # starts with the _bundled/<slug>/ directory prefix.
+        # starts with the _bundled/<slug>/ directory prefix. First
+        # match wins; iteration order is deterministic because we
+        # sorted above.
         match = next(
             (
                 p
@@ -141,8 +139,16 @@ def detect_self_modification(
 
 
 def _strip_repo_prefix(path: str) -> str:
-    """Normalize an absolute or `./`-prefixed path to a repo-relative one."""
-    p = Path(path).as_posix().lstrip("./")
+    """Normalize an absolute or `./`-prefixed path to a repo-relative one.
+
+    Uses explicit prefix-strip (`removeprefix("./")`) instead of
+    `lstrip("./")` — `str.lstrip` is a character-class operation,
+    so the old form silently swallowed any leading run of `.` and
+    `/` characters (e.g. `'../something/...'` would collapse to
+    `'something/...'`). The explicit form is the documented intent.
+    """
+    p = Path(path).as_posix()
+    p = p.removeprefix("./")
     # If the caller passed an absolute path that contains BUNDLED_AGENTS_ROOT,
     # keep only from that root forward — matches how `gh pr diff --name-only`
     # emits paths.
@@ -165,12 +171,7 @@ def _resolve_escalation(
       - the escalation target itself has no derivable bundled slug
         (custom operator agent, etc.)
     """
-    name_map = {
-        "code-reviewer": "Code Reviewer",
-        "substrate-sentinel": "Substrate Sentinel",
-        "luna": "Luna",
-    }
-    name = name_map.get(slug)
+    name = slug_to_name(slug)
     if name is None:
         return None
     agent = (

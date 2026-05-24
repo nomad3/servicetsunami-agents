@@ -84,6 +84,40 @@ class ReviewStartRequest(BaseModel):
         return out
 
 
+class CircularityFindingPayload(BaseModel):
+    """One reviewer dropped by the introduction-PR circularity gate."""
+
+    agent_slug: str
+    bundled_path: str
+    escalation_slug: Optional[str]
+
+
+class CircularityCheckRequest(BaseModel):
+    """POST /api/v1/reviews/check-circularity body — dry-run the gate."""
+
+    changed_files: List[str] = Field(
+        ...,
+        description=(
+            "Paths the PR modifies (e.g. `gh pr diff --name-only`). "
+            "Empty list returns the candidate list unchanged."
+        ),
+    )
+    candidate_slugs: List[str] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Bundled-agent slugs you intend to dispatch as reviewers. "
+            "CLI-platform slugs (claude/codex/gemini) are passed "
+            "through unchanged."
+        ),
+    )
+
+
+class CircularityCheckResponse(BaseModel):
+    filtered_reviewers: List[str]
+    findings: List[CircularityFindingPayload]
+
+
 class ReviewStartResponse(BaseModel):
     review_id: uuid.UUID
     status: str

@@ -49,6 +49,9 @@ from app.models.user import User
 from app.models.agent import Agent
 from app.schemas.review import (
     ALLOWED_SCOPES,
+    CircularityCheckRequest,
+    CircularityCheckResponse,
+    CircularityFindingPayload,
     ReviewReplyRequest,
     ReviewStartRequest,
     ReviewStartResponse,
@@ -56,6 +59,7 @@ from app.schemas.review import (
 )
 from app.services import review_service
 from app.services.agent_token import verify_agent_token
+from app.services.review_circularity import detect_self_modification
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -218,41 +222,9 @@ async def start_review(
     )
 
 
-class _CircularityCheckRequest(BaseModel):
-    """POST /api/v1/reviews/check-circularity body."""
-
-    changed_files: List[str] = Field(
-        ...,
-        min_length=1,
-        description=(
-            "Paths the PR modifies (e.g. `gh pr diff --name-only`)."
-        ),
-    )
-    candidate_slugs: List[str] = Field(
-        ...,
-        min_length=1,
-        description=(
-            "Bundled-agent slugs you intend to dispatch as reviewers. "
-            "CLI-platform slugs (claude/codex/gemini) are passed "
-            "through unchanged."
-        ),
-    )
-
-
-class _CircularityFindingPayload(BaseModel):
-    agent_slug: str
-    bundled_path: str
-    escalation_slug: Optional[str]
-
-
-class _CircularityCheckResponse(BaseModel):
-    filtered_reviewers: List[str]
-    findings: List[_CircularityFindingPayload]
-
-
-@router.post("/check-circularity", response_model=_CircularityCheckResponse)
+@router.post("/check-circularity", response_model=CircularityCheckResponse)
 def check_circularity(
-    request: _CircularityCheckRequest,
+    request: CircularityCheckRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -265,18 +237,16 @@ def check_circularity(
 
     Design: docs/plans/2026-05-24-review-gate-medium-followups-design.md
     """
-    from app.services.review_circularity import detect_self_modification
-
     filtered, findings = detect_self_modification(
         db,
         current_user.tenant_id,
         request.changed_files,
         request.candidate_slugs,
     )
-    return _CircularityCheckResponse(
+    return CircularityCheckResponse(
         filtered_reviewers=filtered,
         findings=[
-            _CircularityFindingPayload(
+            CircularityFindingPayload(
                 agent_slug=f.agent_slug,
                 bundled_path=f.bundled_path,
                 escalation_slug=f.escalation_slug,

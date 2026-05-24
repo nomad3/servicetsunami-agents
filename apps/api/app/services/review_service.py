@@ -44,6 +44,7 @@ from app.schemas.blackboard import (
     EntryType,
 )
 from app.services import blackboard_service
+from app.services.review_circularity import detect_self_modification
 
 
 # ── Parser helpers ────────────────────────────────────────────────────
@@ -427,8 +428,6 @@ def start_review(
     # the PR touches, drop any reviewer whose own bundled config is
     # in the diff. See review_circularity.detect_self_modification.
     if changed_files:
-        from app.services.review_circularity import detect_self_modification
-
         filtered_slugs, _circularity_findings = detect_self_modification(
             db,
             tenant_id,

@@ -18,8 +18,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.services.bundled_agents import BUNDLED_AGENTS_ROOT
 from app.services.review_circularity import (
-    BUNDLED_AGENTS_ROOT,
     CircularityFinding,
     _bundled_paths_for_slug,
     _strip_repo_prefix,
@@ -49,6 +49,11 @@ def test_bundled_paths_for_slug_returns_skill_and_dir() -> None:
         ("/abs/path/apps/api/app/agents/_bundled/code-reviewer/skill.md",
          "apps/api/app/agents/_bundled/code-reviewer/skill.md"),
         ("docs/plans/something.md", "docs/plans/something.md"),
+        # Path with `..` segment must NOT have its leading `.` characters
+        # stripped — the old `lstrip("./")` form was a character-class op
+        # that silently collapsed parent-dir segments.
+        ("../scratch/something.md", "../scratch/something.md"),
+        (".hidden/file.md", ".hidden/file.md"),
     ],
 )
 def test_strip_repo_prefix(raw: str, expected: str) -> None:
@@ -174,11 +179,48 @@ def test_escalation_slug_resolves_via_supervisor_chain() -> None:
     ]
 
 
-def test_pr_705_walkthrough() -> None:
+def test_sibling_slug_does_not_match() -> None:
+    """A `_bundled/code-reviewer-v2/skill.md` change must NOT match
+    `code-reviewer` (trailing-slash discriminator in the prefix)."""
+    db = _stub_db_no_escalation()
+    filtered, findings = detect_self_modification(
+        db,
+        TENANT,
+        changed_files=[
+            "apps/api/app/agents/_bundled/code-reviewer-v2/skill.md",
+        ],
+        candidate_reviewer_slugs=["code-reviewer"],
+    )
+    assert filtered == ["code-reviewer"]
+    assert findings == []
+
+
+def test_pr_705_walkthrough_with_escalation() -> None:
     """Concrete: PR #705 modified BOTH Code Reviewer and Substrate
     Sentinel skill.md, plus migrations + tests. Both reviewers must
-    drop out; Luna remains as the only valid reviewer."""
-    db = _stub_db_no_escalation()
+    drop out, surface Luna as the escalation target, and Luna
+    remains as the only valid reviewer.
+
+    Each circularity finding requires two queries: the agent row
+    (by name) and its escalation target (by id). We sequence the
+    side_effect to feed each pair in turn."""
+    luna_id = uuid.uuid4()
+    code_reviewer = SimpleNamespace(
+        id=uuid.uuid4(), escalation_agent_id=luna_id, name="Code Reviewer",
+    )
+    substrate_sentinel = SimpleNamespace(
+        id=uuid.uuid4(), escalation_agent_id=luna_id, name="Substrate Sentinel",
+    )
+    luna = SimpleNamespace(id=luna_id, escalation_agent_id=None, name="Luna")
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.one_or_none = MagicMock(
+        side_effect=[
+            code_reviewer, luna,            # finding 1: Code Reviewer → Luna
+            substrate_sentinel, luna,       # finding 2: Substrate Sentinel → Luna
+        ]
+    )
+
     filtered, findings = detect_self_modification(
         db,
         TENANT,
@@ -197,3 +239,6 @@ def test_pr_705_walkthrough() -> None:
     )
     assert filtered == ["luna"]
     assert sorted(f.agent_slug for f in findings) == ["code-reviewer", "substrate-sentinel"]
+    # Both findings must surface Luna as the escalation target — that's
+    # the operator's routing hint and the whole point of the dataclass.
+    assert all(f.escalation_slug == "luna" for f in findings)
