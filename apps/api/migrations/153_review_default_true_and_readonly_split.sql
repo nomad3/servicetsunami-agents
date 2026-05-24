@@ -36,18 +36,23 @@
 -- TRUE by migration 149's NULL backfill) are also untouched. They
 -- remain in the review queue per the original P0a sequence.
 
+BEGIN;
+
 -- ── 1. Flip column default ─────────────────────────────────────────────
 
 ALTER TABLE agents
     ALTER COLUMN tool_groups_review_required SET DEFAULT TRUE;
 
 COMMENT ON COLUMN agents.tool_groups_review_required IS
-    '2026-05-24: default is TRUE — new agents land in the review queue '
-    'by default; operator explicitly clears after confirming '
-    'tool_groups match advertised capability. Original P0a (2026-05-23) '
-    'logic for NULL-backfilled agents continues to apply: cleared on '
-    'operator action or 1-week auto-clear that requires BOTH zero '
-    'shadow-denial activity AND observed activity.';
+    '2026-05-24: default is TRUE — new agents land in the future '
+    'operator review queue by default. NOTE: as of 2026-05-24 there '
+    'is no review-queue endpoint or UI yet; the flag is queryable '
+    'only via SQL/CLI (the queue surface is a known follow-up). The '
+    'flag still has value as a runtime gate and audit signal even '
+    'without UI. Original P0a (2026-05-23) logic for NULL-backfilled '
+    'agents continues to apply: cleared on operator action or '
+    '1-week auto-clear that requires BOTH zero shadow-denial '
+    'activity AND observed activity.';
 
 -- ── 2. Retroactive flip + tool_groups correction for the 2 new agents ──
 
@@ -69,3 +74,5 @@ WHERE tenant_id = '752626d9-8b2c-4aa2-87ef-c458d48bd38a'
 
 INSERT INTO _migrations(filename) VALUES ('153_review_default_true_and_readonly_split.sql')
 ON CONFLICT DO NOTHING;
+
+COMMIT;
