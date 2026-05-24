@@ -60,6 +60,7 @@ from app.schemas.review import (
 from app.services import review_service
 from app.services.agent_token import verify_agent_token
 from app.services.review_circularity import detect_self_modification
+from app.services.reviewer_availability import ReviewerUnavailableError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -183,27 +184,25 @@ async def start_review(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        # Reviewer-availability gate refused dispatch — surface the
-        # structured reasons rather than a flat string.
-        from app.services.reviewer_availability import ReviewerUnavailableError
-
-        if isinstance(e, ReviewerUnavailableError):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": "reviewer_unavailable",
-                    "reasons": [
-                        {
-                            "agent_slug": r.agent_slug,
-                            "code": r.code,
-                            "detail": r.detail,
-                        }
-                        for r in e.reasons
-                    ],
-                },
-            )
-        raise
+    except ReviewerUnavailableError as e:
+        # Surface the structured reasons + operator next-steps as 409.
+        # No silent fail-open. Each reason carries a per-code
+        # next_steps hint so operators have a path forward inline.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "reviewer_unavailable",
+                "reasons": [
+                    {
+                        "agent_slug": r.agent_slug,
+                        "code": r.code,
+                        "detail": r.detail,
+                        "next_steps": r.next_steps,
+                    }
+                    for r in e.reasons
+                ],
+            },
+        )
 
     # Temporal-native dispatch from the request handler. The
     # `dispatch_review_workflow` coroutine awaits `Client.connect` +

@@ -60,6 +60,31 @@ class UnavailabilityReason:
     agent_slug: str
     code: UnavailabilityCode
     detail: str
+    next_steps: str
+
+
+# Operator-facing "how do I unblock this?" hint per code. Lives
+# alongside the reasons rather than being a separate runbook because
+# operators staring at a 409 detail blob need the path-forward inline
+# — especially during the chicken-and-egg window where Code Reviewer
+# + Substrate Sentinel are both review_required=TRUE on first ship.
+_NEXT_STEPS_BY_CODE: dict[str, str] = {
+    "agent_missing": (
+        "Confirm the bundled agent is seeded for this tenant. If the "
+        "agent should exist, re-run its seed migration."
+    ),
+    "agent_disabled": (
+        "Promote the agent to status='production' via the agent "
+        "lifecycle CLI/UI after operator review."
+    ),
+    "review_required_unresolved": (
+        "Operator must clear tool_groups_review_required for this "
+        "agent after confirming its tool_groups match advertised "
+        "capability. No UI yet — clear via SQL: "
+        "UPDATE agents SET tool_groups_review_required=FALSE "
+        "WHERE name='<Name>'. See migration 153."
+    ),
+}
 
 
 class ReviewerUnavailableError(Exception):
@@ -86,7 +111,16 @@ _SLUG_TO_NAME = {
 }
 
 
-_DISABLED_STATUSES = {"draft", "deprecated"}
+# Statuses that disqualify an agent from acting as a merge gate.
+# - draft: hasn't been operator-approved at all yet
+# - staging: promoted but not blessed for production traffic; same
+#   posture as a draft for the purpose of *gating a merge* — we want
+#   operator sign-off via the production-promotion flow first
+# - deprecated: explicitly retired
+# Valid Agent.status values come from app/services/_agent_ordering.py
+# (production / staging / draft / deprecated). Only `production` is
+# eligible to act as a merge gate.
+_DISABLED_STATUSES = {"draft", "staging", "deprecated"}
 
 
 def check_required_reviewers(
@@ -131,26 +165,41 @@ def check_required_reviewers(
 
 def _evaluate(slug: str, agent: Optional[Agent]) -> Optional[UnavailabilityReason]:
     if agent is None:
-        return UnavailabilityReason(
-            agent_slug=slug,
-            code="agent_missing",
-            detail=f"no Agent row found for slug '{slug}' in this tenant",
+        return _reason(
+            slug,
+            "agent_missing",
+            f"no Agent row found for slug '{slug}' in this tenant",
         )
     status = (agent.status or "").lower()
     if status in _DISABLED_STATUSES:
-        return UnavailabilityReason(
-            agent_slug=slug,
-            code="agent_disabled",
-            detail=f"agent status='{status}' — not eligible to gate merges",
+        return _reason(
+            slug,
+            "agent_disabled",
+            f"agent status='{status}' — not eligible to gate merges",
         )
-    if getattr(agent, "tool_groups_review_required", False):
-        return UnavailabilityReason(
-            agent_slug=slug,
-            code="review_required_unresolved",
-            detail=(
+    # Direct attribute access — the column is non-nullable and
+    # defaulted on the model (see app/models/agent.py:48). Using
+    # getattr with a default would fail-open silently on a future
+    # rename, which is the wrong direction for a security gate.
+    if agent.tool_groups_review_required:
+        return _reason(
+            slug,
+            "review_required_unresolved",
+            (
                 "agent is itself awaiting operator review of its "
                 "tool_groups (tool_groups_review_required=TRUE) — "
                 "cannot act as a merge gate until cleared"
             ),
         )
     return None
+
+
+def _reason(
+    slug: str, code: UnavailabilityCode, detail: str
+) -> UnavailabilityReason:
+    return UnavailabilityReason(
+        agent_slug=slug,
+        code=code,
+        detail=detail,
+        next_steps=_NEXT_STEPS_BY_CODE[code],
+    )

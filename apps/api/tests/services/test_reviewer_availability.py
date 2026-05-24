@@ -69,11 +69,12 @@ def test_all_healthy_returns_empty_list() -> None:
 def test_cli_platform_slugs_are_skipped() -> None:
     """claude/codex/gemini have no bundled-name mapping → no DB hit, no reason."""
     db = MagicMock()
-    # No .one_or_none calls should happen — assert the query isn't invoked.
-    db.query.assert_not_called()
     assert check_required_reviewers(
         db, TENANT, ["claude", "codex", "gemini"]
     ) == []
+    # Asserts AFTER the call: the function must not touch the DB
+    # for CLI-platform slugs (regression guard).
+    db.query.assert_not_called()
 
 
 # ── Failure modes ─────────────────────────────────────────────────────
@@ -83,14 +84,15 @@ def test_missing_agent_returns_agent_missing() -> None:
     db = _db_returning(None)
     reasons = check_required_reviewers(db, TENANT, ["code-reviewer"])
     assert len(reasons) == 1
-    assert reasons[0] == UnavailabilityReason(
-        agent_slug="code-reviewer",
-        code="agent_missing",
-        detail="no Agent row found for slug 'code-reviewer' in this tenant",
-    )
+    r = reasons[0]
+    assert r.agent_slug == "code-reviewer"
+    assert r.code == "agent_missing"
+    assert r.detail == "no Agent row found for slug 'code-reviewer' in this tenant"
+    # next_steps populated so operators have an inline path forward.
+    assert "seed" in r.next_steps.lower()
 
 
-@pytest.mark.parametrize("status", ["draft", "deprecated"])
+@pytest.mark.parametrize("status", ["draft", "staging", "deprecated"])
 def test_disabled_status_returns_agent_disabled(status: str) -> None:
     db = _db_returning(_agent(name="Code Reviewer", status=status))
     reasons = check_required_reviewers(db, TENANT, ["code-reviewer"])
@@ -106,8 +108,13 @@ def test_review_required_returns_review_required_unresolved() -> None:
     db = _db_returning(_agent(name="Code Reviewer", review_required=True))
     reasons = check_required_reviewers(db, TENANT, ["code-reviewer"])
     assert len(reasons) == 1
-    assert reasons[0].code == "review_required_unresolved"
-    assert "tool_groups_review_required=TRUE" in reasons[0].detail
+    r = reasons[0]
+    assert r.code == "review_required_unresolved"
+    assert "tool_groups_review_required=TRUE" in r.detail
+    # The chicken-and-egg unblock path must appear in next_steps —
+    # operators have no UI yet (per migration 153 column COMMENT).
+    assert "UPDATE agents" in r.next_steps
+    assert "tool_groups_review_required" in r.next_steps
 
 
 def test_multiple_failures_all_returned() -> None:
@@ -133,9 +140,14 @@ def test_multiple_failures_all_returned() -> None:
 def test_error_str_lists_each_slug_and_code() -> None:
     err = ReviewerUnavailableError(
         [
-            UnavailabilityReason("code-reviewer", "agent_missing", "..."),
             UnavailabilityReason(
-                "substrate-sentinel", "review_required_unresolved", "..."
+                "code-reviewer", "agent_missing", "...", "seed it",
+            ),
+            UnavailabilityReason(
+                "substrate-sentinel",
+                "review_required_unresolved",
+                "...",
+                "clear via SQL",
             ),
         ]
     )
