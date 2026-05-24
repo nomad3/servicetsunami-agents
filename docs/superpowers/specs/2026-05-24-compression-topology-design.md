@@ -63,6 +63,11 @@ Running it requires only `SELECT id, description, ... FROM knowledge_entities WH
 
 **One-off Python script + a small migration. No new services, no runtime path, no agent.** This is an analysis instrument, not a product feature.
 
+### 3.0 Two non-negotiable patterns (Luna-named)
+
+1. **Evidence before interpretation.** Every outlier pair surfaced by `run-c` must carry sample raw observations + sample recall events alongside it. The plot is secondary; inspected evidence is the authority. No narrative claim of "false coherence" or "lost structure" is permitted in the auto-generated write-up without the underlying evidence printed next to it.
+2. **Analysis artifact, not runtime cognition.** Output from this probe must NEVER feed automatic memory edits, entity merges, recall-policy changes, or routing-policy changes. Any action derived from a topology run goes through a human or supervisor review step. The Memory Curator agent (when it ships) is the legitimate consumer; even it operates via audit queue, not direct mutation.
+
 ```
 scripts/topology/
 ├── explore_compression_topology.py    # main entry; subcommands: run-c, snapshot-b, status
@@ -83,7 +88,7 @@ Before `run-c` is allowed to produce a scatter plot, `status` inspects the data 
 | Check | Threshold | If below |
 |---|---|---|
 | Count of recall events (`tool_name in ('recall_memory','find_entities','search_knowledge')`) | ≥ 50 | Refuse `run-c`, suggest waiting |
-| % of recall events with parseable entity IDs in `result_summary` | ≥ 60% | Warn; fall back to text-mention extraction on result_summary with reduced confidence |
+| % of recall events with parseable entity IDs in `result_summary` | ≥ 60% | Warn; fall back to text-mention extraction on result_summary. Output JSON MUST carry `confidence_level`, `confidence_reasons`, `extraction_mode` ("entity_id_parse" or "text_mention_fallback"), `payload_parse_mode`, and `readiness_status`. Do NOT annotate confidence in prose only. |
 | Median / max `result_summary` length | report only | If max ≤ 800 chars → all recall payloads are truncated, results are about LOGGING, not behavior. Surface this loudly. |
 | Recall events with ≥ 2 returned entities | ≥ 10 | Refuse |
 | Distinct entity pairs in recall co-occurrence | ≥ 25 | Refuse — sample too thin |
@@ -119,13 +124,15 @@ Both denominators are reported alongside results. If `source_pair_eligible_docs`
 ### 3.4 Output
 
 For C: JSON + a static HTML scatter plot.
-- X axis: `source_cooc` (normalized)
-- Y axis: `recall_cooc` (normalized)
+- X axis: `source_cooc` (normalized — *fraction of pair-eligible docs containing this specific pair, NOT P(A,B)*)
+- Y axis: `recall_cooc` (normalized — *fraction of pair-eligible recall events containing this specific pair, NOT P(A,B)*)
 - Diagonal = preserved coherence
 - Points above diagonal = false coherence (positive residual)
 - Points below diagonal = lost coherence (negative residual)
 - Hover: entity-pair names + sample observation + sample recall event
 - Top 20 positive residual + top 20 negative residual surfaced in a sortable HTML table
+
+The write-up `docs/topology/2026-05-24-compression-topology-run.md` must include a one-line clarification of the axis semantics at the top so reviewers don't misread the rates as joint probabilities. The JSON output carries the explicit denominator values so any reader can sanity-check.
 
 For B: just `INSERT … SELECT … FROM knowledge_entities WHERE tenant_id = ?` rows in `entity_description_snapshots`. No analysis output in v0.
 
@@ -203,11 +210,13 @@ Tests live at `apps/api/tests/topology/test_*.py`. The topology scripts can be i
 
 ## 8. Open decisions for operator sign-off (Simon)
 
-1. **Run scope:** confirm Simon's tenant (`752626d9-8b2c-4aa2-87ef-c458d48bd38a`) is the only tenant in scope for v0.
-2. **Output location:** confirm `docs/topology/` as the home for the run write-ups (or move elsewhere).
-3. **Snapshot cadence:** confirm B should snapshot weekly via cron (vs. on-demand). Recommend weekly.
-4. **No spaCy in v0:** confirm regex-only is acceptable for the first pass. If you want spaCy now, add ~1 hour of dep + model-management work.
-5. **Failure-to-merge case:** if `status` says "insufficient signal," do we still merge the spec (so the script is there for later runs), or do we fix the substrate first (e.g., enrich `tool_calls.result_summary` capture)?
+Luna's pre-vote on each, surfaced for Simon's confirmation:
+
+1. **Run scope:** Simon's tenant only for v0. **Luna: yes.**
+2. **Output location:** `docs/topology/` as the run write-up home. **Luna: yes.**
+3. **Snapshot cadence:** weekly, passive/manual or cron-light (no alerting yet). **Luna: yes.**
+4. **No spaCy in v0:** regex-only with the "high precision / incomplete recall" label. **Luna: yes.**
+5. **Insufficient-signal case:** if `status` says "insufficient signal," merge the script if it cleanly reports the insufficiency. Do NOT fix the substrate first unless `status` proves the recall log source is *structurally unusable*, not merely *sparse*. **Luna: merge.** (Simon's final call.)
 
 ## 9. Provenance
 
