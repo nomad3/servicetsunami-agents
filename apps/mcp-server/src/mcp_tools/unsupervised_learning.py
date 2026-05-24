@@ -122,7 +122,7 @@ async def get_simulation_summary(
     tenant_id = resolve_tenant_id(ctx)
     pool = await _get_pool()
 
-    target_date = cycle_date or date.today().isoformat()
+    target_date = date.fromisoformat(cycle_date) if cycle_date else date.today()
 
     # Overall stats
     stats = await pool.fetchrow(
