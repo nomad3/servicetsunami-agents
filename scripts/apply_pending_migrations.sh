@@ -67,6 +67,27 @@ applied_stems=$(printf '%s\n' "$applied_stems_raw" | sed 's/\.sql$//' | sort -u)
 shopt -s nullglob
 file_paths_arr=( "$MIG_DIR"/*.sql )
 shopt -u nullglob
+
+# Filter out *.down.sql files — these are manual rollback scripts per
+# the README and MUST NOT be auto-applied. The bare `*.sql` glob above
+# matches them too, and the stem-strip below would only remove the
+# trailing `.sql` (leaving `.down`), so unfiltered they get treated as
+# never-applied pending migrations and run in lexical order alongside
+# their `.sql` partner. Discovered 2026-05-24: migration 150's
+# `.down.sql` was applied alongside its `.sql` partner, running a
+# `DELETE 0` rollback against the agents table before the actual
+# seed. The README at apps/api/migrations/README.md explicitly states:
+# "Files matching NNN_*.down.sql are not auto-applied by the deploy
+# runner. They exist for documentation and manual recovery."
+filtered_paths_arr=()
+for _path in "${file_paths_arr[@]}"; do
+  case "$_path" in
+    *.down.sql) continue ;;
+    *) filtered_paths_arr+=( "$_path" ) ;;
+  esac
+done
+file_paths_arr=( "${filtered_paths_arr[@]}" )
+
 if [ ${#file_paths_arr[@]} -eq 0 ]; then
   echo "[migrations] no .sql files in $MIG_DIR — nothing to do"
   exit 0
