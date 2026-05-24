@@ -135,6 +135,16 @@ CLASSIFICATION_CASES: list[
         "gh copilot: 403 not authorized for this account",
         1, None, Status.NEEDS_AUTH, "auth",
     ),
+    # ── 11a. copilot classic-PAT (ghp_) → missing_credential ────────────
+    # Real 2026-05-22 WhatsApp incident: gh-copilot rejected the
+    # operator's COPILOT_GITHUB_TOKEN (classic PAT) with this exact
+    # phrasing. legacy_label is "missing_credential" → chain fallback,
+    # no cooldown (stable config issue, fixed by token rotation).
+    (
+        "copilot_cli_classic_pat_is_missing_credential",
+        "Error: Classic Personal Access Tokens (ghp_) are not supported by Copilot.",
+        1, None, Status.NEEDS_AUTH, "missing_credential",
+    ),
     # ── 12. any RETRYABLE_NETWORK_FAILURE ───────────────────────────────
     (
         "any_econnreset_is_retryable_network_failure",
