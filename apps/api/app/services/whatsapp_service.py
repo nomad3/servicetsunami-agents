@@ -73,7 +73,26 @@ def _detect_inbound_media(msg, text: str) -> tuple[Optional[str], Optional[str],
         return "image", image.mimetype, getattr(image, "caption", None) or text
 
     audio = getattr(msg, "audioMessage", None)
-    if audio:
+    # CRITICAL: protobuf3 message fields default to a present-but-empty
+    # sub-message, so `if audio:` is True even when no audio was sent.
+    # That mis-classified every WhatsApp inbound (including pure text
+    # messages like "Ping") as audio → WHATSAPP_AUDIO_TRANSCRIPTION_
+    # FALLBACK fired on every chat turn → Luna's session filled up
+    # with "Sorry baby, I couldn't transcribe…" apologies even for
+    # plain text. Diagnosed 2026-05-24 from chat_messages history:
+    # text going back to 17:54 UTC all show the fallback instruction
+    # stored as user content instead of the actual text.
+    #
+    # Fix: require at least ONE actual audio-payload field (mimetype,
+    # fileLength, mediaKey, or directPath) to consider this a real
+    # audio message. Mirrors the image-detection pattern above which
+    # already requires `image.mimetype`.
+    if audio and (
+        getattr(audio, "mimetype", None)
+        or getattr(audio, "fileLength", 0)
+        or getattr(audio, "mediaKey", b"")
+        or getattr(audio, "directPath", "")
+    ):
         return "audio", getattr(audio, "mimetype", None) or DEFAULT_WHATSAPP_AUDIO_MIME, text
 
     document = getattr(msg, "documentMessage", None)
