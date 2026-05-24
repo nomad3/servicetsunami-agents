@@ -276,6 +276,84 @@ def _sse_jsonrpc_call(
     raise RuntimeError("No JSON-RPC response received from SSE stream")
 
 
+def _stdio_jsonrpc_call(command: str, rpc_body: dict, timeout: float = 15) -> dict:
+    """Execute a JSON-RPC call over MCP stdio transport."""
+    import subprocess
+    import json
+
+    process = subprocess.Popen(
+        command,
+        shell=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1
+    )
+
+    try:
+        if rpc_body.get("method") != "initialize":
+            # Handshake
+            init_rpc = {
+                "jsonrpc": "2.0", "id": -1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "servicetsunami", "version": "1.0.0"},
+                },
+            }
+            process.stdin.write(json.dumps(init_rpc) + "\n")
+            process.stdin.flush()
+
+            # Read init response
+            init_resp = None
+            init_deadline = time.time() + 5
+            while time.time() < init_deadline:
+                line = process.stdout.readline()
+                if line:
+                    try:
+                        msg = json.loads(line)
+                        if msg.get("id") == -1:
+                            init_resp = msg
+                            break
+                    except json.JSONDecodeError:
+                        pass
+
+            if not init_resp:
+                # Capture stderr for better error reporting
+                stderr = process.stderr.read(1024)
+                raise RuntimeError(f"Failed to initialize stdio MCP server. Stderr: {stderr}")
+
+            # Send initialized notification
+            process.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
+            process.stdin.flush()
+
+        # Send actual request
+        process.stdin.write(json.dumps(rpc_body) + "\n")
+        process.stdin.flush()
+
+        # Read response
+        target_id = rpc_body.get("id")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            line = process.stdout.readline()
+            if line:
+                try:
+                    msg = json.loads(line)
+                    if msg.get("id") == target_id:
+                        return msg
+                except json.JSONDecodeError:
+                    pass
+
+        raise RuntimeError("Timeout waiting for stdio response")
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+
 # ---------------------------------------------------------------------------
 # Tool discovery (via HTTP to MCP server)
 # ---------------------------------------------------------------------------
@@ -316,6 +394,8 @@ def discover_tools(db: Session, connector: MCPServerConnector, timeout: int = 15
     try:
         if connector.transport == "sse":
             data = _sse_jsonrpc_call(connector.server_url.rstrip("/"), headers, rpc_body, timeout=float(timeout))
+        elif connector.transport == "stdio":
+            data = _stdio_jsonrpc_call(connector.server_url, rpc_body, timeout=float(timeout))
         else:
             url = connector.server_url.rstrip("/")
             with httpx.Client(timeout=float(timeout), follow_redirects=True) as client:
@@ -422,6 +502,8 @@ def call_tool(
     try:
         if connector.transport == "sse":
             data = _sse_jsonrpc_call(connector.server_url.rstrip("/"), headers, rpc_body, timeout=float(timeout))
+        elif connector.transport == "stdio":
+            data = _stdio_jsonrpc_call(connector.server_url, rpc_body, timeout=float(timeout))
         else:
             url = connector.server_url.rstrip("/")
             with httpx.Client(timeout=float(timeout), follow_redirects=True) as client:
@@ -499,6 +581,8 @@ def health_check(db: Session, connector: MCPServerConnector, timeout: int = 10) 
     try:
         if connector.transport == "sse":
             data = _sse_jsonrpc_call(connector.server_url.rstrip("/"), headers, rpc_body, timeout=float(timeout))
+        elif connector.transport == "stdio":
+            data = _stdio_jsonrpc_call(connector.server_url, rpc_body, timeout=float(timeout))
         else:
             url = connector.server_url.rstrip("/")
             with httpx.Client(timeout=float(timeout), follow_redirects=True) as client:
