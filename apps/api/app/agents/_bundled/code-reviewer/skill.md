@@ -6,7 +6,7 @@ fallback_platform: codex
 category: engineering
 tags: [code-review, security, architecture, superpowers, regression, test-gaps]
 version: 1
-tool_groups: [github, knowledge, meta]
+tool_groups: [github, knowledge_readonly, meta]
 inputs:
   - name: message
     type: string
