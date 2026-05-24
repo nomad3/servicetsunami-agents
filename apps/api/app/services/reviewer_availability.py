@@ -44,6 +44,7 @@ from typing import List, Literal, Optional
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
+from app.services.bundled_agents import slug_to_name
 
 
 UnavailabilityCode = Literal[
@@ -102,13 +103,11 @@ class ReviewerUnavailableError(Exception):
         )
 
 
-# Bundled slug → canonical Agent.name lookup. Mirrors the helper
-# in review_circularity._resolve_escalation; kept in sync there.
-_SLUG_TO_NAME = {
-    "code-reviewer": "Code Reviewer",
-    "substrate-sentinel": "Substrate Sentinel",
-    "luna": "Luna",
-}
+# Bundled slug → canonical Agent.name lookup comes from
+# app.services.bundled_agents (auto-discovered from
+# _bundled/<slug>/skill.md frontmatter at import time). Both this
+# module and review_circularity import from there — single source of
+# truth so adding a new bundled agent is zero-touch.
 
 
 # Statuses that disqualify an agent from acting as a merge gate.
@@ -143,7 +142,7 @@ def check_required_reviewers(
     reasons: List[UnavailabilityReason] = []
 
     for slug in required_slugs:
-        name = _SLUG_TO_NAME.get(slug)
+        name = slug_to_name(slug)
         if name is None:
             # Unknown slug — out of scope (CLI platform or custom).
             continue
