@@ -436,6 +436,24 @@ def start_review(
         )
         cli_list = [c for c in cli_list if c["agent_slug"] in filtered_slugs]
 
+    # Reviewer-availability gate (gap #3 of the 2026-05-24 blameless
+    # RL experiment). For any bundled-agent slugs in cli_list, assert
+    # the agent exists, isn't draft/deprecated, and isn't itself
+    # awaiting operator review. CLI-platform slugs (claude/codex/
+    # gemini) are silently passed through. Raises
+    # ReviewerUnavailableError when any required reviewer fails;
+    # the API layer turns that into a 409 with structured detail.
+    from app.services.reviewer_availability import (
+        ReviewerUnavailableError,
+        check_required_reviewers,
+    )
+
+    unavailable = check_required_reviewers(
+        db, tenant_id, [c["agent_slug"] for c in cli_list],
+    )
+    if unavailable:
+        raise ReviewerUnavailableError(unavailable)
+
     # Blackboard for raw per-CLI findings.
     title = f"review:{ref[:64]}"
     board = blackboard_service.create_blackboard(
