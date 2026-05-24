@@ -2,7 +2,7 @@
 import os
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from sqlalchemy.types import UserDefinedType
@@ -20,6 +20,9 @@ if "pgvector.sqlalchemy" not in sys.modules:
     pgvector_module.sqlalchemy = pgvector_sqlalchemy
     sys.modules["pgvector"] = pgvector_module
     sys.modules["pgvector.sqlalchemy"] = pgvector_sqlalchemy
+
+if "segno" not in sys.modules:
+    sys.modules["segno"] = ModuleType("segno")
 
 
 class TestProgressHelpers:
@@ -62,6 +65,37 @@ class TestProgressHelpers:
         from app.services.whatsapp_service import _get_progress_message
         for i in range(20):
             assert len(_get_progress_message(i)) < 100
+
+    def test_whatsapp_audio_uses_voice_note_timeout(self):
+        from app.services.whatsapp_service import WHATSAPP_AUDIO_TRANSCRIBE_TIMEOUT_SECONDS
+
+        assert WHATSAPP_AUDIO_TRANSCRIBE_TIMEOUT_SECONDS >= 60.0
+
+    def test_whatsapp_audio_without_mimetype_is_detected(self):
+        from app.services.whatsapp_service import (
+            DEFAULT_WHATSAPP_AUDIO_MIME,
+            _detect_inbound_media,
+        )
+
+        msg = SimpleNamespace(
+            imageMessage=None,
+            audioMessage=SimpleNamespace(mimetype=""),
+            documentMessage=None,
+        )
+
+        media_type, media_mime, media_caption = _detect_inbound_media(msg, "")
+
+        assert media_type == "audio"
+        assert media_mime == DEFAULT_WHATSAPP_AUDIO_MIME
+        assert media_caption == ""
+
+    def test_whatsapp_audio_fallback_is_explicit(self):
+        from app.services.whatsapp_service import WHATSAPP_AUDIO_TRANSCRIPTION_FALLBACK
+
+        fallback = WHATSAPP_AUDIO_TRANSCRIPTION_FALLBACK.lower()
+        assert "voice message" in fallback
+        assert "could not be transcribed" in fallback
+        assert "resend" in fallback
 
     # `_build_completion_summary` was removed from `whatsapp_service` during
     # the typing-indicator refactor and is no longer present anywhere in the

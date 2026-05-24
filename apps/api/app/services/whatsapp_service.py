@@ -57,6 +57,32 @@ from app.models.chat import ChatSession
 
 logger = logging.getLogger(__name__)
 
+WHATSAPP_AUDIO_TRANSCRIBE_TIMEOUT_SECONDS = 60.0
+DEFAULT_WHATSAPP_AUDIO_MIME = "audio/ogg"
+WHATSAPP_AUDIO_TRANSCRIPTION_FALLBACK = (
+    "[User sent a WhatsApp voice message, but the audio could not be "
+    "transcribed. Apologize briefly and ask them to resend the voice note "
+    "or type the message.]"
+)
+
+
+def _detect_inbound_media(msg, text: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Return media type, MIME type, and caption for an inbound WhatsApp message."""
+    image = getattr(msg, "imageMessage", None)
+    if image and getattr(image, "mimetype", None):
+        return "image", image.mimetype, getattr(image, "caption", None) or text
+
+    audio = getattr(msg, "audioMessage", None)
+    if audio:
+        return "audio", getattr(audio, "mimetype", None) or DEFAULT_WHATSAPP_AUDIO_MIME, text
+
+    document = getattr(msg, "documentMessage", None)
+    if document and getattr(document, "mimetype", None):
+        caption = getattr(document, "title", None) or getattr(document, "fileName", None) or text
+        return "document", document.mimetype, caption
+
+    return None, None, text
+
 
 def _phone_variants(value: str | None) -> set[str]:
     """Return normalized phone variants for allowlist matching.
@@ -782,17 +808,7 @@ class WhatsAppService:
         media_type = None
         media_caption = text
 
-        if msg.imageMessage and msg.imageMessage.mimetype:
-            media_mime = msg.imageMessage.mimetype
-            media_caption = msg.imageMessage.caption or text
-            media_type = "image"
-        elif msg.audioMessage and msg.audioMessage.mimetype:
-            media_mime = msg.audioMessage.mimetype
-            media_type = "audio"
-        elif msg.documentMessage and msg.documentMessage.mimetype:
-            media_mime = msg.documentMessage.mimetype
-            media_caption = msg.documentMessage.title or msg.documentMessage.fileName or text
-            media_type = "document"
+        media_type, media_mime, media_caption = _detect_inbound_media(msg, text)
 
         # Download media if present
         # Audio can be large — use a longer timeout than images/docs
@@ -808,7 +824,7 @@ class WhatsAppService:
                 media_bytes = None
 
         # Skip if no text AND no media
-        if not text and not media_bytes:
+        if not text and not media_bytes and not media_type:
             return
 
         # Skip group messages — only handle DMs for now
@@ -983,16 +999,26 @@ class WhatsAppService:
                 # transcribe_async — transcribe_bytes_sync's ThreadPoolExecutor
                 # bridge blocks the event loop. See transcription_client.py.
                 try:
-                    from app.services.media_utils import build_media_parts
                     from app.services.transcription_client import (
                         TranscriptionUnavailable,
                         transcribe_async,
                     )
                     transcript = None
                     try:
-                        tr = await transcribe_async(media_bytes)
+                        tr = await transcribe_async(
+                            media_bytes,
+                            sync_timeout=WHATSAPP_AUDIO_TRANSCRIBE_TIMEOUT_SECONDS,
+                        )
                         if tr.status == "completed":
                             transcript = tr.transcript
+                        elif tr.status == "pending":
+                            logger.warning(
+                                "WhatsApp audio transcription still pending after %.0fs "
+                                "for %s (job=%s)",
+                                WHATSAPP_AUDIO_TRANSCRIBE_TIMEOUT_SECONDS,
+                                sender_phone,
+                                tr.job_id,
+                            )
                     except TranscriptionUnavailable as exc:
                         logger.warning(
                             f"Transcription unavailable for {sender_phone}: {exc}"
@@ -1001,14 +1027,10 @@ class WhatsAppService:
                         logger.info(f"Whisper transcript ({len(transcript)} chars) for {sender_phone}")
                         doc_text = transcript
                     else:
-                        # Whisper failed — fall back to inline_data for multimodal LLMs
-                        logger.warning(f"Whisper transcription empty for {sender_phone}, falling back to inline")
-                        media_parts, _ = build_media_parts(
-                            media_bytes=media_bytes,
-                            mime_type=media_mime,
-                            caption=media_caption or "",
-                            filename="",
-                            precomputed_transcript="",  # already resolved; skip sync dispatch
+                        logger.warning(
+                            "WhatsApp audio transcription empty for %s; "
+                            "CLI channel cannot consume inline audio",
+                            sender_phone,
                         )
                 except Exception as e:
                     logger.warning(f"Audio processing failed for {sender_phone}: {e}")
@@ -1037,6 +1059,8 @@ class WhatsAppService:
                     agent_text = f"[User sent document: {media_filename}]\n\nExtracted content:\n{doc_text[:3000]}"
                     if len(doc_text) > 3000:
                         agent_text += f"\n\n(Document truncated — {len(doc_text)} chars total, embedded for search)"
+            elif media_type == "audio":
+                agent_text = WHATSAPP_AUDIO_TRANSCRIPTION_FALLBACK
             else:
                 agent_text = media_caption or text or f"[Sent {media_type}]"
 
