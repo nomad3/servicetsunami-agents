@@ -183,6 +183,27 @@ async def start_review(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # Reviewer-availability gate refused dispatch — surface the
+        # structured reasons rather than a flat string.
+        from app.services.reviewer_availability import ReviewerUnavailableError
+
+        if isinstance(e, ReviewerUnavailableError):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "reviewer_unavailable",
+                    "reasons": [
+                        {
+                            "agent_slug": r.agent_slug,
+                            "code": r.code,
+                            "detail": r.detail,
+                        }
+                        for r in e.reasons
+                    ],
+                },
+            )
+        raise
 
     # Temporal-native dispatch from the request handler. The
     # `dispatch_review_workflow` coroutine awaits `Client.connect` +
