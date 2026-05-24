@@ -7,6 +7,8 @@ code changes that trigger CI/CD pipelines.
 import asyncio
 import logging
 import subprocess
+import time
+import uuid
 from typing import Optional
 
 from mcp.server.fastmcp import Context
@@ -19,6 +21,12 @@ logger = logging.getLogger(__name__)
 _MAX_STDOUT_BYTES = 10 * 1024  # 10 KB
 _MAX_STDERR_BYTES = 5 * 1024   # 5 KB
 _MAX_TIMEOUT = 300              # 5 minutes
+
+# Background job registry — in-process state, survives HTTP request boundaries.
+# Jobs older than _JOB_TTL_SECONDS are purged on each new job creation.
+_jobs: dict[str, dict] = {}
+_JOB_TTL_SECONDS = 3600  # 1 hour
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -66,6 +74,74 @@ def _run_shell(command: str, working_dir: str, timeout: int) -> dict:
         }
 
 
+def _purge_old_jobs() -> None:
+    """Remove jobs older than _JOB_TTL_SECONDS to prevent unbounded growth."""
+    cutoff = time.time() - _JOB_TTL_SECONDS
+    stale = [jid for jid, j in _jobs.items() if j.get("created_at", 0) < cutoff]
+    for jid in stale:
+        del _jobs[jid]
+
+
+async def _run_job(job_id: str, command: str, working_dir: str, timeout: int) -> None:
+    """Run command as a background asyncio task, updating _jobs when done."""
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=working_dir,
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout
+            )
+            _jobs[job_id].update(
+                {
+                    "status": "done",
+                    "return_code": proc.returncode,
+                    "stdout": _truncate(
+                        stdout_bytes.decode("utf-8", errors="replace"), _MAX_STDOUT_BYTES
+                    ),
+                    "stderr": _truncate(
+                        stderr_bytes.decode("utf-8", errors="replace"), _MAX_STDERR_BYTES
+                    ),
+                    "finished_at": time.time(),
+                }
+            )
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+                await proc.communicate()
+            except Exception:
+                pass
+            _jobs[job_id].update(
+                {
+                    "status": "timeout",
+                    "return_code": -1,
+                    "stdout": "",
+                    "stderr": f"Command timed out after {timeout}s",
+                    "finished_at": time.time(),
+                }
+            )
+    except Exception as exc:
+        _jobs[job_id].update(
+            {
+                "status": "error",
+                "return_code": -1,
+                "stdout": "",
+                "stderr": str(exc),
+                "finished_at": time.time(),
+            }
+        )
+    finally:
+        logger.info(
+            "shell job %s finished: status=%s rc=%s",
+            job_id,
+            _jobs.get(job_id, {}).get("status"),
+            _jobs.get(job_id, {}).get("return_code"),
+        )
+
+
 # ---------------------------------------------------------------------------
 # MCP Tools
 # ---------------------------------------------------------------------------
@@ -76,6 +152,7 @@ async def execute_shell(
     command: str,
     working_dir: str = "/app",
     timeout: int = 60,
+    background: bool = False,
     ctx: Context = None,
 ) -> dict:
     """Execute a shell command and return its output.
@@ -84,21 +161,49 @@ async def execute_shell(
     Use this to run build commands, tests, linting, file inspection, or
     any CLI tool available in the container.
 
+    For long-running commands (>30s) set background=True. The tool returns
+    immediately with a job_id; use get_shell_job(job_id) to poll for results.
+    This avoids HTTP transport timeouts from Cloudflare or proxies.
+
     Args:
         command: The shell command to execute (e.g. "python -m pytest tests/"). Required.
         working_dir: Working directory for the command. Defaults to "/app".
         timeout: Maximum seconds before the command is killed. Defaults to 60, max 300.
+        background: If True, run the command in the background and return a job_id
+            immediately. Poll with get_shell_job(job_id). Default False.
         ctx: MCP request context (injected automatically).
 
     Returns:
-        Dict with stdout, stderr, return_code, and the original command.
+        Foreground: dict with stdout, stderr, return_code, command.
+        Background: dict with job_id, status="running", message.
         Output is truncated to 10KB stdout / 5KB stderr.
     """
     if not command:
         return {"error": "command is required."}
 
     timeout = min(max(timeout, 1), _MAX_TIMEOUT)
-    logger.info("execute_shell: %s (cwd=%s, timeout=%ds)", command, working_dir, timeout)
+    logger.info(
+        "execute_shell: %s (cwd=%s, timeout=%ds, background=%s)",
+        command, working_dir, timeout, background,
+    )
+
+    if background:
+        _purge_old_jobs()
+        job_id = uuid.uuid4().hex[:8]
+        _jobs[job_id] = {
+            "status": "running",
+            "command": command,
+            "working_dir": working_dir,
+            "timeout": timeout,
+            "created_at": time.time(),
+        }
+        asyncio.create_task(_run_job(job_id, command, working_dir, timeout))
+        return {
+            "job_id": job_id,
+            "status": "running",
+            "message": f"Command started in background (timeout={timeout}s). "
+                       f"Call get_shell_job('{job_id}') to poll for results.",
+        }
 
     result = await asyncio.to_thread(_run_shell, command, working_dir, timeout)
 
@@ -110,6 +215,37 @@ async def execute_shell(
             result["stderr"][:200],
         )
     return result
+
+
+@mcp.tool()
+async def get_shell_job(
+    job_id: str,
+    ctx: Context = None,
+) -> dict:
+    """Poll the result of a background shell job started with execute_shell(background=True).
+
+    Args:
+        job_id: The job ID returned by execute_shell when background=True. Required.
+        ctx: MCP request context (injected automatically).
+
+    Returns:
+        Dict with job_id, status ("running" | "done" | "timeout" | "error"),
+        return_code, stdout, stderr, and timing fields.
+        Returns {"error": "..."} if the job_id is not found.
+    """
+    if not job_id:
+        return {"error": "job_id is required."}
+
+    job = _jobs.get(job_id)
+    if job is None:
+        return {"error": f"Job '{job_id}' not found. It may have expired or never existed."}
+
+    elapsed = time.time() - job.get("created_at", time.time())
+    return {
+        "job_id": job_id,
+        **{k: v for k, v in job.items() if k != "created_at"},
+        "elapsed_seconds": round(elapsed, 1),
+    }
 
 
 @mcp.tool()
