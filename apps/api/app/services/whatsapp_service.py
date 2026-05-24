@@ -820,8 +820,62 @@ class WhatsAppService:
                 )
                 logger.info(f"Downloaded {media_type} ({len(media_bytes)} bytes) from {sender_jid}")
             except Exception as e:
-                logger.warning(f"Failed to download {media_type} from {sender_jid}: {e}")
-                media_bytes = None
+                # Audio-specific neonize regression 2026-05-24: download_any
+                # raises "didn't find any attachments in message" for inbound
+                # AudioMessage despite the audioMessage being present in the
+                # envelope. Text and image downloads via download_any continue
+                # to work. Fall back to download_media_with_path called
+                # directly with the audio fields — bypasses the broken
+                # attachment-detection branch on the Go side while keeping
+                # everything else unchanged.
+                _err_str = str(e)
+                _audio_attachment_miss = (
+                    media_type == "audio"
+                    and "didn't find any attachments" in _err_str
+                )
+                if _audio_attachment_miss:
+                    try:
+                        from neonize.utils.enum import (
+                            MediaType as _MediaType,
+                            MediaTypeToMMS as _MediaTypeToMMS,
+                        )
+                        audio_msg = getattr(msg, "audioMessage", None)
+                        if audio_msg is None:
+                            raise RuntimeError(
+                                "audioMessage missing on fallback path "
+                                "(should have been present per _detect_inbound_media)"
+                            )
+                        media_bytes = await asyncio.wait_for(
+                            client.download_media_with_path(
+                                audio_msg.directPath,
+                                audio_msg.fileEncSHA256,
+                                audio_msg.fileSHA256,
+                                audio_msg.mediaKey,
+                                audio_msg.fileLength,
+                                _MediaType.MediaAudio,
+                                _MediaTypeToMMS.MediaAudio,
+                            ),
+                            timeout=_download_timeout,
+                        )
+                        logger.info(
+                            "Downloaded audio (%d bytes) via "
+                            "download_media_with_path fallback for %s — "
+                            "neonize download_any attachment-detection "
+                            "workaround",
+                            len(media_bytes), sender_jid,
+                        )
+                    except Exception as fallback_exc:
+                        logger.warning(
+                            "Audio fallback download_media_with_path also "
+                            "failed for %s: %s (original error: %s)",
+                            sender_jid, fallback_exc, e,
+                        )
+                        media_bytes = None
+                else:
+                    logger.warning(
+                        f"Failed to download {media_type} from {sender_jid}: {e}"
+                    )
+                    media_bytes = None
 
         # Skip if no text AND no media
         if not text and not media_bytes and not media_type:

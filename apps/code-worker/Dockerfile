@@ -1,9 +1,19 @@
 FROM python:3.11-slim
 
-# Install system deps: git, gh CLI, Node.js 22, libgomp1
+# Install system deps: git, gh CLI, Node.js 22, libgomp1, libsndfile1, ffmpeg
 # (Goose binary links libgomp.so.1 dynamically; slim image lacks it and
 # the binary fails with "error while loading shared libraries" → exit
 # 127 at `goose --version` → image build aborts).
+#
+# libsndfile1 + ffmpeg (2026-05-24): the Python `soundfile` package needs
+# libsndfile.so at import time; without it `import soundfile as sf` raises
+# OSError("sndfile library not found using ctypes.util.find_library"),
+# which kills the local Whisper transcription path in transcription.py:57.
+# Production WhatsApp voice notes have been returning "Sorry, I couldn't
+# transcribe that voice note" for every user message as a result.
+# ffmpeg is added alongside because Whisper's input pipeline relies on
+# it for non-WAV inputs (WhatsApp sends opus-in-ogg) — soundfile alone
+# can't decode the .ogg.opus format WhatsApp uses.
 #
 # Phase B (2026-05-18) — dropped ``bzip2`` (PR #561 switched the goose
 # tarball to ``.tar.gz``; gzip is in the base image, so bzip2 is dead
@@ -11,7 +21,7 @@ FROM python:3.11-slim
 # packages/cli_orchestrator/; legacy from an earlier port-forwarding
 # experiment that never shipped).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl gnupg ca-certificates libgomp1 && \
+    git curl gnupg ca-certificates libgomp1 libsndfile1 ffmpeg && \
     # Node.js 22
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
