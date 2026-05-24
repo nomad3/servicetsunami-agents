@@ -6,6 +6,7 @@ passlib[bcrypt]
 bcrypt<4
 python-jose
 SQLAlchemy
+greenlet==3.5.1
 psycopg2-binary
 python-multipart
 requests

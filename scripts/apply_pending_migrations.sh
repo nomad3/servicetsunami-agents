@@ -58,14 +58,21 @@ if ! applied_stems_raw=$(docker exec "$DB_CONTAINER" psql -U postgres -d "$DB_NA
 fi
 applied_stems=$(printf '%s\n' "$applied_stems_raw" | sed 's/\.sql$//' | sort -u)
 
-# Build {file_stems} from the working tree.
+# Build {file_stems} from the working tree. Down migrations are rollback
+# artifacts and must never be auto-applied by the forward migration runner.
 #
 # `shopt -s nullglob` makes an unmatched glob expand to nothing
 # rather than the literal pattern, so an empty migrations directory
 # under `set -euo pipefail` doesn't abort the script before the
 # empty-list guard below can run (reviewer B1, 2026-05-12).
 shopt -s nullglob
-file_paths_arr=( "$MIG_DIR"/*.sql )
+file_paths_arr=()
+for path in "$MIG_DIR"/*.sql; do
+  case "$(basename "$path")" in
+    *.down.sql) continue ;;
+  esac
+  file_paths_arr+=("$path")
+done
 shopt -u nullglob
 if [ ${#file_paths_arr[@]} -eq 0 ]; then
   echo "[migrations] no .sql files in $MIG_DIR — nothing to do"
