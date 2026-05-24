@@ -35,7 +35,17 @@ class Agent(Base):
     # OR after 1-week auto-clear that requires BOTH zero shadow-denial
     # activity AND observed activity (inactivity is not compatibility
     # proof per Luna review 2026-05-23).
-    tool_groups_review_required = Column(Boolean, nullable=False, default=False)
+    #
+    # 2026-05-24: default flipped False → True per Luna's step-4
+    # self-application finding (concern observation b0533a44). New
+    # agents should land in the review queue by default — the
+    # operator must explicitly clear the flag after confirming the
+    # tool_groups match the agent's advertised capability. Code
+    # Reviewer (migration 151) and Substrate Sentinel (migration 152)
+    # both shipped with False under the old default; retroactively
+    # flipped to True in migration 153 alongside this column-default
+    # change.
+    tool_groups_review_required = Column(Boolean, nullable=False, default=True)
     default_model_tier = Column(String(10), default="full")  # "light" (Haiku) or "full" (Sonnet)
     persona_prompt = Column(Text, nullable=True)  # compact persona instead of full skill file
     memory_domains = Column(JSONB, nullable=True)  # list of memory domain strings for scoped recall
