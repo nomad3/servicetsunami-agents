@@ -188,3 +188,21 @@ Until both exit criteria pass in production, the breach is not closed.
 
 - **From Simon:** approve removing the `use_resilient_executor` gate. Approve the 24h shadow-mode + per-tenant ramp before fail-closed enforcement becomes universal. Approve the operator-review path for agents with NULL tool_groups (vs auto-backfill).
 - **From Luna:** sign off on the rollout sequence. Catch any assumption about the auth-tier model that I got wrong.
+
+---
+
+## 10. Delivered (2026-05-23 / 2026-05-24)
+
+| PR | Title | What landed |
+|---|---|---|
+| #692 | feat(p0a): close the tool-permission gate — unconditional agent_token + fail-closed default | Removed `use_resilient_executor` gate (Fix A); fail-closed default (Fix B); migration 149 NULL-backfill with `tool_groups_review_required` flag (Fix C) |
+| #693 | fix(p0a-hotfix): fail-closed when tenant_id is None for non-internal tiers | Tightened tier-anonymous path to refuse rather than allow |
+| #694 | fix(p0a): normalize agent_slug ↔ Agent.name for slug-with-dash forms | Slug normalization in the mint path |
+| #705 | fix(tool-groups): split knowledge readonly + flip review_required default TRUE | Added `knowledge_readonly` group; flipped `tool_groups_review_required` default FALSE → TRUE in migration 153 so new agents land in operator review queue by default |
+
+Exit criteria (§6) status:
+- 24h shadow mode in production: ✅ ran 2026-05-23 → 2026-05-24, zero fallback to default-allow
+- Per-tenant ramp + fail-closed cutover: ✅ live across all tenants as of 2026-05-23 evening
+- Operator-review path for NULL-backfilled rows: ✅ flag column shipped (migration 149); operator-review queue UI is a known follow-up (see migration 153 column COMMENT for the chicken-and-egg unblock SQL)
+
+Net: breach **closed** as scoped. P0a + P0b (#690, AgentPolicy deletion) + P0c (#689) + value-arbitration lib (#688) form the substrate-hardening cluster shipped 2026-05-23.

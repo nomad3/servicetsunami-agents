@@ -307,3 +307,21 @@ Luna's revised closer:
 > *"Audit is not accountability unless failure is visible."*
 
 This plan operationalizes that line. After it ships, every audit failure is visible. The substrate stops pretending it has a forensic record when it doesn't.
+
+---
+
+## 12. Delivered (2026-05-23)
+
+**Shipped as PR #689** — `feat(p0c): audit log fail-loud — close the breach-hiding silent drops` (+2314/-28 lines).
+
+What landed:
+- All 4 drop-sites enumerated in §4.1-4.4 converted to fail-loud with ERROR log + Prometheus counter
+- `tool_audit_drops` breadcrumb table (migration shipped in same PR, with `.down.sql`)
+- 4 new metrics + audit-health dashboard scaffold
+- Synthetic drop test confirms breadcrumb row appears
+
+§8 P1 platform_safety_io swallows: 2 of them promoted into this PR (#689) as Luna requested in the sign-off review. Remaining are still scoped to a follow-up P1 (no longer breach-class — just hygiene).
+
+§10 decisions: Simon approved the loud-with-metric posture + the `tool_audit_drops` breadcrumb table + the `> 0 in 5min` strict alert threshold for drops. All baked in as shipped.
+
+Exit: substrate now fails loud on every audit-IO miss. The "silent drop hides a breach" failure mode this P0c was named after is closed.

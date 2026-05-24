@@ -269,8 +269,32 @@ Existing chat-dispatch integration tests must remain green on every PR (no regre
 > - §10 sign-off scope confirmed covers BOTH `apps/api/.env` AND root `PRODUCTION.env` (Keychain migration applies to both)
 > - §3 code-worker restart-safe claim made reproducible (verify via grep + 30s stop test in PR1's gate)
 >
-> **Status: ready for spec-document-reviewer re-pass and Simon's review.**
+> **Status (as of 2026-05-24):** v2 amendments folded in; partial delivery shipped (F1 + F7a). See §12 for the live delivery table.
 
 ## 11. Simon's review
 
-Pending. Spec written 2026-05-22 with Simon offline (he delegated convergence to Luna + Claude). When Simon returns, this section is updated with his approval / change requests.
+Simon's review pending on the §10 conditions. F1 + F7a shipped 2026-05-22/-23 in parallel with the spec-reviewer pass (delegated convergence). The remaining §5 PRs (F2, F7b, F7c) **have NOT shipped** as of 2026-05-24 — see §12.
+
+## 12. Delivered (status as of 2026-05-24)
+
+| §5 PR | Shipped? | GH PR | Title |
+|---|---|---|---|
+| F1 (PR1) — remove shell=True | ✅ | #681 | fix(F1 P0): remove shell=True from code-worker._run (Sub-project A PR1) |
+| F7a (PR2) — JWT kid plumbing | ✅ | #682 | feat(F7a): JWT kid plumbing — domain-isolated secrets (Sub-project A PR2) |
+| **F2 (PR3) — Keychain migration** | ⚠️ **OPEN** | #686 | feat(F2): Keychain migration — dual-source secret loader (Sub-project A PR3) — **still open**, needs `setup-keychain.sh` on runner before merge |
+| F7b (PR4) — kid cutover | ❌ NOT STARTED | — | — |
+| F7c (PR5) — Ed25519 + cleanup | ❌ NOT STARTED | — | — |
+
+**The takeover chain in §2 is NOT yet closed.** §2 enumerates the exploit chain that requires F1 + F2 + F7-series all the way through to be neutralized. F1 + F7a alone reduce the blast radius (no more `shell=True` injection path; new JWTs use kid plumbing) but do NOT close §2:
+- `PRODUCTION.env` + `apps/api/.env` are still plaintext on the runner host (F2 = Keychain pulls them off disk; #686 has the dual-source loader but is unmerged + the keychain bootstrap hasn't run)
+- Existing tokens minted under the single-secret regime continue to verify until F7b cuts them over
+- The four secrets named in §3 are still on-disk awaiting the F7c cleanup-commit
+
+**Parallel scope (NOT in §5):** PRs #683 (F15 — pip-compile `--require-hashes`), #684 (F9 — X-Tenant-Id header gate), #685 (F11 — persona_prompt write-time safety screen) shipped 2026-05-23 against the red-team queue items #366-#374. These are adjacent hardening but do not substitute for F2 / F7b / F7c.
+
+**Open follow-ups:**
+- Merge #686 (after `setup-keychain.sh` on runner)
+- Open F7b PR (kid cutover — see §5 PR4)
+- Open F7c PR (Ed25519 + cleanup-commit; gated on F7b + GPG offline backup per §5 PR3 amendment)
+
+**Spec location note:** this spec lives at `docs/superpowers/specs/` while every other live plan lives at `docs/plans/`. Noted as an inconsistency — no action planned. If a future grep miss makes this load-bearing, relocate + leave a redirect-stub at the new path.

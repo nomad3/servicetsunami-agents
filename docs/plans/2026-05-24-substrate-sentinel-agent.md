@@ -110,3 +110,21 @@ The runner fix is included because migration 150/151 exposed that the deploy hel
 ## 9. Known dependency
 
 This session's supervisor surface could not delegate to the live Code Reviewer because MCP correctly refused `tier=anonymous` for `delegate_to_agent` and `dispatch_agent`. That is useful enforcement signal, but it means native supervisor-to-agent dispatch still depends on the code-worker/chat agent-token plumbing that Claudia identified.
+
+---
+
+## 10. Delivered (2026-05-24)
+
+| PR | What landed |
+|---|---|
+| #698 | feat(team): add Substrate Sentinel agent — bundled FileSkill + migration 152 seed for Simon's tenant + migration-runner hygiene fix (`scripts/apply_pending_migrations.sh` now skips `*.down.sql`) |
+| #700 | test(migrations): add unit test for *.down.sql skip filter — locks the runner hygiene fix from #698 |
+| #705 | fix(tool-groups): split knowledge readonly + flip review_required default TRUE — corrected `tool_groups` to `[github, knowledge_readonly, meta]` (was `[github, knowledge, meta]` in the original §7 design — read-only invariant means no `record_observation` / `create_entity` / `merge_entities` / `update_entity` leakage) + `tool_groups_review_required` flipped to TRUE retroactively for this agent |
+
+Post-merge verification (§8) status — note step 3's tool_groups string changed:
+- ✅ Substrate Sentinel row exists for Simon's tenant (`33d34d8c-1f9a-4c72-9eb4-667fb5f1b830` — verified via direct query against the live `agents` table 2026-05-24; seed migration uses `gen_random_uuid()` so the UUID isn't reproducible from the repo alone)
+- ✅ Tool groups corrected to `["github", "knowledge_readonly", "meta"]` (was `["github", "knowledge", "meta"]` in the original §8 step 3)
+- ✅ Migration-runner skip filter verified by #700's shell-script test (`scripts/test_apply_pending_migrations_skip_down.sh`)
+- ✅ `tool_groups_review_required` flag cleared 2026-05-24 evening after operator confirmed read-only posture
+
+Companion: review-gate infrastructure that closes the introduction-PR circularity case this agent's own seeding hit — see `docs/plans/2026-05-24-review-gate-medium-followups-design.md` (PRs #706 + #708).

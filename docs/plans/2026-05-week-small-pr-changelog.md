@@ -83,6 +83,27 @@ Two-regex change in `gemini_cli_auth.py` to stop picking `CLOUD_SDK_CLIENT_ID` f
 ### #541 — fix(features): allow tenant members to save default_cli_platform
 PUT /features auth relaxed + service-side allowlist (`_MEMBER_WRITABLE_FIELDS`) gating sensitive fields. Session summary task #268.
 
+### #646 — fix(agent-router): drop robotic English greeting template; let Luna's persona reply
+Removed the canned english-greeting template that bypassed the persona prompt on short greetings. Closes the "Luna replies in english to a spanish 'Hola'" regression and the broader feeling that her replies were canned. One-file change to `agent_router.py`.
+
+### #677 — fix(persona): resilient agent persona_prompt lookup — every non-Luna agent ghosting as Luna
+Hardened the persona-prompt resolver so when a non-Luna agent's row was hit (Code Reviewer, Substrate Sentinel, etc.) the supervisor's persona wasn't silently swapped in. Was the failure mode behind "every agent talks like Luna" — fix is a tighter agent-id → persona lookup in `cli_session_manager.py`.
+
+### #678 — fix(persona): IDENTITY block defers to persona — no hardcoded Luna prepend
+Removed the hardcoded `IDENTITY: You are Luna...` prepend in the universal CLI preamble. Replaced with a deferred-to-persona block. Pairs with #677. Companion fix for the same identity-leakage class.
+
+### #700 — test(migrations): add shell-script test for *.down.sql skip filter (follow-up to #698)
+Locks the migration-runner hygiene fix from PR #698 (`apply_pending_migrations.sh` skips `*.down.sql` files in forward auto-apply). Adds `scripts/test_apply_pending_migrations_skip_down.sh` — a shell-script test, not a pytest. Protects against a regression that would silently rollback every recent forward migration on next deploy.
+
+### #701 — fix(whatsapp): restore voice note transcription
+First of three rapid WhatsApp transcription fixes. Re-enabled the path that had silently regressed (added `audio` to `_detect_inbound_media` classification + reinstated the transcription dispatch). Production was returning "Sorry, I couldn't transcribe that voice note" for every voice note before this.
+
+### #702 — fix(whatsapp): voice-note transcription — libsndfile + audio download fallback
+Two follow-ups to #701: (a) added `libsndfile1` + `ffmpeg` to the code-worker Dockerfile so Whisper actually has a soundfile backend, (b) added a fallback download path via `client.download_media_with_path` when neonize's `download_any` regresses for AudioMessage.
+
+### #703 — fix(whatsapp): stop misclassifying every text inbound as audio
+The actual root-cause fix for the transcription chaos: `_detect_inbound_media` used bare `if audio:` against a protobuf3 sub-message, which is truthy-default. Every text inbound was being classified as audio + getting the fallback instruction echoed back. Switched to a substantive-presence check (`mimetype` OR `fileLength` OR `mediaKey` OR `directPath`).
+
 ## What's not here
 
 Larger plan-bearing work — each has its own dedicated doc:

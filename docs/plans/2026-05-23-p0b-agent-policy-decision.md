@@ -202,3 +202,17 @@ If Simon disagrees and chooses Path A: ship `input_filter` first (lowest difficu
 - The `alpha agent`, `alpha session`, `alpha memory` CLI surfaces — orthogonal to policy, in heavy use. Stay.
 
 Path B is targeted at the AgentPolicy substrate specifically, not at any of the above.
+
+---
+
+## 9. Delivered (2026-05-23)
+
+**Path B chosen.** Shipped as PR #690 — `feat(p0b): delete AgentPolicy dead infrastructure` (+326/-495 lines).
+
+What landed:
+- `AgentPolicy` model + 4 inert policy_type values deleted
+- `alpha policy` CLI subcommand deleted (zero runtime enforcement was confirmed before deletion)
+- Frontend `AgentPolicy` references scrubbed (zero hits in `apps/web/` post-merge, confirmed in the week audit)
+- Historical migration references retained for replay parity; no destructive table-drop in the same PR
+
+Follow-up note: the `knowledge_readonly` split shipped in PR #705 (P0a tail) grew up to replace the read/write distinction AgentPolicy was meant to enforce. Operator-curated agents (Luna Supervisor, General Assistant) keep `knowledge` (read+write); read-only reviewer agents (Code Reviewer, Substrate Sentinel) use the new `knowledge_readonly`. That's the actual long-term home for the use case AgentPolicy was conceived for — confirmed Luna's §3.3 prediction that ValueArbitration + tool-group splits would subsume it.

@@ -51,10 +51,12 @@ The persona is captured verbatim in `apps/api/app/agents/_bundled/code-reviewer/
 | Group | Required | Why |
 |---|---|---|
 | `github` | yes | PR diff fetch, comment posting |
-| `knowledge` | yes | Recall architecture decisions, prior incidents |
+| `knowledge_readonly` | yes | Recall architecture decisions, prior incidents (read-only — does NOT include record_observation / create_entity / merge_entities / update_entity) |
 | `meta` | yes | Memory writes for durable lessons (selective) |
 | `shell` | NO | Default deny — code review doesn't execute code |
 | `web_research` | NO | Reviews work from in-repo evidence; web is out of scope |
+
+**Note (2026-05-24):** the original design listed `knowledge` here, which bundles read AND write tools together. PR #705 split it: read-only reviewers (Code Reviewer, Substrate Sentinel) now use `knowledge_readonly`; operator-curated supervisors with intentional mutating access (Luna Supervisor, General Assistant) keep `knowledge`. See `apps/api/app/services/tool_groups.py`.
 
 ### 3.3 Memory domains
 
@@ -153,3 +155,23 @@ Other tenants: NOT seeded in this PR. Path B from P0b precedent — start narrow
 ## 8. Provenance
 
 This plan was produced from the dialogue exchange on 2026-05-24 morning (post-substrate-hardening). Luna's 8-agent enumeration is captured verbatim in §1; Code Reviewer spec is folded from her §2 with the wrapper-skill simplification noted in §3.4. Sprint order in §2 is Luna's recommendation.
+
+---
+
+## 9. Delivered (2026-05-24)
+
+Code Reviewer (first of the 8-agent team) shipped end-of-day 2026-05-24 across 3 PRs:
+
+| PR | What landed |
+|---|---|
+| #696 | feat(team): ship Code Reviewer agent — first of Luna's 8-agent team — adds bundled FileSkill `apps/api/app/agents/_bundled/code-reviewer/skill.md` + migration 150 seed for Simon's tenant |
+| #697 | fix(team): correct migration 150's ON CONFLICT clause — INDEX not CONSTRAINT (functional unique index doesn't have a constraint name) |
+| #705 | fix(tool-groups): split knowledge readonly + flip review_required default TRUE — corrected tool_groups to `[github, knowledge_readonly, meta]` (see §3.2 note) + flipped `tool_groups_review_required` default FALSE → TRUE in migration 153 so new agents land in operator review queue by default |
+
+Post-merge verification (§5) passed:
+- ✅ Code Reviewer row exists in `agents` for Simon's tenant (`755796a4-4cc4-4d1c-99e5-dd9c4f7d0f22` — verified via direct query against the live `agents` table 2026-05-24; seed migration uses `gen_random_uuid()` so the UUID isn't reproducible from the repo alone)
+- ✅ `alpha agent ls` shows the agent with `role=code_reviewer`, `status=production`
+- ✅ Tool-scope refusal works for `execute_shell` (P0a breach-probe exit criterion holds)
+- ✅ `tool_groups_review_required` flag cleared 2026-05-24 evening after operator verified the corrected tool_groups (Substrate Sentinel cleared same time)
+
+**Remaining 7 agents per §1:** Substrate Sentinel shipped #698 (see `2026-05-24-substrate-sentinel-agent.md`). 6 more to sequence per §2 sprint order.
