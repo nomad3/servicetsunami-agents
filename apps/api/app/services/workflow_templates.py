@@ -605,9 +605,11 @@ NATIVE_TEMPLATES = [
                     "params": {
                         "connector_id": "remedia",
                         "tool_name": "create_order",
-                        "pharmacy_id": "{{input.pharmacy_id}}",
-                        "items": "{{input.items}}",
-                        "payment_provider": "{{input.payment_provider | default('mercadopago')}}",
+                        "kwargs": {
+                            "pharmacy_id": "{{input.pharmacy_id}}",
+                            "items": "{{input.items}}",
+                            "payment_provider": "{{input.payment_provider | default('mercadopago')}}",
+                        },
                     },
                     "output": "order",
                 },
@@ -666,7 +668,9 @@ NATIVE_TEMPLATES = [
                     "params": {
                         "connector_id": "remedia",
                         "tool_name": "track_delivery",
-                        "order_id": "{{order.order_id}}",
+                        "kwargs": {
+                            "order_id": "{{order.order_id}}",
+                        },
                     },
                     "output": "delivery_status",
                 },
@@ -812,7 +816,9 @@ NATIVE_TEMPLATES = [
                             "params": {
                                 "connector_id": "scraper",
                                 "tool_name": "scrape_website",
-                                "url": "{{competitor.website}}",
+                                "kwargs": {
+                                    "url": "{{competitor.website}}",
+                                },
                             },
                             "output": "scrape_result",
                         },
