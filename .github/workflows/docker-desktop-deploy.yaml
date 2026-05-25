@@ -85,20 +85,29 @@ jobs:
             -e cloudflared/credentials.json \
             -e cloudflared/cert.pem
 
-      - name: Load runtime secrets (Keychain → $HOME fallback)
+      - name: Load runtime secrets from $HOME
         run: |
-          # PR3 / F2: dual-source loader. Reads each secret from the
-          # macOS login keychain first (svc names listed in
-          # scripts/runner-secrets/load-from-keychain.sh) and falls
-          # back to the legacy $HOME/Documents/GitHub/agentprovision-agents
-          # path only if the Keychain entry is missing. Writes into
-          # the workspace with 0600 perms.
-          #
-          # After the verification gate passes (tunnel up + api healthy
-          # reading from Keychain), a follow-up commit deletes the
-          # $HOME source files + drops the fallback branch. Until then
-          # both sources coexist.
-          bash scripts/runner-secrets/load-from-keychain.sh
+          # Secrets live at $HOME/Documents/GitHub/agentprovision-agents/
+          # with 0600 perms. F2 keychain migration was attempted (PRs
+          # #715–#724) but abandoned — see
+          # docs/plans/2026-05-25-f2-keychain-wontfix-decision.md.
+          # Login keychain unlock is per-security-session, which the
+          # runner's launchd-spawned Mach context cannot inherit from
+          # the operator's GUI session without storing the login
+          # password somewhere readable (chicken-and-egg).
+          for entry in \
+              "cloudflared/credentials.json" \
+              "cloudflared/cert.pem" \
+              "apps/api/.env" \
+              ".env:PRODUCTION.env"; do
+            dst="${entry%%:*}"
+            src_rel="${entry##*:}"
+            src="$HOME/Documents/GitHub/agentprovision-agents/$src_rel"
+            mkdir -p "$(dirname "$dst")"
+            cp "$src" "$dst"
+            chmod 600 "$dst"
+            echo "[$dst]  ←  $src"
+          done
 
       - name: Detect changed services
         id: changes
