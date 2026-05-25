@@ -134,6 +134,8 @@ Each test scrubs its canary path before AND after to avoid cross-test leakage.
 
 ### PR3 — F2: Keychain migration
 
+> **WONTFIX (2026-05-25).** Attempted across PRs #712, #718, #719, #720, #721, #723, #724 (full arc in [decision doc](../../plans/2026-05-25-f2-keychain-wontfix-decision.md)). The runner subprocess sees the login keychain as locked (Mach security session isolation, not auto-lock). Cannot unlock without storing the login password — chicken-and-egg. Disk-theft + backup-hygiene was the realistic gain; not worth the complexity. Refocused on F7b/F7c which close real takeover-chain risk. The R1 claim at line 41 ("Keychain on the runner is feasible without interactive unlock") was wrong — attribute reads work cross-session, but `-w` value reads need a per-session unlock event.
+
 **Files**: `.github/workflows/docker-desktop-deploy.yaml`, plus a new helper script `scripts/runner-secrets/load-from-keychain.sh`.
 
 **Change**:
