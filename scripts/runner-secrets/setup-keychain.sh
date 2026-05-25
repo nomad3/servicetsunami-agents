@@ -76,27 +76,30 @@ for entry in "${ENTRIES[@]}"; do
   # base64 the source; tr -d '\n' collapses the line-wrap macOS adds.
   payload="$(base64 < "$abs" | tr -d '\n')"
 
-  # -U updates if the entry exists; otherwise creates.
-  # -s service, -a account, -w password value.
+  # CRITICAL: delete-then-add, NOT `-U` update.
+  #
+  # The `-U` update flag only refreshes the PASSWORD VALUE. It does
+  # NOT modify the ACL on an existing entry. PR #720's first attempt
+  # added `-A` to a `-U` invocation and re-ran the script; the next
+  # deploy STILL showed [fallback] because the existing entries kept
+  # their creator-only ACL. Verified post-fix via `security
+  # dump-keychain -a`: the entry's `decrypt` authorization still
+  # listed only /usr/bin/security with the original requirement.
+  #
+  # To install a fresh ACL (with `-A` = any-app), we must delete the
+  # entry first then add it without `-U`. delete is idempotent-ish:
+  # missing-entry exit code is non-zero but harmless. We swallow it.
+  #
   # -A grants access to ANY app on this user account WITHOUT a prompt.
-  #
-  # Why -A: without it, the keychain ACL defaults to "creator-binary
-  # only; anything else needs user prompt". The GH Actions runner's
-  # bash subprocess is not the creator → security would prompt → no
-  # TTY on the runner → `security find-generic-password -w` exits 36
-  # (errSecInteractionNotAllowed) with empty output. Verified live
-  # by the F2 diagnostic v2 (PR #719, deploy 26420631499):
-  # entry exists + attrs readable + password read silently refused.
-  #
   # Trade-off: any app running as $ACCOUNT can read these secrets.
   # On the dedicated runner Mac this is equivalent to the security
   # level of the $HOME fallback (any nomade process can read both).
-  # Spec already accepts this trade-off per the comment below.
+  # Spec already accepts this trade-off.
   #
   # Note: payload briefly visible in argv to ps. Acceptable on the
   # runner Mac (single-user); spec already accepts this trade-off.
+  security delete-generic-password -s "$svc" -a "$ACCOUNT" >/dev/null 2>&1 || true
   security add-generic-password \
-    -U \
     -A \
     -s "$svc" \
     -a "$ACCOUNT" \
