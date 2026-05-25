@@ -39,6 +39,29 @@ blue "Repo:    $REPO_ROOT"
 blue "Account: $ACCOUNT"
 echo
 
+# Disable login-keychain auto-lock so the GH Actions runner subprocess
+# (spawned by launchd, not by the user's interactive session) can read
+# entries via `security -w`. Without this, deploys see exit 36
+# (errSecInteractionNotAllowed) on every value read after the keychain
+# auto-locks (idle timeout, sleep, etc.) — verified end-to-end via the
+# 2026-05-25 diagnostic v3 probe (PR #723). The ACL fix in #721 only
+# closed the per-entry permission gate; the keychain-wide lock state
+# was the second gate.
+#
+# `set-keychain-settings` with no flags = no lock-on-sleep, no
+# inactivity-lock. Keychain stays unlocked from your login until
+# logout. Post-reboot pre-login window still relies on the $HOME
+# fallback (acceptable — deploys queue until you log in).
+#
+# Trade-off: any app running in your GUI session can read the
+# (-A flag) any-app-ACL entries without re-prompt. Same security
+# level as the existing 0600 $HOME fallback files. The dedicated
+# runner Mac is single-user.
+blue "Disabling login-keychain auto-lock (one-time, idempotent)..."
+security set-keychain-settings ~/Library/Keychains/login.keychain-db
+green "login keychain set to: no lock-on-sleep, no inactivity-lock"
+echo
+
 # Pre-flight: all four source files must exist + be non-empty.
 for entry in "${ENTRIES[@]}"; do
   rel="${entry#*:}"
