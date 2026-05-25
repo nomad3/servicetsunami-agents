@@ -417,3 +417,129 @@ def test_cli_fallback_skips_persona_prepend_when_empty(tmp_path, monkeypatch):
     assert "# User Request" not in prompt
 
 
+# ── Server-path coverage (the path that actually shipped the WhatsApp leak) ──
+#
+# IMPORTANT #1 from the PR #717 superpowers review: the production leak
+# was on `execute_opencode_chat` (HTTP server on port 8200), NOT on the
+# CLI fallback. The CLI tests above cover the same prepend logic, but a
+# future refactor of the server path could silently re-introduce the bug.
+# Lock the server-path persona injection here.
+
+
+def test_server_path_prepends_persona_to_parts_text(tmp_path, monkeypatch):
+    """execute_opencode_chat (server path) MUST prepend persona to the
+    prompt before POSTing to the OpenCode server. Body shape is
+    {"parts": [{"type": "text", "text": "<prompt>"}]}."""
+    captured: dict = {}
+
+    def _fake_post(url, json=None, timeout=None):
+        # Two endpoints: /session (create) + /session/<id>/message (send)
+        if url.endswith("/session"):
+            return SimpleNamespace(
+                raise_for_status=lambda: None,
+                json=lambda: {"id": "ses_test_42"},
+            )
+        # The message endpoint — this is where persona MUST be present
+        captured["url"] = url
+        captured["body"] = json
+        return SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {
+                "parts": [{"type": "text", "text": "Sure, I'll help."}],
+                "usage": {},
+            },
+        )
+
+    monkeypatch.setattr(oc.httpx, "post", _fake_post)
+    fake_wf = MagicMock()
+    fake_wf.ChatCliResult = SimpleNamespace
+    monkeypatch.setitem(__import__("sys").modules, "workflows", fake_wf)
+    # Clear the per-tenant session cache so we exercise the create-session path
+    monkeypatch.setattr(oc, "_opencode_sessions", {})
+
+    persona = "You are Luna, an intelligent AI co-pilot."
+    user_msg = "Who are you?"
+    oc.execute_opencode_chat(
+        _task_input(message=user_msg, instruction_md_content=persona),
+        str(tmp_path),
+    )
+
+    assert captured["url"].endswith("/message")
+    parts = captured["body"]["parts"]
+    assert len(parts) == 1 and parts[0]["type"] == "text"
+    prompt_in_body = parts[0]["text"]
+    assert persona in prompt_in_body, (
+        f"persona MUST be prepended on server path; got: {prompt_in_body!r}"
+    )
+    assert "# User Request" in prompt_in_body
+    assert prompt_in_body.index(persona) < prompt_in_body.index(user_msg)
+
+
+# ── Combined-prefix ordering (persona at top, context inside User Request) ──
+#
+# IMPORTANT #2 from the PR #717 review: with both mcp_config + persona,
+# the resulting prompt must put persona at the TOP (system-level
+# identity) and [Context: tenant_id=...] INSIDE the User Request block
+# (closer to the message it scopes). Locks the ordering choice so a
+# future refactor doesn't silently invert it.
+
+
+def test_persona_precedes_mcp_context_when_both_present(tmp_path, monkeypatch):
+    """Combined prompt shape (CLI fallback path):
+        <persona>
+
+        # User Request
+
+        [Context: tenant_id=...]
+
+        <message>
+    Server path uses the same composition logic — covered by the
+    server-path test above."""
+    captured: dict = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({
+                "type": "text",
+                "part": {"type": "text", "text": "ok"},
+            }) + "\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(oc.subprocess, "run", _fake_run)
+    fake_wf = MagicMock()
+    fake_wf.WORKSPACE = str(tmp_path)
+    fake_wf.ChatCliResult = SimpleNamespace
+    monkeypatch.setitem(__import__("sys").modules, "workflows", fake_wf)
+    monkeypatch.setattr(oc.cli_runtime, "tenant_home_dir", lambda tid: tmp_path)
+    monkeypatch.setattr(oc.cli_runtime, "resolve_cli_cwd", lambda task, fb: str(tmp_path))
+    monkeypatch.setattr(oc.tenant_home_quota, "maybe_enforce_quota", lambda *a, **kw: None)
+
+    persona = "You are Luna, an intelligent AI co-pilot."
+    user_msg = "What's our PLM status?"
+    task = _task_input(message=user_msg, instruction_md_content=persona)
+    task.mcp_config = '{"mcpServers": {"agentprovision": {}}}'
+
+    oc._execute_opencode_chat_cli(task, str(tmp_path))
+
+    cmd = captured["cmd"]
+    assert "--" in cmd
+    prompt = cmd[cmd.index("--") + 1]
+    # All four components must be present
+    assert persona in prompt
+    assert "# User Request" in prompt
+    assert "[Context: tenant_id=" in prompt
+    assert user_msg in prompt
+    # Ordering invariant: persona < User Request delimiter < Context < message
+    p_idx = prompt.index(persona)
+    ur_idx = prompt.index("# User Request")
+    ctx_idx = prompt.index("[Context: tenant_id=")
+    msg_idx = prompt.index(user_msg)
+    assert p_idx < ur_idx < ctx_idx < msg_idx, (
+        f"ordering invariant violated; positions persona={p_idx}, "
+        f"User Request={ur_idx}, Context={ctx_idx}, message={msg_idx} "
+        f"in prompt {prompt!r}"
+    )
+

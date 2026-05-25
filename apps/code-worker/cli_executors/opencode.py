@@ -63,26 +63,42 @@ def execute_opencode_chat(task_input, session_dir: str):
             session_id = resp.json()["id"]
             _opencode_sessions[tenant] = session_id
 
-        # Wrap message with tenant context if MCP is enabled
-        prompt = task_input.message
-        # Prepend the agent's persona / instruction prompt — same shape
-        # codex + claude_code use (see cli_executors/codex.py + claude.py).
-        # Without this, opencode runs against bare Gemma 4 with no agent
-        # identity, which is why Luna replied as "I'm OpenCode" on
-        # WhatsApp 2026-05-24 instead of as Luna. Persona-leak class —
-        # see #677/#678 for the cloud-side fixes that this mirrors.
-        if task_input.instruction_md_content and task_input.instruction_md_content.strip():
-            prompt = (
-                f"{task_input.instruction_md_content.strip()}"
-                f"\n\n# User Request\n\n{prompt}"
-            )
+        # Compose prompt: persona at the TOP (system-level identity),
+        # tenant context as user-side metadata INSIDE the User Request
+        # block (closer to the message it scopes), user message last.
+        # Final shape with both persona + mcp_config:
+        #   <persona>
+        #
+        #   # User Request
+        #
+        #   [Context: tenant_id=...]
+        #
+        #   <message>
+        #
+        # Per the persona-leak review on PR #717 — persona must precede
+        # any machine-config metadata so Gemma 4 anchors on agent
+        # identity before reading tool-routing instructions.
+        #
+        # Persona-leak class (incident 2026-05-24): without the persona
+        # prepend, Gemma 4 had no agent identity and replied as
+        # "I'm OpenCode" instead of as Luna. See #677/#678 for the
+        # cloud-side fixes; this mirrors them on the opencode subprocess.
+        user_block = task_input.message
         if task_input.mcp_config:
-            # Inject tenant_id so MCP tools know which data to access
+            # Tenant context: which tenant's data the LLM should reference
+            # in MCP tool calls. Sits inside the User Request block.
             context_prefix = (
                 f"[Context: tenant_id={tenant}. "
                 f"Always pass tenant_id in ALL MCP tool calls.]\n\n"
             )
-            prompt = context_prefix + prompt
+            user_block = context_prefix + user_block
+        if task_input.instruction_md_content and task_input.instruction_md_content.strip():
+            prompt = (
+                f"{task_input.instruction_md_content.strip()}"
+                f"\n\n# User Request\n\n{user_block}"
+            )
+        else:
+            prompt = user_block
 
         # Send message to OpenCode server.
         #
@@ -131,20 +147,23 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
     import os
     import subprocess
 
-    prompt = task_input.message
-    # Prepend the agent's persona / instruction prompt — mirrors the
-    # server-path branch above and the codex / claude_code pattern.
-    # Persona-leak fix (2026-05-25): without this, Gemma 4 has no
-    # agent identity and replies as itself ("I'm OpenCode") instead of
-    # as Luna / whichever agent the dispatch is for.
+    # Compose prompt: persona at TOP (system-level identity), tenant
+    # context as user-side metadata INSIDE the User Request block,
+    # user message last. Same shape as the server path above.
+    # Persona-leak fix (2026-05-25): without the persona prepend,
+    # Gemma 4 had no agent identity and replied as "I'm OpenCode"
+    # instead of as the dispatched agent. Mirrors codex + claude_code.
+    user_block = task_input.message
+    if task_input.mcp_config:
+        context_prefix = f"[Context: tenant_id={task_input.tenant_id}]\n\n"
+        user_block = context_prefix + user_block
     if task_input.instruction_md_content and task_input.instruction_md_content.strip():
         prompt = (
             f"{task_input.instruction_md_content.strip()}"
-            f"\n\n# User Request\n\n{prompt}"
+            f"\n\n# User Request\n\n{user_block}"
         )
-    if task_input.mcp_config:
-        context_prefix = f"[Context: tenant_id={task_input.tenant_id}]\n\n"
-        prompt = context_prefix + prompt
+    else:
+        prompt = user_block
 
     # ── tenant workspace cwd (task #259) ─────────────────────────────────
     # Even on the CLI fallback path, scope cwd to the tenant's persistent
