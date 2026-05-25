@@ -42,7 +42,7 @@ This is the same class as the **WhatsApp "I'm OpenCode" persona-leak** (differen
 
 ## 2. Goal
 
-After this plan ships, every MCP tool call originating from a chat-driven subprocess CLI carries the operator's agent_token JWT. The MCP server's `resolve_auth_context` returns `tier = "agent_token"` for those calls. Tools that hard-gate on agent_token (dispatch_agent, delegate_to_agent, future workflow-write tools) work end-to-end without anonymous fall-through.
+After this plan ships, every MCP tool call originating from a chat-driven subprocess CLI carries the operator's agent_token JWT. The MCP server's `resolve_auth_context` returns `tier = "agent_token"` for those calls. The one confirmed hard-gate today — `dispatch_agent` at `apps/mcp-server/src/mcp_tools/agents.py:76-80` — works end-to-end without anonymous fall-through. Other write-class tools (`delegate_to_agent`, `record_observation`, future workflow-write tools) may adopt the same hard gate; whether they do or not, the agent_token propagation this plan implements is the prerequisite that lets them route correctly.
 
 **Non-goals:**
 - Re-architect MCP auth tiers (P0a's structural decisions stand).
@@ -57,7 +57,7 @@ After this plan ships, every MCP tool call originating from a chat-driven subpro
 
 | Question | Answer | Verification path |
 |---|---|---|
-| Does `cli_session_manager` mint an agent_token JWT? | Yes — unconditional since PR #692 (P0a Fix A). | `apps/api/app/services/cli_session_manager.py` ~line 1402 |
+| Does `cli_session_manager` mint an agent_token JWT? | Yes — unconditional since PR #692 (P0a Fix A). | `apps/api/app/services/cli_session_manager.py` ~line 1475 (P0a comment header starts at ~1389) |
 | Does the mint write the JWT into the subprocess env? | **Unknown — to verify in Phase 0.** | grep for `AGENT_TOKEN` env-setting in cli_executors/* + mint path |
 | What's the MCP server URL the subprocess CLI calls? | Differs per CLI. claude_code + codex use their MCP config (`~/.codex/config.toml` etc.). opencode uses a separate server on port 8200. claude.ai connectors (Gmail Calendar, Drive) bypass mcp-tools entirely. | `apps/code-worker/entrypoint.sh`, each `cli_executors/*.py`, MCP config files |
 | Does the MCP server know how to validate agent_token? | Yes — `apps/mcp-server/src/mcp_auth.py` `resolve_auth_context()` handles agent_token tier. | Source confirmed |
@@ -78,13 +78,30 @@ This is a forwarding job, not a re-authentication job. We never want the subproc
 
 ### 5.1 Mint surface: inject the JWT into the subprocess env
 
-`apps/api/app/services/cli_session_manager.py` — the mint at ~line 1402 must also set `AGENT_TOKEN` (or `AP_AGENT_TOKEN` for namespace hygiene) on the env dict that the subprocess inherits. Today it likely returns the JWT but doesn't thread it into `env={...}` that goes into `subprocess.Popen`.
+`apps/api/app/services/cli_session_manager.py` — the mint at ~line 1475 must also set `AGENT_TOKEN` (or `AP_AGENT_TOKEN` for namespace hygiene) on the env dict that the subprocess inherits. Today it likely returns the JWT but doesn't thread it into `env={...}` that goes into `subprocess.Popen`.
 
-**Acceptance:** after the change, `docker compose exec code-worker bash -c "echo $AP_AGENT_TOKEN"` is empty (good, not in the worker's own env), but a chat-spawned subprocess sees it in its env.
+**Acceptance (negative — should be empty):**
+```bash
+docker compose exec -T code-worker bash -c 'echo "${AP_AGENT_TOKEN:-EMPTY}"'
+# Expected: EMPTY   (the token MUST NOT live in the worker's own env)
+```
+
+**Acceptance (positive — should appear in child env during dispatch):** trigger a chat dispatch, then while the subprocess is still running, snapshot every child process under the code-worker container that has `AP_AGENT_TOKEN` set:
+```bash
+docker compose exec -T code-worker bash -c '
+  for pid in $(pgrep -P 1); do
+    grep -a AP_AGENT_TOKEN /proc/$pid/environ 2>/dev/null \
+      && echo "  ← found on PID $pid (cmd: $(cat /proc/$pid/comm))"
+  done
+'
+# Expected: at least one PID prints a non-empty AP_AGENT_TOKEN line
+# during the dispatch window
+```
+The token should appear ONLY on subprocess CLI children, not the worker root process.
 
 ### 5.2 Per-CLI MCP config writer: thread the env into each CLI's MCP client config
 
-Each CLI's MCP-config writer needs to declare a `headers.Authorization = "Bearer $AP_AGENT_TOKEN"` against the configured MCP server endpoint. Per-CLI config-file shapes differ:
+Each CLI's MCP-config writer lives under `apps/code-worker/cli_executors/<cli>.py` (NOT under `apps/api/app/services/` — the mint surface in §5.1 lives in api; the config writers live in code-worker because that's where the subprocess is spawned). Each needs to declare a `headers.Authorization = "Bearer $AP_AGENT_TOKEN"` against the configured MCP server endpoint. Per-CLI config-file shapes differ:
 
 | CLI | Config file | Where to inject |
 |---|---|---|
@@ -161,7 +178,7 @@ Per `feedback_test_router_startup` + `feedback_mocked_paths_skip_real_steps`:
 - **Unit (per cli_executor):** the rendered MCP config file references `$AP_AGENT_TOKEN` in the Authorization header for every MCP server block. Read the rendered file in the test; assert the substring.
 - **Integration:** spawn a tiny test subprocess that prints its env's `AP_AGENT_TOKEN` and reads `os.environ.get("AP_AGENT_TOKEN")`. Assert it matches the JWT the mint returned.
 - **Integration (most important):** end-to-end chat dispatch in dev — Luna calls `dispatch_agent` for a no-op target. Assert success + audit row appears with `tier=agent_token`.
-- **Negative test:** chat dispatch with `tenant_features.use_resilient_executor = FALSE` (legacy) should still NOT mint (per P0a's deprecation plan, this flag is being phased out; in the meantime, the gap path is intentional).
+- **Regression-guard test (NOT a negative test):** chat dispatch with `tenant_features.use_resilient_executor = FALSE` (the legacy column, kept around post-PR #692 for backwards-compat but no longer gates the mint) MUST still mint an `agent_token` and propagate `AP_AGENT_TOKEN` into the subprocess env. P0a Fix A removed the flag-gated branch; this test exists to catch any future refactor that accidentally re-introduces the gate. If we ever DROP the column, drop this test in the same PR.
 
 ### Cluster-safety gates per `feedback_single_pr_for_feature`
 
@@ -195,7 +212,7 @@ Each per-CLI PR has its own cluster-safety verification:
 
 **Rollback:** revert each per-CLI PR independently. Restores the prior subprocess env shape (no env var injected). The MCP server falls back to `tier=anonymous` as it does today (current behavior; not a regression). No data loss; no schema changes.
 
-**Hard rollback:** if `mcp-tools` starts rejecting valid agent_tokens after this rolls out, set `enforce_strict_tool_scope = FALSE` for the affected tenant (flag exists per P0a §3.1). Restores the lenient pre-enforce behavior immediately.
+**Hard rollback:** if `mcp-tools` starts rejecting valid agent_tokens after this rolls out, set `enforce_strict_tool_scope = FALSE` for the affected tenant (flag introduced in P0a — see `2026-05-23-p0a-tool-permission-gate-fix.md` Fix B + §5 rollout). Restores the lenient pre-enforce behavior immediately.
 
 ---
 
@@ -220,7 +237,7 @@ Each per-CLI PR has its own cluster-safety verification:
 
 In the meantime (until this plan ships), Luna's known-working pattern is:
 
-> **Use the subprocess CLI's shell tool** (`git`, `sed`, `cat`, etc.) **to write files into the workspace**. Files committed via a follow-up Claudia PR get the migration applied through the normal deploy path. This is exactly how the 5-agent fleet shipped tonight via PR #712.
+> **Use the subprocess CLI's shell tool** (`git`, `sed`, `cat`, etc.) **to write files into the workspace**. Files committed via a follow-up Claudia PR get the migration applied through the normal deploy path. This is exactly how the 5-agent fleet was prepared tonight — Luna wrote the migration + skill.md files via codex's shell, Claudia integrated them into git as **PR #712** (open as of 2026-05-25; will ship through the normal deploy path post-merge).
 
 That pattern doesn't depend on MCP write tools, so the tier=anonymous gap doesn't bite. It IS slower than calling `dispatch_agent` directly (Luna writes SQL + skill.md instead of just creating rows), but it's tier-safe.
 
