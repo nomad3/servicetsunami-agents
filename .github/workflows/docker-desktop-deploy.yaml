@@ -88,13 +88,19 @@ jobs:
       - name: Load runtime secrets from $HOME
         run: |
           # Secrets live at $HOME/Documents/GitHub/agentprovision-agents/
-          # with 0600 perms. F2 keychain migration was attempted (PRs
-          # #715–#724) but abandoned — see
-          # docs/plans/2026-05-25-f2-keychain-wontfix-decision.md.
+          # with 0600 perms. F2 keychain migration was attempted across
+          # PRs #712, #718, #719, #720, #721, #723, #724 but abandoned —
+          # see docs/plans/2026-05-25-f2-keychain-wontfix-decision.md.
           # Login keychain unlock is per-security-session, which the
           # runner's launchd-spawned Mach context cannot inherit from
           # the operator's GUI session without storing the login
           # password somewhere readable (chicken-and-egg).
+          #
+          # Entry format: "dst" if src_rel==dst, or "dst:src_rel" if
+          # different. ${entry%%:*} returns dst (or full string when no
+          # `:`). ${entry##*:} returns src_rel (or full string when no
+          # `:`). The only entry with src!=dst is .env (src is
+          # PRODUCTION.env in the home repo).
           for entry in \
               "cloudflared/credentials.json" \
               "cloudflared/cert.pem" \

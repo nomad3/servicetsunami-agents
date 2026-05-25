@@ -1,5 +1,7 @@
 # PR2 — F7a JWT `kid` plumbing (Sub-project A) Implementation Plan
 
+> **2026-05-25 — F2 wontfix update.** PR3 (F2 macOS keychain migration) was abandoned — see [`docs/plans/2026-05-25-f2-keychain-wontfix-decision.md`](../../plans/2026-05-25-f2-keychain-wontfix-decision.md). All references below to "Keychain hydration" or "distinct values via Keychain" now mean **`$HOME/Documents/GitHub/agentprovision-agents/PRODUCTION.env`** (loaded by the deploy workflow's "Load runtime secrets from $HOME" step). The `kid` plumbing in this plan is unaffected. PR4 (real distinct JWT secrets) still ships exactly as described, just sourced from the `.env` file instead of the keychain.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add per-domain JWT signing keys (`JWT_USER_SECRET` / `JWT_AGENT_TOKEN_SECRET` / `JWT_OAUTH_STATE_SECRET`) with a `kid` claim, while preserving full verification of every existing legacy (no-kid) token. **No new key material yet** — all three secrets default to the current `SECRET_KEY` so the cluster sees zero behavior change. PR4 introduces the real distinct values; PR5 ends the legacy fallback.
