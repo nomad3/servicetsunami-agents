@@ -172,9 +172,12 @@ alpha learn <url>     ─┘    (fire-and-forget; single final notify)
    ↳ fail → notify + library_revisions audit ('rejected_test_fail') + abort + quarantine
    ↳ pass → continue
 
-6. install_skill(skill_md_with_provenance, slug, scope)
-   ↳ Injects frontmatter: source_url, synthesis_date, reviewer_agent_id, transcript_hash
-   ↳ Writes to _bundled/ or _tenant/<uuid>/
+6. install_skill(skill_md_with_provenance, slug, tenant_id,
+                  source_url, reviewer_agent_id, transcript_sha256,
+                  learned_by_agent_id)
+   ↳ Injects provenance frontmatter (see §1.6)
+   ↳ Writes to _tenant/<uuid>/<slug>/  — NEVER _bundled/ (per §1.1)
+   ↳ Slug-conflict serialization per §1.7
    ↳ DB upsert + library_revisions row
 
 7. diffuse_learning(skill_id, source_url, capabilities[])
@@ -216,7 +219,7 @@ alpha learn <url>     ─┘    (fire-and-forget; single final notify)
 | Test type | Coverage |
 |---|---|
 | **Unit** (`apps/mcp-server/tests/test_learning.py`) | All 7 MCP primitives in isolation. Mock yt-dlp subprocess, transcription_client, LLM, code-worker dispatch, Code Reviewer agent. Per primitive: happy + error + edge case. **Explicitly include**: `dispatch_skill_review` when Code Reviewer agent is absent (registry 404 path); `diffuse_learning` when KG is down (must not abort install); slug-conflict serialization (concurrent install_skill races resolve to distinct slugs). |
-| **Unit (CLI)** (`apps/agentprovision-cli/src/commands/learn_test.rs`) | Arg parsing, `--scope`, `--from-attachment`, `--dry-run` semantics. |
+| **Unit (CLI)** (`apps/agentprovision-cli/src/commands/learn_test.rs`) | Arg parsing, `--from-attachment`, `--dry-run` semantics. |
 | **Integration** (`apps/api/tests/test_luna_learn_integration.py`) | End-to-end against a fixed 90s YouTube clip (checked-in URL). Real transcription + stubbed LLM with deterministic fixture. Asserts installed skill, library_revisions row, KG observation. |
 | **Code Reviewer stub** | CI fixture: deterministic stub returns verdicts based on draft patterns. Keeps CI hermetic. |
 | **`--dry-run` golden** | `alpha learn <fixture-url> --dry-run` output compared to checked-in golden. Catches synthesis prompt regressions. |
