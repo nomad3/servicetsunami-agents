@@ -70,8 +70,26 @@ def _should_log_mismatch(tenant_id: str, agent_id: str, header_value: str) -> bo
 def _get_header(ctx, header_name: str) -> Optional[str]:
     """Safely extract an HTTP header from MCP request context.
 
-    Handles both dict-like and object-like request_context,
-    and checks common header variations (X-Tenant-Id, x-tenant-id).
+    FastMCP's lowlevel server (mcp/server/lowlevel/server.py:690) constructs
+    a ``RequestContext`` with ``request=<Starlette Request>`` when a tool
+    is invoked over HTTP. Both transports populate it:
+      * SSE: ``mcp/server/sse.py:244``
+      * Streamable-HTTP: ``mcp/server/streamable_http.py:403, 417, 505``
+    via ``ServerMessageMetadata(request_context=request)``.
+
+    The headers live at ``ctx.request_context.request.headers`` — NOT
+    at ``ctx.request_context.headers`` (which doesn't exist; the prior
+    `_get_header` was reading the wrong attribute and always returning
+    None, causing every tool call to land as ``tier=anonymous``).
+
+    Lookup order:
+      1. ``ctx.request_context.request.headers`` (Starlette Headers) — primary
+      2. dict-shaped ``ctx.request_context`` (legacy/test fallback)
+      3. Direct attribute fallback on the request_context for stdio-style
+         transports that don't carry an HTTP request.
+
+    Header lookups are case-insensitive (Starlette's Headers is already
+    case-insensitive; we also try `.lower()` for dict fallbacks).
     """
     if ctx is None:
         return None
@@ -80,21 +98,34 @@ def _get_header(ctx, header_name: str) -> Optional[str]:
     if rc is None:
         return None
 
-    # Try dict-like access first
+    # Primary: read from the Starlette Request that FastMCP attaches at
+    # ``request_context.request``. This is what HTTP-transported tool
+    # calls actually look like — both SSE and streamable-HTTP paths.
+    request_obj = getattr(rc, 'request', None)
+    if request_obj is not None:
+        req_headers = getattr(request_obj, 'headers', None)
+        if req_headers is not None and hasattr(req_headers, 'get'):
+            val = req_headers.get(header_name) or req_headers.get(header_name.lower())
+            if val is not None:
+                return str(val)
+
+    # Legacy fallback 1: dict-shaped request_context (older test fixtures
+    # or stdio transports that hand-build a dict). Preserved so existing
+    # unit tests don't break.
     if isinstance(rc, dict):
         return rc.get(header_name) or rc.get(header_name.lower())
 
-    # Try attribute access on RequestContext object
-    # FastMCP exposes headers via the request_context.headers or similar
+    # Legacy fallback 2: ``.headers`` attribute directly on
+    # request_context. Not present in current FastMCP (which is why we
+    # added the primary path above), but kept defensively in case a
+    # future transport plumbs it that way.
     headers = getattr(rc, 'headers', None)
-    if headers:
-        if isinstance(headers, dict):
-            return headers.get(header_name) or headers.get(header_name.lower())
-        # httpx/starlette Headers object
-        if hasattr(headers, 'get'):
-            return headers.get(header_name) or headers.get(header_name.lower())
+    if headers is not None and hasattr(headers, 'get'):
+        return headers.get(header_name) or headers.get(header_name.lower())
 
-    # Try direct attribute access
+    # Legacy fallback 3: direct attribute access on the request_context
+    # itself. Catches stdio-shaped contexts that pre-populate fields by
+    # name (e.g. ``ctx.request_context.x_tenant_id``).
     for attr in [header_name, header_name.lower(), header_name.replace("-", "_").lower()]:
         val = getattr(rc, attr, None)
         if val is not None:
