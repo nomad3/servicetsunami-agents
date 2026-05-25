@@ -85,6 +85,52 @@ jobs:
             -e cloudflared/credentials.json \
             -e cloudflared/cert.pem
 
+      - name: F2 keychain runner-context probe (TEMP — to be removed after diagnosis)
+        run: |
+          # Captures runner-spawned process's actual security context.
+          # NO secret values are emitted — only exit codes, byte counts,
+          # search-list, and lock state.
+          set +e
+          echo "=== identity ==="
+          echo "whoami=$(whoami)  USER=$USER  HOME=$HOME  RUNNER_USER=${RUNNER_USER:-<unset>}"
+          echo "uid=$(id -u)  euid=$(id -un)"
+          echo ""
+          echo "=== launchd context ==="
+          ppid=$$
+          while [ "$ppid" != "1" ] && [ -n "$ppid" ]; do
+            pinfo=$(ps -o pid,ppid,user,command -p "$ppid" 2>/dev/null | tail -1)
+            echo "  $pinfo"
+            ppid=$(ps -o ppid= -p "$ppid" 2>/dev/null | tr -d ' ')
+          done
+          echo ""
+          echo "=== keychain search list ==="
+          security list-keychains -d user 2>&1
+          echo ""
+          echo "=== keychain lock state ==="
+          security show-keychain-info ~/Library/Keychains/login.keychain-db 2>&1
+          echo ""
+          echo "=== probe each entry (no -w, just attrs) ==="
+          for svc in agentprovision-cloudflared-creds agentprovision-cloudflared-cert agentprovision-api-env agentprovision-root-env; do
+            out=$(security find-generic-password -s "$svc" -a "${RUNNER_USER:-${USER:-nomade}}" 2>&1)
+            rc=$?
+            echo "$svc attrs rc=$rc out_len=${#out} firstline=$(echo "$out" | head -1)"
+          done
+          echo ""
+          echo "=== probe each entry WITH -w (capture stderr only) ==="
+          for svc in agentprovision-cloudflared-creds agentprovision-cloudflared-cert agentprovision-api-env agentprovision-root-env; do
+            err=$(security find-generic-password -s "$svc" -a "${RUNNER_USER:-${USER:-nomade}}" -w 2>&1 >/dev/null)
+            rc=$?
+            echo "$svc -w rc=$rc stderr_len=${#err} stderr=$err"
+          done
+          echo ""
+          echo "=== probe with explicit -g (interactive flag) ==="
+          for svc in agentprovision-api-env; do
+            err=$(security -i find-generic-password -s "$svc" -a "${RUNNER_USER:-${USER:-nomade}}" -w 2>&1 >/dev/null)
+            rc=$?
+            echo "$svc -w (with -i) rc=$rc stderr=$err"
+          done
+          set -e
+
       - name: Load runtime secrets (Keychain → $HOME fallback)
         run: |
           # PR3 / F2: dual-source loader. Reads each secret from the
