@@ -146,7 +146,18 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
             task_input.tenant_id, exc,
         )
 
-    cmd = ["opencode", "run", "-p", prompt, "-y", "--output-format", "json"]
+    # OpenCode 1.15.x CLI signature (verified against `opencode run --help`
+    # against the v1.15.5 pinned in code-worker/Dockerfile):
+    #   - message is a POSITIONAL (`opencode run [message..]`), NOT `-p`.
+    #     `-p` is now `--password` (basic auth). Pre-1.15 the prompt was a
+    #     flag; the code wasn't updated when the Dockerfile bumped to 1.15
+    #     on 2026-05-18 so every fallback invocation was setting the
+    #     basic-auth password to the user's message + then running with
+    #     no message → CLI printed `--help` text + exited.
+    #   - `-y` is not a flag in any 1.15 version (was ignored harmlessly).
+    #   - `--output-format json` was renamed to `--format json`
+    #     (with `default` | `json` as the choices).
+    cmd = ["opencode", "run", prompt, "--format", "json"]
     result: subprocess.CompletedProcess | None = None
     try:
         result = subprocess.run(
@@ -161,9 +172,31 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
                 error=f"OpenCode CLI failed: {err}",
             )
 
-        data = json.loads(result.stdout)
+        # OpenCode 1.15.x `--format json` emits an event stream (one JSON
+        # object per line), not a single response object. Text content
+        # arrives as events of `type=="text"` with the assistant chunk
+        # under `part.text`. Earlier pre-1.15 versions returned a single
+        # `{"response": "..."}` dict; the parser used `data["response"]`
+        # which silently became empty on every 1.15+ invocation after
+        # the Dockerfile bump on 2026-05-18.
+        chunks: list[str] = []
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                # Non-JSON line (rare; defensive). Skip rather than abort
+                # the whole turn.
+                continue
+            if event.get("type") != "text":
+                continue
+            text_chunk = (event.get("part") or {}).get("text")
+            if text_chunk:
+                chunks.append(text_chunk)
         return ChatCliResult(
-            response_text=data.get("response", ""),
+            response_text="".join(chunks),
             success=True,
             metadata={"platform": "opencode_cli", "model": OPENCODE_MODEL},
         )
