@@ -104,6 +104,9 @@ Two follow-ups to #701: (a) added `libsndfile1` + `ffmpeg` to the code-worker Do
 ### #703 — fix(whatsapp): stop misclassifying every text inbound as audio
 The actual root-cause fix for the transcription chaos: `_detect_inbound_media` used bare `if audio:` against a protobuf3 sub-message, which is truthy-default. Every text inbound was being classified as audio + getting the fallback instruction echoed back. Switched to a substantive-presence check (`mimetype` OR `fileLength` OR `mediaKey` OR `directPath`).
 
+### #711 — fix(opencode): align CLI argv + JSON parser with v1.15.x (last-resort fallback restored)
+Production WhatsApp incident 2026-05-24: Luna fell back to OpenCode (last-resort floor when all cloud CLIs are quota-out) for Simon's "create devops subagents" request and got the CLI's `--help` text back as the assistant response. Root cause: Dockerfile bumped `opencode-ai` 1.0.107 → 1.15.5 on 2026-05-18, but `cli_executors/opencode.py` was never updated. Fixed three flag bugs (`-p prompt` → positional with `--` separator; `-y` removed; `--output-format json` → `--format json`) and rewrote the JSON parser as an event-stream walker (1.15.x emits one JSON object per line, not a single response dict). Also surfaces `type=="error"` events as success=False (OpenCode returns exit 0 even on hard errors — only the stream tells you it failed) and treats empty-output as failure per GLM precedent. 6 unit tests pin the invariants.
+
 ## What's not here
 
 Larger plan-bearing work — each has its own dedicated doc:

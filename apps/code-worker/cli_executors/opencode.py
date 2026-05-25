@@ -146,7 +146,23 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
             task_input.tenant_id, exc,
         )
 
-    cmd = ["opencode", "run", "-p", prompt, "-y", "--output-format", "json"]
+    # OpenCode 1.15.x CLI signature (verified against `opencode run --help`
+    # against the v1.15.5 pinned in code-worker/Dockerfile):
+    #   - message is a POSITIONAL (`opencode run [message..]`), NOT `-p`.
+    #     `-p` is now `--password` (basic auth). Pre-1.15 the prompt was a
+    #     flag; the code wasn't updated when the Dockerfile bumped to 1.15
+    #     on 2026-05-18 so every fallback invocation was setting the
+    #     basic-auth password to the user's message + then running with
+    #     no message → CLI printed `--help` text + exited.
+    #   - `-y` is not a flag in any 1.15 version (was ignored harmlessly).
+    #   - `--output-format json` was renamed to `--format json`
+    #     (with `default` | `json` as the choices).
+    #   - `--` separates flags from the variadic positional. Without it,
+    #     a user prompt like "--print-logs and explain X" would parse
+    #     the leading token as a flag and the rest as a different
+    #     positional, same class of silent-corruption bug as the
+    #     original `-p` mistake.
+    cmd = ["opencode", "run", "--format", "json", "--", prompt]
     result: subprocess.CompletedProcess | None = None
     try:
         result = subprocess.run(
@@ -161,9 +177,74 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
                 error=f"OpenCode CLI failed: {err}",
             )
 
-        data = json.loads(result.stdout)
+        # OpenCode 1.15.x `--format json` emits an event stream (one JSON
+        # object per line), not a single response object. Text content
+        # arrives as events of `type=="text"` with the assistant chunk
+        # under `part.text`. Earlier pre-1.15 versions returned a single
+        # `{"response": "..."}` dict; the parser used `data["response"]`
+        # which silently became empty on every 1.15+ invocation after
+        # the Dockerfile bump on 2026-05-18.
+        #
+        # IMPORTANT: OpenCode 1.15.x can return exit 0 even on hard
+        # error (e.g. "Model not found"). The error surfaces ONLY as a
+        # `type=="error"` event in the stream. Without the early-return
+        # below, the parser would silently return success=True with
+        # empty text — the exact failure mode that bit Simon in
+        # WhatsApp tonight. Verified shape against
+        # `opencode run --model bogus/nonexistent --format json`:
+        #   {"type":"error","error":{"name":"UnknownError",
+        #     "data":{"message":"Model not found: ..."}}}
+        chunks: list[str] = []
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                # Non-JSON line (rare; defensive). Skip rather than abort
+                # the whole turn.
+                continue
+            event_type = event.get("type")
+            if event_type == "error":
+                err_obj = event.get("error") or {}
+                err_msg = (
+                    (err_obj.get("data") or {}).get("message")
+                    or err_obj.get("name")
+                    or "unknown opencode error"
+                )
+                return ChatCliResult(
+                    response_text="".join(chunks),
+                    success=False,
+                    error=f"OpenCode event-stream error: {err_msg}",
+                    metadata={"platform": "opencode_cli", "model": OPENCODE_MODEL},
+                )
+            if event_type != "text":
+                continue
+            text_chunk = (event.get("part") or {}).get("text")
+            if text_chunk:
+                chunks.append(text_chunk)
+
+        # Empty-result-is-failure (per GLM precedent — see
+        # cli_executors/glm.py "GLM produced no output"). The CLI is the
+        # last-resort floor; a tool-only turn here is almost certainly a
+        # bug (legitimate tool-only turns belong on the server path,
+        # which has session-context continuity). Surfacing this as
+        # success=False prevents the silent-empty WhatsApp class.
+        if not chunks:
+            logger.warning(
+                "OpenCode CLI returned no text events; stdout=%d bytes",
+                len(result.stdout),
+            )
+            return ChatCliResult(
+                response_text="",
+                success=False,
+                error="OpenCode produced no text output",
+                metadata={"platform": "opencode_cli", "model": OPENCODE_MODEL},
+            )
+
         return ChatCliResult(
-            response_text=data.get("response", ""),
+            response_text="".join(chunks),
             success=True,
             metadata={"platform": "opencode_cli", "model": OPENCODE_MODEL},
         )
@@ -175,6 +256,16 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
         # pass. Approximate from stdout size (~256B per "chunk-ish unit")
         # so the watermark gate's delta logic still kicks in for big
         # outputs without spuriously firing on tiny ones.
+        #
+        # CALIBRATION DRIFT (post 1.15 bump 2026-05-18 + the parser fix
+        # in this PR): the heuristic was tuned against the pre-1.15
+        # single-response JSON shape (~2KB max). Post-fix, stdout is an
+        # event stream with session-id + step metadata padded onto every
+        # event (a "hello" reply easily emits 4-8KB). The 256B/chunk
+        # divisor will now overshoot deltas vs the SessionEventEmitter
+        # baseline. Not load-bearing — the watermark gate fires later
+        # than ideal, not silently skips — but worth re-tuning when
+        # someone touches this next.
         if tenant_home_path:
             _stdout_len = 0
             try:
