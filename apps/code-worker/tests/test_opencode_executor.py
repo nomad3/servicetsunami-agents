@@ -32,11 +32,18 @@ import pytest
 from cli_executors import opencode as oc
 
 
-def _task_input(message: str = "hello world", tenant_id: str = "tenant-abc"):
+def _task_input(
+    message: str = "hello world",
+    tenant_id: str = "tenant-abc",
+    instruction_md_content: str = "",
+):
     return SimpleNamespace(
         message=message,
         tenant_id=tenant_id,
         mcp_config=None,
+        # Default empty matches the pre-2026-05-25 behavior for the
+        # existing tests; new persona-prepend tests pass a non-empty value.
+        instruction_md_content=instruction_md_content,
     )
 
 
@@ -306,5 +313,107 @@ def test_event_stream_parser_concatenates_text_chunks(tmp_path, monkeypatch):
     assert captured_result["response_text"] == "Hello, world!"
     assert captured_result["success"] is True
     assert captured_result["metadata"]["platform"] == "opencode_cli"
+
+
+# ── Persona-leak regression guard (2026-05-25 fix) ─────────────────────
+#
+# Before this fix, both opencode paths did `prompt = task_input.message`
+# without prepending `task_input.instruction_md_content`. That made
+# Gemma 4 reply as "I'm OpenCode" instead of as the dispatched agent —
+# observed live on Luna's WhatsApp 2026-05-24. The fix mirrors the
+# codex + claude_code pattern: prepend the persona prompt with
+# "<persona>\n\n# User Request\n\n<message>".
+#
+# Both paths fixed together (server-path execute_opencode_chat + CLI
+# fallback _execute_opencode_chat_cli) — tests pin both.
+
+
+def test_cli_fallback_prepends_persona_to_prompt(tmp_path, monkeypatch):
+    """The CLI fallback path MUST prepend task_input.instruction_md_content
+    to the user message. Without it, Gemma 4 has no agent identity."""
+    captured: dict = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({
+                "type": "text",
+                "part": {"type": "text", "text": "ok"},
+            }) + "\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(oc.subprocess, "run", _fake_run)
+    fake_wf = MagicMock()
+    fake_wf.WORKSPACE = str(tmp_path)
+    fake_wf.ChatCliResult = SimpleNamespace
+    monkeypatch.setitem(__import__("sys").modules, "workflows", fake_wf)
+    monkeypatch.setattr(oc.cli_runtime, "tenant_home_dir", lambda tid: tmp_path)
+    monkeypatch.setattr(oc.cli_runtime, "resolve_cli_cwd", lambda task, fb: str(tmp_path))
+    monkeypatch.setattr(oc.tenant_home_quota, "maybe_enforce_quota", lambda *a, **kw: None)
+
+    persona = "You are Luna, an intelligent AI co-pilot."
+    user_msg = "Hi"
+    oc._execute_opencode_chat_cli(
+        _task_input(message=user_msg, instruction_md_content=persona),
+        str(tmp_path),
+    )
+
+    # Find the prompt positional in the argv (it's after `--`).
+    cmd = captured["cmd"]
+    assert "--" in cmd
+    prompt = cmd[cmd.index("--") + 1]
+    # Persona MUST appear BEFORE the user message.
+    assert persona in prompt, (
+        f"persona MUST be prepended to opencode prompt; got: {prompt!r}"
+    )
+    assert "# User Request" in prompt, (
+        f"User Request delimiter MUST appear between persona + msg; got: {prompt!r}"
+    )
+    # Order check: persona index < user msg index.
+    assert prompt.index(persona) < prompt.index(user_msg), (
+        f"persona MUST come before user message; got: {prompt!r}"
+    )
+
+
+def test_cli_fallback_skips_persona_prepend_when_empty(tmp_path, monkeypatch):
+    """When instruction_md_content is empty (e.g. raw chat without an
+    agent), opencode should NOT inject the persona block — the prompt
+    is just the user message. Mirrors codex/claude_code behavior."""
+    captured: dict = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({
+                "type": "text",
+                "part": {"type": "text", "text": "ok"},
+            }) + "\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(oc.subprocess, "run", _fake_run)
+    fake_wf = MagicMock()
+    fake_wf.WORKSPACE = str(tmp_path)
+    fake_wf.ChatCliResult = SimpleNamespace
+    monkeypatch.setitem(__import__("sys").modules, "workflows", fake_wf)
+    monkeypatch.setattr(oc.cli_runtime, "tenant_home_dir", lambda tid: tmp_path)
+    monkeypatch.setattr(oc.cli_runtime, "resolve_cli_cwd", lambda task, fb: str(tmp_path))
+    monkeypatch.setattr(oc.tenant_home_quota, "maybe_enforce_quota", lambda *a, **kw: None)
+
+    user_msg = "hi"
+    # Default _task_input has instruction_md_content="" — exercises the skip path.
+    oc._execute_opencode_chat_cli(_task_input(message=user_msg), str(tmp_path))
+
+    cmd = captured["cmd"]
+    assert "--" in cmd
+    prompt = cmd[cmd.index("--") + 1]
+    assert prompt == user_msg, (
+        f"empty persona MUST NOT prepend anything; got: {prompt!r}"
+    )
+    # User Request delimiter MUST NOT appear when no persona.
+    assert "# User Request" not in prompt
 
 

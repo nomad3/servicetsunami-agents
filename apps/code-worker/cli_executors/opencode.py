@@ -65,6 +65,17 @@ def execute_opencode_chat(task_input, session_dir: str):
 
         # Wrap message with tenant context if MCP is enabled
         prompt = task_input.message
+        # Prepend the agent's persona / instruction prompt — same shape
+        # codex + claude_code use (see cli_executors/codex.py + claude.py).
+        # Without this, opencode runs against bare Gemma 4 with no agent
+        # identity, which is why Luna replied as "I'm OpenCode" on
+        # WhatsApp 2026-05-24 instead of as Luna. Persona-leak class —
+        # see #677/#678 for the cloud-side fixes that this mirrors.
+        if task_input.instruction_md_content and task_input.instruction_md_content.strip():
+            prompt = (
+                f"{task_input.instruction_md_content.strip()}"
+                f"\n\n# User Request\n\n{prompt}"
+            )
         if task_input.mcp_config:
             # Inject tenant_id so MCP tools know which data to access
             context_prefix = (
@@ -121,6 +132,16 @@ def _execute_opencode_chat_cli(task_input, session_dir: str):
     import subprocess
 
     prompt = task_input.message
+    # Prepend the agent's persona / instruction prompt — mirrors the
+    # server-path branch above and the codex / claude_code pattern.
+    # Persona-leak fix (2026-05-25): without this, Gemma 4 has no
+    # agent identity and replies as itself ("I'm OpenCode") instead of
+    # as Luna / whichever agent the dispatch is for.
+    if task_input.instruction_md_content and task_input.instruction_md_content.strip():
+        prompt = (
+            f"{task_input.instruction_md_content.strip()}"
+            f"\n\n# User Request\n\n{prompt}"
+        )
     if task_input.mcp_config:
         context_prefix = f"[Context: tenant_id={task_input.tenant_id}]\n\n"
         prompt = context_prefix + prompt
