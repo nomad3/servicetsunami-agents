@@ -78,10 +78,26 @@ for entry in "${ENTRIES[@]}"; do
 
   # -U updates if the entry exists; otherwise creates.
   # -s service, -a account, -w password value.
+  # -A grants access to ANY app on this user account WITHOUT a prompt.
+  #
+  # Why -A: without it, the keychain ACL defaults to "creator-binary
+  # only; anything else needs user prompt". The GH Actions runner's
+  # bash subprocess is not the creator → security would prompt → no
+  # TTY on the runner → `security find-generic-password -w` exits 36
+  # (errSecInteractionNotAllowed) with empty output. Verified live
+  # by the F2 diagnostic v2 (PR #719, deploy 26420631499):
+  # entry exists + attrs readable + password read silently refused.
+  #
+  # Trade-off: any app running as $ACCOUNT can read these secrets.
+  # On the dedicated runner Mac this is equivalent to the security
+  # level of the $HOME fallback (any nomade process can read both).
+  # Spec already accepts this trade-off per the comment below.
+  #
   # Note: payload briefly visible in argv to ps. Acceptable on the
   # runner Mac (single-user); spec already accepts this trade-off.
   security add-generic-password \
     -U \
+    -A \
     -s "$svc" \
     -a "$ACCOUNT" \
     -w "$payload"
