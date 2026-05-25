@@ -85,6 +85,37 @@ jobs:
             -e cloudflared/credentials.json \
             -e cloudflared/cert.pem
 
+      - name: Diagnose runner security context (F2 keychain investigation)
+        # One-shot probe. The F2 PR3 keychain entries were created
+        # under the operator's interactive shell on 2026-05-24 + verified
+        # readable from `launchctl asuser`. But the deploy workflow still
+        # gets `[fallback]` for all 4 secrets in the next step. Logs the
+        # runner subprocess's actual context — user, keychain list,
+        # default keychain, and a non-prompting read attempt against
+        # one of the F2 entries — so we know which knob to turn.
+        # Drops with the F2 cleanup-commit once the cause is fixed.
+        run: |
+          set +e
+          echo "=== whoami / id ==="
+          whoami
+          id
+          echo ""
+          echo "=== default keychain (user domain) ==="
+          security default-keychain -d user 2>&1 || true
+          echo ""
+          echo "=== keychain search list (user domain) ==="
+          security list-keychains -d user 2>&1 || true
+          echo ""
+          echo "=== try a read against agentprovision-api-env (non-prompting) ==="
+          # -g prints attrs (no secret); a successful read here means the
+          # ACL allows this caller; "user interaction is not allowed"
+          # means the ACL would prompt + the runner can't display.
+          security find-generic-password -s agentprovision-api-env -a nomade -g 2>&1 | head -5
+          echo "(exit=$?)"
+          echo ""
+          echo "=== diagnostic complete (this step never fails the deploy) ==="
+          true
+
       - name: Load runtime secrets (Keychain → $HOME fallback)
         run: |
           # PR3 / F2: dual-source loader. Reads each secret from the
