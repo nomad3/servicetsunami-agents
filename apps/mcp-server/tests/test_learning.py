@@ -24,8 +24,10 @@ from src.mcp_tools.learning import (
     MediaTooLong,
     ReviewTimeout,
     ReviewerNotProvisioned,
+    SlugExhausted,
     dispatch_skill_review,
     extract_media,
+    install_skill,
     run_synthetic_test,
     synthesize_skill_draft,
     transcribe_url,
@@ -258,3 +260,98 @@ async def test_run_synthetic_test_execution_error():
     assert r["passed"] is False
     assert r["actual_output"] is None
     assert "syntax error" in r["error"]
+
+
+# ── T2.6: install_skill ────────────────────────────────────────────────
+# All three tests patch ``_install_via_api`` directly — the api endpoint
+# (POST /api/v1/skills/install-learned) is a T4.4e deliverable and won't
+# exist when T2.6 ships. The unit-under-test here is the provenance
+# injection + slug-collision retry policy, not the live wire.
+async def test_install_skill_injects_provenance():
+    """Provenance block (spec §1.6) gets spliced into the frontmatter
+    before the install POST. Asserts both the marker key and a couple of
+    the spec-required leaf values made it through the regex injection."""
+    md_in = "---\nname: Test\nengine: markdown\n---\nbody"
+
+    async def _fake(**kw):
+        return {"skill_id": "s1", "path": "/x/test/skill.md"}
+
+    with patch("src.mcp_tools.learning._install_via_api", side_effect=_fake) as ins:
+        await install_skill(
+            md_in,
+            "test",
+            "tenant1",
+            source_url="https://x.com/v",
+            reviewer_agent_id="755796a4-4cc4-4d1c-99e5-dd9c4f7d0f22",
+            transcript_sha256="abc" * 21 + "abc",
+            learned_by_agent_id="cfb6dd14-aaaa-bbbb-cccc-ddddeeeeffff",
+        )
+    sent_md = ins.call_args.kwargs["skill_md"]
+    assert "provenance:" in sent_md
+    assert "source_url: https://x.com/v" in sent_md
+    assert "transcript_sha256:" in sent_md
+    assert "reviewer_agent_id: 755796a4" in sent_md
+    assert "learned_by_agent_id: cfb6dd14" in sent_md
+    # Provenance must land inside the frontmatter, not appended past the
+    # closing ``---``; the install path's downstream YAML parser would
+    # otherwise silently lose the block.
+    assert sent_md.index("provenance:") < sent_md.index("\n---\n")
+
+
+async def test_install_skill_slug_conflict_retries():
+    """Two consecutive 409s force the loop to retry with ``-v2`` then
+    ``-v3``; the third call succeeds and the returned path reflects the
+    suffixed slug. Verifies both the retry policy and that the suffix is
+    threaded through to ``_install_via_api`` (not silently dropped)."""
+    seen_slugs: list[str] = []
+
+    async def _fake(**kw):
+        slug = kw["slug"]
+        seen_slugs.append(slug)
+        if len(seen_slugs) < 3:
+            raise httpx.HTTPStatusError(
+                "409",
+                request=MagicMock(),
+                response=MagicMock(status_code=409),
+            )
+        return {"skill_id": "s", "path": f"/x/{slug}/skill.md"}
+
+    with patch("src.mcp_tools.learning._install_via_api", side_effect=_fake):
+        r = await install_skill(
+            "---\nname: X\nengine: markdown\n---\n",
+            "test",
+            "tenant1",
+            "https://x.com/v",
+            "755796a4-4cc4-4d1c-99e5-dd9c4f7d0f22",
+            "abc" * 21 + "abc",
+            "cfb6dd14-aaaa-bbbb-cccc-ddddeeeeffff",
+        )
+    assert seen_slugs == ["test", "test-v2", "test-v3"]
+    assert r["path"].endswith("/test-v3/skill.md")
+
+
+async def test_install_skill_exhausts_slug_retries():
+    """Five consecutive 409s — the bare slug plus ``-v2``..``-v5`` — must
+    raise ``SlugExhausted`` rather than looping forever or surfacing a
+    generic httpx error. The shim maps SlugExhausted → 409 (see status
+    table at top of learning.py) so the workflow can branch on it."""
+    async def _fake(**kw):
+        raise httpx.HTTPStatusError(
+            "409",
+            request=MagicMock(),
+            response=MagicMock(status_code=409),
+        )
+
+    with patch("src.mcp_tools.learning._install_via_api", side_effect=_fake) as ins:
+        with pytest.raises(SlugExhausted):
+            await install_skill(
+                "---\nname: X\nengine: markdown\n---\n",
+                "test",
+                "tenant1",
+                "https://x.com/v",
+                "755796a4-4cc4-4d1c-99e5-dd9c4f7d0f22",
+                "abc" * 21 + "abc",
+                "cfb6dd14-aaaa-bbbb-cccc-ddddeeeeffff",
+            )
+    # Bare slug + 4 suffixed attempts = 5 calls total (SLUG_MAX_RETRIES).
+    assert ins.call_count == 5

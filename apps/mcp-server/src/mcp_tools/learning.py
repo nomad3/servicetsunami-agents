@@ -35,6 +35,7 @@ import json
 import os
 import re
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable, Dict
 
@@ -647,6 +648,95 @@ async def run_synthetic_test(
     }
 
 
+# ── T2.6: install_skill ────────────────────────────────────────────────
+# Persists an approved draft into the tenant skills library by POSTing to
+# the api's internal install-learned endpoint (T4.4e — not yet shipped).
+# Tests mock ``_install_via_api`` so this lands independently of T4.4e.
+#
+# Responsibilities split:
+#   1. ``_inject_provenance`` rewrites the draft's frontmatter to embed
+#      the spec §1.6 ``provenance:`` block (source_url, synthesis_date,
+#      reviewer_agent_id, transcript_sha256, learned_by_agent_id) so the
+#      installed skill carries a verifiable lineage record on disk.
+#   2. ``_install_via_api`` POSTs the rewritten skill_md + slug + tenant
+#      to the api. The api owns the transactional DB+FS write — this
+#      module never touches the skills library directly (kept symmetric
+#      with the other T2.x wrappers).
+#   3. ``install_skill`` itself wraps the install call in a slug-conflict
+#      retry loop: first attempt uses the bare slug; subsequent attempts
+#      append ``-v2``, ``-v3``, … up to ``SLUG_MAX_RETRIES`` (5). Only 409
+#      responses trigger a retry — any other ``HTTPStatusError`` bubbles
+#      up. Exhausting the retries raises ``SlugExhausted`` (mapped to 409
+#      by the HTTP shim per the spec table at top of module).
+SLUG_MAX_RETRIES = 5
+
+
+def _inject_provenance(
+    skill_md: str,
+    *,
+    source_url: str,
+    reviewer_agent_id: str,
+    transcript_sha256: str,
+    learned_by_agent_id: str,
+) -> str:
+    """Insert a ``provenance:`` block into the draft's frontmatter (spec §1.6).
+
+    The block is spliced in immediately after the opening ``---\\n`` of the
+    frontmatter via a one-shot regex (``count=1``) so we don't accidentally
+    duplicate it if the body happens to contain another ``---`` line. The
+    ``synthesis_date`` is captured at install-time (UTC ISO8601, second
+    precision) because that's when the draft becomes durable — the upstream
+    transcript may be older, and downstream tooling that diffs synthesis
+    runs needs the install timestamp, not the source media timestamp.
+    """
+    iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    block = (
+        "provenance:\n"
+        f"  source_url: {source_url}\n"
+        f'  synthesis_date: "{iso}"\n'
+        f"  reviewer_agent_id: {reviewer_agent_id}\n"
+        f"  transcript_sha256: {transcript_sha256}\n"
+        f"  learned_by_agent_id: {learned_by_agent_id}\n"
+    )
+    return re.sub(r"^(---\n)", f"\\1{block}", skill_md, count=1)
+
+
+async def _install_via_api(
+    skill_md: str,
+    slug: str,
+    tenant_id: str,
+    learned_by_agent_id: str,
+    source_url: str,
+) -> dict:
+    """POST the rewritten draft to the api's install-learned endpoint.
+
+    Endpoint (``POST /api/v1/skills/install-learned``) is T4.4e — it owns
+    the transactional DB insert into ``library_skills`` + filesystem write
+    to ``_tenant/<uuid>/<slug>/skill.md`` + ``library_revisions`` audit row
+    (actor = ``learned_by_agent_id``, reason = ``learned from <source_url>``).
+    On unique-constraint violation (slug already taken) the endpoint returns
+    HTTP 409 so the caller can re-attempt with a suffixed slug.
+
+    Split out as its own helper so unit tests can patch the network hop
+    without spinning up the not-yet-shipped endpoint; T3.x's activity
+    wrapper layer adds retry/timeout policy on top.
+    """
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            f"{_API_BASE}/api/v1/skills/install-learned",
+            json={
+                "skill_md": skill_md,
+                "slug": slug,
+                "tenant_id": tenant_id,
+                "actor_user_id": learned_by_agent_id,
+                "reason": f"learned from {source_url}",
+            },
+            headers={"X-Internal-Key": _API_INTERNAL_KEY},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
 async def install_skill(
     skill_md: str,
     slug: str,
@@ -656,8 +746,43 @@ async def install_skill(
     transcript_sha256: str,
     learned_by_agent_id: str,
 ) -> dict:
-    """T2.6 — persist an approved draft into the tenant skills library."""
-    raise NotImplementedError("T2.6")
+    """T2.6 — persist an approved draft into the tenant skills library.
+
+    Injects the provenance frontmatter block (spec §1.6) into the draft,
+    then attempts to install via the api endpoint. On a slug collision
+    (HTTP 409) the loop appends ``-v2``, ``-v3``, … and re-attempts up to
+    ``SLUG_MAX_RETRIES`` (5) times before raising ``SlugExhausted``. Any
+    non-409 ``HTTPStatusError`` propagates unchanged so the workflow can
+    surface the underlying api failure with its original status code.
+
+    Returns whatever the api endpoint returned verbatim (typically
+    ``{"skill_id": str, "path": str}``); the workflow uses ``skill_id``
+    for the subsequent ``diffuse_learning`` call (T2.7).
+    """
+    md = _inject_provenance(
+        skill_md,
+        source_url=source_url,
+        reviewer_agent_id=reviewer_agent_id,
+        transcript_sha256=transcript_sha256,
+        learned_by_agent_id=learned_by_agent_id,
+    )
+    for attempt in range(1, SLUG_MAX_RETRIES + 1):
+        candidate = slug if attempt == 1 else f"{slug}-v{attempt}"
+        try:
+            return await _install_via_api(
+                skill_md=md,
+                slug=candidate,
+                tenant_id=tenant_id,
+                learned_by_agent_id=learned_by_agent_id,
+                source_url=source_url,
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 409:
+                raise
+            # 409 → slug already taken, try the next ``-vN`` suffix.
+    raise SlugExhausted(
+        f"could not allocate slug for {slug!r} after {SLUG_MAX_RETRIES} attempts"
+    )
 
 
 async def diffuse_learning(
