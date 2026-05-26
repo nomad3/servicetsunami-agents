@@ -284,6 +284,10 @@ These don't change the architecture but need decisions during writing-plans:
 - Phase 2: `diffuse_learning` retry sweep — background job that re-attempts KG observation for skills where `diffuse_learning` soft-failed at install time
 - Phase 2: `alpha unlearn <skill_id>` — uses the `provenance:` frontmatter to safely remove a learned skill + its KG observation + revoke from agents that picked it up via diffusion
 - Phase 2: bundled-promote flow — operator-gated path to migrate a high-value tenant-learned skill into `_bundled/` (today, learned skills are always tenant-scoped per §1.1 install_skill contract)
+- **Phase 2: Social-network authentication integration** — current MVP handles public videos only; private/unlisted/age-gated content falls back to WhatsApp attachment.
+  - **YouTube OAuth** is the cheap, ToS-clean follow-up: wire YouTube Data API via the existing `OAUTH_PROVIDERS` pattern (`apps/api/app/api/v1/oauth.py:48`). Opens private/unlisted/age-restricted YouTube content. Estimated 1-2 day spec + impl.
+  - **Instagram auth** is a feasibility study, NOT a guaranteed ship. Meta Graph API only exposes your own business account's media at any OAuth scope; arbitrary reel access requires session-cookie scraping which conflicts with Meta ToS (same risk pattern as `higgsfield_tos_multitenant_blocker`). Defer until we've actually validated the use case justifies the ToS exposure.
+  - Both get their own design pass; not folded into this spec at the user-review gate.
 - Future: real-time progress streaming via SSE
 - Future: `luna learn from documentation` (reusable `diffuse_learning` primitive)
 
