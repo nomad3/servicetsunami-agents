@@ -54,6 +54,7 @@ from app.db.session import SessionLocal
 from app.models.channel_account import ChannelAccount
 from app.models.channel_event import ChannelEvent
 from app.models.chat import ChatSession
+from app.services.url_intent_router import extract_learning_url
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,15 @@ def _detect_inbound_media(msg, text: str) -> tuple[Optional[str], Optional[str],
     if document and getattr(document, "mimetype", None):
         caption = getattr(document, "title", None) or getattr(document, "fileName", None) or text
         return "document", document.mimetype, caption
+
+    # T4.2 — text-only message may contain a learning URL (YouTube / IG).
+    # When matched, surface as a new ``learning_url`` tuple variant so the
+    # caller can route to LearningService.dispatch instead of the normal
+    # chat/agent pipeline. mime slot carries the URL itself; caption keeps
+    # the original message text so Luna's ack can quote / contextualize it.
+    learning_url = extract_learning_url(text)
+    if learning_url:
+        return "learning_url", learning_url, text
 
     return None, None, text
 
