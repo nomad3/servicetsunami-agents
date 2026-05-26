@@ -396,9 +396,125 @@ async def act_log_test_fail(*args, **kwargs) -> dict:
     return {"ok": True, "data": None, "error": None}
 
 
+# ---------------------------------------------------------------------------
+# T3.5 — Completion notification (spec §2 step 8)
+# ---------------------------------------------------------------------------
+# Writes a ChatMessage(role="agent", context.kind="learn_complete") to the
+# session that originated the learning intent. The existing WhatsApp
+# message-out plumbing (chat → outbound) keys on agent-role rows for that
+# session and surfaces the content to the user. The activity is a thin
+# DB-write boundary: keeping it as an activity (not a workflow step) means
+# Temporal handles the retry on transient DB errors without polluting
+# workflow state.
+#
+# The content string is rendered here so the workflow stays free of
+# user-facing copy (single source of truth, easier to localise later).
+# spec §3 failure rows are already rendered by the workflow into
+# ``result["message"]`` before this activity is called — for failure
+# envelopes we just forward that string verbatim. Success envelopes get
+# the canonical "learned X. capabilities: Y, Z. source: <url>" body.
+
+
+def _render_notify_body(result: dict) -> str:
+    """Render the user-facing message body from a workflow ``result`` dict.
+
+    Success envelope (spec §2 step 8):
+        {status: "success", skill_name, capabilities, source_url, ...}
+    Failure envelopes (spec §3 rows):
+        {status: "<...>_failed" | "quarantined" | ..., message: "<copy>"}
+
+    Failure envelopes already carry the spec §3 user-facing copy in
+    ``message`` — forward it verbatim. Unknown shapes fall back to a
+    generic "learning finished" string so the user always gets *some*
+    closing notification (the workflow shouldn't silently drop the user).
+    """
+    status = (result or {}).get("status")
+    if status == "success":
+        name = result.get("skill_name") or "<unnamed>"
+        caps = [c for c in (result.get("capabilities") or []) if c]
+        caps_str = ", ".join(caps) if caps else "(none)"
+        src = result.get("source_url") or "<unknown>"
+        body = f"✓ learned '{name}'. Capabilities: {caps_str}. Source: {src}"
+        if result.get("resumed"):
+            body = f"{body} (resumed)"
+        if result.get("diffuse_cached"):
+            body = f"{body} (diffuse pending)"
+        return body
+    msg = (result or {}).get("message")
+    if msg:
+        return str(msg)
+    return f"learning finished: {status or 'unknown'}"
+
+
 @activity.defn
-async def act_notify_session(*args, **kwargs) -> dict:
-    raise NotImplementedError("T3.5")
+async def act_notify_session(session_id: str, result: dict) -> dict:
+    """Write a ChatMessage(role="agent", context.kind="learn_complete") row.
+
+    Returns the standard envelope ``{ok, data, error}``:
+      * success → ``{ok: True, data: {message_id, content}}``
+      * session not found → ``{ok: False, error: {type: "SessionNotFound", ...}}``
+      * unexpected DB error → ``{ok: False, error: {type: "NotifyWriteFailed", ...}}``
+
+    Failures here MUST NOT raise — the workflow already considers the
+    learning result final at this point. A notify failure would only
+    cost the user the closing message, not invalidate the install.
+    """
+    import uuid as _uuid
+
+    # Late imports keep the activity module importable in the Temporal
+    # workflow sandbox (which forbids eager DB/ORM imports — see §0g).
+    from sqlalchemy.orm import Session
+
+    from app.db.session import SessionLocal
+    from app.models.chat import ChatMessage, ChatSession
+
+    body = _render_notify_body(result or {})
+    context = {"kind": "learn_complete", **(result or {})}
+
+    db: Session = SessionLocal()
+    try:
+        try:
+            sess_uuid = _uuid.UUID(str(session_id))
+        except (ValueError, TypeError) as e:
+            return {
+                "ok": False,
+                "data": None,
+                "error": {"type": "InvalidSessionId", "message": str(e)},
+            }
+        session = db.query(ChatSession).filter(ChatSession.id == sess_uuid).first()
+        if session is None:
+            return {
+                "ok": False,
+                "data": None,
+                "error": {
+                    "type": "SessionNotFound",
+                    "message": f"session_id={session_id} not found",
+                },
+            }
+        try:
+            message = ChatMessage(
+                session_id=session.id,
+                role="agent",
+                content=body,
+                context=context,
+            )
+            db.add(message)
+            db.commit()
+            db.refresh(message)
+        except Exception as e:  # noqa: BLE001 — envelope contract per docstring
+            db.rollback()
+            return {
+                "ok": False,
+                "data": None,
+                "error": {"type": "NotifyWriteFailed", "message": str(e)},
+            }
+        return {
+            "ok": True,
+            "data": {"message_id": str(message.id), "content": body},
+            "error": None,
+        }
+    finally:
+        db.close()
 
 
 @activity.defn

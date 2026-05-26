@@ -447,7 +447,8 @@ async def test_stub_activities_minimal_bodies(tmp_path, monkeypatch):
     audit = await act_log_test_fail()
     assert audit["ok"] is True
 
-    with pytest.raises(NotImplementedError):
-        await act_notify_session()
+    # act_notify_session got a real body in T3.5 — verified end-to-end in
+    # tests/test_learn_notify.py. Here we only assert it accepts the
+    # T3.2a call signature without raising NotImplementedError.
     with pytest.raises(NotImplementedError):
         await act_probe_attachment()
