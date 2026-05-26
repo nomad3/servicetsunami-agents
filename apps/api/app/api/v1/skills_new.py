@@ -1086,7 +1086,7 @@ def skill_md_body(skill_md: str) -> str:
     return parts[2].strip() if len(parts) >= 3 else ""
 
 
-@router.post("/library/execute-draft")
+@router.post("/execute-draft")
 def execute_draft_skill(
     payload: ExecuteDraftRequest,
     _auth: None = Depends(_verify_internal_key),
@@ -1179,7 +1179,7 @@ class InstallLearnedRequest(BaseModel):
     reason: Optional[str] = None
 
 
-@router.post("/library/install-learned")
+@router.post("/install-learned")
 def install_learned_skill(
     payload: InstallLearnedRequest,
     db: Session = Depends(get_db),

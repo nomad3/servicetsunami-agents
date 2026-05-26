@@ -27,7 +27,7 @@ def test_execute_draft_router_imports_clean():
     from app.api.v1 import skills_new
 
     paths = {r.path for r in skills_new.router.routes}
-    assert "/library/execute-draft" in paths
+    assert "/execute-draft" in paths
 
 
 def _build_client(monkeypatch):
@@ -70,7 +70,7 @@ _PY_SCRIPT = "def execute(inputs):\n    return {'doubled': inputs['n'] * 2}\n"
 def test_execute_draft_requires_internal_key(monkeypatch):
     client = _build_client(monkeypatch)
     r = client.post(
-        "/api/v1/skills/library/execute-draft",
+        "/api/v1/skills/execute-draft",
         json={"skill_md": _VALID_MD, "inputs": {"model": "HP-2030"}},
     )
     assert r.status_code == 401
@@ -79,7 +79,7 @@ def test_execute_draft_requires_internal_key(monkeypatch):
 def test_execute_draft_rejects_malformed_frontmatter(monkeypatch):
     client = _build_client(monkeypatch)
     r = client.post(
-        "/api/v1/skills/library/execute-draft",
+        "/api/v1/skills/execute-draft",
         json={"skill_md": "no frontmatter at all", "inputs": {}},
         headers={"X-Internal-Key": "test-key"},
     )
@@ -91,7 +91,7 @@ def test_execute_draft_rejects_malformed_frontmatter(monkeypatch):
 def test_execute_draft_markdown_returns_substituted_prompt(monkeypatch):
     client = _build_client(monkeypatch)
     r = client.post(
-        "/api/v1/skills/library/execute-draft",
+        "/api/v1/skills/execute-draft",
         json={"skill_md": _VALID_MD, "inputs": {"model": "HP-2030"}},
         headers={"X-Internal-Key": "test-key"},
     )
@@ -106,7 +106,7 @@ def test_execute_draft_markdown_returns_substituted_prompt(monkeypatch):
 def test_execute_draft_python_executes(monkeypatch):
     client = _build_client(monkeypatch)
     r = client.post(
-        "/api/v1/skills/library/execute-draft",
+        "/api/v1/skills/execute-draft",
         json={
             "skill_md": _VALID_PY,
             "script": _PY_SCRIPT,
