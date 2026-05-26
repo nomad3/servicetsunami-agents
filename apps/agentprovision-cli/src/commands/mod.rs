@@ -5,6 +5,7 @@ pub mod coalition;
 pub mod completions;
 pub mod goal;
 pub mod integration;
+pub mod learn;
 pub mod login;
 pub mod logout;
 pub mod memory;

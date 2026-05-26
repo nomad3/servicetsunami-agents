@@ -62,7 +62,7 @@ self_update = { version = "0.41", default-features = false, features = ["rustls"
 # feature unification means our request here gets those decompression
 # features too — but we list them explicitly so a future direct caller
 # from this crate (e.g. self_update internals) gets the same behaviour.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "brotli"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "brotli", "multipart"] }
 sha2 = "0.10"
 semver = "1"
 

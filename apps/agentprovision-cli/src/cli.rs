@@ -3,7 +3,7 @@
 use clap::{Parser, Subcommand};
 
 use crate::commands::{
-    agent, cancel, chat, coalition, completions, goal, integration, login, logout, memory,
+    agent, cancel, chat, coalition, completions, goal, integration, learn, login, logout, memory,
     quickstart, recall, recipes, remember, review, run, session, sessions, skill, status, tasks,
     upgrade, usage, watch, workflow, workspace,
 };
@@ -134,6 +134,16 @@ pub enum Command {
     /// Phase 2 (#179) companion to `alpha recall`.
     Remember(remember::RememberArgs),
 
+    /// Learn a new skill from a media URL or attachment. Dispatches
+    /// Luna's `LearnFromMediaWorkflow` — transcribes the source,
+    /// synthesizes a draft skill, runs reviewer/test gates, and (on
+    /// approval) installs the skill into the tenant library.
+    ///
+    /// Fire-and-forget by default; pass `--dry-run` to wait for the
+    /// workflow result inline (useful for synthesis-prompt golden
+    /// tests). See Luna Learn from Media plan for the full surface.
+    Learn(learn::LearnArgs),
+
     /// Dispatch and inspect multi-agent coalitions (incident
     /// investigations, plan/verify, research/synthesize, debate/
     /// resolve, propose/critique/revise). Backed by the existing
@@ -229,6 +239,7 @@ pub async fn dispatch(args: Cli, ctx: Context) -> anyhow::Result<()> {
         Command::Memory(cmd) => memory::dispatch(cmd, ctx).await,
         Command::Recall(a) => recall::run(a, ctx).await,
         Command::Remember(a) => remember::run(a, ctx).await,
+        Command::Learn(a) => learn::run(a, ctx).await,
         Command::Coalition(cmd) => coalition::dispatch(cmd, ctx).await,
         Command::Review(cmd) => review::dispatch(cmd, ctx).await,
         Command::Recipes(cmd) => recipes::run(recipes::RecipesArgs { command: cmd }, ctx).await,
