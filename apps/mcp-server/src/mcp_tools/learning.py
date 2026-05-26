@@ -32,9 +32,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Awaitable, Callable, Dict
+
+import httpx
+
+
+# ── Internal API client config ─────────────────────────────────────────
+# transcribe_url (T2.2) and the later T2.4/T2.5 wrappers all POST back to
+# the api process. We default the base URL to the in-cluster service name
+# so this works out-of-the-box in docker-compose; tests mock the helpers
+# above this layer so the env vars never matter under pytest. Key default
+# mirrors ``mcp_auth.INTERNAL_KEY`` so a missing env doesn't crash imports
+# (the dev key only opens internal-tier routes, not real tenant data).
+_API_BASE = os.environ.get("AGENTPROVISION_API_BASE", "http://api:8000")
+_API_INTERNAL_KEY = os.environ.get("MCP_API_KEY", "dev_mcp_key")
 
 
 # ── Filesystem layout ──────────────────────────────────────────────────
@@ -234,9 +248,45 @@ async def extract_media(url: str, max_duration_s: int = 900) -> dict:
     }
 
 
+async def _transcribe_bytes_async(audio_bytes: bytes) -> dict:
+    """POST audio bytes to the api's existing transcription endpoint.
+
+    Wraps the same code-path the web client uses (``POST
+    /api/v1/media/transcribe``); the api hands the bytes to the
+    ``TranscribeAudioWorkflow`` on the code-worker Temporal queue and
+    returns either an inline transcript or a ``{status: "pending",
+    job_id: ...}`` envelope for long-form audio. Either way we return
+    whatever the api returned verbatim — the workflow layer (T3.x)
+    decides how to handle the pending case.
+
+    Split out so unit tests can mock the network hop without mocking
+    httpx itself; T3.1's activity wrapper layers retry/timeout policy on
+    top of this.
+    """
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        files = {"file": ("audio.m4a", audio_bytes, "audio/mp4")}
+        response = await client.post(
+            f"{_API_BASE}/api/v1/media/transcribe",
+            files=files,
+            headers={"X-Internal-Key": _API_INTERNAL_KEY},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
 async def transcribe_url(audio_path: str) -> dict:
-    """T2.2 — transcribe a local audio file to text + segments."""
-    raise NotImplementedError("T2.2")
+    """T2.2 — transcribe a local audio file to text + segments.
+
+    Spec §1.1. Reads the file produced by ``extract_media`` and hands
+    the bytes to the api's existing transcription endpoint (which routes
+    through the code-worker whisper workflow). Raises ``FileNotFoundError``
+    if the path doesn't exist so the Temporal activity layer can surface
+    a precise error (rather than a generic httpx upload failure).
+    """
+    path = Path(audio_path)
+    if not path.exists():
+        raise FileNotFoundError(audio_path)
+    return await _transcribe_bytes_async(path.read_bytes())
 
 
 async def synthesize_skill_draft(

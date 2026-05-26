@@ -18,6 +18,7 @@ from src.mcp_tools.learning import (
     MediaPrivate,
     MediaTooLong,
     extract_media,
+    transcribe_url,
 )
 
 
@@ -87,3 +88,28 @@ async def test_extract_media_error_mapping(stderr, exc):
         run.side_effect = RuntimeError(stderr)
         with pytest.raises(exc):
             await extract_media("https://example.com/x")
+
+
+# ── T2.2: transcribe_url ───────────────────────────────────────────────
+async def test_transcribe_url_calls_existing_client(tmp_path):
+    audio = tmp_path / "x.m4a"
+    audio.write_bytes(b"\x00" * 100)
+    with patch("src.mcp_tools.learning._transcribe_bytes_async") as transcribe:
+        transcribe.return_value = {
+            "transcript": "hello",
+            "duration_ms": 1500,
+            "engine": "whisper",
+        }
+        result = await transcribe_url(str(audio))
+    assert result["transcript"] == "hello"
+    assert result["engine"] == "whisper"
+    assert result["duration_ms"] == 1500
+    # Confirm the helper received the on-disk bytes verbatim — guards
+    # against future refactors that might slurp the file twice or pass
+    # a path instead of bytes.
+    transcribe.assert_awaited_once_with(b"\x00" * 100)
+
+
+async def test_transcribe_url_missing_file():
+    with pytest.raises(FileNotFoundError):
+        await transcribe_url("/nonexistent/path.m4a")
