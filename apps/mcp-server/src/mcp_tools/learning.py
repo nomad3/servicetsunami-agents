@@ -785,13 +785,90 @@ async def install_skill(
     )
 
 
+# ── T2.7: diffuse_learning ─────────────────────────────────────────────
+# After a skill is installed (T2.6), we POST a tenant-scoped observation
+# describing the newly-learned capability so peer agents in the same
+# tenant can discover it via semantic recall (``search_knowledge``).
+# Design call (per the plan): observation is tenant-scoped, NOT
+# agent-scoped — the whole point is stigmergy, every agent in the tenant
+# should be able to find what Luna just learned.
+#
+# Soft-fail semantics are load-bearing: the workflow caller treats a
+# KG-down failure as "skill installed + usable, semantic discovery
+# delayed" and caches the pending diffusion (§1.11 in the plan). If we
+# raised here, an unrelated KG outage would block every skill install
+# Luna ever tries — which is the wrong call. Any Exception path collapses
+# to ``{observation_id: None, soft_failed: True, error: str(e)}``.
+#
+# Endpoint contract note: the spec writes the URL as
+# ``/api/v1/knowledge/observations``, but the api today exposes
+# tenant-scoped observation ingest at ``/api/v1/memory/remember`` (JWT-
+# gated) and entity-only CRUD on ``/api/v1/knowledge/entities/internal``
+# (X-Internal-Key). Neither matches the spec verbatim; T4.x is expected
+# to ship the literal ``/knowledge/observations`` internal-key endpoint.
+# We POST to the spec'd URL so the moment T4.x lands we work end-to-end
+# without another patch; until then this path 404s and we soft-fail —
+# which is exactly the contract this function promises.
+async def _record_observation(text: str, metadata: dict) -> dict:
+    """POST a tenant-scoped observation to the api's KG endpoint.
+
+    10s timeout — observation writes are cheap (single insert + an
+    embedding hop) and we don't want to pin the install workflow on
+    a slow KG. The activity wrapper (T3.1) layers retry policy on top.
+
+    Split out as its own helper so the T2.7 unit tests can patch the
+    network hop without a live api. Same X-Internal-Key auth as the
+    other T2.x wrappers (see ``_API_INTERNAL_KEY`` at the top of this
+    module).
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post(
+            f"{_API_BASE}/api/v1/knowledge/observations",
+            json={"text": text, "metadata": metadata},
+            headers={"X-Internal-Key": _API_INTERNAL_KEY},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
 async def diffuse_learning(
     skill_id: str,
     source_url: str,
     capabilities: list[str],
 ) -> dict:
-    """T2.7 — broadcast the new skill to peer agents (stigmergy event)."""
-    raise NotImplementedError("T2.7")
+    """T2.7 — broadcast the new skill to peer agents (stigmergy event).
+
+    Spec §1.1 + design call: writes a tenant-scoped KG observation so
+    every agent in the tenant (not just Luna) can find the new
+    capability via semantic recall. The observation text embeds the
+    source URL, the human-readable capability list, and the skill_id so
+    a recall hit can jump straight to the installed skill.
+
+    Returns:
+        ``{"observation_id": str, "soft_failed": False}`` on success.
+        ``{"observation_id": None, "soft_failed": True, "error": str}``
+        on any failure (KG down, timeout, malformed response, etc.).
+
+    NEVER raises. The workflow caller (T3.1) treats a soft-fail as
+    "skill is installed and usable; semantic discovery may be delayed"
+    and caches the pending diffusion for a later retry — install MUST
+    NOT abort on a KG outage.
+    """
+    text = (
+        f"Learned new capability from {source_url}. "
+        f"Capabilities: {', '.join(capabilities)}. Skill: {skill_id}."
+    )
+    metadata = {
+        "kind": "luna_learn",
+        "skill_id": skill_id,
+        "source_url": source_url,
+        "capabilities": capabilities,
+    }
+    try:
+        r = await _record_observation(text, metadata)
+        return {"observation_id": r["observation_id"], "soft_failed": False}
+    except Exception as e:  # noqa: BLE001 — soft-fail is the contract
+        return {"observation_id": None, "soft_failed": True, "error": str(e)}
 
 
 # ── Tool registry ──────────────────────────────────────────────────────

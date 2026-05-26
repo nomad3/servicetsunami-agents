@@ -25,6 +25,7 @@ from src.mcp_tools.learning import (
     ReviewTimeout,
     ReviewerNotProvisioned,
     SlugExhausted,
+    diffuse_learning,
     dispatch_skill_review,
     extract_media,
     install_skill,
@@ -355,3 +356,44 @@ async def test_install_skill_exhausts_slug_retries():
             )
     # Bare slug + 4 suffixed attempts = 5 calls total (SLUG_MAX_RETRIES).
     assert ins.call_count == 5
+
+
+# ── T2.7: diffuse_learning ────────────────────────────────────────────
+# diffuse_learning records a tenant-scoped KG observation describing the
+# newly-installed capability so peer agents can discover it via
+# semantic recall. Tests patch ``_record_observation`` so they don't
+# need the (not-yet-shipped) observation endpoint live. The function
+# MUST soft-fail on any underlying exception — workflow caller treats
+# the soft-fail as "skill is installed and usable, diffusion is just
+# delayed". Raising here would abort install, which is the wrong call.
+async def test_diffuse_success():
+    """Happy path: ``_record_observation`` returns an obs id, we surface
+    it verbatim with ``soft_failed=False`` so the workflow records the
+    success and moves on without enqueuing a retry."""
+    with patch("src.mcp_tools.learning._record_observation") as r:
+        async def _ok(text, metadata):
+            return {"observation_id": "obs-1"}
+        r.side_effect = _ok
+        result = await diffuse_learning(
+            "skill-1", "https://x.com/v", ["fix-printer"]
+        )
+        assert result["observation_id"] == "obs-1"
+        assert result["soft_failed"] is False
+
+
+async def test_diffuse_soft_fails_on_kg_down():
+    """KG endpoint unreachable → ``_record_observation`` raises
+    ``httpx.HTTPError``. We swallow it, return ``soft_failed=True`` +
+    the error text, and never re-raise. The workflow caches the
+    pending diffusion (§1.11) but does NOT abort install — the skill
+    is still usable, semantic recall is just delayed."""
+    with patch("src.mcp_tools.learning._record_observation") as r:
+        async def _boom(text, metadata):
+            raise httpx.HTTPError("KG unavailable")
+        r.side_effect = _boom
+        result = await diffuse_learning(
+            "skill-1", "https://x.com/v", ["fix-printer"]
+        )
+        assert result["observation_id"] is None
+        assert result["soft_failed"] is True
+        assert "KG unavailable" in result["error"]
