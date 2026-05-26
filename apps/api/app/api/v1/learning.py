@@ -1,13 +1,28 @@
-"""Learning experiment and policy candidate API endpoints."""
+"""Learning experiment and policy candidate API endpoints.
 
+Also hosts the Luna Learn from Media internal endpoints (T4.4b, T4.4c):
+
+  * ``POST /upload-attachment`` — multipart upload + ffprobe duration cap
+    + MIME / size enforcement (spec §1.8). Internal-key gated.
+  * ``POST /dispatch`` — HTTP wrapper around
+    ``LearningService.dispatch()`` (T4.1a). Returns ``{workflow_id}``.
+"""
+
+import logging
+import os
+import subprocess
+import tempfile
 import uuid
+from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
+from app.api.v1.skills_new import _verify_internal_key
 from app.models.user import User
+from app.schemas.learning import LearningIntent
 from app.schemas.learning_experiment import (
     LearningExperimentCreate,
     LearningExperimentInDB,
@@ -16,7 +31,124 @@ from app.schemas.learning_experiment import (
 )
 from app.services import learning_experiment_service
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Luna Learn — internal upload + dispatch surfaces (T4.4b / T4.4c)
+# ─────────────────────────────────────────────────────────────────────
+
+_MAX_SIZE_BYTES = 50 * 1024 * 1024  # spec §1.8
+_MAX_DURATION_S = 900               # spec §1.8
+
+
+def _attach_dir() -> Path:
+    """Return the on-disk dir for learning attachments.
+
+    Honours ``LUNA_LEARN_ATTACH_DIR`` for tests / dev; falls back to
+    ``/var/agentprovision/workspaces/_learning`` in production. If the
+    production path isn't writable (e.g. unit-test environment without
+    that mount), we fall back to ``$TMPDIR/luna-learn-attachments`` so
+    the endpoint stays exercisable in CI.
+    """
+    env_dir = os.environ.get("LUNA_LEARN_ATTACH_DIR")
+    if env_dir:
+        return Path(env_dir)
+    default = Path("/var/agentprovision/workspaces/_learning")
+    try:
+        default.mkdir(parents=True, exist_ok=True)
+        return default
+    except OSError:
+        return Path(tempfile.gettempdir()) / "luna-learn-attachments"
+
+
+def _ffprobe_duration(path: Path) -> int:
+    """Return media duration in seconds (rounded). Raises on probe failure.
+
+    Module-level for monkeypatching in tests (ffprobe is not guaranteed in
+    CI / dev environments).
+    """
+    out = subprocess.check_output(
+        [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        ]
+    )
+    return int(float(out.decode().strip()))
+
+
+@router.post("/upload-attachment")
+async def upload_attachment(
+    file: UploadFile = File(...),
+    _auth: None = Depends(_verify_internal_key),
+):
+    """Upload an audio/video attachment for Luna Learn (T4.4b, spec §1.8).
+
+    Enforces ALL spec §1.8 constraints server-side — CLI checks are
+    best-effort UX only; the server is the trust boundary:
+
+      * MIME: ``audio/*`` or ``video/*`` only (415 otherwise)
+      * Size: <= 50MB (413)
+      * Duration: <= 900s via ffprobe (413)
+
+    Returns a path on local disk for the workflow to consume plus a
+    sanitised ``source_url`` of the form ``attachment://<basename>``
+    (the full local path is never leaked into provenance).
+    """
+    ct = (file.content_type or "").lower()
+    if not (ct.startswith("audio/") or ct.startswith("video/")):
+        raise HTTPException(415, f"unsupported MIME type {ct!r}; only audio/* or video/* allowed")
+
+    body = await file.read()
+    if len(body) > _MAX_SIZE_BYTES:
+        raise HTTPException(413, f"file size {len(body)} exceeds 50MB cap")
+
+    attach_dir = _attach_dir()
+    attach_dir.mkdir(parents=True, exist_ok=True)
+    safe_basename = Path(file.filename or "upload").name
+    dest = attach_dir / f"{uuid.uuid4().hex}-{safe_basename}"
+    dest.write_bytes(body)
+
+    try:
+        dur = _ffprobe_duration(dest)
+    except Exception as e:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(422, f"could not probe duration: {e}")
+
+    if dur > _MAX_DURATION_S:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(413, f"duration {dur}s exceeds 900s cap")
+
+    return {
+        "attachment_path": str(dest),
+        "source_url": f"attachment://{safe_basename}",
+        "duration_s": dur,
+        "size_bytes": len(body),
+    }
+
+
+@router.post("/dispatch")
+async def dispatch_learning(
+    intent: LearningIntent,
+    _auth: None = Depends(_verify_internal_key),
+):
+    """Dispatch a ``LearnFromMediaWorkflow`` via ``LearningService`` (T4.4c).
+
+    Thin HTTP wrapper around the service-layer helper from T4.1a so the
+    ``alpha learn`` CLI and any future external caller share the same
+    dispatch path. Fire-and-forget — returns ``{workflow_id}`` once the
+    workflow is queued.
+    """
+    from app.services.learning_service import LearningService
+
+    try:
+        workflow_id = await LearningService.dispatch(intent)
+    except Exception as e:
+        logger.exception("learning dispatch failed: %s", e)
+        raise HTTPException(500, f"dispatch failed: {e}")
+    return {"workflow_id": workflow_id}
 
 
 # --- Policy Candidates ---
