@@ -28,6 +28,10 @@
 
 mcp-server tests + production code use `from src.mcp_tools import learning` (with the `src.` prefix), NOT `from mcp_tools import learning`. Several test code samples in this plan show the bare form — implementer subagents should mirror neighboring test files in `apps/mcp-server/tests/` for the actual import path.
 
+## §0e — Temporal worker registration (resolved during T1.3 impl)
+
+`apps/api/app/workflows/__init__.py` and `apps/api/app/workflows/activities/__init__.py` are EMPTY packages (just docstrings) — they do NOT register workflows or activities. Runtime registration lives in `apps/api/app/workers/orchestration_worker.py` where workflows are added to `workflows=[...]` and activities to `activities=[...]` lists passed to the Temporal Worker. T1.3 deliberately did NOT add `LearnFromMediaWorkflow` to those lists (workflow body still NotImplementedError; advertising a half-built workflow on `agentprovision-orchestration` queue would let Temporal route real tasks to it). **T3.1 implementer adds the activity list entries. T3.2a implementer adds the workflow list entry** (once the happy path is implemented and tested).
+
 ## §0c — Conservative defaults applied (Luna's plan-review dispatch failed)
 
 Luna's iteration-1 plan-review dispatch timed out at the Cloudflare gateway (524) twice — same failure mode as her tighter spec-review dispatch. She already co-designed every spec section in 3 prior rounds + ratified the full design. Conservative defaults applied here, documented for revisit:
