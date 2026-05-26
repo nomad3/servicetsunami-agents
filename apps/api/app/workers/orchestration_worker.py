@@ -206,10 +206,10 @@ from app.workflows.activities.inbound_lead_capture import (
 )
 from app.workflows.activities.agent_performance import compute_agent_performance_snapshot
 from app.workflows.agent_performance_rollup import AgentPerformanceRollupWorkflow
-# Luna Learn (T3.1) — activities are functional; LearnFromMediaWorkflow is
-# NOT yet added to `workflows=[...]` because its body is still
-# NotImplementedError (T3.2a does that). Activities are safe to register
-# now: Temporal only dispatches them when a workflow invokes them.
+# Luna Learn (T3.2a) — happy-path workflow body landed; safe to advertise
+# on the orchestration queue. Error/revise/abort branches (T3.2b–T3.2f)
+# extend the same workflow without churning the worker registration.
+from app.workflows.learn_from_media_workflow import LearnFromMediaWorkflow
 from app.workflows.activities.learn_from_media_activities import (
     act_extract_media as learn_act_extract_media,
     act_transcribe_url as learn_act_transcribe_url,
@@ -284,6 +284,7 @@ async def run_orchestration_worker():
             NightlyReflectionWorkflow,
             SkillEvalIterationWorkflow,
             OAuthHandshakeWorkflow,
+            LearnFromMediaWorkflow,
         ],
         activities=[
             dispatch_task,
