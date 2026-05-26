@@ -40,7 +40,9 @@ from pathlib import Path
 from typing import Awaitable, Callable, Dict
 
 import httpx
+from mcp.server.fastmcp import Context
 
+from src.mcp_app import mcp
 from .learning_prompts import SYNTHESIS_SYSTEM, SYNTHESIS_USER
 
 
@@ -195,8 +197,17 @@ def _map_ytdlp_error(stderr: str) -> type[LearningToolError]:
     return LearningToolError
 
 
-async def extract_media(url: str, max_duration_s: int = 900) -> dict:
-    """T2.1 — download audio from a public URL (yt-dlp + ffmpeg).
+@mcp.tool()
+async def extract_media(
+    url: str,
+    max_duration_s: int = 900,
+    ctx: Context = None,
+) -> dict:
+    """Download audio from a public media URL (YouTube, podcasts, etc.) via yt-dlp.
+
+    Step 1 of the Luna Learn pipeline: fetches audio from a public URL,
+    capped at ``max_duration_s`` seconds, and returns the local audio path
+    plus source metadata for downstream transcription.
 
     Spec §1.1. Probes duration first to fail fast on long-form media
     (the synthesis budget assumes ~15min ceiling). On success returns::
@@ -278,8 +289,15 @@ async def _transcribe_bytes_async(audio_bytes: bytes) -> dict:
         return response.json()
 
 
-async def transcribe_url(audio_path: str) -> dict:
-    """T2.2 — transcribe a local audio file to text + segments.
+@mcp.tool()
+async def transcribe_url(
+    audio_path: str,
+    ctx: Context = None,
+) -> dict:
+    """Transcribe a local audio file to text + segments via the platform's Whisper workflow.
+
+    Step 2 of the Luna Learn pipeline: takes the audio file produced by
+    ``extract_media`` and returns its transcript (text + timestamped segments).
 
     Spec §1.1. Reads the file produced by ``extract_media`` and hands
     the bytes to the api's existing transcription endpoint (which routes
@@ -373,12 +391,18 @@ async def _llm_synthesize(
     return payload["skill_md"], payload["synthetic_test"]
 
 
+@mcp.tool()
 async def synthesize_skill_draft(
     transcript: str,
     source_url: str,
     hints: list[str] | None = None,
+    ctx: Context = None,
 ) -> dict:
-    """T2.3 — LLM-synthesize a SKILL.md draft from a transcript.
+    """Synthesize a SKILL.md draft from a transcript via Claude Sonnet.
+
+    Step 3 of the Luna Learn pipeline: turns a transcript into a structured
+    skill draft (frontmatter + body + synthetic test) ready for review.
+    ``hints`` carries prior reviewer findings on revise cycles.
 
     Spec §1.5 (engine selection) + §1.6 (frontmatter schema). Single
     Claude Sonnet call via ``_llm_synthesize``; the prompt embeds the
@@ -489,14 +513,20 @@ async def _dispatch_agent(agent_id: str, payload: dict) -> dict:
         return r.json()
 
 
+@mcp.tool()
 async def dispatch_skill_review(
     skill_md: str,
     transcript: str,
     source_url: str,
     synthetic_test_input: dict,
     synthetic_test_expected: dict,
+    ctx: Context = None,
 ) -> dict:
-    """T2.4 — dispatch the draft to the Code Reviewer agent and await verdict.
+    """Dispatch a synthesized skill draft to the Code Reviewer agent and await verdict.
+
+    Step 4 of the Luna Learn pipeline: cross-agent QC pass that returns
+    ``approved``, ``revise``, or ``reject`` with structured findings the
+    workflow can feed back into the next synthesis iteration.
 
     Spec §0.3 (cross-agent QC) + §1.10. The reviewer agent inspects:
     (a) the SKILL.md is idiomatic + safe (no shellout-via-prose), and
@@ -611,12 +641,19 @@ def _subset_match(actual: dict, expected: dict) -> bool:
     return all(actual.get(k) == v for k, v in expected.items())
 
 
+@mcp.tool()
 async def run_synthetic_test(
     skill_md: str,
     test_input: dict,
     test_expected: dict,
+    ctx: Context = None,
 ) -> dict:
-    """T2.5 — execute the reviewer-provided synthetic test against the draft.
+    """Run the reviewer's synthetic test against a draft skill to surface behavior drift.
+
+    Step 5 of the Luna Learn pipeline: executes the unsaved draft against
+    ``test_input`` and subset-compares the output against ``test_expected``.
+    Never raises — returns ``{passed, actual_output, error}`` for the
+    workflow to branch on.
 
     Spec §1.1. Runs the draft against ``test_input`` via the
     execute-draft endpoint, then compares the result against
@@ -737,6 +774,7 @@ async def _install_via_api(
         return r.json()
 
 
+@mcp.tool()
 async def install_skill(
     skill_md: str,
     slug: str,
@@ -745,8 +783,13 @@ async def install_skill(
     reviewer_agent_id: str,
     transcript_sha256: str,
     learned_by_agent_id: str,
+    ctx: Context = None,
 ) -> dict:
-    """T2.6 — persist an approved draft into the tenant skills library.
+    """Persist an approved skill draft into the tenant skills library with provenance.
+
+    Step 6 of the Luna Learn pipeline: injects the provenance frontmatter
+    block (source URL, reviewer, transcript hash, learner) and installs
+    the skill via the api, retrying with ``-vN`` suffixes on slug collisions.
 
     Injects the provenance frontmatter block (spec §1.6) into the draft,
     then attempts to install via the api endpoint. On a slug collision
@@ -831,12 +874,19 @@ async def _record_observation(text: str, metadata: dict) -> dict:
         return r.json()
 
 
+@mcp.tool()
 async def diffuse_learning(
     skill_id: str,
     source_url: str,
     capabilities: list[str],
+    ctx: Context = None,
 ) -> dict:
-    """T2.7 — broadcast the new skill to peer agents (stigmergy event).
+    """Broadcast a newly-installed skill to peer agents via a tenant-scoped KG observation.
+
+    Step 7 of the Luna Learn pipeline: writes a stigmergy observation so
+    every agent in the tenant can semantically discover the new
+    capability. Never raises — soft-fails on KG outage so install doesn't
+    abort on an unrelated semantic-recall issue.
 
     Spec §1.1 + design call: writes a tenant-scoped KG observation so
     every agent in the tenant (not just Luna) can find the new
