@@ -28,6 +28,14 @@
 
 mcp-server tests + production code use `from src.mcp_tools import learning` (with the `src.` prefix), NOT `from mcp_tools import learning`. Several test code samples in this plan show the bare form — implementer subagents should mirror neighboring test files in `apps/mcp-server/tests/` for the actual import path.
 
+## §0f — Temporal `execute_activity` multi-arg pattern (resolved during T3.2a impl)
+
+Temporal's `workflow.execute_activity(...)` has TWO overloads:
+- **Single positional arg**: `workflow.execute_activity(activity_fn, single_arg, start_to_close_timeout=...)`
+- **Multi-arg**: must use `args=[...]` kwarg → `workflow.execute_activity(activity_fn, args=[a, b, c], start_to_close_timeout=...)`
+
+The plan's T3.2a-f code samples use positional varargs (`workflow.execute_activity(A.act_X, arg1, arg2, ..., start_to_close_timeout=...)`) which is **invalid**. First test run with plan-verbatim code HUNG for 7+ minutes (Temporal silently retried failing workflow tasks). T3.2b-f implementers must use `args=[...]` kwarg form for any activity call with >1 positional arg.
+
 ## §0e — Temporal worker registration (resolved during T1.3 impl)
 
 `apps/api/app/workflows/__init__.py` and `apps/api/app/workflows/activities/__init__.py` are EMPTY packages (just docstrings) — they do NOT register workflows or activities. Runtime registration lives in `apps/api/app/workers/orchestration_worker.py` where workflows are added to `workflows=[...]` and activities to `activities=[...]` lists passed to the Temporal Worker. T1.3 deliberately did NOT add `LearnFromMediaWorkflow` to those lists (workflow body still NotImplementedError; advertising a half-built workflow on `agentprovision-orchestration` queue would let Temporal route real tasks to it). **T3.1 implementer adds the activity list entries. T3.2a implementer adds the workflow list entry** (once the happy path is implemented and tested).
