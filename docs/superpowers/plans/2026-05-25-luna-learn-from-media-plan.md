@@ -225,6 +225,104 @@ git commit -m "feat(luna-learn): pydantic schemas for learning subsystem"
 git push -u origin impl/luna-learn-t11-schemas
 ```
 
+### Task 1.2a: MCP-server HTTP shim — typed-exception → status-code mapping
+
+**Files:**
+- Modify: `apps/mcp-server/src/mcp_tools/__init__.py` (or wherever the tool-dispatch HTTP entrypoint lives)
+- Test: `apps/mcp-server/tests/test_learning_http_shim.py` (new)
+
+**Why this exists** (review NEW-IMPORTANT-1): Tools in `learning.py` raise Python exceptions (`ReviewerNotProvisioned`, `ReviewTimeout`, `MediaPrivate`, `MediaNotFound`, `MediaGeoBlocked`, `MediaAntiScrape`, `MediaTooLong`, `DraftInvalid`, `DraftForbiddenShellout`, `SlugExhausted`). The Temporal activities in T3.1 call these tools over HTTP and need to translate exceptions into status codes so the `_STATUS_TO_TYPE` map in T3.1 can branch. Without this shim, every typed exception becomes a generic 500 and T3.2c's distinct cache-vs-quarantine branching collapses.
+
+**Contract** — when `POST /tools/<tool_name>` raises one of these exceptions, the shim returns the indicated status + a JSON body `{"error_type": "<ClassName>", "message": "<exception message>"}`:
+
+| Exception class | HTTP status |
+|---|---|
+| `MediaTooLong` | 413 |
+| `MediaPrivate` | 451 |
+| `MediaNotFound` | 404 |
+| `MediaGeoBlocked` | 403 |
+| `MediaAntiScrape` | 429 |
+| `DraftInvalid` | 422 |
+| `DraftForbiddenShellout` | 424 |
+| `ReviewerNotProvisioned` | 503 |
+| `ReviewTimeout` | 504 |
+| `SlugExhausted` | 409 |
+| Any other Exception | 500 + `error_type: "UnknownError"` |
+
+**Note on the chosen codes**: 451 (RFC 7725 "Unavailable For Legal Reasons") and 424 (WebDAV "Failed Dependency") are repurposed for internal use. The status codes are advisory; the `error_type` field in the response body is authoritative for branching. The Temporal activities' `_STATUS_TO_TYPE` map in T3.1 is just a fast-path lookup — if the body has `error_type`, it overrides the map.
+
+- [ ] **Step 1: Write failing tests** for each exception → status mapping
+
+```python
+# apps/mcp-server/tests/test_learning_http_shim.py
+import pytest
+from fastapi.testclient import TestClient
+from mcp_server.http_app import app  # whatever the FastAPI/Starlette app is
+from unittest.mock import patch
+
+client = TestClient(app)
+
+@pytest.mark.parametrize("exc_name,status", [
+    ("MediaTooLong", 413), ("MediaPrivate", 451), ("MediaNotFound", 404),
+    ("MediaGeoBlocked", 403), ("MediaAntiScrape", 429),
+    ("DraftInvalid", 422), ("DraftForbiddenShellout", 424),
+    ("ReviewerNotProvisioned", 503), ("ReviewTimeout", 504),
+    ("SlugExhausted", 409),
+])
+def test_typed_exception_maps_to_status(exc_name, status):
+    from mcp_tools import learning as L
+    exc_cls = getattr(L, exc_name)
+    with patch.object(L, "extract_media", side_effect=exc_cls("boom")):
+        # tool name doesn't matter — using extract_media as a dispatch target
+        r = client.post("/tools/extract_media", json={"url": "x"},
+                        headers={"X-Internal-Key": "test-key"})
+        assert r.status_code == status
+        assert r.json()["error_type"] == exc_name
+        assert "boom" in r.json()["message"]
+```
+
+- [ ] **Step 2-4: Implement + test passing**
+
+```python
+# In whichever module hosts the tool-dispatch HTTP entrypoint
+from mcp_tools.learning import (
+    MediaTooLong, MediaPrivate, MediaNotFound, MediaGeoBlocked, MediaAntiScrape,
+    DraftInvalid, DraftForbiddenShellout, ReviewerNotProvisioned, ReviewTimeout,
+    SlugExhausted,
+)
+
+_EXC_STATUS = {
+    MediaTooLong: 413, MediaPrivate: 451, MediaNotFound: 404,
+    MediaGeoBlocked: 403, MediaAntiScrape: 429,
+    DraftInvalid: 422, DraftForbiddenShellout: 424,
+    ReviewerNotProvisioned: 503, ReviewTimeout: 504,
+    SlugExhausted: 409,
+}
+
+
+async def _dispatch_tool(name: str, payload: dict):
+    tool = TOOLS[name]
+    try:
+        return await tool(**payload)
+    except tuple(_EXC_STATUS.keys()) as e:
+        status = _EXC_STATUS[type(e)]
+        raise HTTPException(status_code=status, detail={
+            "error_type": type(e).__name__, "message": str(e),
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={
+            "error_type": "UnknownError", "message": str(e),
+        })
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git switch -c impl/luna-learn-t12a-http-shim impl/luna-learn-t11-schemas
+git commit -m "feat(luna-learn): MCP HTTP shim — typed-exception → status-code mapping"
+git push -u origin impl/luna-learn-t12a-http-shim
+```
+
 ### Task 1.2: MCP tool group skeleton
 
 **Files:**
@@ -1327,6 +1425,8 @@ Each activity is a thin async wrapper that calls the MCP primitive via the mcp-s
 ```
 The typed exceptions from learning.py (`MediaPrivate`, `MediaNotFound`, `MediaGeoBlocked`, `MediaAntiScrape`, `MediaTooLong`, `DraftInvalid`, `DraftForbiddenShellout`, `ReviewerNotProvisioned`, `ReviewTimeout`, `SlugExhausted`) become `{"ok": False, "error": {"type": "MediaPrivate", "message": "..."}}`. The workflow body branches on `error.type`.
 
+> **Status-code mapping is internal-only** (review NEW-IMPORTANT-3): The HTTP status codes used by the T1.2a shim (e.g. 451 for `MediaPrivate`, 424 for `DraftForbiddenShellout`) repurpose RFC codes for internal signaling. They are NOT meant to be exposed publicly. The `error_type` field in the response body is the **authoritative** branch key — the `_STATUS_TO_TYPE` map below is a fast-path lookup, and the envelope code below prefers `body["error_type"]` over the status-code map when present.
+
 - [ ] **Step 1: Write failing test for one activity (act_extract_media)** as template
 
 ```python
@@ -1402,17 +1502,22 @@ async def _call_mcp(tool: str, payload: dict) -> dict:
 
 
 def _wrap(coro):
-    """Convert (success | HTTPStatusError) → Temporal result envelope."""
+    """Convert (success | HTTPStatusError) → Temporal result envelope.
+
+    Body's `error_type` is AUTHORITATIVE; `_STATUS_TO_TYPE` is only the
+    fast-path fallback when the body is missing or malformed (matches the
+    T1.2a shim contract).
+    """
     async def wrapper(*args, **kwargs):
         try:
             data = await coro(*args, **kwargs)
             return {"ok": True, "data": data, "error": None}
         except httpx.HTTPStatusError as e:
-            etype = _STATUS_TO_TYPE.get(e.response.status_code, "UnknownError")
             try:
                 body = e.response.json()
             except Exception:
                 body = {}
+            etype = body.get("error_type") or _STATUS_TO_TYPE.get(e.response.status_code, "UnknownError")
             return {"ok": False, "data": None, "error": {"type": etype, "message": body.get("message", str(e))}}
     return wrapper
 
@@ -1512,6 +1617,9 @@ git push -u origin impl/luna-learn-t31-activities
 - Test: `apps/api/tests/test_learn_workflow.py` (new — extended across sub-tasks)
 
 Test scaffolding (used in every sub-task):
+
+> **Important** (review NEW-IMPORTANT-2): Temporal's `Worker` captures activity function references at construction time, BEFORE the test body runs. `monkeypatch.setattr(A, "act_X", stub)` rebinds the module attribute but the worker still calls the original `A.act_X`. Patch `_call_mcp` (which every real activity calls into via `_wrap`) instead — that way the real activities run, the envelope decorator runs, but the HTTP boundary is mocked. Cleaner, fewer surface bugs.
+
 ```python
 # apps/api/tests/test_learn_workflow.py
 import pytest
@@ -1538,31 +1646,46 @@ async def worker(env):
         ],
     ) as w:
         yield w
+
+
+def _mock_mcp_responses(monkeypatch, responses: dict[str, dict]):
+    """Replace A._call_mcp with a dispatcher returning per-tool stub data.
+
+    `responses` keys are tool names ("extract_media", "transcribe_url", ...),
+    values are the raw dict the real tool would return.
+    """
+    async def fake(tool: str, payload: dict):
+        if tool not in responses:
+            raise RuntimeError(f"unexpected MCP call to {tool!r}")
+        return responses[tool]
+    monkeypatch.setattr(A, "_call_mcp", fake)
 ```
 
 #### Task 3.2a — Happy path (no revise, install + diffuse success)
 
-- [ ] **Step 1: Write failing test**
+- [ ] **Step 1: Write failing test** — patches `_call_mcp` (NOT the activity functions, per NEW-IMPORTANT-2 note above)
 
 ```python
 @pytest.mark.asyncio
 async def test_workflow_happy_path(env, worker, monkeypatch):
-    # Stub every activity to return success
-    async def stub_extract(*a, **k): return {"ok": True, "data": {"audio_path": "/tmp/x.m4a", "metadata": {"duration_s": 90, "title": "T"}}, "error": None}
-    async def stub_transcribe(*a, **k): return {"ok": True, "data": {"transcript": "hello world", "engine": "whisper", "duration_ms": 90000}, "error": None}
-    async def stub_synth(*a, **k): return {"ok": True, "data": {"skill_md": "---\nname: Fix Printer\nengine: markdown\nauto_trigger: \"Fix printer\"\ninputs: []\n---\nUnplug it", "slug": "fix-printer", "engine": "markdown", "synthetic_test_input": {"x": 1}, "synthetic_test_expected": {"y": 2}}, "error": None}
-    async def stub_review(*a, **k): return {"ok": True, "data": {"verdict": "approved", "findings": [], "reviewer_agent_id": "755796a4-..."}, "error": None}
-    async def stub_test(*a, **k): return {"ok": True, "data": {"passed": True, "actual_output": {"y": 2}, "error": None}, "error": None}
-    async def stub_install(*a, **k): return {"ok": True, "data": {"skill_id": "s1", "path": "/x/_tenant/t1/fix-printer/skill.md"}, "error": None}
-    async def stub_diffuse(*a, **k): return {"ok": True, "data": {"observation_id": "obs1", "soft_failed": False}, "error": None}
-    async def stub_notify(*a, **k): return {"ok": True, "data": {}, "error": None}
-    for name, stub in [
-        ("act_extract_media", stub_extract), ("act_transcribe_url", stub_transcribe),
-        ("act_synthesize_skill_draft", stub_synth), ("act_dispatch_skill_review", stub_review),
-        ("act_run_synthetic_test", stub_test), ("act_install_skill", stub_install),
-        ("act_diffuse_learning", stub_diffuse), ("act_notify_session", stub_notify),
-    ]:
-        monkeypatch.setattr(A, name, stub)
+    _mock_mcp_responses(monkeypatch, {
+        "extract_media": {"audio_path": "/tmp/x.m4a", "metadata": {"duration_s": 90, "title": "T"}},
+        "transcribe_url": {"transcript": "hello world", "engine": "whisper", "duration_ms": 90000},
+        "synthesize_skill_draft": {
+            "skill_md": "---\nname: Fix Printer\nengine: markdown\nauto_trigger: \"Fix printer\"\ninputs: []\n---\nUnplug it",
+            "slug": "fix-printer", "engine": "markdown",
+            "synthetic_test_input": {"x": 1}, "synthetic_test_expected": {"y": 2},
+        },
+        "dispatch_skill_review": {"verdict": "approved", "findings": [], "reviewer_agent_id": "755796a4-..."},
+        "run_synthetic_test": {"passed": True, "actual_output": {"y": 2}, "error": None},
+        "install_skill": {"skill_id": "s1", "path": "/x/_tenant/t1/fix-printer/skill.md"},
+        "diffuse_learning": {"observation_id": "obs1", "soft_failed": False},
+    })
+    # act_notify_session writes to session DB; stub at the DB-write boundary.
+    monkeypatch.setattr(A, "_write_session_message", lambda *a, **k: None)
+    # act_transcribe_url's success-path delete touches the filesystem; ensure path exists.
+    from pathlib import Path; Path("/tmp/x.m4a").write_bytes(b"x")
+
     result = await env.client.execute_workflow(
         LearnFromMediaWorkflow.run,
         {"source_url": "https://youtu.be/abc123", "tenant_id": "t1", "actor_user_id": "u1"},
@@ -1570,8 +1693,21 @@ async def test_workflow_happy_path(env, worker, monkeypatch):
     )
     assert result["status"] == "success"
     assert result["skill_id"] == "s1"
-    assert "fix-printer" in result["skill_path"] or "Fix Printer" in result["skill_name"]
+    assert "fix-printer" in result["skill_path"]
+    assert result["skill_name"] == "Fix Printer"
 ```
+
+> Subsequent T3.2b–T3.2f tests follow the same pattern: build the `responses` dict for the happy steps, then either omit the failing-step key (forcing the `RuntimeError` in `_mock_mcp_responses`) or have the value RAISE the appropriate `httpx.HTTPStatusError` per the response-code map from T1.2a. Example for T3.2c reviewer-not-provisioned:
+> ```python
+> import httpx
+> async def fake(tool: str, payload: dict):
+>     if tool == "dispatch_skill_review":
+>         raise httpx.HTTPStatusError(
+>             "503", request=AsyncMock(),
+>             response=AsyncMock(status_code=503, json=lambda: {"error_type": "ReviewerNotProvisioned", "message": "not in tenant"}),
+>         )
+>     ...
+> ```
 
 - [ ] **Step 2: Run → fail** (workflow body still NotImplementedError)
 
@@ -2213,8 +2349,10 @@ git push -u origin impl/luna-learn-t51-bundled-skill
 
 **Files:**
 - Modify: `apps/api/app/agents/_bundled/luna/skill.md` — add `tool_groups: [..., learning]` frontmatter (mirroring the pattern in `apps/api/app/agents/_bundled/code-reviewer/skill.md:9`)
-- Create: `apps/api/migrations/NNN_luna_add_learning_tool_group.sql` — DB-side append to Luna Supervisor's `tool_groups` array (model the migration on `154_expand_luna_supervisor_tool_groups.sql`)
+- Create: `apps/api/migrations/<N>_luna_add_learning_tool_group.sql` — DB-side append to Luna Supervisor's `tool_groups` array (model the migration on `154_expand_luna_supervisor_tool_groups.sql`)
 - Test: `apps/api/tests/test_luna_learning_tool_group.py` (new) — asserts after migration application, Luna's effective tool_groups includes `learning`
+
+> **Migration number allocation** (review NEW-IMPORTANT-4): At branch-creation time run `ls apps/api/migrations | grep -E '^[0-9]+_' | sort -V | tail -3` to find the current max, then use max+1. If a collision appears at merge time (parallel feature also took the number), rebase + renumber + update the matching `.down.sql` and any `127_backfill_migrations_applied.sql` reference. Per `migration_apply_pattern` memory: no auto-runner in api container, apply via `docker exec psql + manual _migrations insert`; column is `filename`, NOT `name`; new `*.sql` needs `git add -f` because of global gitignore.
 
 - [ ] **Step 1: Write failing test** that runs the migration in a test DB transaction and asserts `learning in agent.tool_groups`
 
