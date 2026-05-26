@@ -18,6 +18,7 @@ from app.workflows.activities.learn_from_media_activities import (
     act_diffuse_learning,
     act_extract_media,
     act_install_skill,
+    act_log_test_fail,
     act_run_synthetic_test,
     act_synthesize_skill_draft,
     act_transcribe_url,
@@ -397,6 +398,7 @@ def test_stub_activities_are_registered():
     for fn in (
         act_write_cache,
         act_write_quarantine,
+        act_log_test_fail,
         act_notify_session,
         act_probe_attachment,
     ):
@@ -407,12 +409,23 @@ def test_stub_activities_are_registered():
 
 
 @pytest.mark.asyncio
-async def test_stub_activities_raise_not_implemented():
-    """T3.1 ships stubs; T3.3/T3.5/T4.4b flesh out the bodies."""
-    with pytest.raises(NotImplementedError):
-        await act_write_cache()
-    with pytest.raises(NotImplementedError):
-        await act_write_quarantine()
+async def test_stub_activities_minimal_bodies():
+    """T3.2b–f need cache/quarantine/log_test_fail returning envelopes so
+    the workflow body can branch through them. Real bodies in T3.3 / T4.4e.
+    ``notify_session`` + ``probe_attachment`` remain NotImplementedError
+    until T3.5 / T4.4b.
+    """
+    cache = await act_write_cache()
+    assert cache["ok"] is True
+    assert "cache_dir" in cache["data"]
+
+    quar = await act_write_quarantine()
+    assert quar["ok"] is True
+    assert "quarantine_dir" in quar["data"]
+
+    audit = await act_log_test_fail()
+    assert audit["ok"] is True
+
     with pytest.raises(NotImplementedError):
         await act_notify_session()
     with pytest.raises(NotImplementedError):

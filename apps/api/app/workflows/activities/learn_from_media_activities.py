@@ -224,20 +224,29 @@ async def act_diffuse_learning(
 
 
 # ---------------------------------------------------------------------------
-# Stub activities — bodies in T3.3 (cache/quarantine), T3.5 (notify),
-# T4.4b (probe_attachment). Registered here so the T3.2 workflow worker
-# can include them in its ``activities=[...]`` list without import churn
-# when the bodies land.
+# Minimal stub bodies — T3.2b–f need these callable so the workflow body
+# can branch through cache/quarantine/audit dispatch. Real bodies land in
+# T3.3 (cache/quarantine), T3.5 (notify), T4.4b (probe_attachment),
+# T4.4e (test-fail audit). For T3.2b–f these return the result-envelope
+# shape so workflow steps can proceed without behavioural coupling.
 # ---------------------------------------------------------------------------
 
 @activity.defn
 async def act_write_cache(*args, **kwargs) -> dict:
-    raise NotImplementedError("T3.3")
+    """T3.3 stub — returns a cache marker so T3.2c/e branches can proceed."""
+    return {"ok": True, "data": {"cache_dir": "stub"}, "error": None}
 
 
 @activity.defn
 async def act_write_quarantine(*args, **kwargs) -> dict:
-    raise NotImplementedError("T3.3")
+    """T3.3 stub — returns a quarantine marker so T3.2b/c/d branches can proceed."""
+    return {"ok": True, "data": {"quarantine_dir": "stub"}, "error": None}
+
+
+@activity.defn
+async def act_log_test_fail(*args, **kwargs) -> dict:
+    """T4.4e stub — audit row for test_failed branch (T3.2d)."""
+    return {"ok": True, "data": None, "error": None}
 
 
 @activity.defn

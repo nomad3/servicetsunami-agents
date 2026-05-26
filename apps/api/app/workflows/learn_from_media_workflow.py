@@ -1,14 +1,27 @@
 """LearnFromMediaWorkflow — orchestrates the Luna Learn pipeline (spec §1.10).
 
-T3.2a — happy path only: extract (or probe attachment) → transcribe →
-synth → review (must be ``approved``) → test (must pass) → install →
-diffuse (soft-fail handling lives in T3.2e) → notify.
+T3.2a — happy path: extract (or probe attachment) → transcribe → synth →
+review (must be ``approved``) → test (must pass) → install → diffuse
+→ notify.
 
-The 5 error/revise/abort branches (T3.2b–T3.2f) replace the early
-``return {"status": "<step>_failed", ...}`` exits with quarantine + cache
-+ revise-loop dispatch. Until those land, any non-happy outcome surfaces
-to the caller as a typed failure dict instead of triggering a workflow
-exception (Temporal would otherwise retry indefinitely).
+T3.2b — extract-error per-type branches: each yt-dlp typed error
+(MediaPrivate/MediaNotFound/MediaGeoBlocked/MediaAntiScrape/MediaTooLong)
+maps to a user-facing notify message (per spec §3) + a quarantine write.
+
+T3.2c — review branches: revise loop (max LUNA_LEARN_MAX_REVISE_RETRIES,
+default 2) with hints flowed back into synth; rejected → quarantine;
+ReviewerNotProvisioned → cache (recoverable) + --resume-last hint;
+ReviewTimeout → quarantine (terminal).
+
+T3.2d — test_failed → quarantine + audit row (act_log_test_fail).
+
+T3.2e — diffuse soft-fail: install succeeded, KG observation cached;
+status STILL ``success`` with ``diffuse_cached: true`` (don't propagate
+soft-fail as failure).
+
+T3.2f — install_failed branches (SlugExhausted, UnknownError) return
+``install_failed`` so the workflow surfaces the error envelope to caller;
+real DB+FS rollback semantics live server-side in T4.4e.
 
 Note on activity args: ``workflow.execute_activity`` for typed callables
 accepts at most one positional ``arg``; multi-param activities MUST be
@@ -16,6 +29,7 @@ called with ``args=[...]`` (see temporalio.workflow:2381 multi-param
 overload). The plan code's positional-vararg form would crash the
 workflow task and Temporal would retry it forever; we use ``args=`` here.
 """
+import os
 from datetime import timedelta
 
 from temporalio import workflow
@@ -27,6 +41,39 @@ with workflow.unsafe.imports_passed_through():
     import yaml
 
     from app.workflows.activities import learn_from_media_activities as A
+
+
+# Spec §3 — per-error-type user-facing notify messages. Keys are the
+# typed-error ``error.type`` strings emitted by the MCP shim (T1.2a).
+_EXTRACT_ERROR_NOTIFY = {
+    "MediaPrivate": (
+        "this video requires sign-in or is restricted — Luna can't access it. "
+        "If you have permission, download it and re-send with `--from-attachment`."
+    ),
+    "MediaNotFound": "this video doesn't exist or has been removed.",
+    "MediaGeoBlocked": (
+        "this video is geo-blocked from Luna's region. "
+        "If you can access it, download it and re-send with `--from-attachment`."
+    ),
+    "MediaAntiScrape": (
+        "the platform is rate-limiting or blocking automated access. "
+        "Try again later or re-send the file with `--from-attachment`."
+    ),
+    "MediaTooLong": (
+        "this video exceeds the 15-minute cap. Split it into shorter "
+        "clips or re-send a trimmed version."
+    ),
+}
+
+
+def _extract_notify_message(err: dict) -> str:
+    """Map an extract-error envelope to a user-facing notify string."""
+    etype = (err or {}).get("type", "UnknownError")
+    return _EXTRACT_ERROR_NOTIFY.get(
+        etype,
+        f"couldn't fetch the media ({etype}). "
+        "Try re-sending the file with `--from-attachment`.",
+    )
 
 
 # Per-step timeouts. ``review`` is 70s = MCP-side 60s reviewer gate + 10s
@@ -90,8 +137,33 @@ class LearnFromMediaWorkflow:
                 start_to_close_timeout=_ACTIVITY_TIMEOUTS["extract"],
             )
             if not extract["ok"]:
-                # T3.2b replaces this with per-error-type notify + quarantine.
-                return {"status": "extract_failed", "error": extract["error"]}
+                # T3.2b — per-error-type notify message + quarantine.
+                err = extract["error"] or {}
+                notify_message = _extract_notify_message(err)
+                await workflow.execute_activity(
+                    A.act_write_quarantine,
+                    args=[
+                        tenant_id,
+                        workflow.info().workflow_id,
+                        "",  # no transcript yet
+                        None,
+                        None,
+                        None,
+                        f"extract_failed: {err.get('type', 'UnknownError')}",
+                    ],
+                    start_to_close_timeout=_ACTIVITY_TIMEOUTS["write"],
+                )
+                if session_id:
+                    await workflow.execute_activity(
+                        A.act_notify_session,
+                        args=[session_id, {"status": "extract_failed", "message": notify_message}],
+                        start_to_close_timeout=_ACTIVITY_TIMEOUTS["notify"],
+                    )
+                return {
+                    "status": "extract_failed",
+                    "error": err,
+                    "notify_message": notify_message,
+                }
             audio_path = extract["data"]["audio_path"]
             provenance_url = source_url
 
