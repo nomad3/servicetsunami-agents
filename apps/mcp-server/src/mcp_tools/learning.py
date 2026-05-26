@@ -79,11 +79,87 @@ class SlugExhausted(LearningToolError):
     """All candidate slugs collided with existing skills; can't pick a fresh name."""
 
 
+# ── Tool stubs ─────────────────────────────────────────────────────────
+# Bodies land in T2.1–T2.7. Signatures are frozen here so the HTTP shim,
+# Temporal activity wrappers (T3.x), and reviewer-agent contracts can be
+# built against a stable surface in parallel. Each raises
+# ``NotImplementedError("TX.Y")`` tagged to the task that fills it in.
+async def extract_media(url: str, max_duration_s: int = 900) -> dict:
+    """T2.1 — download audio from a public URL (yt-dlp + ffmpeg)."""
+    raise NotImplementedError("T2.1")
+
+
+async def transcribe_url(audio_path: str) -> dict:
+    """T2.2 — transcribe a local audio file to text + segments."""
+    raise NotImplementedError("T2.2")
+
+
+async def synthesize_skill_draft(
+    transcript: str,
+    source_url: str,
+    hints: list[str] | None = None,
+) -> dict:
+    """T2.3 — LLM-synthesize a SKILL.md draft from a transcript."""
+    raise NotImplementedError("T2.3")
+
+
+async def dispatch_skill_review(
+    skill_md: str,
+    transcript: str,
+    source_url: str,
+    synthetic_test_input: dict,
+    synthetic_test_expected: dict,
+) -> dict:
+    """T2.4 — dispatch the draft to a reviewer agent and await verdict."""
+    raise NotImplementedError("T2.4")
+
+
+async def run_synthetic_test(
+    skill_md: str,
+    test_input: dict,
+    test_expected: dict,
+) -> dict:
+    """T2.5 — execute the reviewer-provided synthetic test against the draft."""
+    raise NotImplementedError("T2.5")
+
+
+async def install_skill(
+    skill_md: str,
+    slug: str,
+    tenant_id: str,
+    source_url: str,
+    reviewer_agent_id: str,
+    transcript_sha256: str,
+    learned_by_agent_id: str,
+) -> dict:
+    """T2.6 — persist an approved draft into the tenant skills library."""
+    raise NotImplementedError("T2.6")
+
+
+async def diffuse_learning(
+    skill_id: str,
+    source_url: str,
+    capabilities: list[str],
+) -> dict:
+    """T2.7 — broadcast the new skill to peer agents (stigmergy event)."""
+    raise NotImplementedError("T2.7")
+
+
 # ── Tool registry ──────────────────────────────────────────────────────
-# Populated by T1.2 (skeleton) and T2.x (real implementations). Kept as
-# an empty dict here so the HTTP shim can import it without circular-
-# dependency risk and so tests for the shim can patch entries in.
-TOOLS: Dict[str, Callable[..., Awaitable]] = {}
+# Populated by T1.2 (skeleton) and T2.x (real implementations). The HTTP
+# shim in ``server.py`` imports this dict to dispatch
+# ``POST /agentprovision/v1/tools/{tool_name}`` requests. Tests for the
+# shim can patch entries in to stub network IO without touching the
+# dispatch path itself.
+TOOLS: Dict[str, Callable[..., Awaitable]] = {
+    "extract_media": extract_media,
+    "transcribe_url": transcribe_url,
+    "synthesize_skill_draft": synthesize_skill_draft,
+    "dispatch_skill_review": dispatch_skill_review,
+    "run_synthetic_test": run_synthetic_test,
+    "install_skill": install_skill,
+    "diffuse_learning": diffuse_learning,
+}
 
 
 __all__ = [
@@ -98,5 +174,12 @@ __all__ = [
     "ReviewerNotProvisioned",
     "ReviewTimeout",
     "SlugExhausted",
+    "extract_media",
+    "transcribe_url",
+    "synthesize_skill_draft",
+    "dispatch_skill_review",
+    "run_synthetic_test",
+    "install_skill",
+    "diffuse_learning",
     "TOOLS",
 ]

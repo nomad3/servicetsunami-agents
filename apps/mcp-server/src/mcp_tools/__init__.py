@@ -35,3 +35,4 @@ from src.mcp_tools import session_events  # noqa: F401  # Phase 2 — read_sessi
 from src.mcp_tools import habits  # noqa: F401  # #297 — log_habit_observation
 from src.mcp_tools import affect  # noqa: F401  # #332 — get_agent_affect
 from src.mcp_tools import values  # noqa: F401  # #647 PR 2 — get_agent_value_set
+from src.mcp_tools import learning  # noqa: F401  # Luna Learn — extract_media / transcribe_url / synthesize_skill_draft / dispatch_skill_review / run_synthetic_test / install_skill / diffuse_learning (T1.2 skeleton; bodies in T2.x)
