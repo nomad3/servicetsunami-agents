@@ -26,6 +26,7 @@ from src.mcp_tools.learning import (
     ReviewerNotProvisioned,
     dispatch_skill_review,
     extract_media,
+    run_synthetic_test,
     synthesize_skill_draft,
     transcribe_url,
 )
@@ -212,3 +213,48 @@ async def test_dispatch_review_timeout():
     with patch("src.mcp_tools.learning._dispatch_agent", side_effect=_hang):
         with pytest.raises(ReviewTimeout):
             await dispatch_skill_review("md", "t", "u", {}, {})
+
+
+# ── T2.5: run_synthetic_test ───────────────────────────────────────────
+# All three tests patch ``_execute_draft`` directly. The execute-draft
+# endpoint on the api side is a separate deliverable (T4.4d) and won't
+# exist when T2.5 ships — mocking the helper decouples the rollout and
+# keeps the unit-under-test the subset-match + error-envelope logic.
+async def test_run_synthetic_test_pass():
+    """Subset match: actual carries the expected keys (plus extras) →
+    passed=True. The extra ``extra: 1`` field is allowed; the skill is
+    free to return more than the test pins."""
+    async def _ok(*_a, **_k):
+        return {"resolved": True, "extra": 1}
+    with patch("src.mcp_tools.learning._execute_draft", side_effect=_ok):
+        r = await run_synthetic_test("md", {"code": 41}, {"resolved": True})
+    assert r["passed"] is True
+    assert r["actual_output"] == {"resolved": True, "extra": 1}
+    assert r["error"] is None
+
+
+async def test_run_synthetic_test_fail_value_mismatch():
+    """Value mismatch on a pinned key → passed=False, but the actual
+    output is still surfaced so the reviewer / workflow can see the
+    drift and decide how to react (revise vs reject)."""
+    async def _wrong(*_a, **_k):
+        return {"resolved": False}
+    with patch("src.mcp_tools.learning._execute_draft", side_effect=_wrong):
+        r = await run_synthetic_test("md", {"code": 41}, {"resolved": True})
+    assert r["passed"] is False
+    assert r["actual_output"] == {"resolved": False}
+    assert "resolved" in r["actual_output"]
+    assert r["error"] is None
+
+
+async def test_run_synthetic_test_execution_error():
+    """Execution exception is captured as data, not re-raised. The
+    workflow needs a structured ``error`` field to branch into
+    quarantine — raising here would collapse the branching."""
+    async def _boom(*_a, **_k):
+        raise RuntimeError("syntax error")
+    with patch("src.mcp_tools.learning._execute_draft", side_effect=_boom):
+        r = await run_synthetic_test("md", {}, {})
+    assert r["passed"] is False
+    assert r["actual_output"] is None
+    assert "syntax error" in r["error"]

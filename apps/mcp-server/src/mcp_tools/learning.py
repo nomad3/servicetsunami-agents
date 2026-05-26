@@ -542,13 +542,109 @@ async def dispatch_skill_review(
     }
 
 
+# ── T2.5: run_synthetic_test ───────────────────────────────────────────
+# The synthetic test is a structured {input, expected} pair the
+# synthesizer (T2.3) attached to the draft and the reviewer (T2.4)
+# vetted as substantive. We execute the draft against ``test_input``
+# via a dedicated internal endpoint (``/api/v1/skills/execute-draft``
+# — shipped separately as T4.4d) that knows how to run an unsaved
+# skill_md in the code-worker without persisting it to the library.
+# This task implements only the mcp-server caller; the endpoint itself
+# doesn't exist yet, so unit tests mock ``_execute_draft`` directly to
+# decouple T2.5 from T4.4d's rollout schedule.
+#
+# Result-shape contract: this function NEVER raises. The whole point
+# of the synthetic test step is to surface drift between the draft's
+# advertised behavior and what it actually does, so any failure mode —
+# execution exception, value mismatch, network error — is recorded as
+# structured data in the returned ``{passed, actual_output, error}``
+# envelope. The Temporal workflow (T3.x) decides what to do with a
+# ``passed=False`` result (revise, quarantine, or reject) based on the
+# verdict + finding combination, not on whether this call threw.
+_EXECUTE_DRAFT_TIMEOUT_S = 30.0
+
+
+async def _execute_draft(skill_md: str, inputs: dict) -> dict:
+    """POST a draft skill_md + inputs to the api's execute-draft endpoint.
+
+    The endpoint (``POST /api/v1/skills/execute-draft``) is a T4.4d
+    deliverable — it hands the unsaved skill_md to the code-worker's
+    existing skill-execution path and returns the raw output dict
+    without persisting anything to the skills library. We use the same
+    X-Internal-Key auth as the other T2.x wrappers (see
+    ``_API_INTERNAL_KEY`` at the top of this module).
+
+    30s timeout: synthetic tests should be cheap by construction
+    (single deterministic transformation, no external IO); a draft
+    that needs longer than that to produce one output is almost
+    certainly misbehaving and we want the test to fail fast rather
+    than pin a Temporal activity slot.
+
+    Split out as its own helper so the unit tests in T2.5 can patch
+    this call without spinning up the (not-yet-shipped) endpoint, and
+    so T3.x's activity wrapper can layer retry policy on top of a
+    stable seam.
+    """
+    async with httpx.AsyncClient(timeout=_EXECUTE_DRAFT_TIMEOUT_S) as client:
+        response = await client.post(
+            f"{_API_BASE}/api/v1/skills/execute-draft",
+            json={"skill_md": skill_md, "inputs": inputs},
+            headers={"X-Internal-Key": _API_INTERNAL_KEY},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+def _subset_match(actual: dict, expected: dict) -> bool:
+    """Return True iff every key in ``expected`` is present in ``actual``
+    with an equal value.
+
+    Subset semantics (not equality) so the synthesizer can specify the
+    minimum contract the skill must honor without over-specifying — the
+    skill is free to return additional fields. A draft printer-error
+    skill might return ``{"resolved": True, "steps_taken": 3,
+    "duration_s": 12}``; the synthetic test only pins ``resolved=True``
+    and ignores the rest. An empty ``expected`` trivially passes (the
+    workflow treats that as a "smoke test only" signal).
+    """
+    return all(actual.get(k) == v for k, v in expected.items())
+
+
 async def run_synthetic_test(
     skill_md: str,
     test_input: dict,
     test_expected: dict,
 ) -> dict:
-    """T2.5 — execute the reviewer-provided synthetic test against the draft."""
-    raise NotImplementedError("T2.5")
+    """T2.5 — execute the reviewer-provided synthetic test against the draft.
+
+    Spec §1.1. Runs the draft against ``test_input`` via the
+    execute-draft endpoint, then compares the result against
+    ``test_expected`` with subset-match semantics. Returns::
+
+        {
+            "passed": bool,
+            "actual_output": dict | None,  # None on execution error
+            "error": str | None,           # populated on execution error
+        }
+
+    NEVER raises. Synthetic-test failures are deliberate signal for the
+    workflow to act on — turning them into Python exceptions would
+    collapse the cache-vs-quarantine-vs-revise branching into a
+    single generic 500.
+    """
+    try:
+        actual = await _execute_draft(skill_md, test_input)
+    except Exception as exc:  # noqa: BLE001 — all failures are data
+        return {
+            "passed": False,
+            "actual_output": None,
+            "error": str(exc),
+        }
+    return {
+        "passed": _subset_match(actual, test_expected),
+        "actual_output": actual,
+        "error": None,
+    }
 
 
 async def install_skill(
