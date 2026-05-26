@@ -223,6 +223,11 @@ from app.workflows.activities.learn_from_media_activities import (
     act_notify_session as learn_act_notify_session,
     act_probe_attachment as learn_act_probe_attachment,
 )
+# T6.4 — daily audio cleanup workflow + its single activity.
+from app.workflows.learning_audio_cleanup_workflow import (
+    LearningAudioCleanupWorkflow,
+    act_sweep_learning_audio,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -285,6 +290,7 @@ async def run_orchestration_worker():
             SkillEvalIterationWorkflow,
             OAuthHandshakeWorkflow,
             LearnFromMediaWorkflow,
+            LearningAudioCleanupWorkflow,
         ],
         activities=[
             dispatch_task,
@@ -447,6 +453,7 @@ async def run_orchestration_worker():
             learn_act_write_quarantine,
             learn_act_notify_session,
             learn_act_probe_attachment,
+            act_sweep_learning_audio,
         ],
     )
 

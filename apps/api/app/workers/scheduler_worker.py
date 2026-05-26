@@ -35,6 +35,11 @@ class SchedulerWorker:
             return
 
         self._last_stale_check: datetime = datetime.min
+        # T6.4 — Luna Learn audio cleanup. Fires at 04:00 UTC daily; the
+        # hour-window-once-per-day guard mirrors the stale-deal pattern
+        # above so a scheduler restart in the firing hour can't double-
+        # invoke the workflow.
+        self._last_learn_audio_cleanup: datetime = datetime.min
 
         while self.running:
             try:
@@ -50,6 +55,22 @@ class SchedulerWorker:
                     await self.check_stale_deals_all_tenants()
             except Exception as e:
                 logger.error(f"Error in stale deal check: {e}")
+
+            # T6.4 — Luna Learn audio cleanup at 04:00 UTC daily.
+            # Mirrors the once-per-day guard pattern above. The Temporal
+            # workflow body itself does the actual deletion; we just fire
+            # it on schedule from the same poller loop the rest of the
+            # api uses (cron expression equivalent: `0 4 * * *`).
+            try:
+                now = datetime.utcnow()
+                if (
+                    now.hour == 4
+                    and (now - self._last_learn_audio_cleanup).total_seconds() > 3600
+                ):
+                    self._last_learn_audio_cleanup = now
+                    await self.trigger_learning_audio_cleanup()
+            except Exception as e:
+                logger.error(f"Error in learning audio cleanup trigger: {e}")
 
             # Sleep for 60 seconds
             await asyncio.sleep(60)
@@ -153,6 +174,44 @@ class SchedulerWorker:
 
         # Default or manual
         return now + timedelta(days=1)
+
+    async def trigger_learning_audio_cleanup(self):
+        """T6.4 — start the LearningAudioCleanupWorkflow on the orchestration
+        task queue. Fire-and-forget: the workflow's single activity is
+        idempotent and returns the deleted-file count for ops dashboards.
+
+        Cron equivalent: ``0 4 * * *`` (04:00 UTC daily).
+        """
+        if self.temporal_client is None:
+            logger.warning(
+                "learning audio cleanup: no temporal client; skipping this firing"
+            )
+            return
+        # Stable workflow id per UTC day so a scheduler restart can't
+        # accidentally fire two cleanups for the same day — Temporal
+        # rejects the second start_workflow with WorkflowAlreadyStarted.
+        day_key = datetime.utcnow().strftime("%Y%m%d")
+        workflow_id = f"luna-learn-audio-cleanup-{day_key}"
+        try:
+            await self.temporal_client.start_workflow(
+                "LearningAudioCleanupWorkflow",
+                id=workflow_id,
+                task_queue="agentprovision-orchestration",
+            )
+            logger.info(
+                "learning audio cleanup: started workflow_id=%s", workflow_id
+            )
+        except Exception as e:
+            # WorkflowAlreadyStarted is the expected branch when the
+            # scheduler restarts inside the 04:xx hour; log at debug.
+            msg = str(e)
+            if "already" in msg.lower() and "started" in msg.lower():
+                logger.debug(
+                    "learning audio cleanup: workflow %s already started today",
+                    workflow_id,
+                )
+            else:
+                raise
 
     async def check_stale_deals_all_tenants(self):
         """Module 6.2 — call stale deal check for every active tenant (runs daily at 8am UTC)."""
