@@ -4,6 +4,7 @@ AgentProvision MCP Server (REST API + MCP)
 This server exposes REST endpoints for the AgentProvision API to consume,
 acting as a bridge to PostgreSQL and other integrations.
 """
+import inspect
 import os
 import logging
 from contextlib import asynccontextmanager
@@ -11,6 +12,7 @@ from contextlib import asynccontextmanager
 import asyncpg
 import uvicorn
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
@@ -21,6 +23,7 @@ from src.services.browser_service import get_browser_service
 from src.tools.web_scraper import scrape_webpage, scrape_structured_data, search_and_scrape
 from src.mcp_app import mcp as mcp_server
 import src.mcp_tools  # noqa: F401 — registers @mcp.tool() decorators
+from src.mcp_tools import learning as _learning
 
 logger = logging.getLogger(__name__)
 
@@ -330,6 +333,101 @@ async def transform_silver(request: TransformSilverRequest):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Luna Learn HTTP Shim ====================
+# Task 1.2a — translate typed Python exceptions raised by
+# ``src.mcp_tools.learning`` primitives into HTTP responses with
+# ``error_type`` + ``message`` body fields so the Temporal activities
+# in T3.1 can branch on the error type without parsing free-form 500s.
+#
+# The ``error_type`` body field is authoritative — the status-code map
+# below is a fast-path hint only. See
+# ``docs/superpowers/plans/2026-05-25-luna-learn-from-media-plan.md``
+# (Task 1.2a) for the contract + rationale on the chosen codes
+# (e.g. 451 / 424 repurposed from RFC 7725 / WebDAV for internal use).
+
+_LEARNING_EXC_STATUS: Dict[type, int] = {
+    _learning.MediaTooLong: 413,
+    _learning.MediaPrivate: 451,
+    _learning.MediaNotFound: 404,
+    _learning.MediaGeoBlocked: 403,
+    _learning.MediaAntiScrape: 429,
+    _learning.DraftInvalid: 422,
+    _learning.DraftForbiddenShellout: 424,
+    _learning.ReviewerNotProvisioned: 503,
+    _learning.ReviewTimeout: 504,
+    _learning.SlugExhausted: 409,
+}
+
+
+def _learning_error_response(status_code: int, error_type: str, message: str) -> JSONResponse:
+    """Uniform error envelope used by the Luna Learn dispatch shim.
+
+    Body shape (matches T3.1's ``_STATUS_TO_TYPE`` consumer)::
+
+        {"error_type": "<ExceptionClassName>", "message": "<str(exc)>"}
+    """
+    return JSONResponse(
+        status_code=status_code,
+        content={"error_type": error_type, "message": message},
+    )
+
+
+@app.post("/agentprovision/v1/tools/{tool_name}")
+async def dispatch_learning_tool(tool_name: str, payload: Dict[str, Any] | None = None):
+    """Dispatch a Luna Learn MCP primitive over HTTP for Temporal activities.
+
+    The ``src.mcp_tools.learning.TOOLS`` registry maps tool name → callable
+    (async or sync). The shim:
+
+    1. Looks the tool up; missing → 404 ``ToolNotFound`` (distinct from
+       ``MediaNotFound`` so activities don't confuse "I asked for the
+       wrong endpoint" with "the video was deleted").
+    2. Awaits the result if it's a coroutine, otherwise returns the value
+       directly.
+    3. Catches the typed ``LearningToolError`` subclasses and converts
+       them per ``_LEARNING_EXC_STATUS``.
+    4. Catches any other ``Exception`` and returns 500 +
+       ``error_type="UnknownError"``.
+
+    Auth: the route currently relies on the existing reverse-proxy /
+    internal network boundary (the FastAPI server runs inside the docker
+    network on port 8000). Temporal activities call it with the same
+    ``X-Internal-Key`` header the other MCP-server REST routes accept;
+    enforcement is delegated to future middleware in line with the rest
+    of this file's routes (none of which authenticate inline today).
+    """
+    tools = _learning.TOOLS
+    if tool_name not in tools:
+        return _learning_error_response(
+            status_code=404,
+            error_type="ToolNotFound",
+            message=f"No Luna Learn tool registered under name '{tool_name}'",
+        )
+
+    tool = tools[tool_name]
+    kwargs = payload or {}
+
+    try:
+        result = tool(**kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+    except tuple(_LEARNING_EXC_STATUS.keys()) as exc:
+        status = _LEARNING_EXC_STATUS[type(exc)]
+        return _learning_error_response(
+            status_code=status,
+            error_type=type(exc).__name__,
+            message=str(exc),
+        )
+    except Exception as exc:  # noqa: BLE001 — intentional catch-all
+        logger.exception("Luna Learn tool %s raised an unmapped exception", tool_name)
+        return _learning_error_response(
+            status_code=500,
+            error_type="UnknownError",
+            message=str(exc),
+        )
 
 
 def main():
