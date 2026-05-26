@@ -24,6 +24,10 @@
 
 - Spec says `apps/api/app/agents/luna/AGENT.md` for Luna agent config. Actual path is `apps/api/app/agents/_bundled/luna/skill.md`. Luna's `tool_groups` lives in the DB (per `apps/api/app/models/agent.py:30`), seeded for Luna Supervisor by migration `154_expand_luna_supervisor_tool_groups.sql`. The bundled `skill.md` file may also carry `tool_groups` frontmatter (verified at `apps/api/app/agents/_bundled/code-reviewer/skill.md:9`). T5.2 adds a migration `NNN_luna_learning_tool_group.sql` AND updates the bundled `skill.md` frontmatter (mirroring `code-reviewer`'s pattern).
 
+## §0d — mcp-server import path convention (resolved during T1.2 impl)
+
+mcp-server tests + production code use `from src.mcp_tools import learning` (with the `src.` prefix), NOT `from mcp_tools import learning`. Several test code samples in this plan show the bare form — implementer subagents should mirror neighboring test files in `apps/mcp-server/tests/` for the actual import path.
+
 ## §0c — Conservative defaults applied (Luna's plan-review dispatch failed)
 
 Luna's iteration-1 plan-review dispatch timed out at the Cloudflare gateway (524) twice — same failure mode as her tighter spec-review dispatch. She already co-designed every spec section in 3 prior rounds + ratified the full design. Conservative defaults applied here, documented for revisit:
