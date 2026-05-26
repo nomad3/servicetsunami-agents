@@ -64,7 +64,7 @@ _API_INTERNAL_KEY = os.environ.get("MCP_API_KEY", "dev_mcp_key")
 # first use rather than at import-time so unit tests don't need to mock
 # the FS — yt-dlp is mocked out in tests, so the dir is only ever
 # created in the real container path.
-_LEARNING_DIR = Path("/var/agentprovision/workspaces/_learning")
+_LEARNING_DIR = Path(os.environ.get("LUNA_LEARN_AUDIO_DIR", "/tmp/agentprovision_learning"))
 
 
 # ── Exception hierarchy ────────────────────────────────────────────────
@@ -252,8 +252,13 @@ async def extract_media(
     except RuntimeError as exc:
         raise _map_ytdlp_error(str(exc))(str(exc)) from exc
 
+    # yt-dlp's `_filename` is the PRE-postprocessing path (e.g. .webm); we
+    # invoked it with `-x --audio-format m4a` so the FINAL file is always
+    # `.m4a`. Rewrite the extension so transcribe_url can find it.
+    raw_filename = meta.get("_filename") or str(_LEARNING_DIR / f"{job_id}.m4a")
+    audio_path = re.sub(r"\.[A-Za-z0-9]+$", ".m4a", raw_filename)
     return {
-        "audio_path": meta.get("_filename") or str(_LEARNING_DIR / f"{job_id}.m4a"),
+        "audio_path": audio_path,
         "metadata": {
             "title": meta.get("title"),
             "duration_s": meta.get("duration"),
@@ -278,12 +283,15 @@ async def _transcribe_bytes_async(audio_bytes: bytes) -> dict:
     httpx itself; T3.1's activity wrapper layers retry/timeout policy on
     top of this.
     """
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    # Use the internal-tier sibling endpoint (T2.2b). The original
+    # /transcribe requires a user JWT; we have X-Internal-Key + tenant header.
+    tenant_id = os.environ.get("LUNA_LEARN_DEFAULT_TENANT_ID", "752626d9-8b2c-4aa2-87ef-c458d48bd38a")
+    async with httpx.AsyncClient(timeout=120.0) as client:
         files = {"file": ("audio.m4a", audio_bytes, "audio/mp4")}
         response = await client.post(
-            f"{_API_BASE}/api/v1/media/transcribe",
+            f"{_API_BASE}/api/v1/media/transcribe-internal",
             files=files,
-            headers={"X-Internal-Key": _API_INTERNAL_KEY},
+            headers={"X-Internal-Key": _API_INTERNAL_KEY, "X-Tenant-Id": tenant_id},
         )
         response.raise_for_status()
         return response.json()

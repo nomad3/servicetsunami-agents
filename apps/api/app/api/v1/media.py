@@ -1,7 +1,7 @@
 import logging
 import time
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile, status
 
 from app.api import deps
 from app.core.config import settings
@@ -191,6 +191,60 @@ async def transcribe_audio(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
+
+
+@router.post("/transcribe-internal")
+async def transcribe_audio_internal(
+    file: UploadFile = File(...),
+    x_internal_key: str = Header(..., alias="X-Internal-Key"),
+    x_tenant_id: str = Header(..., alias="X-Tenant-Id"),
+):
+    """Internal-tier sibling of POST /transcribe (T2.2b followup).
+
+    Used by mcp-server's transcribe_url tool which has no user JWT. Same
+    body + return shape as /transcribe; auth is X-Internal-Key with the
+    tenant id passed via X-Tenant-Id header.
+    """
+    if x_internal_key not in (
+        getattr(settings, "API_INTERNAL_KEY", ""),
+        getattr(settings, "MCP_API_KEY", ""),
+    ):
+        raise HTTPException(status_code=401, detail="Invalid internal key")
+    ct = (file.content_type or "").lower()
+    if not (ct.startswith("audio/") or ct.startswith("video/") or ct in media_utils.AUDIO_MIMES):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported media type: {ct}",
+        )
+    audio_bytes = await file.read()
+    if len(audio_bytes) > media_utils.MAX_AUDIO_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Audio too large (max {media_utils.MAX_AUDIO_SIZE // (1024*1024)}MB)",
+        )
+    try:
+        result = await transcribe_async(audio_bytes, sync_timeout=_SYNC_WINDOW_SECONDS)
+    except TranscriptionUnavailable as exc:
+        logger.warning("Transcription service unavailable: %s", exc)
+        return {"transcript": None, "engine": "unavailable", "duration_ms": 0, "reason": str(exc)}
+    if result.job_id:
+        _record_job_tenant(result.job_id, x_tenant_id)
+    if result.status == "pending":
+        return {
+            "status": "pending",
+            "job_id": result.job_id,
+            "transcript": None,
+            "engine": "pending",
+            "duration_ms": 0,
+            "poll_url": f"/api/v1/media/transcription/{result.job_id}",
+        }
+    return {
+        "transcript": result.transcript,
+        "engine": result.engine,
+        "duration_ms": result.duration_ms,
+        "job_id": result.job_id,
+        "status": "completed",
+    }
 
 
 @router.get("/transcription/{job_id}")

@@ -206,11 +206,21 @@ TOOL_GROUPS: dict[str, list[str]] = {
         "call_mcp_tool",
     ],
     "learning": [
+        # Autonomous-learning subsystem (pre-existing)
         "start_autonomous_learning",
         "stop_autonomous_learning",
         "check_autonomous_learning_status",
         "submit_learning_feedback",
         "get_simulation_summary",
+        # Luna Learn from Media (PR #726) — video → skill synthesis primitives.
+        # Spec: docs/superpowers/specs/2026-05-25-luna-learn-from-media-design.md
+        "extract_media",
+        "transcribe_url",
+        "synthesize_skill_draft",
+        "dispatch_skill_review",
+        "run_synthetic_test",
+        "install_skill",
+        "diffuse_learning",
     ],
     # Platform introspection — answers "what's on this tenant?" questions like
     # "list my agents", "what workflows do I have", "which MCP servers are
