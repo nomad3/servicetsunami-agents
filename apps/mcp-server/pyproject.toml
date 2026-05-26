@@ -35,6 +35,10 @@ dependencies = [
     # crashing the tool path. /metrics endpoint exposure for
     # mcp-server is a follow-up (counters exist in-process).
     "prometheus_client>=0.20.0",
+    # Luna Learn from Media (T2.1): extract_media MCP primitive uses
+    # yt-dlp to download audio from YouTube / Instagram. Requires the
+    # ffmpeg system binary (installed via apt in the Dockerfile).
+    "yt-dlp>=2024.10.0",
 ]
 
 [project.optional-dependencies]
