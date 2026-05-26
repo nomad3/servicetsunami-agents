@@ -6,12 +6,15 @@ mapping). T2.2–T2.7 will append their own sections.
 """
 from __future__ import annotations
 
-from unittest.mock import patch
+import asyncio
+from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from src.mcp_tools import learning
 from src.mcp_tools.learning import (
+    CODE_REVIEWER_AGENT_ID,
     DraftForbiddenShellout,
     DraftInvalid,
     MediaAntiScrape,
@@ -19,6 +22,9 @@ from src.mcp_tools.learning import (
     MediaNotFound,
     MediaPrivate,
     MediaTooLong,
+    ReviewTimeout,
+    ReviewerNotProvisioned,
+    dispatch_skill_review,
     extract_media,
     synthesize_skill_draft,
     transcribe_url,
@@ -169,3 +175,40 @@ async def test_synthesize_forbids_ytdlp_in_python_draft():
         )
         with pytest.raises(DraftForbiddenShellout):
             await synthesize_skill_draft("t", "u")
+
+
+# ── T2.4: dispatch_skill_review ────────────────────────────────────────
+async def test_dispatch_review_approved():
+    """Happy path: reviewer returns approved verdict — surface it verbatim
+    and stamp reviewer_agent_id so downstream audit knows who voted."""
+    with patch("src.mcp_tools.learning._dispatch_agent") as d:
+        async def _ok(*_a, **_k):
+            return {"verdict": "approved", "findings": []}
+        d.side_effect = _ok
+        r = await dispatch_skill_review("md", "t", "u", {}, {})
+    assert r["verdict"] == "approved"
+    assert r["findings"] == []
+    assert r["reviewer_agent_id"] == CODE_REVIEWER_AGENT_ID
+
+
+async def test_dispatch_review_reviewer_not_provisioned():
+    """404 from the agent dispatch endpoint = reviewer agent not in
+    registry. Workflow §3 maps this to cache+notify, not retry."""
+    fake_response = MagicMock(status_code=404)
+    async def _404(*_a, **_k):
+        raise httpx.HTTPStatusError(
+            "404", request=MagicMock(), response=fake_response,
+        )
+    with patch("src.mcp_tools.learning._dispatch_agent", side_effect=_404):
+        with pytest.raises(ReviewerNotProvisioned):
+            await dispatch_skill_review("md", "t", "u", {}, {})
+
+
+async def test_dispatch_review_timeout():
+    """asyncio.TimeoutError bubbles through the wait_for wrapper as
+    ReviewTimeout so the workflow can branch on the typed error."""
+    async def _hang(*_a, **_k):
+        raise asyncio.TimeoutError()
+    with patch("src.mcp_tools.learning._dispatch_agent", side_effect=_hang):
+        with pytest.raises(ReviewTimeout):
+            await dispatch_skill_review("md", "t", "u", {}, {})

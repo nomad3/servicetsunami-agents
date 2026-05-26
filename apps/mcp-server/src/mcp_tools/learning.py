@@ -442,6 +442,52 @@ async def synthesize_skill_draft(
     }
 
 
+# ── T2.4: dispatch_skill_review ────────────────────────────────────────
+# The Code Reviewer agent (per spec §0.3 cross-agent QC) lives behind
+# the api's internal task-dispatch endpoint. The agent UUID is the
+# tenant-Simon Code Reviewer seeded by migration 151 (the plan freezes
+# this UUID — actual seeded id may differ in deploys; T2.5b reconciles).
+# REVIEW_TIMEOUT_S caps the round trip so a stuck reviewer can't pin a
+# Temporal activity past its activity-timeout budget; the workflow
+# (T1.3 / T3.x) maps ReviewTimeout to cache+notify per §3.
+CODE_REVIEWER_AGENT_ID = "755796a4-4cc4-4d1c-99e5-dd9c4f7d0f22"
+REVIEW_TIMEOUT_S = 60
+
+
+async def _dispatch_agent(agent_id: str, payload: dict) -> dict:
+    """POST to the api's internal agent-dispatch endpoint.
+
+    Auth is the same X-Internal-Key the other T2.x wrappers use. The
+    path the plan documents (``/api/v1/agents/{agent_id}/dispatch``)
+    doesn't exist on the api as a literal route — the actual internal
+    sibling of the JWT-gated dispatch verb is
+    ``POST /api/v1/tasks/internal/dispatch`` (Phase 4 C-FINAL-1). We
+    POST there with a ``delegate`` task_type and pass the structured
+    review payload through ``context`` so the reviewer agent receives
+    the SKILL.md + transcript + synthetic test verbatim. Tests mock
+    this helper, so the URL/contract drift is contained here; T3.x's
+    activity wrapper layer covers the live-wire integration.
+
+    The 60s client timeout matches ``REVIEW_TIMEOUT_S`` so the outer
+    ``asyncio.wait_for`` is the authoritative deadline either way —
+    whichever fires first raises a TimeoutError that maps to
+    ``ReviewTimeout``.
+    """
+    async with httpx.AsyncClient(timeout=REVIEW_TIMEOUT_S) as client:
+        r = await client.post(
+            f"{_API_BASE}/api/v1/tasks/internal/dispatch",
+            json={
+                "task_type": "delegate",
+                "target_agent_id": agent_id,
+                "objective": payload.get("task", "review_synthesized_skill"),
+                "context": payload,
+            },
+            headers={"X-Internal-Key": _API_INTERNAL_KEY},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
 async def dispatch_skill_review(
     skill_md: str,
     transcript: str,
@@ -449,8 +495,51 @@ async def dispatch_skill_review(
     synthetic_test_input: dict,
     synthetic_test_expected: dict,
 ) -> dict:
-    """T2.4 — dispatch the draft to a reviewer agent and await verdict."""
-    raise NotImplementedError("T2.4")
+    """T2.4 — dispatch the draft to the Code Reviewer agent and await verdict.
+
+    Spec §0.3 (cross-agent QC) + §1.10. The reviewer agent inspects:
+    (a) the SKILL.md is idiomatic + safe (no shellout-via-prose), and
+    (b) the synthetic test isn't a tautology of the synthesizer's own
+    rationale (the synthesizer wrote the test, so a peer must vet that
+    it actually probes the skill).
+
+    Returns ``{"verdict": str, "findings": list, "reviewer_agent_id": str}``.
+    Verdict values the workflow recognizes are ``"approved"``,
+    ``"revise"``, ``"reject"`` — anything else defaults to ``"revise"``
+    (re-cycle through synthesis with the findings as hints).
+
+    Typed errors:
+      - ``ReviewerNotProvisioned`` — registry returned 404; workflow
+        caches the draft + notifies the operator (§3.2).
+      - ``ReviewTimeout`` — reviewer didn't respond inside
+        ``REVIEW_TIMEOUT_S``; same cache+notify path as above.
+    """
+    payload = {
+        "task": "review_synthesized_skill",
+        "skill_md": skill_md,
+        "transcript": transcript,
+        "source_url": source_url,
+        "synthetic_test": {
+            "input": synthetic_test_input,
+            "expected": synthetic_test_expected,
+        },
+    }
+    try:
+        result = await asyncio.wait_for(
+            _dispatch_agent(CODE_REVIEWER_AGENT_ID, payload),
+            timeout=REVIEW_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError as e:
+        raise ReviewTimeout() from e
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise ReviewerNotProvisioned() from e
+        raise
+    return {
+        "verdict": result.get("verdict", "revise"),
+        "findings": result.get("findings", []),
+        "reviewer_agent_id": CODE_REVIEWER_AGENT_ID,
+    }
 
 
 async def run_synthetic_test(
