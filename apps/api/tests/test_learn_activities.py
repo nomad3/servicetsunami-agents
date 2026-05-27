@@ -150,7 +150,7 @@ async def test_act_transcribe_url_ok_deletes_audio(tmp_path):
         "app.workflows.activities.learn_from_media_activities._call_mcp"
     ) as call:
         call.return_value = {"transcript": "hello world", "language": "en"}
-        r = await act_transcribe_url(str(audio))
+        r = await act_transcribe_url(str(audio), "11111111-2222-3333-4444-555555555555")
 
     assert r["ok"] is True
     assert r["data"]["transcript"] == "hello world"
@@ -168,7 +168,7 @@ async def test_act_transcribe_url_failure_leaves_audio(tmp_path):
         "app.workflows.activities.learn_from_media_activities._call_mcp"
     ) as call:
         call.side_effect = _http_error(500, "TranscriptionFailed")
-        r = await act_transcribe_url(str(audio))
+        r = await act_transcribe_url(str(audio), "11111111-2222-3333-4444-555555555555")
 
     assert r["ok"] is False
     # File survives for T3.3 quarantine bundle to copy.

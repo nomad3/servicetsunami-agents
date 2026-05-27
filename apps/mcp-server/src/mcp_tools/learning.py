@@ -43,6 +43,7 @@ import httpx
 from mcp.server.fastmcp import Context
 
 from src.mcp_app import mcp
+from src.mcp_auth import resolve_tenant_id
 from .learning_prompts import SYNTHESIS_SYSTEM, SYNTHESIS_USER
 
 
@@ -64,7 +65,38 @@ _API_INTERNAL_KEY = os.environ.get("MCP_API_KEY", "dev_mcp_key")
 # first use rather than at import-time so unit tests don't need to mock
 # the FS — yt-dlp is mocked out in tests, so the dir is only ever
 # created in the real container path.
+#
+# IMPORTANT3 fix: the audio gets partitioned per-tenant under this root
+# (``<root>/<tenant_id>/<job_id>.m4a``) with mode 0o700 so one tenant's
+# audio can never land beside another's, and so a non-root reader inside
+# the container can't even list the audio directory.
 _LEARNING_DIR = Path(os.environ.get("LUNA_LEARN_AUDIO_DIR", "/tmp/agentprovision_learning"))
+
+
+def _tenant_audio_dir(tenant_id: str) -> Path:
+    """Return the per-tenant audio dir, creating it with mode 0o700.
+
+    Tenant id is treated as opaque and re-rendered through ``str`` so
+    a non-string sneaks through as TypeError instead of writing to the
+    bare root. Idempotent: chmod is re-applied even when the dir
+    already exists in case an earlier process created it with a looser
+    umask.
+    """
+    if not tenant_id:
+        raise ValueError("tenant_id required for per-tenant audio dir")
+    # Root dir: 0o700 so even peers in the container can't enumerate.
+    _LEARNING_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(_LEARNING_DIR, 0o700)
+    except OSError:
+        pass
+    sub = _LEARNING_DIR / str(tenant_id)
+    sub.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(sub, 0o700)
+    except OSError:
+        pass
+    return sub
 
 
 # ── Exception hierarchy ────────────────────────────────────────────────
@@ -201,6 +233,7 @@ def _map_ytdlp_error(stderr: str) -> type[LearningToolError]:
 async def extract_media(
     url: str,
     max_duration_s: int = 900,
+    tenant_id: str | None = None,
     ctx: Context = None,
 ) -> dict:
     """Download audio from a public media URL (YouTube, podcasts, etc.) via yt-dlp.
@@ -213,7 +246,7 @@ async def extract_media(
     (the synthesis budget assumes ~15min ceiling). On success returns::
 
         {
-            "audio_path": "/var/.../<job_id>.m4a",
+            "audio_path": "/var/.../<tenant_id>/<job_id>.m4a",
             "metadata": {
                 "title": str | None,
                 "duration_s": int | None,
@@ -222,20 +255,31 @@ async def extract_media(
             },
         }
 
+    Audio lands under ``<root>/<tenant_id>/`` with mode 0o700 so one
+    tenant's m4a files can't be read or even listed by a peer in the
+    same container (IMPORTANT3). ``tenant_id`` is resolved from the
+    explicit arg, then ``ctx`` headers; missing → ValueError.
+
     Subprocess errors are translated into the typed ``Media*`` classes
     so Temporal activities (T3.1) can branch on ``error_type`` without
     parsing free-form 500s. See ``_map_ytdlp_error``.
     """
+    resolved_tenant = tenant_id or resolve_tenant_id(ctx)
+    if not resolved_tenant:
+        raise ValueError(
+            "extract_media requires tenant_id (no safe default — audio "
+            "must be partitioned per tenant)"
+        )
     try:
-        _LEARNING_DIR.mkdir(parents=True, exist_ok=True)
+        tenant_dir = _tenant_audio_dir(resolved_tenant)
     except (PermissionError, OSError):
         # In container the dir is writable; in unit tests yt-dlp is
-        # mocked so the dir is never actually used. Swallow filesystem
-        # errors here rather than forcing tests to patch the path.
-        pass
+        # mocked so the dir is never actually used. Fall back to a
+        # bare tmp path so tests don't need to patch the FS.
+        tenant_dir = _LEARNING_DIR / str(resolved_tenant)
 
     job_id = uuid.uuid4().hex
-    output_path = str(_LEARNING_DIR / f"{job_id}.%(ext)s")
+    output_path = str(tenant_dir / f"{job_id}.%(ext)s")
 
     try:
         duration_s = await _probe_duration(url)
@@ -255,7 +299,7 @@ async def extract_media(
     # yt-dlp's `_filename` is the PRE-postprocessing path (e.g. .webm); we
     # invoked it with `-x --audio-format m4a` so the FINAL file is always
     # `.m4a`. Rewrite the extension so transcribe_url can find it.
-    raw_filename = meta.get("_filename") or str(_LEARNING_DIR / f"{job_id}.m4a")
+    raw_filename = meta.get("_filename") or str(tenant_dir / f"{job_id}.m4a")
     audio_path = re.sub(r"\.[A-Za-z0-9]+$", ".m4a", raw_filename)
     return {
         "audio_path": audio_path,
@@ -268,7 +312,7 @@ async def extract_media(
     }
 
 
-async def _transcribe_bytes_async(audio_bytes: bytes) -> dict:
+async def _transcribe_bytes_async(audio_bytes: bytes, tenant_id: str) -> dict:
     """POST audio bytes to the api's existing transcription endpoint.
 
     Wraps the same code-path the web client uses (``POST
@@ -279,13 +323,21 @@ async def _transcribe_bytes_async(audio_bytes: bytes) -> dict:
     whatever the api returned verbatim — the workflow layer (T3.x)
     decides how to handle the pending case.
 
+    ``tenant_id`` is REQUIRED and propagates as ``X-Tenant-Id`` to the
+    internal endpoint. The api's per-tenant Redis ledger uses this to
+    scope the emitted job_id so a poll from another tenant returns 404.
+    NEVER fall back to a hardcoded UUID — a default value here would
+    silently rebind every other tenant's transcripts onto whichever
+    tenant the default points at (multi-tenant data leak).
+
     Split out so unit tests can mock the network hop without mocking
     httpx itself; T3.1's activity wrapper layers retry/timeout policy on
     top of this.
     """
     # Use the internal-tier sibling endpoint (T2.2b). The original
     # /transcribe requires a user JWT; we have X-Internal-Key + tenant header.
-    tenant_id = os.environ.get("LUNA_LEARN_DEFAULT_TENANT_ID", "752626d9-8b2c-4aa2-87ef-c458d48bd38a")
+    if not tenant_id:
+        raise ValueError("tenant_id is required for transcribe (no safe default)")
     async with httpx.AsyncClient(timeout=120.0) as client:
         files = {"file": ("audio.m4a", audio_bytes, "audio/mp4")}
         response = await client.post(
@@ -300,6 +352,7 @@ async def _transcribe_bytes_async(audio_bytes: bytes) -> dict:
 @mcp.tool()
 async def transcribe_url(
     audio_path: str,
+    tenant_id: str | None = None,
     ctx: Context = None,
 ) -> dict:
     """Transcribe a local audio file to text + segments via the platform's Whisper workflow.
@@ -312,11 +365,25 @@ async def transcribe_url(
     through the code-worker whisper workflow). Raises ``FileNotFoundError``
     if the path doesn't exist so the Temporal activity layer can surface
     a precise error (rather than a generic httpx upload failure).
+
+    Tenant resolution order (review BLOCKER1 — no hardcoded fallback):
+      1. ``tenant_id`` arg, when caller passes it explicitly.
+      2. ``ctx`` headers via ``resolve_tenant_id`` (Luna chat tier
+         injects X-Tenant-Id from the agent-scoped JWT).
+      3. ``ValueError`` if neither is present — we MUST NOT default to
+         Simon's UUID because that would bind other tenants' jobs to
+         his ledger.
     """
     path = Path(audio_path)
     if not path.exists():
         raise FileNotFoundError(audio_path)
-    return await _transcribe_bytes_async(path.read_bytes())
+    resolved_tenant = tenant_id or resolve_tenant_id(ctx)
+    if not resolved_tenant:
+        raise ValueError(
+            "transcribe_url requires tenant_id (no safe fallback); "
+            "pass tenant_id explicitly or ensure ctx carries X-Tenant-Id"
+        )
+    return await _transcribe_bytes_async(path.read_bytes(), tenant_id=resolved_tenant)
 
 
 # ── T2.3: synthesize_skill_draft ───────────────────────────────────────

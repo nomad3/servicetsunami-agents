@@ -120,22 +120,40 @@ def _wrap(coro):
 
 @activity.defn
 @_wrap
-async def act_extract_media(url: str, max_duration_s: int = 900) -> dict:
-    return await _call_mcp(
-        "extract_media", {"url": url, "max_duration_s": max_duration_s}
-    )
+async def act_extract_media(
+    url: str, max_duration_s: int = 900, tenant_id: str | None = None
+) -> dict:
+    """Download audio for ``url``, partitioned into the tenant's audio dir.
+
+    ``tenant_id`` is plumbed so the MCP tool writes under
+    ``/tmp/agentprovision_learning/<tenant_id>/`` with mode 0o700
+    (IMPORTANT3 fix). Optional only for back-compat with older callers;
+    the workflow now passes it for every new job.
+    """
+    payload: dict = {"url": url, "max_duration_s": max_duration_s}
+    if tenant_id:
+        payload["tenant_id"] = tenant_id
+    return await _call_mcp("extract_media", payload)
 
 
 @activity.defn
 @_wrap
-async def act_transcribe_url(audio_path: str) -> dict:
+async def act_transcribe_url(audio_path: str, tenant_id: str) -> dict:
     """Transcribe + delete audio on success (spec §1.12).
+
+    ``tenant_id`` is REQUIRED (BLOCKER1 fix): the MCP tool refuses to
+    fall back to a hardcoded default so the workflow MUST plumb the
+    job-owning tenant here. Without it the api ledger would either
+    return 401 or (pre-fix) silently bind the job to Simon's tenant.
 
     Failure path leaves the file in place so the T3.3 quarantine bundle
     can copy it (and the periodic orphan sweep eventually clears the rest).
     """
     try:
-        result = await _call_mcp("transcribe_url", {"audio_path": audio_path})
+        result = await _call_mcp(
+            "transcribe_url",
+            {"audio_path": audio_path, "tenant_id": tenant_id},
+        )
     except httpx.HTTPStatusError:
         # Re-raise so ``_wrap`` builds the typed-error envelope; file
         # intentionally NOT deleted on failure (quarantine consumes it).
