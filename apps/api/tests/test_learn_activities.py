@@ -182,7 +182,7 @@ async def test_act_transcribe_url_missing_file_is_safe(tmp_path):
         "app.workflows.activities.learn_from_media_activities._call_mcp"
     ) as call:
         call.return_value = {"transcript": "x", "language": "en"}
-        r = await act_transcribe_url(str(missing))
+        r = await act_transcribe_url(str(missing), "752626d9-8b2c-4aa2-87ef-c458d48bd38a")
     assert r["ok"] is True
     assert not missing.exists()
 
