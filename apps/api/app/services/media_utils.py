@@ -45,7 +45,7 @@ SPREADSHEET_MIMES = {
 # ── Size limits (bytes) ────────────────────────────────────────────────────
 
 MAX_IMAGE_SIZE = 10 * 1024 * 1024   # 10 MB
-MAX_AUDIO_SIZE = 25 * 1024 * 1024   # 25 MB
+MAX_AUDIO_SIZE = 200 * 1024 * 1024  # 200 MB — accommodates ~1hr m4a (Luna Learn from Media support)
 MAX_PDF_SIZE = 20 * 1024 * 1024     # 20 MB
 MAX_SPREADSHEET_SIZE = 10 * 1024 * 1024  # 10 MB
 
