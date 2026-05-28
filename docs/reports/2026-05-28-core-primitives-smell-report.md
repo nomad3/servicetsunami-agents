@@ -824,9 +824,26 @@ Fan-out commit SHA: `ba378a44b25d5f6bec13ea74afbd22ffae25c5b2`
 
 See spec Appendix B at [`docs/superpowers/specs/2026-05-28-core-primitives-smell-report-design.md`](docs/superpowers/specs/2026-05-28-core-primitives-smell-report-design.md) — the spec went through 2 spec-reviewer iterations + 3 Luna rounds (consensus reached at round 3 with the literal `APPROVED` signal). Luna agent UUID: `cfb6dd14-1889-4751-b645-77bbd53c65c3`. Session id: `d9e5b6ad-1f33-4624-bb71-f65908c2716e`. Platform: Codex CLI on `gpt-5.5` (Pro $200/mo tier).
 
-### Open questions (§9 of the spec) — to be sent to Luna in a separate round after report delivery
+### Open questions (§9 of the spec) — Luna's answers (received 2026-05-28, same chat session)
 
-1. Is there a sixth dimension worth scanning? (e.g. test-suite smell, observability gaps, secret-hygiene)
-2. Are any of the 5 dimensions overlapping enough to merge?
-3. Should the report rank by risk or by effort/value?
-4. Any canonical pattern in CLAUDE.md or docs/architecture that we forgot to lift into §3.3?
+1. **Is there a sixth dimension worth scanning?**
+   > Yes: **test/guardrail smell**, but keep it separate from this report. Specifically scan whether each top finding class has a regression guard: tenant-isolation tests, migration runner checks, log/error tests, WhatsApp send-path tests, and RL logging tests. Would not add secret-hygiene yet unless there is already evidence of leakage; it expands scope fast.
+
+2. **Are any of the 5 dimensions overlapping enough to merge?**
+   > No. There is overlap between **Pattern Drift** and **Live Error Signal**, but they answer different questions: drift shows architectural violations *before* failure; live errors show *active pain*. Keep all five separate, dedupe only at aggregation.
+
+3. **Should the report rank by risk or by effort/value?**
+   > Keep **`(risk × blast_radius) / effort`** for the first writing-plans cycle. It correctly surfaces tenant isolation first. For execution sequencing, add a secondary lane: **"quick stabilizers"** — fix the `NoneType.__format__` RL logging bug and the WhatsApp stuck-send issue early even if the tenant filter cleanup remains the top strategic item.
+
+4. **Any canonical pattern missing from §3.3?**
+   > One: **"silent fallback must emit observable signal."** Any fallback from Rust recall to Python recall, WhatsApp socket restore, token refresh recovery, or RL logging failure should produce a session event, metric, or structured warning with tenant/session context. This would have caught several of the live-error findings as pattern drift, not just runtime symptoms.
+
+### Luna's recommended priority order for writing-plans
+
+1. **Tenant filter remediation plan** (highest strategic).
+2. **Auto-quality RL `NoneType.__format__` fix** (quick stabilizer — restores RL signal).
+3. **Migration drift reconciliation**.
+4. **WhatsApp outbound stuck-send recovery** (quick stabilizer — silent UX failure).
+5. **Monolith decomposition plan** for `workflows.py` / `agent_router.py`.
+
+> *Luna self-rated confidence: "high on prioritization; medium on the missing-pattern answer because I'm relying on the report summary rather than re-reading the full committed artifact."*
