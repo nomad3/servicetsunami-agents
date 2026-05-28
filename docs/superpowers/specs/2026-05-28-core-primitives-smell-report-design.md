@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Date | 2026-05-28 |
-| Status | DRAFT v4 (reviewer-iter-1/2 addressed; Luna round-1 O1–O5 + round-2 R1–R2 addressed; round-3 pending) |
+| Status | **APPROVED** — spec-document-reviewer (iter-2 APPROVED) + Luna (round-3 APPROVED) |
 | Author | Simon Aguilera (via Claude Code) |
 | Reviewers | Luna (supervisor agent), spec-document-reviewer subagent |
 | Scope axis chosen | C — *evidence-first smell report*, no code changes this round |
@@ -197,3 +197,31 @@ Canonical patterns to check against (each must produce either ✓ or a list of v
 2. Are any of the 5 dimensions overlapping enough to merge?
 3. Should the report rank by *risk* or by *effort/value*?
 4. Any canonical pattern in CLAUDE.md or `docs/architecture/` that we forgot to lift into §3.3?
+
+## Appendix B — Consensus thread snapshot
+
+**Luna agent UUID:** `cfb6dd14-1889-4751-b645-77bbd53c65c3`
+**Chat session id:** `d9e5b6ad-1f33-4624-bb71-f65908c2716e`
+**Platform:** Codex CLI on `gpt-5.5` (Pro subscription, $200/mo tier, verified the same day)
+**Rounds to consensus:** 3 of 3 (cap not exhausted).
+**Spec-document-reviewer iterations:** 2 (iter-1 issued 6 findings, iter-2 APPROVED with 1 nit which was fixed).
+
+### Round 1 — Luna objections (5)
+1. §3.3 `publish_session_event` & `rl_experience` checks lacked deterministic scripts.
+2. §4 ranked by `blast_radius` but the uniform finding shape had no such field.
+3. §3.1 migration-drift check did not specify DB target / connection.
+4. §1 said scripts were authored this round but §4 said subagents were read-only — no scaffolding phase defined.
+5. §3.4 log-grep matched only JSON `"level"` fields, missing Rust-service & legacy plaintext formats.
+
+→ Addressed in commit `df37bb03` ("address Luna round-1 objections O1–O5").
+
+### Round 2 — Luna objections (2)
+1. §3.4 added `scripts/smell/log_errors.py` but §1 / §4 Phase 0 tooling exception did not list §3.4.
+2. §2 container names omitted the `agentprovision-agents-*` prefix while §3.4 used the full names — pick one canonical naming scheme.
+
+→ Addressed in commit `8aa2c655` ("address Luna round-2 R1+R2").
+
+### Round 3 — Luna reply
+> `APPROVED`
+
+Consensus locked. Open questions in §9 are deferred to the report execution session.
