@@ -847,3 +847,89 @@ See spec Appendix B at [`docs/superpowers/specs/2026-05-28-core-primitives-smell
 5. **Monolith decomposition plan** for `workflows.py` / `agent_router.py`.
 
 > *Luna self-rated confidence: "high on prioritization; medium on the missing-pattern answer because I'm relying on the report summary rather than re-reading the full committed artifact."*
+
+---
+
+## Appendix C — Opus 4.7 fan-out verification pass (2026-05-28)
+
+A second review was run after delivery: 4 parallel Opus 4.7 reviewer agents independently
+re-validated each top finding against the **actual source code and live logs**. The headline
+numbers in §1 are produced by deliberately crude heuristics and carry a high false-positive
+rate. **Re-prioritize the writing-plans cycle using this appendix, not §1.**
+
+### C.1 Tenant-filter cluster (§1.1, §2 top-10) — DOWNGRADE
+
+- **10/10 of the top-ranked findings are false positives.** All 10 models genuinely carry a
+  `tenant_id` column (model-detection is sound), but the leak-detection half uses a fixed
+  **5-source-line window** that misses tenant scoping applied via: route-layer ownership guards
+  (`tenant_id != current_user.tenant_id → 404`), by-PK lookups, chained `.filter()` past the
+  window (e.g. `users.py:92` filters on line 98), and prior tenant-filtered queries one layer up.
+- The `risk=high` / `blast_radius=large` fields are **hardcoded constants** in
+  `tenant_filter_check.py` (≈lines 85-86), not derived from context.
+- **Corrected headline:** "44 queries the 5-line heuristic could not confirm tenant scoping for —
+  manual review recommended; **no confirmed cross-tenant leak**." Only `rl_reward_service.py:87`
+  (trajectory_id cross-tenant collision) and `users.py:22` (User PK exposure) merit a human glance,
+  and both appear safe in context.
+
+### C.2 auto_quality_scorer `NoneType.__format__` (§1.2) — VERIFIED ✅
+
+- **Real bug, confirmed in logs** (61 occurrences/72h, report said 55 — same order).
+- Formatting bug: `auto_quality_scorer.py:319-323` f-string `cost=${cost_usd:.4f}` where
+  `cost_usd` can be `None` (line 147 guards it; 318-323 and 339 do not).
+- Swallowed at `auto_quality_scorer.py:415-416` (`except Exception` → `logger.warning`); thread is
+  fire-and-forget `daemon=True`, so it appears healthy. Crash fires *after* scoring but *before*
+  RL persistence → each crash discards one fully-computed reward. **This is the one finding that is
+  unambiguously real and should be fixed first.** ("~half the RL signal" is directional, not exact.)
+
+### C.3 WhatsApp stuck-send (§1.5) — NOT REPRODUCED
+
+- The 22 `handoff: to_thread` events (`whatsapp_service.py:1336`) are **healthy completed handoffs**
+  — paired with `handoff: returned ... response=ok` at `:1358` (20/20 `response=ok`, zero `none`,
+  zero `Failed to send reply`). `readonly database` had **0** occurrences in 72h.
+- A silent-send hang inside `to_thread` is *theoretically* possible and would escape the
+  restore handler (`main.py:213-234`, keyed strictly on `readonly database`), but **did not occur
+  in the observed window**. Treat as a latent guardrail gap, not active pain. Downgrade from §1.
+
+### C.4 Dead code — INFLATED
+
+- **unimported_symbols (297 findings): ~90-95% false positives.** Vulture was unavailable; the AST
+  fallback matches only 5 dotted-import string patterns and is blind to **aliased imports**
+  (`from app.services import chat as chat_service`), intra-file usage (defining file excluded),
+  and bare-name `__all__` re-exports. 8/8 spot-checks were live route-backing CRUD. **The
+  `action: delete` on these is dangerous — do not act without per-symbol verification.**
+- **migration_drift (22): ~2 real.** ~13 are cosmetic `.sql`-extension mismatches (`_migrations`
+  stored bare stems for the 091-era), 6 are by-design `*.down.sql` rollback files (never recorded),
+  ~1 deliberately-dropped (`097_agent_policies`). Real drift: `118_pulse_revenue_sync_wiring`
+  (renumbered) and `157_luna_split_luna_learn` (no file).
+
+### C.5 Hotspots — METRICS PARTIALLY OVERSTATED
+
+- LOC counts accurate. `agent_router.route_and_execute` is exactly 682 LOC but **nesting depth is 6,
+  not "10+"** (confirmed by AST + raw indentation). It is still the single genuine refactor fire.
+- The report conflates a **2250-LOC data blob** (`workflow_templates.py`, ≈zero change risk) with a
+  **682-LOC depth-6 control-flow function** (high change risk) under one "monolith" label. Only
+  `route_and_execute` warrants urgent decomposition; `workflows.py` is medium; templates is cosmetic.
+
+### C.6 AI slop — ESSENTIALLY EMPTY
+
+- 3/5 findings are false positives: the "hedging word" heuristic flags **load-bearing security
+  prose** in `auth.py:49,246,650` ("very long chain" = DoS vector, etc.) and precise test comments.
+  Only the 2 redundant docstrings in `connector_testing.py:33,58` are real, and both are trivial.
+  Recommend dropping/narrowing the hedging-word check. (Section-header comments were correctly
+  *not* flagged — the standing user preference held.)
+
+### C.7 Corrected priority for writing-plans
+
+1. **Fix `auto_quality_scorer` `NoneType.__format__`** — the only verified, high-value bug. (S)
+2. **Reconcile the ~2 real migration drifts** + document the `.sql`-stem convention. (S)
+3. **Decompose `agent_router.route_and_execute`** (682 LOC, depth 6) — the real hotspot. (L)
+4. **Manually audit the 2 NEEDS-HUMAN tenant sites** (`rl_reward_service.py:87`, `users.py:22`);
+   treat the other 42 as a heuristic backlog, not incidents.
+5. **Harden the scanners themselves** before re-running: alias-aware import resolution, route-guard
+   awareness in tenant check, drop the hedging-word slop check, widen the tenant-filter window or
+   make it data-flow aware. The current heuristics over-report by ~10x on the headline dimensions.
+
+> Verification method: 4 parallel Opus 4.7 agents, read-only, validating against source + 72h
+> container logs. Net: 1 finding fully verified (C.2), 1 partially (C.5 LOC), the rest materially
+> overstated by crude heuristics. The report remains useful as a *candidate* list — not an
+> incident list.
