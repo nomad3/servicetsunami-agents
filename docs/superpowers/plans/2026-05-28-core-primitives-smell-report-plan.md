@@ -245,7 +245,7 @@ git commit -m "smell: migration-drift scanner with degraded preflight (dimension
 
 - [ ] **Step 1:** CLI flags `--since` (default `72h`), `--container` (repeatable). For each container: `docker logs --since <since> <name>` → pipe through the 3-shape grep, normalize stack traces (strip line numbers, UUIDs, request IDs, timestamps), bucket by fingerprint, return top-20 with count + sample line. Preflight: container list seen via `docker ps --format '{{.Names}}'`; per-container exit code recorded. Each top-20 fingerprint → Finding with `where=<container>`, `evidence="<fingerprint> ×<count>"`, `reproducer=` the docker logs invocation.
 
-- [ ] **Step 2:** Smoke: `python3 scripts/smell/log_errors.py --since 5m --container agentprovision-agents-api-1 | jq .preflight.container_set`.
+- [ ] **Step 2:** Smoke: `python3 scripts/smell/log_errors.py --since 5m --container agentprovision-agents-api-1 | jq .preflight.containers_seen`.
 
 - [ ] **Step 3:** Commit: `git add scripts/smell/log_errors.py && git commit -m "smell: log-errors multi-format capture (dimension §3.4)"`
 
