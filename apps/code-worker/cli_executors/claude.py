@@ -31,6 +31,7 @@ import os
 
 import cli_runtime
 import tenant_home_quota
+from cli_executors import claude_interactive
 from cli_executors import claude_stream_parser
 from session_event_emitter import SessionEventEmitter
 from tenant_feature_flags import is_enabled as _feature_enabled
@@ -77,6 +78,7 @@ def execute_claude_chat(task_input, session_dir: str):
         with open(os.path.join(session_dir, "mcp.json"), "w") as f:
             f.write(task_input.mcp_config)
 
+    token, kind = credential
     _model = task_input.model or CLAUDE_CODE_MODEL
     _allowed = task_input.allowed_tools or _build_allowed_tools_from_mcp(
         task_input.mcp_config, extra="Bash,Read,Edit,Write,WebFetch,WebSearch"
@@ -96,11 +98,21 @@ def execute_claude_chat(task_input, session_dir: str):
     _stream_enabled = _feature_enabled(
         task_input.tenant_id, "cli_stream_output", default=False
     )
-    cmd = ["claude", "-p", prompt]
-    if _stream_enabled:
-        cmd.extend(["--output-format", "stream-json", "--verbose"])
-    else:
-        cmd.extend(["--output-format", "json"])
+    execution_mode = os.environ.get(
+        "CLAUDE_CODE_EXECUTION_MODE", "print"
+    ).strip().lower()
+    interactive_requested = execution_mode in {"interactive", "pty", "native"}
+    # API-key tenants are already on the Console billing path; keep their
+    # machine-readable print mode even when the worker globally enables
+    # interactive native-auth for subscription/OAuth tenants.
+    interactive_mode = interactive_requested and kind == "oauth"
+    cmd = ["claude"]
+    if not interactive_mode:
+        cmd.extend(["-p", prompt])
+        if _stream_enabled:
+            cmd.extend(["--output-format", "stream-json", "--verbose"])
+        else:
+            cmd.extend(["--output-format", "json"])
     cmd.extend([
         "--model", _model,
         "--allowedTools", _allowed,
@@ -122,13 +134,13 @@ def execute_claude_chat(task_input, session_dir: str):
     # bounded context under our control.
     # Use --no-session-persistence to avoid leaking JSONL files on every
     # call (842+ files were accumulated in the previous model).
-    cmd.append("--no-session-persistence")
+    if not interactive_mode:
+        cmd.append("--no-session-persistence")
 
     mcp_path = os.path.join(session_dir, "mcp.json")
     if os.path.exists(mcp_path):
         cmd.extend(["--mcp-config", mcp_path])
 
-    token, kind = credential
     env = os.environ.copy()
     if kind == "oauth":
         # Subscription-OAuth flow: token is a Bearer for claude.com.
@@ -140,7 +152,14 @@ def execute_claude_chat(task_input, session_dir: str):
         # Console billing path, surfacing as "Credit balance is too
         # low" even though the OAuth account has quota. Observed
         # 2026-05-16 after PR #530 recreated code-worker.
-        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+        # Interactive mode is for native Claude Code subscription auth in
+        # the worker HOME. Do not force the old print-mode OAuth env unless
+        # explicitly requested; recent Claude Code releases route that path
+        # differently from a normal logged-in TTY session.
+        if interactive_mode and os.environ.get("CLAUDE_CODE_INTERACTIVE_AUTH", "native") == "native":
+            env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        else:
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = token
         env.pop("ANTHROPIC_API_KEY", None)
     else:
         # API-key flow (kind == "api_key"): claude CLI honours
@@ -165,6 +184,9 @@ def execute_claude_chat(task_input, session_dir: str):
     if cli_cwd != _cwd_fallback:
         cmd.extend(["--add-dir", cli_cwd])
 
+    if interactive_mode:
+        cmd.append(prompt)
+
     # ── tenant HOME on workspaces volume (task #267 Phase 1) ────────────
     # Redirect HOME onto the persistent workspaces volume so per-tenant
     # ``.local/`` / ``.cache/`` / package installs don't grow the
@@ -175,7 +197,16 @@ def execute_claude_chat(task_input, session_dir: str):
     tenant_home_path: str | None = None
     try:
         tenant_home_path = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
-        env["HOME"] = tenant_home_path
+        interactive_home_mode = os.environ.get(
+            "CLAUDE_CODE_INTERACTIVE_HOME", "tenant"
+        ).strip().lower()
+        if interactive_mode and interactive_home_mode in {"worker", "codeworker"}:
+            # Native Claude Code subscription auth is tied to HOME. Some
+            # workers are authenticated once as the codeworker user, so use
+            # that HOME only for the TTY path when explicitly requested.
+            env["HOME"] = os.environ.get("CLAUDE_CODE_WORKER_HOME", "/home/codeworker")
+        else:
+            env["HOME"] = tenant_home_path
     except (ValueError, OSError) as exc:
         logger.warning(
             "tenant_home_dir(%s) failed (%s); HOME falls back to container default",
@@ -189,17 +220,36 @@ def execute_claude_chat(task_input, session_dir: str):
         platform="claude_code",
         attempt=getattr(task_input, "attempt", 1) or 1,
     )
-    on_chunk = claude_stream_parser.build_parser(emitter) if (_stream_enabled and emitter.enabled) else None
+    # The stream parser only understands Claude's `stream-json` protocol.
+    # Interactive mode emits terminal text from a PTY, so leave raw transcript
+    # handling inside `claude_interactive` instead of feeding it to NDJSON code.
+    on_chunk = (
+        claude_stream_parser.build_parser(emitter)
+        if (_stream_enabled and not interactive_mode and emitter.enabled)
+        else None
+    )
 
     try:
-        result = cli_runtime.run_cli_with_heartbeat(
-            cmd,
-            label="Claude Code",
-            timeout=1500,
-            env=env,
-            cwd=cli_cwd,
-            on_chunk=on_chunk,
-        )
+        if interactive_mode:
+            result = claude_interactive.run_claude_interactive_with_heartbeat(
+                cmd,
+                prompt=prompt,
+                label="Claude Code",
+                timeout=1500,
+                env=env,
+                cwd=cli_cwd,
+                on_chunk=on_chunk,
+                heartbeat=cli_runtime.activity.heartbeat,
+            )
+        else:
+            result = cli_runtime.run_cli_with_heartbeat(
+                cmd,
+                label="Claude Code",
+                timeout=1500,
+                env=env,
+                cwd=cli_cwd,
+                on_chunk=on_chunk,
+            )
     finally:
         _stats = emitter.close()
         # ── Phase 2 quota walker (task #264) ────────────────────────────
@@ -220,6 +270,16 @@ def execute_claude_chat(task_input, session_dir: str):
     raw = result.stdout.strip()
     if not raw:
         return ChatCliResult(response_text="", success=False, error="CLI produced no output")
+
+    if interactive_mode:
+        return ChatCliResult(
+            response_text=raw,
+            success=True,
+            metadata={
+                "platform": "claude_code",
+                "execution_mode": "interactive",
+            },
+        )
 
     # stream-json: response is NDJSON, the final `result` event holds the
     # cost + usage data and ``result.result`` is the assistant's full

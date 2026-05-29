@@ -18,7 +18,7 @@ Workflows: `CodeTaskWorkflow`, `ChatCliWorkflow`, `ProviderReviewWorkflow`. Defi
 
 | Runtime | Auth env | Notes |
 |---------|----------|-------|
-| Claude Code | `CLAUDE_CODE_OAUTH_TOKEN` | `claude -p` |
+| Claude Code | Native Claude Code HOME session, or `CLAUDE_CODE_OAUTH_TOKEN` in legacy print mode | `CLAUDE_CODE_EXECUTION_MODE=interactive` avoids `claude -p`; `print` keeps the JSON path |
 | Codex (OpenAI) | `auth.json` written from vault | per-subprocess |
 | Gemini CLI | OAuth creds + `--skip-trust` + `GEMINI_CLI_TRUST_WORKSPACE` | trusted-folders gate workaround (#209) |
 | GitHub Copilot CLI | OAuth token | `--json` output mode + usage tracking (#244) |
@@ -48,6 +48,9 @@ python worker.py
 | `GITHUB_TOKEN` | git push + PR ops |
 | `TEMPORAL_ADDRESS` | `temporal:7233` |
 | `MCP_TOOLS_URL` | MCP SSE endpoint for tool calls |
+| `CLAUDE_CODE_EXECUTION_MODE` | `print` uses the legacy `claude -p --output-format json` path. `interactive` drives a native Claude Code TTY session through a PTY for subscription-auth workers. |
+| `CLAUDE_CODE_INTERACTIVE_HOME` | `tenant` uses the tenant HOME for native auth. `worker` uses `/home/codeworker` so a pre-authenticated worker Claude Code session is visible to the PTY path. |
+| `CLAUDE_CODE_WORKER_HOME` | Optional override for worker native-auth HOME. Defaults to `/home/codeworker`. |
 
 CLI tokens are **not** in the pod env — they're set per-subprocess from the tenant's vault.
 

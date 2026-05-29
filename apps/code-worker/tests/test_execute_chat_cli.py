@@ -12,10 +12,13 @@ helpers themselves) so the test stays a unit test and never hits the network.
 from __future__ import annotations
 
 import os
+import sys
 
 import pytest
 
 import cli_runtime
+import cli_executors.claude as claude_executor
+from cli_executors import claude_interactive
 import workflows as wf
 
 
@@ -176,6 +179,10 @@ class TestGithubTokenIntegration:
 # ── _execute_claude_chat smoke (covers JSON parse path) ─────────────────
 
 class TestExecuteClaudeChat:
+    @pytest.fixture(autouse=True)
+    def _default_claude_mode(self, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_EXECUTION_MODE", raising=False)
+
     def test_missing_token_returns_friendly_error(self, monkeypatch):
         # Patch the module-private second-definition that the helper actually
         # binds — both names point at the same function object.
@@ -209,6 +216,182 @@ class TestExecuteClaudeChat:
         assert out.response_text == "hi"
         assert out.metadata["platform"] == "claude_code"
         assert out.metadata["input_tokens"] == 1
+
+    def test_print_mode_uses_claude_print_flag(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(wf, "_fetch_claude_token", lambda tid: "tok")
+        captured = {}
+
+        import subprocess as sp
+
+        def fake_run(cmd, **kw):
+            captured["cmd"] = cmd
+            return sp.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout='{"result": "ok"}',
+                stderr="",
+            )
+
+        monkeypatch.setattr(cli_runtime, "run_cli_with_heartbeat", fake_run)
+
+        out = wf._execute_claude_chat(
+            _make_input(
+                platform="claude_code",
+                message="hello",
+                tenant_id="752626d9-8b2c-4aa2-87ef-c458d48bd38a",
+            ),
+            session_dir=str(tmp_path),
+        )
+
+        assert out.success is True
+        assert captured["cmd"][:3] == ["claude", "-p", "hello"]
+
+    def test_interactive_mode_avoids_print_flag(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_CODE_EXECUTION_MODE", "interactive")
+        monkeypatch.setattr(claude_executor, "_feature_enabled", lambda *a, **k: True)
+        monkeypatch.setattr(wf, "_fetch_claude_token", lambda tid: "tok")
+        captured = {}
+
+        import subprocess as sp
+
+        def fake_interactive(cmd, **kw):
+            captured["cmd"] = cmd
+            captured["env"] = kw["env"]
+            captured["prompt"] = kw["prompt"]
+            return sp.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="interactive ok",
+                stderr="",
+            )
+
+        monkeypatch.setattr(
+            claude_interactive,
+            "run_claude_interactive_with_heartbeat",
+            fake_interactive,
+        )
+        monkeypatch.setattr(
+            claude_executor.claude_stream_parser,
+            "build_parser",
+            lambda emitter: pytest.fail("interactive mode must not use stream-json parser"),
+        )
+
+        out = wf._execute_claude_chat(
+            _make_input(
+                platform="claude_code",
+                message="hello",
+                tenant_id="752626d9-8b2c-4aa2-87ef-c458d48bd38a",
+            ),
+            session_dir=str(tmp_path),
+        )
+
+        assert out.success is True
+        assert out.response_text == "interactive ok"
+        assert "-p" not in captured["cmd"]
+        assert "--output-format" not in captured["cmd"]
+        assert captured["cmd"][0] == "claude"
+        assert captured["cmd"][-1] == "hello"
+        assert captured["prompt"] == "hello"
+        assert "ANTHROPIC_API_KEY" not in captured["env"]
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in captured["env"]
+
+    def test_interactive_mode_can_use_worker_home_for_native_auth(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_CODE_EXECUTION_MODE", "interactive")
+        monkeypatch.setenv("CLAUDE_CODE_INTERACTIVE_HOME", "worker")
+        monkeypatch.setenv("CLAUDE_CODE_WORKER_HOME", "/home/codeworker")
+        monkeypatch.setattr(wf, "_fetch_claude_token", lambda tid: "tok")
+        captured = {}
+
+        import subprocess as sp
+
+        def fake_interactive(cmd, **kw):
+            captured["env"] = kw["env"]
+            return sp.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="interactive ok",
+                stderr="",
+            )
+
+        monkeypatch.setattr(
+            claude_interactive,
+            "run_claude_interactive_with_heartbeat",
+            fake_interactive,
+        )
+
+        out = wf._execute_claude_chat(
+            _make_input(
+                platform="claude_code",
+                message="hello",
+                tenant_id="752626d9-8b2c-4aa2-87ef-c458d48bd38a",
+            ),
+            session_dir=str(tmp_path),
+        )
+
+        assert out.success is True
+        assert captured["env"]["HOME"] == "/home/codeworker"
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in captured["env"]
+
+    def test_interactive_mode_keeps_api_key_tenants_on_print_path(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_CODE_EXECUTION_MODE", "interactive")
+        monkeypatch.setattr(wf, "_fetch_claude_credential", lambda tid: ("sk-ant-fake", "api_key"))
+        captured = {}
+
+        import subprocess as sp
+
+        def fake_run(cmd, **kw):
+            captured["cmd"] = cmd
+            captured["env"] = kw["env"]
+            return sp.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout='{"result": "api key ok"}',
+                stderr="",
+            )
+
+        monkeypatch.setattr(cli_runtime, "run_cli_with_heartbeat", fake_run)
+
+        out = wf._execute_claude_chat(
+            _make_input(platform="claude_code", message="hello"),
+            session_dir=str(tmp_path),
+        )
+
+        assert out.success is True
+        assert captured["cmd"][:3] == ["claude", "-p", "hello"]
+        assert captured["env"]["ANTHROPIC_API_KEY"] == "sk-ant-fake"
+
+    def test_interactive_transcript_cleaner_strips_terminal_chrome(self):
+        raw = "\x1b[32mClaude Code\x1b[0m\r\n> hello\r\n╭ box\r\nUseful answer\r\n/exit\r\n"
+
+        cleaned = claude_interactive.clean_interactive_transcript(raw, "hello")
+
+        assert cleaned == "Useful answer"
+
+    def test_interactive_runner_sends_exit_after_idle(self, tmp_path):
+        script = """
+import sys
+print("Ready")
+sys.stdout.flush()
+for line in sys.stdin:
+    if line.strip() == "/exit":
+        print("Goodbye")
+        sys.stdout.flush()
+        break
+"""
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            [sys.executable, "-c", script],
+            prompt="hello",
+            label="Claude Code",
+            timeout=5,
+            env=os.environ.copy(),
+            cwd=str(tmp_path),
+            idle_exit_seconds=0.1,
+            exit_grace_seconds=1,
+        )
+
+        assert result.returncode == 0
+        assert "Ready" in result.stdout
+        assert "Goodbye" in result.stdout
 
     def test_non_zero_exit_returns_error_with_truncated_stderr(self, monkeypatch, tmp_path):
         monkeypatch.setattr(wf, "_fetch_claude_token", lambda tid: "tok")
