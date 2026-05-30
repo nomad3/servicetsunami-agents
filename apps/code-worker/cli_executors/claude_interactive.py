@@ -70,19 +70,28 @@ def run_claude_interactive_with_heartbeat(
     heartbeat: Callable[[str], None] | None = None,
     idle_exit_seconds: float | None = None,
     exit_grace_seconds: float | None = None,
+    first_output_seconds: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run Claude Code attached to a PTY and return a CompletedProcess.
 
     ``cmd`` should start an interactive Claude session, normally with the
-    user's prompt as the positional argument. Since the interactive CLI
-    does not exit after a turn, we send ``/exit`` after the terminal has
-    been quiet for ``idle_exit_seconds``.
+    user's prompt as the positional argument. Since the interactive CLI does
+    not exit after a turn, we send ``/exit`` once the terminal has been quiet
+    for ``idle_exit_seconds`` — but only *after* Claude's first output. Before
+    that the idle countdown is suppressed and we wait up to
+    ``first_output_seconds`` for the launch to start producing (MCP server load
+    + a large injected system prompt + model warm-up routinely take longer than
+    ``idle_exit_seconds``). Without this gate a slow launch was `/exit`'d
+    mid-startup and the turn died with an empty transcript.
     """
     idle_exit_seconds = idle_exit_seconds if idle_exit_seconds is not None else float(
         os.environ.get("CLAUDE_CODE_INTERACTIVE_IDLE_EXIT_SECONDS", "8")
     )
     exit_grace_seconds = exit_grace_seconds if exit_grace_seconds is not None else float(
         os.environ.get("CLAUDE_CODE_INTERACTIVE_EXIT_GRACE_SECONDS", "10")
+    )
+    first_output_seconds = first_output_seconds if first_output_seconds is not None else float(
+        os.environ.get("CLAUDE_CODE_INTERACTIVE_FIRST_OUTPUT_SECONDS", "90")
     )
 
     master_fd, slave_fd = pty.openpty()
@@ -103,6 +112,7 @@ def run_claude_interactive_with_heartbeat(
     last_output = start
     last_heartbeat = start
     exit_sent_at: float | None = None
+    seen_output = False
 
     try:
         while True:
@@ -124,12 +134,23 @@ def run_claude_interactive_with_heartbeat(
                     text = data.decode(errors="replace")
                     chunks.append(text)
                     last_output = now
+                    seen_output = True
                     if on_chunk:
                         on_chunk(text, "stdout")
                     continue
 
             if proc.poll() is not None:
                 break
+
+            # Suppress the idle `/exit` until Claude has produced output. A slow
+            # launch (MCP server load, large injected prompt, model warm-up)
+            # emits nothing for a while; arming the idle timer here would kill it
+            # mid-startup. Fail fast only if nothing arrives within the cap.
+            if not seen_output:
+                if now - start >= first_output_seconds:
+                    proc.kill()
+                    break
+                continue
 
             idle_for = now - last_output
             if exit_sent_at is None and idle_for >= idle_exit_seconds:
