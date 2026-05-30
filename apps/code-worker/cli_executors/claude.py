@@ -39,6 +39,52 @@ from tenant_feature_flags import is_enabled as _feature_enabled
 logger = logging.getLogger(__name__)
 
 
+def _ensure_claude_onboarding(home: str, trusted_cwd: str | None = None) -> None:
+    """Seed ``$HOME/.claude.json`` so interactive Claude Code skips its
+    first-run onboarding wizard (theme → login-method → folder-trust).
+
+    A fresh HOME makes ``claude`` re-run the wizard on every interactive turn;
+    at "Select login method" it starts a *new* OAuth login instead of using the
+    stored ``.credentials.json``, which the headless PTY cannot complete — so a
+    HOME that is actually logged in still surfaces as a subscription-auth
+    failure. Marking onboarding complete makes the TTY use the stored
+    credential silently. Best-effort; never raises.
+    """
+    if not home:
+        return
+    try:
+        cfg_path = os.path.join(home, ".claude.json")
+        data: dict = {}
+        if os.path.exists(cfg_path):
+            try:
+                with open(cfg_path, encoding="utf-8") as fh:
+                    data = json.load(fh) or {}
+            except (json.JSONDecodeError, OSError, ValueError):
+                data = {}
+        if not isinstance(data, dict):
+            data = {}
+        changed = data.get("hasCompletedOnboarding") is not True
+        data["hasCompletedOnboarding"] = True
+        if trusted_cwd:
+            projects = data.setdefault("projects", {})
+            if isinstance(projects, dict):
+                proj = projects.setdefault(trusted_cwd, {})
+                if isinstance(proj, dict):
+                    for key in ("hasTrustDialogAccepted", "hasCompletedProjectOnboarding"):
+                        if proj.get(key) is not True:
+                            proj[key] = True
+                            changed = True
+        if not changed:
+            return
+        os.makedirs(home, exist_ok=True)
+        tmp_path = f"{cfg_path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        os.replace(tmp_path, cfg_path)
+    except OSError as exc:
+        logger.warning("could not seed Claude onboarding flags in %s: %s", home, exc)
+
+
 def execute_claude_chat(task_input, session_dir: str):
     from workflows import (
         _fetch_claude_token,
@@ -212,6 +258,12 @@ def execute_claude_chat(task_input, session_dir: str):
             "tenant_home_dir(%s) failed (%s); HOME falls back to container default",
             task_input.tenant_id, exc,
         )
+
+    # Interactive TTY only: pre-complete Claude Code's onboarding wizard for
+    # this HOME so it uses the stored subscription credential instead of
+    # re-initiating an OAuth login the headless PTY can't finish.
+    if interactive_mode:
+        _ensure_claude_onboarding(env.get("HOME", ""), cli_cwd)
 
     # ---- streaming emitter (no-op if flag off / chat_session_id missing) ----
     emitter = SessionEventEmitter(
