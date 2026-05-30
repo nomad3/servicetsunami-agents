@@ -245,6 +245,8 @@ class TestExecuteClaudeChat:
 
         assert out.success is True
         assert captured["cmd"][:3] == ["claude", "-p", "hello"]
+        # acceptEdits is interactive-only; print mode is already headless.
+        assert "--permission-mode" not in captured["cmd"]
 
     def test_interactive_mode_avoids_print_flag(self, monkeypatch, tmp_path):
         monkeypatch.setenv("CLAUDE_CODE_EXECUTION_MODE", "interactive")
@@ -297,6 +299,11 @@ class TestExecuteClaudeChat:
         assert captured["cmd"][-1] != "hello"
         assert "hello" not in captured["cmd"]
         assert captured["prompt"] != "hello"
+        # Permission fix (2026-05-30): interactive mode auto-accepts edits so
+        # Claude's Write(answer.md) isn't blocked by a tool-permission menu the
+        # PTY runner can't answer (would SIGTERM the turn → exit 143).
+        assert "--permission-mode" in captured["cmd"]
+        assert captured["cmd"][captured["cmd"].index("--permission-mode") + 1] == "acceptEdits"
         assert "\n" not in captured["prompt"]
         assert str(tmp_path / "turn_prompt.md") in captured["prompt"]
         assert (tmp_path / "turn_prompt.md").read_text() == "hello"

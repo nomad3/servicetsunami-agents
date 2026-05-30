@@ -228,6 +228,16 @@ def execute_claude_chat(task_input, session_dir: str):
             cmd.extend(["--output-format", "stream-json", "--verbose"])
         else:
             cmd.extend(["--output-format", "json"])
+    else:
+        # Interactive REPL: auto-accept tool edits. Without this, Claude's
+        # Write(answer.md) call intermittently raises a tool-permission menu
+        # ("Do you want to create answer.md? 1.Yes 2.Yes-allow-all 3.No") that
+        # the PTY runner can't answer (it only handles the folder-trust dialog),
+        # so the answer file is never written and the turn dies SIGTERM/exit 143.
+        # `acceptEdits` matches print mode's headless auto-accept and makes the
+        # Write deterministic. (NOT `bypassPermissions` — it gates on its own
+        # confirmation menu the runner likewise can't answer.)
+        cmd.extend(["--permission-mode", "acceptEdits"])
     cmd.extend([
         "--model", _model,
         "--allowedTools", _allowed,
