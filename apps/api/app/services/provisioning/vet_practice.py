@@ -123,14 +123,36 @@ def _empty_counts() -> Dict[str, int]:
 def _resolve_owner_id(
     db: Session, tenant_id: uuid.UUID, profile: VetPracticeProfile
 ) -> Optional[uuid.UUID]:
-    """profile.owner_user_id wins; otherwise fall back to a tenant admin
+    """Resolve the agent owner, ALWAYS scoped to ``tenant_id``.
+
+    If ``profile.owner_user_id`` is supplied it MUST resolve to a ``User``
+    on this tenant (``id == owner_user_id AND tenant_id == tenant_id``);
+    otherwise we raise ``ValueError`` (tenant-isolation break — the caller
+    surfaces a 400). A cross-tenant owner would write the foreign user's id
+    into ``Agent.owner_user_id`` + USER-principal ``agent_permissions``,
+    handing them implicit access to another tenant's fleet.
+
+    If ``owner_user_id`` is omitted we resolve the tenant's own admin
     (superuser preferred, else the earliest user on the tenant).
 
     Returns None only if the tenant has no users at all — agents are then
     seeded ownerless (logged WARNING) rather than failing the whole run,
     but this is the "born ownerless" anti-pattern the operator should fix."""
     if profile.owner_user_id is not None:
-        return profile.owner_user_id
+        owner = (
+            db.query(User)
+            .filter(
+                User.id == profile.owner_user_id,
+                User.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if owner is None:
+            raise ValueError(
+                f"owner_user_id {profile.owner_user_id} does not belong to "
+                f"tenant {tenant_id} (cross-tenant owner rejected)"
+            )
+        return owner.id
 
     admin = (
         db.query(User)
@@ -442,6 +464,16 @@ def _desired_value_set_drifts(
     return cur != want
 
 
+class ValueSetWriteError(RuntimeError):
+    """A declared value-set write failed (``write_value_set`` returned None).
+
+    ``write_value_set`` ``db.rollback()``s the session before returning None,
+    so by the time this is raised the WHOLE provisioning run's prior staged
+    inserts are already gone. We raise (instead of logging + continuing) so
+    the run reports a hard FAILURE rather than a SUCCESS summary over a
+    half-lost transaction (BLOCKER 1)."""
+
+
 def _seed_value_sets(
     db: Session,
     tenant_id: uuid.UUID,
@@ -452,7 +484,13 @@ def _seed_value_sets(
     agents. NOT runtime-enforced — value_arbitration.py is pure-library
     with no runtime wiring (plan §9). Seeded so the hard rules are recorded
     + auditable + enforceable once arbitration is wired. Idempotent: only
-    writes a new append-only version when the declared slugs drift."""
+    writes a new append-only version when the declared slugs drift.
+
+    ``write_value_set`` ``db.commit()``s internally on success — so this is
+    the LAST write of the run and its commit finalizes every prior flushed
+    step. A None return means the write FAILED (and already rolled the
+    session back); we raise ``ValueSetWriteError`` so the run fails loud
+    instead of reporting success over lost inserts (BLOCKER 1)."""
     counts = _empty_counts()
     now = datetime.now(timezone.utc).isoformat()
 
@@ -499,12 +537,14 @@ def _seed_value_sets(
             avoid=avoid,
         )
         if persisted is None:
-            log.error(
-                "provision: write_value_set returned None for agent %s "
-                "(%s) — declared value-set NOT seeded",
-                agent_name, agent.id,
+            # write_value_set has ALREADY rolled the session back. Raising
+            # here makes provision_vet_practice fail loud (BLOCKER 1) instead
+            # of returning a SUCCESS summary over a half-lost transaction.
+            raise ValueSetWriteError(
+                f"write_value_set returned None for agent {agent_name} "
+                f"({agent.id}); session was rolled back — provisioning run "
+                f"FAILED (no half-provisioned tenant)"
             )
-            continue
         counts["created"] += 1
         log.info(
             "provision: seeded DECLARED value-set v%s for agent %s (%s) "
@@ -613,10 +653,18 @@ def provision_vet_practice(
     owner_id = _resolve_owner_id(db, tenant_id, profile)
 
     if dry_run:
-        plan = _dry_run_plan(db, tenant_id, manifest, owner_id)
-        # Defensive: a dry-run must not leave an open write txn. Reads don't
-        # write, but roll back so nothing the caller did before lingers.
-        db.rollback()
+        # NIT: scope the probe to a SAVEPOINT so rolling it back discards
+        # ONLY the provisioner's own (read-only here, but defensively
+        # scoped) work — not unrelated uncommitted writes the caller staged
+        # before calling us. A blanket db.rollback() would nuke those too.
+        nested = db.begin_nested()
+        try:
+            plan = _dry_run_plan(db, tenant_id, manifest, owner_id)
+        finally:
+            # Always release the savepoint by rolling it back: a dry-run
+            # must write NOTHING on commit, and the outer txn (with the
+            # caller's prior staged work) is left intact.
+            nested.rollback()
         log.info(
             "provision_vet_practice DRY-RUN tenant=%s variant=%s plan=%s",
             tenant_id, manifest.variant, plan,
@@ -624,6 +672,12 @@ def provision_vet_practice(
         return plan
 
     try:
+        # ── Atomicity contract (BLOCKER 1) ──────────────────────────────
+        # write_value_set does an internal db.commit() (and a db.rollback()
+        # + None return on failure), so it is the run's COMMIT BOUNDARY. We
+        # therefore order ALL other writes BEFORE it and only FLUSH them —
+        # never commit — so a later failure rolls the whole run back, and
+        # the value-set commit (last) finalizes everything atomically.
         agent_counts, agents_by_name = _seed_agents(
             db, tenant_id, manifest, owner_id
         )
@@ -632,11 +686,19 @@ def provision_vet_practice(
         perm_counts = _seed_permissions(
             db, tenant_id, owner_id, owner_id, agents_by_name
         )
-        # Agents must be committed before value-sets: write_value_set INSERTs
-        # agent_memory rows with a NOT-NULL agent_id FK. Flush so the FK
-        # targets are visible to the value-set writer's own commit.
+        # Flush (not commit) so the agent ids are visible to the value-set
+        # writer's INSERTs (agent_memory.agent_id is a NOT-NULL FK) while the
+        # whole txn stays open + rollback-able.
         db.flush()
+        # LAST write. On success its internal commit finalizes the run. On
+        # failure it raises ValueSetWriteError (after rolling the session
+        # back) → fail loud, NOT a silent success summary.
         vs_counts = _seed_value_sets(db, tenant_id, manifest, agents_by_name)
+        # Re-run / no-drift case: _seed_value_sets may not have called
+        # write_value_set at all (all value-sets unchanged), so nothing has
+        # committed yet — finalize the flushed agent/connector/workflow/
+        # permission writes here. When a value-set write DID happen it
+        # already committed, making this a harmless no-op.
         db.commit()
     except Exception:
         db.rollback()

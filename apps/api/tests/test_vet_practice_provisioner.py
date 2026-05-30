@@ -410,3 +410,191 @@ def test_endpoint_dry_run_delegates_to_service(
     assert db_session.query(Agent).filter(
         Agent.tenant_id == tenant.id
     ).count() == 0
+
+
+def test_endpoint_invalid_tenant_id_is_400(db_session, vet_tenant):
+    """IMPORTANT — a malformed X-Tenant-Id must be a controlled 400, not a
+    500 from an unguarded ``uuid.UUID(...)`` parse."""
+    client = _build_client(db_session)
+    resp = client.post(
+        "/api/v1/provision/vet-practice/internal",
+        json={"practice_name": "BB Cardiology"},
+        headers={
+            "X-Internal-Key": settings.API_INTERNAL_KEY,
+            "X-Tenant-Id": "not-a-uuid",
+        },
+    )
+    assert resp.status_code == 400, resp.text
+
+
+# ── BLOCKER 1: atomic + fail-loud value-set write ─────────────────────
+
+
+def test_value_set_write_failure_is_a_hard_failure(
+    db_session, vet_tenant, native_cardiac_template, monkeypatch
+):
+    """If ``write_value_set`` fails (returns None — after it has already
+    rolled the session back), the run MUST report FAILURE, not a silent
+    success summary. Earlier agent/connector/workflow/permission inserts
+    must NOT survive (no half-provisioned tenant)."""
+    tenant, admin = vet_tenant
+
+    # Simulate the value-set writer failing the way the real one does:
+    # it rolls the session back and returns None.
+    def _failing_write(db, **kwargs):
+        db.rollback()
+        return None
+
+    monkeypatch.setattr(
+        "app.services.provisioning.vet_practice.value_io.write_value_set",
+        _failing_write,
+    )
+
+    with pytest.raises(Exception):
+        provision_vet_practice(
+            db_session, tenant.id, profile=_profile(tenant, admin)
+        )
+
+    # the whole run rolled back — nothing half-committed survives
+    db_session.rollback()
+    assert db_session.query(Agent).filter(
+        Agent.tenant_id == tenant.id
+    ).count() == 0
+    assert db_session.query(IntegrationConfig).filter(
+        IntegrationConfig.tenant_id == tenant.id
+    ).count() == 0
+    assert db_session.query(AgentPermission).filter(
+        AgentPermission.tenant_id == tenant.id
+    ).count() == 0
+    assert db_session.query(AgentMemory).filter(
+        AgentMemory.tenant_id == tenant.id,
+        AgentMemory.memory_type == "value_set",
+    ).count() == 0
+
+
+# ── BLOCKER 2: owner_user_id tenant-isolation ─────────────────────────
+
+
+def test_owner_from_other_tenant_is_rejected(db_session, vet_tenant):
+    """An owner_user_id that belongs to a DIFFERENT tenant must be rejected
+    — no agent or permission rows may be written with a cross-tenant owner."""
+    tenant, _ = vet_tenant
+    # a user on a wholly separate tenant
+    other_tenant = Tenant(name=f"other-{uuid.uuid4().hex[:8]}")
+    db_session.add(other_tenant)
+    db_session.commit()
+    intruder = User(
+        email=f"intruder-{uuid.uuid4().hex[:8]}@example.com",
+        full_name="Intruder",
+        hashed_password="x",
+        is_active=True,
+        tenant_id=other_tenant.id,
+    )
+    db_session.add(intruder)
+    db_session.commit()
+
+    bad_profile = VetPracticeProfile(
+        practice_name="BB Cardiology",
+        owner_user_id=intruder.id,  # belongs to other_tenant
+        fleet_variant="cardiology_v1",
+    )
+    with pytest.raises(ValueError):
+        provision_vet_practice(db_session, tenant.id, profile=bad_profile)
+
+    db_session.rollback()
+    # nothing seeded on the target tenant
+    assert db_session.query(Agent).filter(
+        Agent.tenant_id == tenant.id
+    ).count() == 0
+    assert db_session.query(AgentPermission).filter(
+        AgentPermission.tenant_id == tenant.id
+    ).count() == 0
+
+
+def test_owner_omitted_resolves_tenant_admin(db_session, vet_tenant):
+    """Omitting owner_user_id resolves the tenant's own admin (scoped to
+    tenant_id) — the resolved owner must be a user on THIS tenant."""
+    tenant, admin = vet_tenant
+    profile = VetPracticeProfile(
+        practice_name="BB Cardiology",
+        owner_user_id=None,  # resolve tenant admin
+        fleet_variant="cardiology_v1",
+    )
+    result = provision_vet_practice(db_session, tenant.id, profile=profile)
+    assert result["owner_user_id"] == str(admin.id)
+    agents = db_session.query(Agent).filter(Agent.tenant_id == tenant.id).all()
+    assert len(agents) == 5
+    for a in agents:
+        assert str(a.owner_user_id) == str(admin.id)
+
+
+def test_endpoint_owner_from_other_tenant_is_400(db_session, vet_tenant):
+    """The cross-tenant-owner rejection surfaces as a 400 at the endpoint."""
+    tenant, _ = vet_tenant
+    other_tenant = Tenant(name=f"other-{uuid.uuid4().hex[:8]}")
+    db_session.add(other_tenant)
+    db_session.commit()
+    intruder = User(
+        email=f"intruder-{uuid.uuid4().hex[:8]}@example.com",
+        full_name="Intruder",
+        hashed_password="x",
+        is_active=True,
+        tenant_id=other_tenant.id,
+    )
+    db_session.add(intruder)
+    db_session.commit()
+
+    client = _build_client(db_session)
+    resp = client.post(
+        "/api/v1/provision/vet-practice/internal",
+        json={
+            "practice_name": "BB Cardiology",
+            "owner_user_id": str(intruder.id),
+            "dry_run": True,
+        },
+        headers={
+            "X-Internal-Key": settings.API_INTERNAL_KEY,
+            "X-Tenant-Id": str(tenant.id),
+        },
+    )
+    assert resp.status_code == 400, resp.text
+
+
+# ── NIT: dry_run rollback scope ───────────────────────────────────────
+
+
+def test_dry_run_preserves_unrelated_caller_writes(
+    db_session, vet_tenant, native_cardiac_template
+):
+    """A dry-run must roll back only its OWN probe (via SAVEPOINT), not
+    unrelated uncommitted work the caller staged before calling it."""
+    tenant, admin = vet_tenant
+    # caller stages an unrelated, uncommitted row before the dry-run
+    caller_marker = IntegrationConfig(
+        tenant_id=tenant.id,
+        integration_name="caller_unrelated_marker",
+        enabled=True,
+    )
+    db_session.add(caller_marker)
+    db_session.flush()  # staged, NOT committed
+
+    result = provision_vet_practice(
+        db_session, tenant.id, profile=_profile(tenant, admin), dry_run=True
+    )
+    assert result["dry_run"] is True
+
+    # the caller's unrelated staged row must survive the dry-run probe
+    still_there = (
+        db_session.query(IntegrationConfig)
+        .filter(
+            IntegrationConfig.tenant_id == tenant.id,
+            IntegrationConfig.integration_name == "caller_unrelated_marker",
+        )
+        .first()
+    )
+    assert still_there is not None, "dry-run discarded unrelated caller work"
+
+    # and the dry-run itself still persisted no provisioner objects
+    assert db_session.query(Agent).filter(
+        Agent.tenant_id == tenant.id
+    ).count() == 0

@@ -2,9 +2,10 @@
 
 Thin HTTP route that delegates to the single Python entrypoint
 ``provision_vet_practice`` (Alpha-CLI-kernel pattern: no business logic
-in the route). v1 is operator-run only — reuses the ``verify_internal_key``
-``X-Internal-Key`` + ``X-Tenant-Id`` dependency from the dynamic-workflows
-internal routes (the canonical service-to-service auth shape).
+in the route). v1 is operator-run only — uses the same
+``X-Internal-Key`` + ``X-Tenant-Id`` service-to-service auth shape as the
+dynamic-workflows internal routes, but with a GUARDED tenant-id parse so a
+malformed ``X-Tenant-Id`` returns a controlled 400 instead of a 500.
 
 Deferred (plan §1.1 / §9, out of scope here):
   - the ``alpha provision vet-practice <tenant>`` verb (operator UX) —
@@ -19,14 +20,12 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api import deps
-# Reuse the canonical internal-key dep so there's one source of truth for
-# the X-Internal-Key / X-Tenant-Id contract across internal routes.
-from app.api.v1.dynamic_workflows import verify_internal_key
+from app.core.config import settings
 from app.services.provisioning.vet_practice import (
     VetPracticeProfile,
     provision_vet_practice,
@@ -35,6 +34,31 @@ from app.services.provisioning.vet_practice import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# ── internal auth (validated X-Tenant-Id) ─────────────────────────────
+# Same X-Internal-Key / X-Tenant-Id contract as the dynamic-workflows
+# internal routes, but with a GUARDED tenant-id parse. The shared
+# ``verify_internal_key`` does ``uuid.UUID(x_tenant_id)`` unguarded, which
+# 500s on a malformed header; here a bad UUID returns a controlled 400.
+def verify_internal_key(
+    x_internal_key: Optional[str] = Header(None, alias="X-Internal-Key"),
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-Id"),
+) -> uuid.UUID:
+    """Validate the internal key + return the tenant_id as a UUID.
+
+    Rejects a missing/invalid key (401), a missing tenant header (400), and
+    a malformed tenant UUID (400 — not an unguarded-parse 500)."""
+    if x_internal_key not in (settings.API_INTERNAL_KEY, settings.MCP_API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid internal key")
+    if not x_tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-Id required")
+    try:
+        return uuid.UUID(x_tenant_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(
+            status_code=400, detail="X-Tenant-Id must be a valid UUID"
+        )
 
 
 class VetPracticeProvisionRequest(BaseModel):
@@ -82,6 +106,11 @@ def provision_vet_practice_internal(
         "provision/vet-practice/internal tenant=%s variant=%s dry_run=%s",
         tenant_id, payload.fleet_variant, payload.dry_run,
     )
-    return provision_vet_practice(
-        db, tenant_id, profile=profile, dry_run=payload.dry_run
-    )
+    try:
+        return provision_vet_practice(
+            db, tenant_id, profile=profile, dry_run=payload.dry_run
+        )
+    except ValueError as exc:
+        # Bad caller input (e.g. an owner_user_id from another tenant —
+        # tenant-isolation break). Surface as a controlled 400, not a 500.
+        raise HTTPException(status_code=400, detail=str(exc))
