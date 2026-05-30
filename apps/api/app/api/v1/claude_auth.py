@@ -478,37 +478,41 @@ class ClaudeAuthManager:
         return state
 
     def _run_login(self, state: ClaudeLoginState) -> None:
-        """Drive the `claude setup-token` subprocess.
+        """Drive the `claude auth login --claudeai` subprocess.
 
-        `claude setup-token` is the documented headless path for
-        generating a long-lived `sk-ant-oat01-…` OAuth token suitable
-        for `CLAUDE_CODE_OAUTH_TOKEN`. It:
-          1. Prints a `https://claude.com/…` verification URL.
-          2. Blocks on stdin reading the verification code the user
-             pasted from the browser.
-          3. On success, prints the long-lived token (a single
-             `sk-ant-oat01-…` string) on its last line of stdout, then
-             exits 0. The token is NOT written to any file on disk —
-             it must be captured from stdout.
+        `setup-token` and `-p` are blocked for Claude subscription accounts, so
+        we use the native login. Headless (no browser) it:
+          1. Prints a `https://claude.com/…` authorize URL.
+          2. Blocks on stdin reading the verification code the user pasted
+             from the browser.
+          3. On success writes `.credentials.json` under CLAUDE_CONFIG_DIR
+             (no token is printed to stdout) and exits 0.
 
-        Mechanics mirror the previous `auth login --claudeai` flow:
+        Mechanics:
           * Spawn with `stdin=PIPE` so `/submit-code` can write to it.
-          * Drain stdout on a background thread, line-by-line, so we
-            can detect the verification URL without blocking and
-            without closing the stdin pipe.
-          * Wait on a `threading.Event` (`state._code_submitted`) for
-            the user's paste — set by `/submit-code`.
-          * Once the code is written, close stdin to signal EOF and
-            let claude CLI finish. `proc.wait(timeout=…)` reaps the
-            exit status.
-          * On exit, scan the captured stdout for the
-            `sk-ant-oat01-…` token, store it on
-            `state.captured_token`, then call `_persist_credentials`
-            which probes it against Anthropic before writing to the
-            vault.
+          * Drain stdout on a background thread, line-by-line, so we can
+            detect the authorize URL without blocking or closing stdin.
+          * Wait on a `threading.Event` (`state._code_submitted`) for the
+            user's paste — set by `/submit-code`.
+          * Once the code is written, close stdin to signal EOF and let the
+            CLI finish. `proc.wait(timeout=…)` reaps the exit status.
+          * On exit, `_install_worker_credentials` copies the native
+            `.credentials.json` into the code-worker's shared HOME volume and
+            marks the integration connected.
         """
-        cmd = ["claude", "setup-token"]
+        # `setup-token` is blocked for Claude subscription accounts, so use the
+        # native `auth login --claudeai` flow. Headless (no browser) it prints a
+        # `https://claude.com/…` authorize URL and reads the pasted code from
+        # stdin — same URL/paste shape this manager already drives. On success it
+        # writes `.credentials.json` under CLAUDE_CONFIG_DIR, which we then copy
+        # into the code-worker's shared HOME volume for interactive PTY auth.
+        cmd = ["claude", "auth", "login", "--claudeai"]
+        # Drop inherited API-key/token env so claude does the claude.ai
+        # subscription login (not the Console/API-key path), mirroring the
+        # worker's native auth.
         env = {**os.environ, "CLAUDE_CONFIG_DIR": state.claude_home or ""}
+        env.pop("ANTHROPIC_API_KEY", None)
+        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
 
         try:
             proc = subprocess.Popen(
@@ -659,40 +663,19 @@ class ClaudeAuthManager:
         reader.join(timeout=2)
 
         if proc.returncode == 0:
-            # ── Extract the long-lived OAuth token from stdout ──
-            # `claude setup-token` prints the `sk-ant-oat01-…` token
-            # on its own line near the end of stdout. We scan ALL
-            # captured output (with ANSI stripped) for a token-shaped
-            # match and fail-closed if none is found — better to
-            # surface a clear error than persist a bogus credential
-            # that 401s on every executor call.
-            cleaned = self._clean_output(_snapshot_buf(state._output_buf))
-            captured = _extract_oat01_token(cleaned)
-            if not captured:
-                state.status = "failed"
-                state.error = (
-                    "Claude CLI exited successfully but no long-lived "
-                    f"`{_OAT01_PREFIX}…` token was printed. The CLI may "
-                    "have rejected the verification code silently — try "
-                    "Connect again."
-                )
-                state.completed_at = datetime.utcnow().isoformat()
-                self._cleanup(state)
-                return
-            state.captured_token = captured
+            # `claude auth login --claudeai` writes `.credentials.json` under
+            # CLAUDE_CONFIG_DIR on success (no token is printed to stdout).
+            # Install that native credential into the code-worker's shared HOME
+            # volume so interactive PTY sessions pick it up, then mark connected.
             try:
-                self._persist_credentials(state)
+                self._install_worker_credentials(state)
                 state.status = "connected"
                 state.connected = True
                 state.error = None
             except Exception as exc:
-                logger.exception("Failed to persist Claude auth credentials")
+                logger.exception("Failed to install Claude worker credentials")
                 state.status = "failed"
-                # `exc` was raised from `_persist_credentials` which
-                # shouldn't reference the token in any current message,
-                # but redact defensively so any future RuntimeError
-                # that included the token can never reach the UI.
-                state.error = _redact_oat01(f"Failed to store credentials: {exc}")
+                state.error = f"Failed to store credentials: {exc}"
         elif state.status != "cancelled":
             cleaned = self._clean_output(_snapshot_buf(state._output_buf))
             state.status = "failed"
@@ -915,6 +898,93 @@ class ClaudeAuthManager:
                 credential_type="oauth_token",
             )
 
+        finally:
+            db.close()
+
+    def _install_worker_credentials(self, state: ClaudeLoginState) -> None:
+        """Install the native credential `claude auth login` produced into the
+        code-worker's shared HOME volume and mark the integration connected.
+
+        Subscription Claude Code can no longer use `setup-token`/`-p`, so chat
+        runs through the interactive PTY path which reads
+        `$HOME/.claude/.credentials.json` in the worker HOME. The api container
+        shares the worker's `claude_sessions` volume (both run as uid 1000), so
+        we atomically drop the freshly-minted credential there at 0600. No
+        long-lived token exists to store; we record connected state plus a
+        marker `session_token` so `cli_executors/claude.py` resolves the tenant
+        as an OAuth/subscription tenant and takes the interactive native-auth
+        path (where the marker value is dropped, never sent to Anthropic).
+        """
+        home = state.claude_home or ""
+        src = next(
+            (
+                c
+                for c in (
+                    os.path.join(home, ".credentials.json"),
+                    os.path.join(home, ".claude", ".credentials.json"),
+                )
+                if os.path.isfile(c)
+            ),
+            None,
+        )
+        if not src:
+            raise RuntimeError("Login completed but claude wrote no .credentials.json")
+        worker_home = os.environ.get("CLAUDE_CODE_WORKER_HOME", "/home/codeworker")
+        dst_dir = os.path.join(worker_home, ".claude")
+        if not os.path.isdir(dst_dir):
+            raise RuntimeError(
+                f"Worker credential volume not mounted at {dst_dir} in the api "
+                "container — add the claude_sessions volume to the api service."
+            )
+        with open(src, "rb") as fh:
+            payload = fh.read()
+        fd, tmp = tempfile.mkstemp(dir=dst_dir, prefix=".credentials.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(payload)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, os.path.join(dst_dir, ".credentials.json"))
+        except OSError:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+        db: Session = SessionLocal()
+        try:
+            tid = uuid.UUID(state.tenant_id)
+            config = (
+                db.query(IntegrationConfig)
+                .filter(
+                    IntegrationConfig.tenant_id == tid,
+                    IntegrationConfig.integration_name == "claude_code",
+                )
+                .first()
+            )
+            if not config:
+                config = IntegrationConfig(
+                    tenant_id=tid, integration_name="claude_code", enabled=True
+                )
+                db.add(config)
+                db.commit()
+                db.refresh(config)
+            elif not config.enabled:
+                config.enabled = True
+                db.add(config)
+                db.commit()
+                db.refresh(config)
+            # Replace any stale api_key row, then store the OAuth marker so the
+            # executor resolves kind="oauth" and takes the interactive path.
+            _revoke_other_claude_credentials(db, config.id, tid, keep="session_token")
+            store_credential(
+                db,
+                integration_config_id=config.id,
+                tenant_id=tid,
+                credential_key="session_token",
+                plaintext_value="native-worker-login",
+                credential_type="oauth_token",
+            )
         finally:
             db.close()
 

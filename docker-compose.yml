@@ -45,6 +45,14 @@ services:
       # apps/api/app/api/v1/workspace.py. Mirrored in Helm as a PVC
       # (helm/charts/microservice/templates/workspaces-pvc.yaml).
       - workspaces:/var/agentprovision/workspaces
+      # Shared Claude Code credential volume (same one the code-worker mounts
+      # at /home/codeworker/.claude). The web "Connect with Anthropic" flow
+      # (apps/api/app/api/v1/claude_auth.py) runs `claude auth login` and drops
+      # the resulting native .credentials.json here so the worker's interactive
+      # PTY sessions use it — setup-token/-p are blocked for subscription.
+      # Both containers run as uid 1000 so the api can write it. Mirrored in
+      # Helm via the code-worker claude-sessions PVC.
+      - claude_sessions:/home/codeworker/.claude
     env_file:
       - ./apps/api/.env
     depends_on:
