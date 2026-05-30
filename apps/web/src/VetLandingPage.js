@@ -42,6 +42,12 @@ const APEX_SIGNIN = 'https://agentprovision.com/login';
 // LandingFooter default to the main landing's set; we pass our own so
 // clicks scroll to real sections. Keys resolve via t('nav.${key}') /
 // t('footer.links.${key}') — added to landing.json (en + es).
+//
+// i18n scope: the reused nav + footer resolve through t('nav.*') /
+// t('footer.links.*') and keep their en + es keys. The five vet-specific
+// section components (VetHero, VetConnectors, VetAgentFleet, VetTrust,
+// VetCardiologyShowcase) hardcode English copy on purpose —
+// English-only for launch; section-body i18n deferred.
 const VET_NAV_LINKS = ['connectors', 'fleet', 'trust', 'cardiology'];
 const VET_FOOTER_LINKS = [
   { key: 'connectors', href: '#connectors' },
@@ -64,7 +70,12 @@ export default function VetLandingPage() {
         <VetAgentFleet />
         <VetTrust />
         <VetCardiologyShowcase />
-        <CTASection registerHref={APEX_REGISTER} />
+        <CTASection
+          registerHref={APEX_REGISTER}
+          title="Run your practice from one source-traceable record."
+          subtitle="Connect your systems, coordinate your agent fleet, and keep every clinical and financial decision under human approval."
+          buttonText="Request a vet-OS demo"
+        />
       </main>
       <LandingFooter links={VET_FOOTER_LINKS} />
     </>

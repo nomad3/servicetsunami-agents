@@ -93,6 +93,9 @@
 }
 .vet-hero__ctas { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
 .vet-hero__cta-primary {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
   background: var(--land-teal);
   color: #06241f;
   border: none;
@@ -105,6 +108,9 @@
 }
 .vet-hero__cta-primary:hover { filter: brightness(1.07); transform: translateY(-1px); }
 .vet-hero__cta-ghost {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
   background: transparent;
   color: rgba(238, 246, 245, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.26);

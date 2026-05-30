@@ -12,7 +12,7 @@ const AGENTS = [
   {
     icon: '🛎️',
     title: 'Front Desk & Scheduling',
-    body: 'Books, confirms, and reschedules appointments; fills cancellations and preps the day.',
+    body: 'Prepares booking, confirmation, and reschedule workflows; fills cancellations from approved rules.',
     gate: 'Staff confirms every booking change',
   },
   {

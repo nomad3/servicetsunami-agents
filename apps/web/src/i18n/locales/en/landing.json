@@ -7,7 +7,7 @@
     "connectors": "Connectors",
     "fleet": "Agent Fleet",
     "trust": "Trust",
-    "cardiology": "Cardiology",
+    "cardiology": "Example",
     "signIn": "Sign In",
     "getStarted": "Get Started"
   },
@@ -293,7 +293,7 @@
       "connectors": "Connectors",
       "fleet": "Agent Fleet",
       "trust": "Trust",
-      "cardiology": "Cardiology"
+      "cardiology": "Example"
     },
     "copy": "© {{year}} AgentProvision. All rights reserved."
   },

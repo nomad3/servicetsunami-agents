@@ -48,8 +48,8 @@ export default function VetHero() {
           <p className="vet-hero__subtitle">
             Connect every system you already run — PIMS, scribe, imaging,
             labs, scheduling, and billing — into one source-traceable record.
-            Then let a fleet of agents run the day-to-day, with your team
-            approving every clinical and financial decision.
+            Then let a fleet of agents coordinate the day-to-day work, with
+            your team approving every clinical and financial decision.
           </p>
 
           <ul className="vet-hero__assurances" aria-label="What stays true">
@@ -59,19 +59,24 @@ export default function VetHero() {
           </ul>
 
           <div className="vet-hero__ctas">
-            {/* Absolute apex href so the auth flow always resolves —
-                cloudflared only routes /api/* on the apex hostname. */}
+            {/* Anchors styled as buttons — a real <button> nested inside
+                <a> is invalid DOM (React nesting warning). The button
+                classes carry the identical visual style. Absolute apex
+                href so the auth flow always resolves — cloudflared only
+                routes /api/* on the apex hostname. */}
             <a
+              className="vet-hero__cta-primary"
               href={APEX_REGISTER}
               onClick={() => track('vet_get_started_click', { location: 'hero' })}
             >
-              <button className="vet-hero__cta-primary">Request access</button>
+              Request access
             </a>
             <a
+              className="vet-hero__cta-ghost"
               href="#fleet"
               onClick={() => track('vet_see_fleet_click', { location: 'hero' })}
             >
-              <button className="vet-hero__cta-ghost">See the agent fleet →</button>
+              See the agent fleet →
             </a>
           </div>
         </motion.div>

@@ -7,7 +7,7 @@
     "connectors": "Conexiones",
     "fleet": "Flota de Agentes",
     "trust": "Confianza",
-    "cardiology": "Cardiología",
+    "cardiology": "Ejemplo",
     "signIn": "Iniciar Sesión",
     "getStarted": "Comenzar"
   },
@@ -293,7 +293,7 @@
       "connectors": "Conexiones",
       "fleet": "Flota de Agentes",
       "trust": "Confianza",
-      "cardiology": "Cardiología"
+      "cardiology": "Ejemplo"
     },
     "copy": "© {{year}} AgentProvision. Todos los derechos reservados."
   },
