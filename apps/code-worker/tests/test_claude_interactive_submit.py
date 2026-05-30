@@ -177,7 +177,12 @@ class TestClaudeExecutorInteractiveSubmit:
     ):
         """Defect 2: the single-line trigger must instruct Claude to BOTH read
         the turn file AND write its final answer out-of-band to the answer
-        file, and the runner must receive ``answer_file`` so it reads it back."""
+        file, and the runner must receive ``answer_file`` so it reads it back.
+
+        FINDING 1 (stale answer replay): the answer file is a UNIQUE per-turn
+        name (``answer_<hex>.md``), not the fixed ``answer.md`` — so any
+        non-empty content is guaranteed to be THIS turn's reply, never a prior
+        turn's leftover in the reused per-tenant ``session_dir``."""
         self._patch_credential(monkeypatch)
         session_dir = tmp_path / "session"
         session_dir.mkdir()
@@ -200,20 +205,60 @@ class TestClaudeExecutorInteractiveSubmit:
 
         submit = captured["kwargs"]["prompt"]
         turn_file = str(session_dir / "turn_prompt.md")
-        answer_file = str(session_dir / "answer.md")
+        answer_file = captured["kwargs"].get("answer_file")
         # Single line still.
         assert "\n" not in submit
         # Read-turn-file instruction.
         assert "Read the file" in submit
         assert turn_file in submit
-        # Write-answer-file instruction (Defect 2).
+        # FINDING 1: unique per-turn answer filename (answer_<hex>.md), NOT the
+        # fixed answer.md — guards against the prior turn's file being replayed.
+        assert os.path.basename(answer_file).startswith("answer_")
+        assert os.path.basename(answer_file).endswith(".md")
+        assert os.path.basename(answer_file) != "answer.md"
+        # Write-answer-file instruction (Defect 2), naming the unique file.
         assert answer_file in submit
-        assert "Write ONLY your final answer" in submit
+        # FINDING 3 (Luna): the trigger asks for the COMPLETE final response, not
+        # a terse stub — important results / file changes / errors / next steps.
+        assert "COMPLETE" in submit
+        assert "important results" in submit
         # The runner is handed the answer-file path to read back.
-        assert captured["kwargs"].get("answer_file") == answer_file
         assert os.path.isabs(answer_file)
         # The answer file lives under session_dir (ephemeral scratch).
         assert os.path.dirname(answer_file) == str(session_dir)
+
+    def test_answer_file_unique_per_call(
+        self, monkeypatch, tmp_path, interactive_env
+    ):
+        """FINDING 1: each interactive turn must build a DISTINCT answer
+        filename. ``session_dir`` is persistent per-tenant and reused every
+        turn, so a fixed ``answer.md`` lets a turn that fails to write its
+        answer return the PRIOR turn's file as a fresh success. Two calls →
+        two different unique names proves the stale-replay window is closed."""
+        self._patch_credential(monkeypatch)
+        session_dir = tmp_path / "session"
+        session_dir.mkdir()
+
+        names: list[str] = []
+
+        def fake_run(cmd, **kwargs):
+            names.append(kwargs.get("answer_file"))
+            return _completed(0, stdout="ok")
+
+        monkeypatch.setattr(
+            claude_interactive, "run_claude_interactive_with_heartbeat", fake_run
+        )
+
+        task = _make_input(instruction_md_content="PERSONA", message="hi")
+        wf._execute_claude_chat(task, session_dir=str(session_dir))
+        wf._execute_claude_chat(task, session_dir=str(session_dir))
+
+        assert len(names) == 2
+        assert names[0] != names[1], "answer filename must be unique per turn"
+        for name in names:
+            assert os.path.basename(name).startswith("answer_")
+            assert os.path.basename(name).endswith(".md")
+            assert os.path.dirname(name) == str(session_dir)
 
     def test_turn_prompt_and_claude_md_written_0600(
         self, monkeypatch, tmp_path, interactive_env
@@ -496,15 +541,19 @@ class TestDecidePtyAction:
         assert action == "kill"
 
     def test_idle_exit_after_response_seen(self):
-        # Response seen, then 9s of quiet → time to /exit.
+        # Legacy idle-/exit path (FINDING 2): response seen, the answer file
+        # never arrived, AND we are PAST the bounded fallback cap since submit →
+        # /exit (→ scraped-transcript fallback). Before the cap this would WAIT
+        # to avoid killing the turn pre-write; covered separately.
         action = decide_pty_action(
-            now=20.0,
+            now=100.0,
             start=0.0,
-            last_output=11.0,
+            last_output=91.0,  # 9s of quiet
             seen_output=True,
             submitted=True,
             response_seen=True,
             exit_sent_at=None,
+            submitted_at=2.0,  # 98s since submit — past the 90s fallback cap
             first_output_seconds=90.0,
             submit_settle_seconds=1.0,
             idle_exit_seconds=8.0,
@@ -725,6 +774,147 @@ class TestDecidePtyAction:
             enter_delay_seconds=0.5,
         )
         assert action == "wait"
+
+    # ── FINDING 2: answer file is the completion signal ──────────────────
+    # ``response_seen`` flips on the first post-submit byte (a ``Read(...)``
+    # echo), which would arm the idle ``/exit`` BEFORE the answer file exists.
+    # A quiet gap could then ``/exit`` and kill the turn pre-write. Fix: gate
+    # completion on the answer file. When ``answer_ready`` (file present,
+    # non-empty, size stable across a tick) → ``exit`` promptly. While NOT
+    # ``answer_ready``, suppress the idle ``/exit`` until the bounded fallback
+    # cap since submit (``first_output_seconds``), then fall through to the
+    # existing idle path (→ scraped-transcript fallback).
+    def test_exit_when_answer_ready_after_settle(self):
+        """``answer_ready`` (file written + stable) → ``exit`` after the brief
+        settle, even if the response only just started streaming (idle window
+        not yet elapsed). The deliverable is in hand."""
+        action = decide_pty_action(
+            now=13.0,
+            start=0.0,
+            last_output=12.9,  # only 0.1s quiet — well under idle_exit
+            seen_output=True,
+            submitted=True,
+            response_seen=True,
+            exit_sent_at=None,
+            submitted_at=2.0,
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            answer_ready=True,
+            answer_ready_at=12.6,  # ready 0.4s ago — past the brief settle
+        )
+        assert action == "exit"
+
+    def test_answer_ready_waits_brief_settle_before_exit(self):
+        """Just-appeared answer file (zero settle) waits a brief settle before
+        ``exit`` — guards against exiting mid-flush of the answer file."""
+        action = decide_pty_action(
+            now=13.0,
+            start=0.0,
+            last_output=12.9,
+            seen_output=True,
+            submitted=True,
+            response_seen=True,
+            exit_sent_at=None,
+            submitted_at=2.0,
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            answer_ready=True,
+            answer_ready_at=12.99,  # ready ~0.01s ago — under the brief settle
+        )
+        assert action == "wait"
+
+    def test_no_idle_exit_while_waiting_for_answer_before_cap(self):
+        """Response seen + idle window elapsed, but the answer file is NOT yet
+        ready and we are still under the fallback cap since submit → keep
+        WAITING, do NOT idle-``/exit`` (which would kill the turn pre-write).
+        Requires ``awaiting_answer_file`` — the suppression only applies when an
+        answer file is actually expected."""
+        action = decide_pty_action(
+            now=30.0,
+            start=0.0,
+            last_output=11.0,  # 19s quiet — way past the 8s idle window
+            seen_output=True,
+            submitted=True,
+            response_seen=True,
+            exit_sent_at=None,
+            submitted_at=2.0,  # 28s since submit, under the 90s fallback cap
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            answer_ready=False,
+            awaiting_answer_file=True,
+        )
+        assert action == "wait"
+
+    def test_idle_exit_falls_through_after_fallback_cap(self):
+        """The answer file NEVER appears: once past the bounded fallback cap
+        since submit, fall through to the existing idle-``/exit`` (→ scraped
+        transcript fallback). No new hang path."""
+        action = decide_pty_action(
+            now=95.0,
+            start=0.0,
+            last_output=80.0,  # long idle
+            seen_output=True,
+            submitted=True,
+            response_seen=True,
+            exit_sent_at=None,
+            submitted_at=2.0,  # 93s since submit, PAST the 90s fallback cap
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            answer_ready=False,
+            awaiting_answer_file=True,
+        )
+        assert action == "exit"
+
+    def test_no_answer_file_expected_keeps_legacy_idle_exit(self):
+        """When the caller passes NO answer file (``awaiting_answer_file``
+        False), there's nothing to wait for — the legacy idle-``/exit`` applies
+        immediately once the response is seen + idle window elapsed, even well
+        under the fallback cap. This keeps the transcript-only path's timing."""
+        action = decide_pty_action(
+            now=20.0,
+            start=0.0,
+            last_output=11.0,  # 9s quiet — past the 8s idle window
+            seen_output=True,
+            submitted=True,
+            response_seen=True,
+            exit_sent_at=None,
+            submitted_at=2.0,  # only 18s since submit — under the 90s cap
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            awaiting_answer_file=False,
+        )
+        assert action == "exit"
+
+    def test_sigterm_still_fires_after_exit_grace_with_answer_gate(self):
+        """The existing kill caps still bound everything: once ``/exit`` is
+        sent, SIGTERM escalation after the grace window is unchanged by the
+        answer-file gate (no new hang path)."""
+        action = decide_pty_action(
+            now=30.0,
+            start=0.0,
+            last_output=11.0,
+            seen_output=True,
+            submitted=True,
+            response_seen=True,
+            exit_sent_at=18.0,
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            answer_ready=True,
+            answer_ready_at=12.0,
+        )
+        assert action == "terminate"
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -1156,3 +1346,136 @@ class TestRunnerReadsAnswerFile:
         )
 
         assert "The answer is 4." in result.stdout
+
+    def test_answer_file_unlinked_after_read(self, fake_pty_wiring, tmp_path):
+        """FINDING 1: after reading a non-empty answer file the runner must
+        UNLINK it (best-effort) so the reused per-tenant ``session_dir`` doesn't
+        accumulate per-turn answer files across many turns."""
+        answer_file = tmp_path / "answer_deadbeef.md"
+        trigger = (
+            f"Read the file /scratch/turn_prompt.md and respond. Write your "
+            f"COMPLETE final response to {answer_file}."
+        )
+        script = [
+            b"Welcome to Claude Code\n",
+            None, None, None, None, None, None, None, None,
+            b"\x1b[2Jchrome\n",
+            None, None, None, None, None, None, None, None, None,
+            None, None, None,
+        ]
+        fake, proc = fake_pty_wiring(
+            script, answer_drop=(str(answer_file), "The complete answer.")
+        )
+
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            ["claude"],
+            prompt=trigger,
+            label="Claude Code",
+            timeout=1500,
+            env={},
+            cwd="/tmp",
+            answer_file=str(answer_file),
+            submit_settle_seconds=0.2,
+            enter_delay_seconds=0.1,
+            idle_exit_seconds=0.5,
+            exit_grace_seconds=0.5,
+            first_output_seconds=90.0,
+        )
+
+        assert result.stdout == "The complete answer."
+        # The unique per-turn answer file is cleaned up after the read.
+        assert not answer_file.exists(), "answer file must be unlinked after read"
+
+    def test_unlink_failure_does_not_raise(
+        self, fake_pty_wiring, tmp_path, monkeypatch
+    ):
+        """FINDING 1: the post-read unlink is best-effort — an OSError while
+        removing the answer file must NEVER propagate (the answer is already in
+        hand). Patch ``os.unlink`` to raise and assert the result still comes
+        back clean."""
+        answer_file = tmp_path / "answer_cafef00d.md"
+        answer_file.write_text("Already on disk.")
+        trigger = (
+            f"Read /scratch/turn_prompt.md and respond. Write to {answer_file}."
+        )
+        script = [
+            b"Welcome to Claude Code\n",
+            None, None, None, None, None, None, None, None,
+            b"chrome\n",
+            None, None, None, None, None, None,
+        ]
+        fake, proc = fake_pty_wiring(script)
+
+        import os as _os
+
+        real_unlink = _os.unlink
+
+        def _boom_unlink(path, *a, **k):
+            if str(path) == str(answer_file):
+                raise OSError("cannot unlink")
+            return real_unlink(path, *a, **k)
+
+        monkeypatch.setattr(claude_interactive.os, "unlink", _boom_unlink)
+
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            ["claude"],
+            prompt=trigger,
+            label="Claude Code",
+            timeout=1500,
+            env={},
+            cwd="/tmp",
+            answer_file=str(answer_file),
+            submit_settle_seconds=0.2,
+            enter_delay_seconds=0.1,
+            idle_exit_seconds=0.5,
+            exit_grace_seconds=0.5,
+            first_output_seconds=90.0,
+        )
+
+        assert result.stdout == "Already on disk."
+        assert result.returncode == 0
+
+    def test_stale_different_named_file_never_read(
+        self, fake_pty_wiring, tmp_path
+    ):
+        """FINDING 1: a leftover answer file from a PRIOR turn (a DIFFERENT
+        unique name) must NEVER be read as this turn's answer. The runner is
+        handed only THIS turn's unique ``answer_file``; a stale neighbour with a
+        different name is ignored, so an empty this-turn file falls back to the
+        transcript rather than replaying the stale success."""
+        # A prior turn left this behind in the reused session_dir.
+        stale = tmp_path / "answer_oldturn1234.md"
+        stale.write_text("STALE answer from the previous turn.")
+        # This turn's unique file — never written (the turn failed to write it).
+        this_turn = tmp_path / "answer_newturn5678.md"
+        trigger = (
+            f"Read /scratch/turn_prompt.md and respond. Write to {this_turn}."
+        )
+        script = [
+            b"Welcome to Claude Code\n",
+            None, None, None, None, None, None, None, None,
+            b"The answer is 4.\n",  # only the transcript carries the reply
+            None, None, None, None, None, None,
+        ]
+        fake, proc = fake_pty_wiring(script)
+
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            ["claude"],
+            prompt=trigger,
+            label="Claude Code",
+            timeout=1500,
+            env={},
+            cwd="/tmp",
+            answer_file=str(this_turn),
+            submit_settle_seconds=0.2,
+            enter_delay_seconds=0.1,
+            idle_exit_seconds=0.5,
+            exit_grace_seconds=0.5,
+            first_output_seconds=90.0,
+        )
+
+        # The stale file's content must NOT appear — only this turn's transcript.
+        assert "STALE answer" not in result.stdout
+        assert "The answer is 4." in result.stdout
+        # The stale neighbour is untouched (we only unlink our own file).
+        assert stale.exists()

@@ -303,9 +303,19 @@ class TestExecuteClaudeChat:
         # Defect 2 (plan 2026-05-30): the trigger also instructs Claude to write
         # its answer out-of-band, and the runner is handed that ``answer_file``
         # to read back (the TUI transcript can't be reliably cleaned).
-        assert str(tmp_path / "answer.md") in captured["prompt"]
-        assert "Write ONLY your final answer" in captured["prompt"]
-        assert captured.get("answer_file") == str(tmp_path / "answer.md")
+        # FINDING 1 (stale answer replay): the answer file is a UNIQUE per-turn
+        # name (answer_<hex>.md), not the fixed answer.md, so a non-empty file
+        # is always THIS turn's reply — never a leftover from a prior turn in
+        # the reused per-tenant session_dir.
+        import os as _os
+        answer_file = captured.get("answer_file")
+        assert _os.path.basename(answer_file).startswith("answer_")
+        assert _os.path.basename(answer_file).endswith(".md")
+        assert _os.path.basename(answer_file) != "answer.md"
+        assert _os.path.dirname(answer_file) == str(tmp_path)
+        assert answer_file in captured["prompt"]
+        # FINDING 3 (Luna): the trigger asks for the COMPLETE final response.
+        assert "COMPLETE" in captured["prompt"]
         assert "ANTHROPIC_API_KEY" not in captured["env"]
         assert "CLAUDE_CODE_OAUTH_TOKEN" not in captured["env"]
 

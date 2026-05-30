@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import tempfile
+import uuid
 
 import cli_runtime
 import tenant_home_quota
@@ -328,12 +329,27 @@ def execute_claude_chat(task_input, session_dir: str):
         # its final answer to a session-scratch file the runner reads back
         # out-of-band. ``session_dir`` is already ``--add-dir``'d so the Write
         # tool can reach it by absolute path.
-        interactive_answer_file = os.path.join(session_dir, "answer.md")
+        #
+        # FINDING 1 (stale answer replay): ``session_dir`` is persistent per
+        # tenant and REUSED every turn (workflows.py:1203). A fixed ``answer.md``
+        # let a turn that failed to write its answer return the PRIOR turn's
+        # file as a fresh success. A UNIQUE per-turn filename guarantees any
+        # non-empty content the runner reads is THIS turn's answer — no
+        # mtime/inode check needed. The runner unlinks it after reading so the
+        # dir doesn't accumulate per-turn answer files.
+        interactive_answer_file = os.path.join(
+            session_dir, f"answer_{uuid.uuid4().hex}.md"
+        )
+        # FINDING 3 (Luna): ask for the COMPLETE user-facing response, not a
+        # terse stub — include important results, file changes, errors, or next
+        # steps (but no tool-chatter/preamble) so the deliverable the runner
+        # reads back is the full reply.
         interactive_submit = (
             f"Read the file {turn_file} and respond to the user request it "
-            f"contains. Write ONLY your final answer to {interactive_answer_file} "
-            "(overwrite it); no preamble. Reply directly — do not ask for "
-            "confirmation."
+            f"contains. Write your COMPLETE final response for the user to "
+            f"{interactive_answer_file} (overwrite it) — include any important "
+            "results, file changes, errors, or next steps, but no preamble or "
+            "tool-chatter. Reply directly — do not ask for confirmation."
         )
 
     # ── tenant HOME on workspaces volume (task #267 Phase 1) ────────────

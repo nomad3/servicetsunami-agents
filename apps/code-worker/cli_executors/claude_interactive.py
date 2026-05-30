@@ -147,6 +147,10 @@ def decide_pty_action(
     text_written: bool = False,
     text_written_at: float | None = None,
     enter_delay_seconds: float = 0.5,
+    answer_ready: bool = False,
+    answer_ready_at: float | None = None,
+    answer_settle_seconds: float = 0.25,
+    awaiting_answer_file: bool = False,
 ) -> str:
     """Decide the next PTY action for one loop tick (pure — no I/O).
 
@@ -175,8 +179,21 @@ def decide_pty_action(
       3. Await response — after submit, suppress the idle ``/exit`` until the
          FIRST post-submit output; if none within ``first_output_seconds`` after
          submit → kill.
-      4. Idle exit — once the response is seen, ``/exit`` after
-         ``idle_exit_seconds`` quiet, then SIGTERM after ``exit_grace_seconds``.
+      4. Completion — FINDING 2: the answer FILE is the completion signal, not
+         the first post-submit byte. ``response_seen`` flips on the first byte
+         (a ``Read(...)`` echo) which would arm the idle ``/exit`` BEFORE the
+         answer file exists; a quiet gap could then ``/exit`` and kill the turn
+         pre-write. So:
+           - When ``answer_ready`` (file present, non-empty, size STABLE across
+             one tick) and a brief ``answer_settle_seconds`` has passed since it
+             appeared → ``exit`` promptly (the deliverable is in hand).
+           - While NOT ``answer_ready``, do NOT let the idle ``/exit`` fire —
+             keep waiting — UNTIL a bounded fallback cap since submit (reuse
+             ``first_output_seconds``); only past that cap do we fall through to
+             the legacy idle-``/exit`` (→ scraped-transcript fallback for turns
+             where Claude never wrote the file). The outer ``timeout`` + the
+             post-``/exit`` SIGTERM/SIGKILL still bound everything (no new hang).
+         Then SIGTERM after ``exit_grace_seconds``.
     """
     # 4b. Exit already sent — escalate after the grace window.
     if exit_sent_at is not None:
@@ -223,7 +240,27 @@ def decide_pty_action(
             return "kill"
         return "wait"
 
-    # 4a. Response seen: /exit after the idle window of quiet.
+    # 4a. Completion (FINDING 2): the answer FILE — not the first post-submit
+    #     byte — is the signal. Exit promptly once the file is written + stable.
+    if answer_ready:
+        baseline = answer_ready_at if answer_ready_at is not None else now
+        if now - baseline >= answer_settle_seconds:
+            return "exit"
+        return "wait"
+
+    # 4b. Answer not yet on disk: suppress the legacy idle /exit (which could
+    #     kill the turn before the file is written) until a bounded fallback cap
+    #     since submit. Past the cap, fall through to the legacy idle path so a
+    #     turn where Claude NEVER wrote the file still ends (→ transcript scrape)
+    #     instead of hanging until the outer timeout. ONLY when we're actually
+    #     awaiting a file — if the caller passed no ``answer_file`` there's
+    #     nothing to wait for, so the legacy idle /exit applies immediately.
+    if awaiting_answer_file:
+        baseline = submitted_at if submitted_at is not None else start
+        if now - baseline < first_output_seconds:
+            return "wait"
+
+    # Fallback (cap exceeded, or no answer file expected): legacy idle /exit.
     if now - last_output >= idle_exit_seconds:
         return "exit"
     return "wait"
@@ -389,6 +426,15 @@ def run_claude_interactive_with_heartbeat(
     # of the first output (for the bounded submit ceiling).
     input_box_seen = False
     first_output_at: float | None = None
+    # FINDING 2 answer-file completion state: the answer FILE (not the first
+    # post-submit byte) signals the turn is done. ``answer_ready`` flips once
+    # the file is present, non-empty, and its size is STABLE across one tick;
+    # ``answer_ready_at`` notes when, so a brief settle precedes ``/exit``.
+    # ``_prev_answer_size`` carries the prior tick's size for the stability
+    # check. ``-1`` = not yet observed (distinct from a real 0-byte file).
+    answer_ready = False
+    answer_ready_at: float | None = None
+    _prev_answer_size = -1
 
     # Empty-prompt guard: nothing to type → skip straight to submitted so the
     # loop runs the response/idle gates rather than waiting to type forever.
@@ -443,6 +489,21 @@ def run_claude_interactive_with_heartbeat(
             if proc.poll() is not None:
                 break
 
+            # FINDING 2: poll the answer file once submitted. It is the
+            # completion signal — present + non-empty + size STABLE across one
+            # tick. Stability guards against exiting mid-flush of a large reply.
+            # Polled BEFORE the exit decision so ``answer_ready`` reflects this
+            # tick. Best-effort: a stat error just defers readiness.
+            if answer_file and submitted and not answer_ready:
+                try:
+                    size = os.path.getsize(answer_file)
+                except OSError:
+                    size = -1
+                if size > 0 and size == _prev_answer_size:
+                    answer_ready = True
+                    answer_ready_at = now
+                _prev_answer_size = size
+
             action = decide_pty_action(
                 now=now,
                 start=start,
@@ -461,6 +522,9 @@ def run_claude_interactive_with_heartbeat(
                 text_written=text_written,
                 text_written_at=text_written_at,
                 enter_delay_seconds=enter_delay_seconds,
+                answer_ready=answer_ready,
+                answer_ready_at=answer_ready_at,
+                awaiting_answer_file=bool(answer_file),
             )
 
             if action == "wait":
@@ -525,6 +589,15 @@ def run_claude_interactive_with_heartbeat(
                 answer = fh.read().strip()
         except OSError:
             answer = ""
+        # FINDING 1: unlink this turn's unique answer file (best-effort, never
+        # raise) so the persistent per-tenant ``session_dir`` doesn't accumulate
+        # one answer_<hex>.md per turn. Done whether or not it had content — an
+        # empty file is still this turn's leftover. The unique name means we only
+        # ever remove OUR file, never a concurrent turn's.
+        try:
+            os.unlink(answer_file)
+        except OSError:
+            pass
         if answer:
             return subprocess.CompletedProcess(
                 args=cmd,
