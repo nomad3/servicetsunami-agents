@@ -258,6 +258,7 @@ class TestExecuteClaudeChat:
             captured["cmd"] = cmd
             captured["env"] = kw["env"]
             captured["prompt"] = kw["prompt"]
+            captured["answer_file"] = kw.get("answer_file")
             return sp.CompletedProcess(
                 args=cmd,
                 returncode=0,
@@ -290,8 +291,31 @@ class TestExecuteClaudeChat:
         assert "-p" not in captured["cmd"]
         assert "--output-format" not in captured["cmd"]
         assert captured["cmd"][0] == "claude"
-        assert captured["cmd"][-1] == "hello"
-        assert captured["prompt"] == "hello"
+        # Approach C (plan 2026-05-30): the turn message is NOT appended
+        # positionally — the REPL ignores it. The runner receives a single-line
+        # trigger to TYPE, and the blob is written to turn_prompt.md instead.
+        assert captured["cmd"][-1] != "hello"
+        assert "hello" not in captured["cmd"]
+        assert captured["prompt"] != "hello"
+        assert "\n" not in captured["prompt"]
+        assert str(tmp_path / "turn_prompt.md") in captured["prompt"]
+        assert (tmp_path / "turn_prompt.md").read_text() == "hello"
+        # Defect 2 (plan 2026-05-30): the trigger also instructs Claude to write
+        # its answer out-of-band, and the runner is handed that ``answer_file``
+        # to read back (the TUI transcript can't be reliably cleaned).
+        # FINDING 1 (stale answer replay): the answer file is a UNIQUE per-turn
+        # name (answer_<hex>.md), not the fixed answer.md, so a non-empty file
+        # is always THIS turn's reply — never a leftover from a prior turn in
+        # the reused per-tenant session_dir.
+        import os as _os
+        answer_file = captured.get("answer_file")
+        assert _os.path.basename(answer_file).startswith("answer_")
+        assert _os.path.basename(answer_file).endswith(".md")
+        assert _os.path.basename(answer_file) != "answer.md"
+        assert _os.path.dirname(answer_file) == str(tmp_path)
+        assert answer_file in captured["prompt"]
+        # FINDING 3 (Luna): the trigger asks for the COMPLETE final response.
+        assert "COMPLETE" in captured["prompt"]
         assert "ANTHROPIC_API_KEY" not in captured["env"]
         assert "CLAUDE_CODE_OAUTH_TOKEN" not in captured["env"]
 
@@ -368,6 +392,10 @@ class TestExecuteClaudeChat:
         assert cleaned == "Useful answer"
 
     def test_interactive_runner_sends_exit_after_idle(self, tmp_path):
+        # Approach C (plan 2026-05-30): the runner now TYPES the trigger into
+        # the REPL after the settle window, waits for a post-submit response,
+        # then `/exit`s on idle. The fake REPL echoes the typed line as its
+        # "answer" so the response gate fires.
         script = """
 import sys
 print("Ready")
@@ -377,43 +405,51 @@ for line in sys.stdin:
         print("Goodbye")
         sys.stdout.flush()
         break
+    print("Answer: " + line.strip())
+    sys.stdout.flush()
 """
         result = claude_interactive.run_claude_interactive_with_heartbeat(
             [sys.executable, "-c", script],
-            prompt="hello",
+            prompt="please answer",
             label="Claude Code",
             timeout=5,
             env=os.environ.copy(),
             cwd=str(tmp_path),
+            submit_settle_seconds=0.1,
             idle_exit_seconds=0.1,
             exit_grace_seconds=1,
         )
 
         assert result.returncode == 0
         assert "Ready" in result.stdout
+        # The trigger was typed and the REPL answered it.
+        assert "Answer: please answer" in result.stdout
         assert "Goodbye" in result.stdout
 
     def test_interactive_runner_waits_for_slow_first_output(self, tmp_path):
-        # First output arrives AFTER idle_exit_seconds (simulating MCP load /
-        # model warm-up). The runner must NOT `/exit` mid-startup — it waits,
-        # captures the output, and completes. (Under the old logic the idle
-        # timer fired from spawn and killed the launch with an empty transcript.)
+        # First output (banner) arrives AFTER idle_exit_seconds (simulating MCP
+        # load / model warm-up). The runner must NOT `/exit` mid-startup — it
+        # waits, then submits the trigger and captures the answer. (Under the
+        # old logic the idle timer fired from spawn and killed the launch.)
         script = """
 import sys, time
 time.sleep(0.6)
-print("Useful answer")
+print("Ready")
 sys.stdout.flush()
 for line in sys.stdin:
     if line.strip() == "/exit":
         break
+    print("Useful answer")
+    sys.stdout.flush()
 """
         result = claude_interactive.run_claude_interactive_with_heartbeat(
             [sys.executable, "-c", script],
-            prompt="hello",
+            prompt="please answer",
             label="Claude Code",
             timeout=10,
             env=os.environ.copy(),
             cwd=str(tmp_path),
+            submit_settle_seconds=0.1,
             idle_exit_seconds=0.1,
             exit_grace_seconds=1,
             first_output_seconds=5,

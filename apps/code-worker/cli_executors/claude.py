@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import tempfile
+import uuid
 
 import cli_runtime
 import tenant_home_quota
@@ -38,6 +39,27 @@ from session_event_emitter import SessionEventEmitter
 from tenant_feature_flags import is_enabled as _feature_enabled
 
 logger = logging.getLogger(__name__)
+
+
+def _write_secret_file(path: str, content: str) -> None:
+    """Write ``content`` to ``path`` with mode 0o600 (N2).
+
+    The interactive turn blob (``turn_prompt.md``) and ``CLAUDE.md`` hold the
+    persona + full conversation history, so they are secret-grade. ``os.open``
+    with ``O_CREAT|0o600`` sets the perms atomically on create; an explicit
+    ``chmod`` re-tightens a pre-existing world-readable file from an earlier
+    turn. Interactive path only — the print path keeps its plain ``open``."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(content)
+    finally:
+        # Re-assert perms in case the file pre-existed (O_CREAT mode is ignored
+        # for an existing file).
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
 
 
 def _ensure_claude_onboarding(home: str, trusted_cwd: str | None = None) -> None:
@@ -277,8 +299,58 @@ def execute_claude_chat(task_input, session_dir: str):
     if cli_cwd != _cwd_fallback:
         cmd.extend(["--add-dir", cli_cwd])
 
+    # ── interactive submission (Approach C, plan 2026-05-30) ────────────
+    # Claude Code v2.1.144's interactive REPL does NOT auto-execute a
+    # positional [prompt] arg, so appending the turn blob to ``cmd`` (as the
+    # old code did) submitted nothing and the turn died at the idle ``/exit``.
+    # Instead: write the blob to a session-scratch file (``session_dir`` is
+    # already ``--add-dir``'d at L212 so Claude's Read tool can reach it by
+    # absolute path) and hand the runner a single-line trigger to TYPE. A
+    # single line sidesteps both the unreliable CLAUDE.md auto-load (cwd-upward
+    # only; --add-dir grants access, not memory loading) and the multi-line
+    # bracketed-paste ``[Pasted text +N lines]`` placeholder that needs a
+    # second Enter. The runner types the trigger and strips its echo.
+    interactive_submit = None
+    interactive_answer_file = None
     if interactive_mode:
-        cmd.append(prompt)
+        turn_file = os.path.join(session_dir, "turn_prompt.md")
+        # N2: turn blob is secret-grade (persona + conversation history) → 0o600.
+        _write_secret_file(turn_file, prompt)
+        # Re-tighten CLAUDE.md (written above with a plain `open`) on the
+        # interactive path for consistency — it carries the same blob.
+        _claude_md = os.path.join(session_dir, "CLAUDE.md")
+        if os.path.exists(_claude_md):
+            try:
+                os.chmod(_claude_md, 0o600)
+            except OSError:
+                pass
+        # Defect 2 (plan §4.1/§4.4): interactive Claude is a cursor-addressed
+        # TUI whose transcript can't be reliably cleaned, so have Claude write
+        # its final answer to a session-scratch file the runner reads back
+        # out-of-band. ``session_dir`` is already ``--add-dir``'d so the Write
+        # tool can reach it by absolute path.
+        #
+        # FINDING 1 (stale answer replay): ``session_dir`` is persistent per
+        # tenant and REUSED every turn (workflows.py:1203). A fixed ``answer.md``
+        # let a turn that failed to write its answer return the PRIOR turn's
+        # file as a fresh success. A UNIQUE per-turn filename guarantees any
+        # non-empty content the runner reads is THIS turn's answer — no
+        # mtime/inode check needed. The runner unlinks it after reading so the
+        # dir doesn't accumulate per-turn answer files.
+        interactive_answer_file = os.path.join(
+            session_dir, f"answer_{uuid.uuid4().hex}.md"
+        )
+        # FINDING 3 (Luna): ask for the COMPLETE user-facing response, not a
+        # terse stub — include important results, file changes, errors, or next
+        # steps (but no tool-chatter/preamble) so the deliverable the runner
+        # reads back is the full reply.
+        interactive_submit = (
+            f"Read the file {turn_file} and respond to the user request it "
+            f"contains. Write your COMPLETE final response for the user to "
+            f"{interactive_answer_file} (overwrite it) — include any important "
+            "results, file changes, errors, or next steps, but no preamble or "
+            "tool-chatter. Reply directly — do not ask for confirmation."
+        )
 
     # ── tenant HOME on workspaces volume (task #267 Phase 1) ────────────
     # Redirect HOME onto the persistent workspaces volume so per-tenant
@@ -337,13 +409,14 @@ def execute_claude_chat(task_input, session_dir: str):
         if interactive_mode:
             result = claude_interactive.run_claude_interactive_with_heartbeat(
                 cmd,
-                prompt=prompt,
+                prompt=interactive_submit,
                 label="Claude Code",
                 timeout=1500,
                 env=env,
                 cwd=cli_cwd,
                 on_chunk=on_chunk,
                 heartbeat=cli_runtime.activity.heartbeat,
+                answer_file=interactive_answer_file,
             )
         else:
             result = cli_runtime.run_cli_with_heartbeat(
