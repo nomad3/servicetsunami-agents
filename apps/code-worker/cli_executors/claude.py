@@ -176,7 +176,29 @@ def execute_claude_chat(task_input, session_dir: str):
     # API-key tenants are already on the Console billing path; keep their
     # machine-readable print mode even when the worker globally enables
     # interactive native-auth for subscription/OAuth tenants.
-    interactive_mode = interactive_requested and kind == "oauth"
+    #
+    # Native worker-login: the web connect flow (claude_auth.py) stores a
+    # sentinel `session_token = "__native_worker_login__"` whose real credential
+    # lives in the worker HOME volume. Force the interactive PTY path for THIS
+    # tenant regardless of the global execution-mode env — the sentinel is never
+    # a usable token (it's popped below for native auth). api_key tenants stay on
+    # print mode (the `kind == "oauth"` gate holds).
+    _native_worker_login = kind == "oauth" and token == "__native_worker_login__"
+    interactive_mode = (interactive_requested or _native_worker_login) and kind == "oauth"
+    if _native_worker_login:
+        # The sentinel promises a native credential in the worker HOME volume.
+        # If it's missing/wiped, fail explicitly rather than letting the chain
+        # silently fall back and "hallucinate" Claude connectivity.
+        _worker_home = os.environ.get("CLAUDE_CODE_WORKER_HOME", "/home/codeworker")
+        if not os.path.isfile(os.path.join(_worker_home, ".claude", ".credentials.json")):
+            return ChatCliResult(
+                response_text="",
+                success=False,
+                error=(
+                    "Claude Code worker auth missing — reconnect Claude Code on "
+                    "the integrations page."
+                ),
+            )
     cmd = ["claude"]
     if not interactive_mode:
         cmd.extend(["-p", prompt])
@@ -272,7 +294,9 @@ def execute_claude_chat(task_input, session_dir: str):
         interactive_home_mode = os.environ.get(
             "CLAUDE_CODE_INTERACTIVE_HOME", "tenant"
         ).strip().lower()
-        if interactive_mode and interactive_home_mode in {"worker", "codeworker"}:
+        if interactive_mode and (
+            _native_worker_login or interactive_home_mode in {"worker", "codeworker"}
+        ):
             # Native Claude Code subscription auth is tied to HOME. Some
             # workers are authenticated once as the codeworker user, so use
             # that HOME only for the TTY path when explicitly requested.

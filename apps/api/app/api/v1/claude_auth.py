@@ -909,11 +909,10 @@ class ClaudeAuthManager:
         runs through the interactive PTY path which reads
         `$HOME/.claude/.credentials.json` in the worker HOME. The api container
         shares the worker's `claude_sessions` volume (both run as uid 1000), so
-        we atomically drop the freshly-minted credential there at 0600. We store
-        NO vault credential (the native credential lives in the volume) and clear
-        any stale token rows, so the integration is marked connected via the
-        enabled IntegrationConfig while chat cleanly falls back to another CLI
-        until per-tenant interactive routing lands (follow-up).
+        we atomically drop the freshly-minted credential there at 0600. We also
+        store a sentinel `session_token` (never a usable token) so the
+        integration reads as connected + routable; the worker executor detects
+        that sentinel and runs the interactive PTY path for this tenant.
         """
         home = state.claude_home or ""
         src = next(
@@ -974,14 +973,22 @@ class ClaudeAuthManager:
                 db.add(config)
                 db.commit()
                 db.refresh(config)
-            # Clear any stale token/api-key rows from the dead setup-token / API
-            # flows. We deliberately store NO vault credential: the native
-            # credential lives in the worker volume, and until per-tenant
-            # interactive routing lands (follow-up) the executor finds no token
-            # and cleanly falls back to another CLI rather than feeding a marker
-            # to the blocked `claude -p`. The enabled IntegrationConfig is the
-            # "connected" signal.
-            _revoke_other_claude_credentials(db, config.id, tid, keep="__none__")
+            # Store a sentinel `session_token` so the integration reads as
+            # connected (get_connected_integrations / cli_platform_resolver) and
+            # is routable in the chat CLI picker. The real credential lives in
+            # the worker volume — the sentinel is NEVER a usable token: the
+            # worker executor detects this exact value and forces the
+            # interactive PTY path (popping CLAUDE_CODE_OAUTH_TOKEN), so the
+            # sentinel is never sent to Anthropic. See cli_executors/claude.py.
+            _revoke_other_claude_credentials(db, config.id, tid, keep="session_token")
+            store_credential(
+                db,
+                integration_config_id=config.id,
+                tenant_id=tid,
+                credential_key="session_token",
+                plaintext_value="__native_worker_login__",
+                credential_type="oauth_token",
+            )
         finally:
             db.close()
 
