@@ -4,6 +4,10 @@
     "features": "Features",
     "integrations": "Integrations",
     "pricing": "Pricing",
+    "connectors": "Connectors",
+    "fleet": "Agent Fleet",
+    "trust": "Trust",
+    "cardiology": "Example",
     "signIn": "Sign In",
     "getStarted": "Get Started"
   },
@@ -285,7 +289,11 @@
       "platform": "Platform",
       "features": "Features",
       "docs": "Docs",
-      "github": "GitHub"
+      "github": "GitHub",
+      "connectors": "Connectors",
+      "fleet": "Agent Fleet",
+      "trust": "Trust",
+      "cardiology": "Example"
     },
     "copy": "© {{year}} AgentProvision. All rights reserved."
   },

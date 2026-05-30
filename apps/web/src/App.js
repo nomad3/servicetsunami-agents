@@ -9,12 +9,13 @@ import api from './services/api';
 import authService from './services/auth';
 
 // ── Critical-path routes (kept eager) ──
-// LandingPage + AlphaLandingPage render at "/" before auth and dictate
-// LCP for cold marketing-site visitors; LoginPage is the next click on
-// the auth funnel. Both ship in the initial bundle so unauth visitors
-// don't pay a Suspense round-trip on first paint.
+// LandingPage + AlphaLandingPage + VetLandingPage render at "/" before
+// auth and dictate LCP for cold marketing-site visitors; LoginPage is
+// the next click on the auth funnel. All ship in the initial bundle so
+// unauth visitors don't pay a Suspense round-trip on first paint.
 import LandingPage from './LandingPage';
 import AlphaLandingPage from './AlphaLandingPage';
+import VetLandingPage from './VetLandingPage';
 import LoginPage from './pages/LoginPage';
 
 // ── Hot routes (lazy + prefetched) ──
@@ -211,22 +212,30 @@ function App() {
               <Suspense fallback={<LoadingSpinner fullScreen text="Loading…" />}>
               <Routes>
                 {/* Root: alpha.agentprovision.com renders the CLI
-                    landing; agentprovision.com renders the main one.
-                    Hostname-sniff so the same SPA bundle handles both
-                    apex domains without a separate build. */}
+                    landing; vet.agentprovision.com renders the
+                    veterinary practice-OS landing; agentprovision.com
+                    renders the main one. Hostname-sniff so the same SPA
+                    bundle handles every apex/subdomain without a
+                    separate build. */}
                 <Route
                   path="/"
                   element={
-                    typeof window !== 'undefined' &&
-                    window.location.hostname.startsWith('alpha.')
-                      ? <AlphaLandingPage />
-                      : <LandingPage />
+                    (() => {
+                      const host =
+                        typeof window !== 'undefined'
+                          ? window.location.hostname
+                          : '';
+                      if (host.startsWith('alpha.')) return <AlphaLandingPage />;
+                      if (host.startsWith('vet.')) return <VetLandingPage />;
+                      return <LandingPage />;
+                    })()
                   }
                 />
-                {/* /alpha is also reachable directly (e.g. for staging
-                    or share-links). Idempotent with the hostname-
-                    sniffed root above. */}
+                {/* /alpha + /vet are also reachable directly (e.g. for
+                    staging or share-links). Idempotent with the
+                    hostname-sniffed root above. */}
                 <Route path="/alpha" element={<AlphaLandingPage />} />
+                <Route path="/vet" element={<VetLandingPage />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/auth/login" element={<LoginPage />} />
                 {/* Device-auth landing for `alpha login` (task #201). Wrapped in

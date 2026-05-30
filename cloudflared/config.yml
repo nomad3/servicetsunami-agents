@@ -51,6 +51,14 @@ ingress:
   - hostname: alpha.agentprovision.com
     service: http://web:80
 
+  # vet practice-OS landing — dedicated subdomain pointing the SPA at
+  # the /vet route. Same mechanism as the alpha block above: React
+  # Router's hostname-sniff renders VetLandingPage at the root and the
+  # SPA nginx catch-all serves index.html for any direct path hit.
+  # KEEP IN SYNC with kubernetes/cloudflared-deployment.yaml.
+  - hostname: vet.agentprovision.com
+    service: http://web:80
+
   # Web SPA
   - hostname: agentprovision.com
     service: http://web:80

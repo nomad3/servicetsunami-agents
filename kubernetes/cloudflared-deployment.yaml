@@ -41,6 +41,19 @@ data:
 
       - hostname: luna.agentprovision.com
         service: http://luna-client:80
+
+      # alpha CLI landing — dedicated subdomain pointing the SPA at the
+      # /alpha route (React Router hostname-sniff renders it at root).
+      # KEEP IN SYNC with cloudflared/config.yml.
+      - hostname: alpha.agentprovision.com
+        service: http://web:80
+
+      # vet practice-OS landing — dedicated subdomain pointing the SPA
+      # at the /vet route (React Router hostname-sniff renders it at
+      # root). KEEP IN SYNC with cloudflared/config.yml.
+      - hostname: vet.agentprovision.com
+        service: http://web:80
+
       - hostname: agentprovision.com
         service: http://web:80
       - service: http_status:404
