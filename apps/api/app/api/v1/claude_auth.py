@@ -909,11 +909,11 @@ class ClaudeAuthManager:
         runs through the interactive PTY path which reads
         `$HOME/.claude/.credentials.json` in the worker HOME. The api container
         shares the worker's `claude_sessions` volume (both run as uid 1000), so
-        we atomically drop the freshly-minted credential there at 0600. No
-        long-lived token exists to store; we record connected state plus a
-        marker `session_token` so `cli_executors/claude.py` resolves the tenant
-        as an OAuth/subscription tenant and takes the interactive native-auth
-        path (where the marker value is dropped, never sent to Anthropic).
+        we atomically drop the freshly-minted credential there at 0600. We store
+        NO vault credential (the native credential lives in the volume) and clear
+        any stale token rows, so the integration is marked connected via the
+        enabled IntegrationConfig while chat cleanly falls back to another CLI
+        until per-tenant interactive routing lands (follow-up).
         """
         home = state.claude_home or ""
         src = next(
@@ -974,17 +974,14 @@ class ClaudeAuthManager:
                 db.add(config)
                 db.commit()
                 db.refresh(config)
-            # Replace any stale api_key row, then store the OAuth marker so the
-            # executor resolves kind="oauth" and takes the interactive path.
-            _revoke_other_claude_credentials(db, config.id, tid, keep="session_token")
-            store_credential(
-                db,
-                integration_config_id=config.id,
-                tenant_id=tid,
-                credential_key="session_token",
-                plaintext_value="native-worker-login",
-                credential_type="oauth_token",
-            )
+            # Clear any stale token/api-key rows from the dead setup-token / API
+            # flows. We deliberately store NO vault credential: the native
+            # credential lives in the worker volume, and until per-tenant
+            # interactive routing lands (follow-up) the executor finds no token
+            # and cleanly falls back to another CLI rather than feeding a marker
+            # to the blocked `claude -p`. The enabled IntegrationConfig is the
+            # "connected" signal.
+            _revoke_other_claude_credentials(db, config.id, tid, keep="__none__")
         finally:
             db.close()
 

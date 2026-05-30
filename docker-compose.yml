@@ -219,13 +219,6 @@ services:
       - TEMPORAL_ADDRESS=temporal:7233
       - API_BASE_URL=http://api:8000
       - CLAUDE_CODE_MODEL=${CLAUDE_CODE_MODEL:-sonnet}
-      # Claude subscription accounts can no longer use `-p`/setup-token, so
-      # subscription (kind==oauth) chat must run through the interactive PTY
-      # against the worker HOME's native `.credentials.json` (populated by the
-      # web connect flow / `claude auth login`). API-key tenants are unaffected
-      # — interactive only engages for kind==oauth (see cli_executors/claude.py).
-      - CLAUDE_CODE_EXECUTION_MODE=${CLAUDE_CODE_EXECUTION_MODE:-interactive}
-      - CLAUDE_CODE_INTERACTIVE_HOME=${CLAUDE_CODE_INTERACTIVE_HOME:-worker}
       # Codex CLI MCP opt-in for the experimental Rust MCP client.
       # Required for SSE / streamable_http MCP servers to be honoured.
       # See apps/code-worker/workflows.py::_prepare_codex_home and
