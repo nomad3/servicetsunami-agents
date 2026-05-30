@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 
 import cli_runtime
 import tenant_home_quota
@@ -56,31 +57,55 @@ def _ensure_claude_onboarding(home: str, trusted_cwd: str | None = None) -> None
         cfg_path = os.path.join(home, ".claude.json")
         data: dict = {}
         if os.path.exists(cfg_path):
-            try:
-                with open(cfg_path, encoding="utf-8") as fh:
-                    data = json.load(fh) or {}
-            except (json.JSONDecodeError, OSError, ValueError):
-                data = {}
+            with open(cfg_path, encoding="utf-8") as fh:
+                raw = fh.read()
+            if raw.strip():
+                try:
+                    data = json.loads(raw)
+                except (json.JSONDecodeError, ValueError):
+                    # An existing but unparseable config may be real state or a
+                    # transient partial write — never clobber it.
+                    logger.warning(
+                        "skipping onboarding seed: %s is not valid JSON", cfg_path
+                    )
+                    return
         if not isinstance(data, dict):
             data = {}
         changed = data.get("hasCompletedOnboarding") is not True
         data["hasCompletedOnboarding"] = True
         if trusted_cwd:
-            projects = data.setdefault("projects", {})
-            if isinstance(projects, dict):
-                proj = projects.setdefault(trusted_cwd, {})
-                if isinstance(proj, dict):
-                    for key in ("hasTrustDialogAccepted", "hasCompletedProjectOnboarding"):
-                        if proj.get(key) is not True:
-                            proj[key] = True
-                            changed = True
+            projects = data.get("projects")
+            if not isinstance(projects, dict):
+                projects = {}
+                data["projects"] = projects
+                changed = True
+            proj = projects.get(trusted_cwd)
+            if not isinstance(proj, dict):
+                proj = {}
+                projects[trusted_cwd] = proj
+                changed = True
+            for key in ("hasTrustDialogAccepted", "hasCompletedProjectOnboarding"):
+                if proj.get(key) is not True:
+                    proj[key] = True
+                    changed = True
         if not changed:
             return
         os.makedirs(home, exist_ok=True)
-        tmp_path = f"{cfg_path}.tmp"
-        with open(tmp_path, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-        os.replace(tmp_path, cfg_path)
+        # mkstemp gives a unique, O_EXCL, 0600 temp in the same dir; os.replace
+        # then atomically swaps it in — preserving 0600 (this file is
+        # secret-grade, see hook_templates.py SR-4), replacing a symlink instead
+        # of writing through it, and staying race-safe across concurrent turns.
+        fd, tmp_path = tempfile.mkstemp(dir=home, prefix=".claude.json.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=2)
+            os.replace(tmp_path, cfg_path)
+        except OSError:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except OSError as exc:
         logger.warning("could not seed Claude onboarding flags in %s: %s", home, exc)
 
@@ -241,6 +266,7 @@ def execute_claude_chat(task_input, session_dir: str):
     # the container's default HOME — same defensive shape as
     # ``resolve_cli_cwd``.
     tenant_home_path: str | None = None
+    home_resolved = False
     try:
         tenant_home_path = str(cli_runtime.tenant_home_dir(task_input.tenant_id))
         interactive_home_mode = os.environ.get(
@@ -253,6 +279,7 @@ def execute_claude_chat(task_input, session_dir: str):
             env["HOME"] = os.environ.get("CLAUDE_CODE_WORKER_HOME", "/home/codeworker")
         else:
             env["HOME"] = tenant_home_path
+        home_resolved = True
     except (ValueError, OSError) as exc:
         logger.warning(
             "tenant_home_dir(%s) failed (%s); HOME falls back to container default",
@@ -260,10 +287,11 @@ def execute_claude_chat(task_input, session_dir: str):
         )
 
     # Interactive TTY only: pre-complete Claude Code's onboarding wizard for
-    # this HOME so it uses the stored subscription credential instead of
-    # re-initiating an OAuth login the headless PTY can't finish.
-    if interactive_mode:
-        _ensure_claude_onboarding(env.get("HOME", ""), cli_cwd)
+    # the HOME we deliberately resolved (never the inherited fallback HOME) so
+    # it uses the stored subscription credential instead of re-initiating an
+    # OAuth login the headless PTY can't finish.
+    if interactive_mode and home_resolved:
+        _ensure_claude_onboarding(env["HOME"], cli_cwd)
 
     # ---- streaming emitter (no-op if flag off / chat_session_id missing) ----
     emitter = SessionEventEmitter(
