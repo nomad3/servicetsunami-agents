@@ -393,6 +393,59 @@ for line in sys.stdin:
         assert "Ready" in result.stdout
         assert "Goodbye" in result.stdout
 
+    def test_interactive_runner_waits_for_slow_first_output(self, tmp_path):
+        # First output arrives AFTER idle_exit_seconds (simulating MCP load /
+        # model warm-up). The runner must NOT `/exit` mid-startup — it waits,
+        # captures the output, and completes. (Under the old logic the idle
+        # timer fired from spawn and killed the launch with an empty transcript.)
+        script = """
+import sys, time
+time.sleep(0.6)
+print("Useful answer")
+sys.stdout.flush()
+for line in sys.stdin:
+    if line.strip() == "/exit":
+        break
+"""
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            [sys.executable, "-c", script],
+            prompt="hello",
+            label="Claude Code",
+            timeout=10,
+            env=os.environ.copy(),
+            cwd=str(tmp_path),
+            idle_exit_seconds=0.1,
+            exit_grace_seconds=1,
+            first_output_seconds=5,
+        )
+
+        assert result.returncode == 0
+        assert "Useful answer" in result.stdout
+
+    def test_interactive_runner_fails_fast_on_no_output(self, tmp_path):
+        # A true hang: Claude never emits anything. The runner must kill it at
+        # first_output_seconds, NOT wait for idle_exit (high here) or the full
+        # timeout. Distinguishes the new first-output deadline from the old path.
+        import time
+        script = "import time\ntime.sleep(30)\n"
+        t0 = time.monotonic()
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            [sys.executable, "-c", script],
+            prompt="hello",
+            label="Claude Code",
+            timeout=20,
+            env=os.environ.copy(),
+            cwd=str(tmp_path),
+            idle_exit_seconds=10,
+            exit_grace_seconds=1,
+            first_output_seconds=0.5,
+        )
+        elapsed = time.monotonic() - t0
+
+        assert result.returncode != 0
+        assert result.stdout.strip() == ""
+        assert elapsed < 5
+
     def test_non_zero_exit_returns_error_with_truncated_stderr(self, monkeypatch, tmp_path):
         monkeypatch.setattr(wf, "_fetch_claude_token", lambda tid: "tok")
 
