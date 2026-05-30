@@ -117,10 +117,14 @@ class TestClaudeExecutorInteractiveSubmit:
         session_dir = tmp_path / "session"
         session_dir.mkdir()
 
+        captured: dict = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["kwargs"] = kwargs
+            return _completed(0, stdout="ok")
+
         monkeypatch.setattr(
-            claude_interactive,
-            "run_claude_interactive_with_heartbeat",
-            lambda cmd, **kw: _completed(0, stdout="ok"),
+            claude_interactive, "run_claude_interactive_with_heartbeat", fake_run
         )
 
         task = _make_input(
@@ -129,9 +133,15 @@ class TestClaudeExecutorInteractiveSubmit:
         )
         wf._execute_claude_chat(task, session_dir=str(session_dir))
 
-        turn_file = session_dir / "turn_prompt.md"
-        assert turn_file.is_file()
-        body = turn_file.read_text()
+        # The turn blob now lives in a UNIQUE per-turn scratch dir
+        # (``turn_<hex>/turn_prompt.md``), not directly under session_dir —
+        # robust to Claude mangling a per-turn filename when it re-types it.
+        answer_dir = captured["kwargs"]["answer_dir"]
+        turn_file = os.path.join(answer_dir, "turn_prompt.md")
+        assert os.path.isfile(turn_file)
+        assert os.path.basename(answer_dir).startswith("turn_")
+        assert os.path.dirname(answer_dir) == str(session_dir)
+        body = open(turn_file).read()
         assert "PERSONA: Luna" in body
         assert "# User Request" in body
         assert "hello there" in body
@@ -160,7 +170,8 @@ class TestClaudeExecutorInteractiveSubmit:
         wf._execute_claude_chat(task, session_dir=str(session_dir))
 
         submit = captured["kwargs"]["prompt"]
-        turn_file = str(session_dir / "turn_prompt.md")
+        answer_dir = captured["kwargs"]["answer_dir"]
+        turn_file = os.path.join(answer_dir, "turn_prompt.md")
         # Single line — Approach C's whole point.
         assert "\n" not in submit
         # References the absolute turn-file path so Claude's Read tool reaches it.
@@ -176,13 +187,15 @@ class TestClaudeExecutorInteractiveSubmit:
         self, monkeypatch, tmp_path, interactive_env
     ):
         """Defect 2: the single-line trigger must instruct Claude to BOTH read
-        the turn file AND write its final answer out-of-band to the answer
-        file, and the runner must receive ``answer_file`` so it reads it back.
+        the turn file AND write its final answer out-of-band, and the runner
+        must receive the scratch ``answer_dir`` so it can glob it back.
 
-        FINDING 1 (stale answer replay): the answer file is a UNIQUE per-turn
-        name (``answer_<hex>.md``), not the fixed ``answer.md`` — so any
-        non-empty content is guaranteed to be THIS turn's reply, never a prior
-        turn's leftover in the reused per-tenant ``session_dir``."""
+        Mangle-robust redesign (2026-05-30): the turn blob + answer both live in
+        a UNIQUE per-turn scratch DIRECTORY (``turn_<hex>/``); the answer target
+        is a SHORT, FIXED name (``answer.md``) in that dir. Claude intermittently
+        drops chars from a 32-hex filename when re-typing it into its ``Write``
+        call — a short fixed name + globbing the fresh dir survives that. The dir
+        is unique per turn, so freshness (no stale replay) is preserved."""
         self._patch_credential(monkeypatch)
         session_dir = tmp_path / "session"
         session_dir.mkdir()
@@ -204,45 +217,46 @@ class TestClaudeExecutorInteractiveSubmit:
         wf._execute_claude_chat(task, session_dir=str(session_dir))
 
         submit = captured["kwargs"]["prompt"]
-        turn_file = str(session_dir / "turn_prompt.md")
-        answer_file = captured["kwargs"].get("answer_file")
+        answer_dir = captured["kwargs"].get("answer_dir")
+        # ``answer_file`` is replaced by the scratch dir — it must be gone.
+        assert "answer_file" not in captured["kwargs"]
+        turn_file = os.path.join(answer_dir, "turn_prompt.md")
+        answer_file = os.path.join(answer_dir, "answer.md")
         # Single line still.
         assert "\n" not in submit
         # Read-turn-file instruction.
         assert "Read the file" in submit
         assert turn_file in submit
-        # FINDING 1: unique per-turn answer filename (answer_<hex>.md), NOT the
-        # fixed answer.md — guards against the prior turn's file being replayed.
-        assert os.path.basename(answer_file).startswith("answer_")
-        assert os.path.basename(answer_file).endswith(".md")
-        assert os.path.basename(answer_file) != "answer.md"
-        # Write-answer-file instruction (Defect 2), naming the unique file.
+        # Unique per-turn scratch DIR (turn_<hex>), under session_dir.
+        assert os.path.basename(answer_dir).startswith("turn_")
+        assert os.path.dirname(answer_dir) == str(session_dir)
+        assert os.path.isabs(answer_dir)
+        # Answer target is a SHORT, FIXED name in that dir (mangle-robust), NOT
+        # a 32-hex filename Claude could drop characters from.
+        assert os.path.basename(answer_file) == "answer.md"
+        # Write-answer-file instruction (Defect 2), naming the short file.
         assert answer_file in submit
         # FINDING 3 (Luna): the trigger asks for the COMPLETE final response, not
         # a terse stub — important results / file changes / errors / next steps.
         assert "COMPLETE" in submit
         assert "important results" in submit
-        # The runner is handed the answer-file path to read back.
-        assert os.path.isabs(answer_file)
-        # The answer file lives under session_dir (ephemeral scratch).
-        assert os.path.dirname(answer_file) == str(session_dir)
 
-    def test_answer_file_unique_per_call(
+    def test_answer_dir_unique_per_call(
         self, monkeypatch, tmp_path, interactive_env
     ):
-        """FINDING 1: each interactive turn must build a DISTINCT answer
-        filename. ``session_dir`` is persistent per-tenant and reused every
-        turn, so a fixed ``answer.md`` lets a turn that fails to write its
-        answer return the PRIOR turn's file as a fresh success. Two calls →
-        two different unique names proves the stale-replay window is closed."""
+        """Freshness guarantee: each interactive turn must build a DISTINCT
+        scratch directory. ``session_dir`` is persistent per-tenant and reused
+        every turn; a unique ``turn_<hex>/`` dir means any answer file the runner
+        globs out of it is guaranteed to be THIS turn's — never a prior turn's
+        leftover. Two calls → two different unique dirs."""
         self._patch_credential(monkeypatch)
         session_dir = tmp_path / "session"
         session_dir.mkdir()
 
-        names: list[str] = []
+        dirs: list[str] = []
 
         def fake_run(cmd, **kwargs):
-            names.append(kwargs.get("answer_file"))
+            dirs.append(kwargs.get("answer_dir"))
             return _completed(0, stdout="ok")
 
         monkeypatch.setattr(
@@ -253,28 +267,33 @@ class TestClaudeExecutorInteractiveSubmit:
         wf._execute_claude_chat(task, session_dir=str(session_dir))
         wf._execute_claude_chat(task, session_dir=str(session_dir))
 
-        assert len(names) == 2
-        assert names[0] != names[1], "answer filename must be unique per turn"
-        for name in names:
-            assert os.path.basename(name).startswith("answer_")
-            assert os.path.basename(name).endswith(".md")
-            assert os.path.dirname(name) == str(session_dir)
+        assert len(dirs) == 2
+        assert dirs[0] != dirs[1], "scratch dir must be unique per turn"
+        for d in dirs:
+            assert os.path.basename(d).startswith("turn_")
+            assert os.path.dirname(d) == str(session_dir)
+            assert os.path.isdir(d)
 
     def test_turn_prompt_and_claude_md_written_0600(
         self, monkeypatch, tmp_path, interactive_env
     ):
         """N2: the turn blob (persona + conversation history) is secret-grade,
-        so ``turn_prompt.md`` and ``CLAUDE.md`` must be mode 0o600."""
+        so ``turn_prompt.md`` (now inside the per-turn scratch dir) and
+        ``CLAUDE.md`` must be mode 0o600. The scratch dir itself is 0o700."""
         import stat
 
         self._patch_credential(monkeypatch)
         session_dir = tmp_path / "session"
         session_dir.mkdir()
 
+        captured: dict = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["kwargs"] = kwargs
+            return _completed(0, stdout="ok")
+
         monkeypatch.setattr(
-            claude_interactive,
-            "run_claude_interactive_with_heartbeat",
-            lambda cmd, **kw: _completed(0, stdout="ok"),
+            claude_interactive, "run_claude_interactive_with_heartbeat", fake_run
         )
 
         task = _make_input(
@@ -283,11 +302,17 @@ class TestClaudeExecutorInteractiveSubmit:
         )
         wf._execute_claude_chat(task, session_dir=str(session_dir))
 
-        for name in ("turn_prompt.md", "CLAUDE.md"):
-            p = session_dir / name
-            assert p.is_file(), name
-            mode = stat.S_IMODE(p.stat().st_mode)
-            assert mode == 0o600, f"{name} mode is {oct(mode)}"
+        answer_dir = captured["kwargs"]["answer_dir"]
+        # Scratch dir is 0o700 (only the worker user can list it).
+        assert stat.S_IMODE(os.stat(answer_dir).st_mode) == 0o700
+        # The turn blob lives in the scratch dir; CLAUDE.md under session_dir.
+        for p in (
+            os.path.join(answer_dir, "turn_prompt.md"),
+            str(session_dir / "CLAUDE.md"),
+        ):
+            assert os.path.isfile(p), p
+            mode = stat.S_IMODE(os.stat(p).st_mode)
+            assert mode == 0o600, f"{p} mode is {oct(mode)}"
 
     def test_print_mode_unchanged_appends_minus_p_and_no_turn_file(
         self, monkeypatch, tmp_path
@@ -1230,18 +1255,34 @@ class TestRunnerDrainsWrites:
 class TestRunnerReadsAnswerFile:
     """Interactive Claude is a cursor-addressed TUI; the line-based cleaner
     can't reliably reconstruct the answer from spinner/redraw chrome. So when
-    ``answer_file`` is set, Claude writes its final answer there and the runner
-    reads it back — normalizing the returncode to success (the answer was
-    produced even if ``/exit`` left a non-zero code). The scraped transcript is
-    a fallback only (``answer_file`` absent or empty)."""
+    ``answer_dir`` is set, Claude writes its final answer into that fresh
+    per-turn scratch dir and the runner GLOBS it back — normalizing the
+    returncode to success (the answer was produced even if ``/exit`` left a
+    non-zero code). The scraped transcript is a fallback only (no answer file
+    ever lands in the dir, or it's empty).
+
+    Mangle-robustness (the bug this fixes): Claude intermittently drops chars
+    from a long hex filename when re-typing it into its ``Write`` call. Globbing
+    ``answer*.md`` (and any non-``turn_prompt`` ``*.md`` as a fallback) catches
+    the mangled name; the old exact-path poll waited forever on the un-mangled
+    name → idle ``/exit`` → exit 143 → Gemini fallback."""
+
+    def _scratch(self, tmp_path):
+        d = tmp_path / "turn_abc123"
+        d.mkdir()
+        # The turn-prompt file is always present; the runner must never treat it
+        # as the answer.
+        (d / "turn_prompt.md").write_text("the turn blob")
+        return d
 
     def test_returns_answer_file_contents_normalizing_returncode(
         self, fake_pty_wiring, tmp_path
     ):
-        answer_file = tmp_path / "answer.md"
+        scratch = self._scratch(tmp_path)
+        answer_file = scratch / "answer.md"
         trigger = (
-            f"Read the file /scratch/turn_prompt.md and respond. Write ONLY your "
-            f"final answer to {answer_file}."
+            f"Read the file {scratch / 'turn_prompt.md'} and respond. Write ONLY "
+            f"your final answer to {answer_file}."
         )
         # The fake writes the answer file once the trigger TEXT is typed
         # (simulating Claude's Read + Write). The TUI transcript is pure chrome.
@@ -1266,7 +1307,7 @@ class TestRunnerReadsAnswerFile:
             timeout=1500,
             env={},
             cwd="/tmp",
-            answer_file=str(answer_file),
+            answer_dir=str(scratch),
             submit_settle_seconds=0.2,
             enter_delay_seconds=0.1,
             idle_exit_seconds=0.5,
@@ -1280,13 +1321,141 @@ class TestRunnerReadsAnswerFile:
         # Returncode normalized to success because the answer was produced.
         assert result.returncode == 0
 
-    def test_falls_back_to_transcript_when_answer_file_absent(
+    def test_mangled_hex_answer_filename_is_detected(
         self, fake_pty_wiring, tmp_path
     ):
-        """No answer file on disk → use the cleaned transcript + real
-        returncode (the existing best-effort path)."""
-        answer_file = tmp_path / "answer.md"  # never created
-        trigger = "Read the file /scratch/turn_prompt.md and respond."
+        """THE REGRESSION: Claude was told to write ``answer_<32hex>.md`` but
+        DROPPED chars from the hex when re-typing the filename into its ``Write``
+        call (e.g. ``answer_ed15d92160f14f71bd2300f95ecd84fd.md`` →
+        ``answer_ed15d92160f95ecd84fd.md``). The answer lands on disk under the
+        MANGLED name. The old runner polled the exact un-mangled path → waited
+        forever → idle ``/exit`` → exit 143 → Gemini fallback. Globbing
+        ``answer*.md`` in the fresh per-turn dir catches the mangled name (the
+        ``answer`` prefix survives the drop). This FAILS on the old exact-path
+        code and PASSES now."""
+        scratch = self._scratch(tmp_path)
+        # The name the executor *asked* for (full 32-hex) — never written.
+        asked = scratch / "answer_ed15d92160f14f71bd2300f95ecd84fd.md"
+        # The name Claude *actually* wrote (chars dropped from the hex).
+        mangled = scratch / "answer_ed15d92160f95ecd84fd.md"
+        trigger = (
+            f"Read {scratch / 'turn_prompt.md'} and respond. Write your COMPLETE "
+            f"final response to {asked}."
+        )
+        script = [
+            b"Welcome to Claude Code\n",
+            None, None, None, None, None, None, None, None,
+            b"\x1b[2Jchrome only\n",
+            None, None, None, None, None, None, None, None, None,
+            None, None, None,
+        ]
+        fake, proc = fake_pty_wiring(
+            script, answer_drop=(str(mangled), "Mangled-name answer survives.")
+        )
+
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            ["claude"],
+            prompt=trigger,
+            label="Claude Code",
+            timeout=1500,
+            env={},
+            cwd="/tmp",
+            answer_dir=str(scratch),
+            submit_settle_seconds=0.2,
+            enter_delay_seconds=0.1,
+            idle_exit_seconds=0.5,
+            exit_grace_seconds=0.5,
+            first_output_seconds=90.0,
+        )
+
+        assert result.stdout == "Mangled-name answer survives."
+        assert result.returncode == 0
+        assert not asked.exists()
+
+    def test_fully_renamed_md_caught_by_fallback(
+        self, fake_pty_wiring, tmp_path
+    ):
+        """Fallback: if Claude renames the answer entirely (no ``answer`` prefix,
+        e.g. ``reply.md``) the runner still picks it up — any ``*.md`` in the
+        fresh scratch dir that is NOT ``turn_prompt.md`` is this turn's answer."""
+        scratch = self._scratch(tmp_path)
+        reply = scratch / "reply.md"
+        trigger = (
+            f"Read {scratch / 'turn_prompt.md'} and respond. Write to "
+            f"{scratch / 'answer.md'}."
+        )
+        script = [
+            b"Welcome to Claude Code\n",
+            None, None, None, None, None, None, None, None,
+            b"\x1b[2Jchrome\n",
+            None, None, None, None, None, None, None, None, None,
+            None, None, None,
+        ]
+        fake, proc = fake_pty_wiring(
+            script, answer_drop=(str(reply), "Renamed-file answer.")
+        )
+
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            ["claude"],
+            prompt=trigger,
+            label="Claude Code",
+            timeout=1500,
+            env={},
+            cwd="/tmp",
+            answer_dir=str(scratch),
+            submit_settle_seconds=0.2,
+            enter_delay_seconds=0.1,
+            idle_exit_seconds=0.5,
+            exit_grace_seconds=0.5,
+            first_output_seconds=90.0,
+        )
+
+        assert result.stdout == "Renamed-file answer."
+
+    def test_turn_prompt_is_never_returned_as_answer(
+        self, fake_pty_wiring, tmp_path
+    ):
+        """The ``turn_prompt.md`` blob is always in the scratch dir and must
+        NEVER be returned as the answer. With no answer file ever written, the
+        runner falls back to the cleaned transcript — not the turn blob."""
+        scratch = self._scratch(tmp_path)
+        trigger = (
+            f"Read {scratch / 'turn_prompt.md'} and respond. Write to "
+            f"{scratch / 'answer.md'}."
+        )
+        script = [
+            b"Welcome to Claude Code\n",
+            None, None, None, None, None, None, None, None,
+            b"The answer is 4.\n",
+            None, None, None, None, None, None,
+        ]
+        fake, proc = fake_pty_wiring(script)  # no answer_drop
+
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            ["claude"],
+            prompt=trigger,
+            label="Claude Code",
+            timeout=1500,
+            env={},
+            cwd="/tmp",
+            answer_dir=str(scratch),
+            submit_settle_seconds=0.2,
+            enter_delay_seconds=0.1,
+            idle_exit_seconds=0.5,
+            exit_grace_seconds=0.5,
+            first_output_seconds=90.0,
+        )
+
+        assert "the turn blob" not in result.stdout
+        assert "The answer is 4." in result.stdout
+
+    def test_falls_back_to_transcript_when_no_answer_file_in_dir(
+        self, fake_pty_wiring, tmp_path
+    ):
+        """No answer file lands in the scratch dir → use the cleaned transcript
+        + real returncode (the existing best-effort path)."""
+        scratch = self._scratch(tmp_path)
+        trigger = f"Read {scratch / 'turn_prompt.md'} and respond."
         script = [
             b"Welcome to Claude Code\n",
             None, None, None, None, None, None, None, None,
@@ -1302,7 +1471,7 @@ class TestRunnerReadsAnswerFile:
             timeout=1500,
             env={},
             cwd="/tmp",
-            answer_file=str(answer_file),
+            answer_dir=str(scratch),
             submit_settle_seconds=0.2,
             enter_delay_seconds=0.1,
             idle_exit_seconds=0.5,
@@ -1310,7 +1479,8 @@ class TestRunnerReadsAnswerFile:
             first_output_seconds=90.0,
         )
 
-        assert not answer_file.exists()
+        # Only turn_prompt.md remains in the dir — no answer was written.
+        assert not (scratch / "answer.md").exists()
         # Falls back to the cleaned transcript.
         assert "The answer is 4." in result.stdout
 
@@ -1319,9 +1489,9 @@ class TestRunnerReadsAnswerFile:
     ):
         """An empty answer file (Claude wrote nothing) → fall back to the
         cleaned transcript rather than returning an empty success."""
-        answer_file = tmp_path / "answer.md"
-        answer_file.write_text("")  # empty
-        trigger = "Read the file /scratch/turn_prompt.md and respond."
+        scratch = self._scratch(tmp_path)
+        (scratch / "answer.md").write_text("")  # empty
+        trigger = f"Read {scratch / 'turn_prompt.md'} and respond."
         script = [
             b"Welcome to Claude Code\n",
             None, None, None, None, None, None, None, None,
@@ -1337,7 +1507,7 @@ class TestRunnerReadsAnswerFile:
             timeout=1500,
             env={},
             cwd="/tmp",
-            answer_file=str(answer_file),
+            answer_dir=str(scratch),
             submit_settle_seconds=0.2,
             enter_delay_seconds=0.1,
             idle_exit_seconds=0.5,
@@ -1347,14 +1517,57 @@ class TestRunnerReadsAnswerFile:
 
         assert "The answer is 4." in result.stdout
 
-    def test_answer_file_unlinked_after_read(self, fake_pty_wiring, tmp_path):
-        """FINDING 1: after reading a non-empty answer file the runner must
-        UNLINK it (best-effort) so the reused per-tenant ``session_dir`` doesn't
-        accumulate per-turn answer files across many turns."""
-        answer_file = tmp_path / "answer_deadbeef.md"
+    def test_newest_non_empty_match_is_picked(self, fake_pty_wiring, tmp_path):
+        """When several candidate ``*.md`` files exist in the fresh dir, the
+        NEWEST non-empty one is the answer. An empty ``answer.md`` plus a
+        populated ``answer.md`` written later (the real reply) → the populated
+        one wins; an empty candidate is never returned."""
+        import time as _time
+
+        scratch = self._scratch(tmp_path)
+        # A stale-ish empty answer.md written before the run starts.
+        empty = scratch / "answer.md"
+        empty.write_text("")
+        _time.sleep(0.01)
+        later = scratch / "answer_final.md"
+        trigger = f"Read {scratch / 'turn_prompt.md'} and respond. Write answer."
+        script = [
+            b"Welcome to Claude Code\n",
+            None, None, None, None, None, None, None, None,
+            b"\x1b[2Jchrome\n",
+            None, None, None, None, None, None, None, None, None,
+            None, None, None,
+        ]
+        fake, proc = fake_pty_wiring(
+            script, answer_drop=(str(later), "The real, newest answer.")
+        )
+
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            ["claude"],
+            prompt=trigger,
+            label="Claude Code",
+            timeout=1500,
+            env={},
+            cwd="/tmp",
+            answer_dir=str(scratch),
+            submit_settle_seconds=0.2,
+            enter_delay_seconds=0.1,
+            idle_exit_seconds=0.5,
+            exit_grace_seconds=0.5,
+            first_output_seconds=90.0,
+        )
+
+        assert result.stdout == "The real, newest answer."
+
+    def test_scratch_dir_removed_after_read(self, fake_pty_wiring, tmp_path):
+        """After reading the answer the runner removes the WHOLE per-turn scratch
+        dir (best-effort) so the reused per-tenant ``session_dir`` doesn't
+        accumulate ``turn_<hex>/`` dirs across many turns."""
+        scratch = self._scratch(tmp_path)
+        answer_file = scratch / "answer.md"
         trigger = (
-            f"Read the file /scratch/turn_prompt.md and respond. Write your "
-            f"COMPLETE final response to {answer_file}."
+            f"Read {scratch / 'turn_prompt.md'} and respond. Write your COMPLETE "
+            f"final response to {answer_file}."
         )
         script = [
             b"Welcome to Claude Code\n",
@@ -1374,7 +1587,7 @@ class TestRunnerReadsAnswerFile:
             timeout=1500,
             env={},
             cwd="/tmp",
-            answer_file=str(answer_file),
+            answer_dir=str(scratch),
             submit_settle_seconds=0.2,
             enter_delay_seconds=0.1,
             idle_exit_seconds=0.5,
@@ -1383,20 +1596,18 @@ class TestRunnerReadsAnswerFile:
         )
 
         assert result.stdout == "The complete answer."
-        # The unique per-turn answer file is cleaned up after the read.
-        assert not answer_file.exists(), "answer file must be unlinked after read"
+        # The whole per-turn scratch dir is cleaned up after the read.
+        assert not scratch.exists(), "scratch dir must be removed after read"
 
-    def test_unlink_failure_does_not_raise(
+    def test_cleanup_failure_does_not_raise(
         self, fake_pty_wiring, tmp_path, monkeypatch
     ):
-        """FINDING 1: the post-read unlink is best-effort — an OSError while
-        removing the answer file must NEVER propagate (the answer is already in
-        hand). Patch ``os.unlink`` to raise and assert the result still comes
-        back clean."""
-        answer_file = tmp_path / "answer_cafef00d.md"
-        answer_file.write_text("Already on disk.")
+        """The post-read cleanup is best-effort — an error while removing the
+        scratch dir must NEVER propagate (the answer is already in hand)."""
+        scratch = self._scratch(tmp_path)
+        (scratch / "answer.md").write_text("Already on disk.")
         trigger = (
-            f"Read /scratch/turn_prompt.md and respond. Write to {answer_file}."
+            f"Read {scratch / 'turn_prompt.md'} and respond. Write answer."
         )
         script = [
             b"Welcome to Claude Code\n",
@@ -1406,16 +1617,10 @@ class TestRunnerReadsAnswerFile:
         ]
         fake, proc = fake_pty_wiring(script)
 
-        import os as _os
+        def _boom_rmtree(path, *a, **k):
+            raise OSError("cannot remove dir")
 
-        real_unlink = _os.unlink
-
-        def _boom_unlink(path, *a, **k):
-            if str(path) == str(answer_file):
-                raise OSError("cannot unlink")
-            return real_unlink(path, *a, **k)
-
-        monkeypatch.setattr(claude_interactive.os, "unlink", _boom_unlink)
+        monkeypatch.setattr(claude_interactive.shutil, "rmtree", _boom_rmtree)
 
         result = claude_interactive.run_claude_interactive_with_heartbeat(
             ["claude"],
@@ -1424,7 +1629,7 @@ class TestRunnerReadsAnswerFile:
             timeout=1500,
             env={},
             cwd="/tmp",
-            answer_file=str(answer_file),
+            answer_dir=str(scratch),
             submit_settle_seconds=0.2,
             enter_delay_seconds=0.1,
             idle_exit_seconds=0.5,
@@ -1434,48 +1639,3 @@ class TestRunnerReadsAnswerFile:
 
         assert result.stdout == "Already on disk."
         assert result.returncode == 0
-
-    def test_stale_different_named_file_never_read(
-        self, fake_pty_wiring, tmp_path
-    ):
-        """FINDING 1: a leftover answer file from a PRIOR turn (a DIFFERENT
-        unique name) must NEVER be read as this turn's answer. The runner is
-        handed only THIS turn's unique ``answer_file``; a stale neighbour with a
-        different name is ignored, so an empty this-turn file falls back to the
-        transcript rather than replaying the stale success."""
-        # A prior turn left this behind in the reused session_dir.
-        stale = tmp_path / "answer_oldturn1234.md"
-        stale.write_text("STALE answer from the previous turn.")
-        # This turn's unique file — never written (the turn failed to write it).
-        this_turn = tmp_path / "answer_newturn5678.md"
-        trigger = (
-            f"Read /scratch/turn_prompt.md and respond. Write to {this_turn}."
-        )
-        script = [
-            b"Welcome to Claude Code\n",
-            None, None, None, None, None, None, None, None,
-            b"The answer is 4.\n",  # only the transcript carries the reply
-            None, None, None, None, None, None,
-        ]
-        fake, proc = fake_pty_wiring(script)
-
-        result = claude_interactive.run_claude_interactive_with_heartbeat(
-            ["claude"],
-            prompt=trigger,
-            label="Claude Code",
-            timeout=1500,
-            env={},
-            cwd="/tmp",
-            answer_file=str(this_turn),
-            submit_settle_seconds=0.2,
-            enter_delay_seconds=0.1,
-            idle_exit_seconds=0.5,
-            exit_grace_seconds=0.5,
-            first_output_seconds=90.0,
-        )
-
-        # The stale file's content must NOT appear — only this turn's transcript.
-        assert "STALE answer" not in result.stdout
-        assert "The answer is 4." in result.stdout
-        # The stale neighbour is untouched (we only unlink our own file).
-        assert stale.exists()

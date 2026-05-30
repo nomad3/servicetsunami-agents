@@ -313,7 +313,7 @@ def execute_claude_chat(task_input, session_dir: str):
     # Claude Code v2.1.144's interactive REPL does NOT auto-execute a
     # positional [prompt] arg, so appending the turn blob to ``cmd`` (as the
     # old code did) submitted nothing and the turn died at the idle ``/exit``.
-    # Instead: write the blob to a session-scratch file (``session_dir`` is
+    # Instead: write the blob to a per-turn scratch file (``session_dir`` is
     # already ``--add-dir``'d at L212 so Claude's Read tool can reach it by
     # absolute path) and hand the runner a single-line trigger to TYPE. A
     # single line sidesteps both the unreliable CLAUDE.md auto-load (cwd-upward
@@ -321,9 +321,28 @@ def execute_claude_chat(task_input, session_dir: str):
     # bracketed-paste ``[Pasted text +N lines]`` placeholder that needs a
     # second Enter. The runner types the trigger and strips its echo.
     interactive_submit = None
-    interactive_answer_file = None
+    interactive_answer_dir = None
     if interactive_mode:
-        turn_file = os.path.join(session_dir, "turn_prompt.md")
+        # Mangle-robust scratch DIR (bug fix 2026-05-30): Claude intermittently
+        # DROPS characters from a long hex FILENAME when it re-types it into its
+        # ``Write`` call (told ``answer_<32hex>.md``, writes a SHORTER name). The
+        # old code polled the exact un-mangled path → waited forever → idle
+        # ``/exit`` → exit 143 → Gemini fallback (~25% of turns). Fix: a UNIQUE
+        # per-turn scratch DIRECTORY plus a SHORT, FIXED answer name in it. The
+        # runner globs the fresh dir, so a dropped-char filename is still caught
+        # (the ``answer`` prefix survives; any non-``turn_prompt`` ``*.md`` is a
+        # fallback). The dir being unique + fresh per turn preserves the
+        # freshness guarantee the old unique-filename gave (no stale replay).
+        # ``session_dir`` is ``--add-dir``'d, so a child dir under it is writable.
+        turn_dir = os.path.join(session_dir, f"turn_{uuid.uuid4().hex}")
+        os.makedirs(turn_dir, 0o700)
+        # Re-assert 0o700 in case the umask trimmed the mode at create time.
+        try:
+            os.chmod(turn_dir, 0o700)
+        except OSError:
+            pass
+        interactive_answer_dir = turn_dir
+        turn_file = os.path.join(turn_dir, "turn_prompt.md")
         # N2: turn blob is secret-grade (persona + conversation history) → 0o600.
         _write_secret_file(turn_file, prompt)
         # Re-tighten CLAUDE.md (written above with a plain `open`) on the
@@ -336,20 +355,9 @@ def execute_claude_chat(task_input, session_dir: str):
                 pass
         # Defect 2 (plan §4.1/§4.4): interactive Claude is a cursor-addressed
         # TUI whose transcript can't be reliably cleaned, so have Claude write
-        # its final answer to a session-scratch file the runner reads back
-        # out-of-band. ``session_dir`` is already ``--add-dir``'d so the Write
-        # tool can reach it by absolute path.
-        #
-        # FINDING 1 (stale answer replay): ``session_dir`` is persistent per
-        # tenant and REUSED every turn (workflows.py:1203). A fixed ``answer.md``
-        # let a turn that failed to write its answer return the PRIOR turn's
-        # file as a fresh success. A UNIQUE per-turn filename guarantees any
-        # non-empty content the runner reads is THIS turn's answer — no
-        # mtime/inode check needed. The runner unlinks it after reading so the
-        # dir doesn't accumulate per-turn answer files.
-        interactive_answer_file = os.path.join(
-            session_dir, f"answer_{uuid.uuid4().hex}.md"
-        )
+        # its final answer into the scratch dir under a SHORT, FIXED name the
+        # runner globs back out-of-band.
+        answer_file = os.path.join(turn_dir, "answer.md")
         # FINDING 3 (Luna): ask for the COMPLETE user-facing response, not a
         # terse stub — include important results, file changes, errors, or next
         # steps (but no tool-chatter/preamble) so the deliverable the runner
@@ -357,7 +365,7 @@ def execute_claude_chat(task_input, session_dir: str):
         interactive_submit = (
             f"Read the file {turn_file} and respond to the user request it "
             f"contains. Write your COMPLETE final response for the user to "
-            f"{interactive_answer_file} (overwrite it) — include any important "
+            f"{answer_file} (overwrite it) — include any important "
             "results, file changes, errors, or next steps, but no preamble or "
             "tool-chatter. Reply directly — do not ask for confirmation."
         )
@@ -426,7 +434,7 @@ def execute_claude_chat(task_input, session_dir: str):
                 cwd=cli_cwd,
                 on_chunk=on_chunk,
                 heartbeat=cli_runtime.activity.heartbeat,
-                answer_file=interactive_answer_file,
+                answer_dir=interactive_answer_dir,
             )
         else:
             result = cli_runtime.run_cli_with_heartbeat(

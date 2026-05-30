@@ -260,7 +260,8 @@ class TestExecuteClaudeChat:
             captured["cmd"] = cmd
             captured["env"] = kw["env"]
             captured["prompt"] = kw["prompt"]
-            captured["answer_file"] = kw.get("answer_file")
+            captured["answer_dir"] = kw.get("answer_dir")
+            captured["kwargs"] = kw
             return sp.CompletedProcess(
                 args=cmd,
                 returncode=0,
@@ -305,21 +306,31 @@ class TestExecuteClaudeChat:
         assert "--permission-mode" in captured["cmd"]
         assert captured["cmd"][captured["cmd"].index("--permission-mode") + 1] == "acceptEdits"
         assert "\n" not in captured["prompt"]
-        assert str(tmp_path / "turn_prompt.md") in captured["prompt"]
-        assert (tmp_path / "turn_prompt.md").read_text() == "hello"
-        # Defect 2 (plan 2026-05-30): the trigger also instructs Claude to write
-        # its answer out-of-band, and the runner is handed that ``answer_file``
-        # to read back (the TUI transcript can't be reliably cleaned).
-        # FINDING 1 (stale answer replay): the answer file is a UNIQUE per-turn
-        # name (answer_<hex>.md), not the fixed answer.md, so a non-empty file
-        # is always THIS turn's reply — never a leftover from a prior turn in
-        # the reused per-tenant session_dir.
+        # Mangle-robust redesign (2026-05-30): the turn blob + answer both live
+        # in a UNIQUE per-turn scratch DIR (turn_<hex>/) under session_dir, and
+        # the runner is handed that dir (``answer_dir``) — not a single answer
+        # file path. Claude drops chars from a long hex FILENAME when re-typing
+        # it; a short fixed name (answer.md) in a fresh dir the runner GLOBS
+        # survives that. ``answer_file`` is gone.
         import os as _os
-        answer_file = captured.get("answer_file")
-        assert _os.path.basename(answer_file).startswith("answer_")
-        assert _os.path.basename(answer_file).endswith(".md")
-        assert _os.path.basename(answer_file) != "answer.md"
-        assert _os.path.dirname(answer_file) == str(tmp_path)
+        answer_dir = captured.get("answer_dir")
+        assert "answer_file" not in captured["kwargs"]
+        assert answer_dir is not None
+        assert _os.path.basename(answer_dir).startswith("turn_")
+        assert _os.path.dirname(answer_dir) == str(tmp_path)
+        # Turn blob lives in the scratch dir, not directly under session_dir.
+        turn_file = _os.path.join(answer_dir, "turn_prompt.md")
+        assert _os.path.isfile(turn_file)
+        assert open(turn_file).read() == "hello"
+        assert turn_file in captured["prompt"]
+        assert not (tmp_path / "turn_prompt.md").exists()
+        # Defect 2 (plan 2026-05-30): the trigger also instructs Claude to write
+        # its answer out-of-band into the scratch dir under a SHORT, FIXED name
+        # (answer.md) the runner globs back (the TUI transcript can't be reliably
+        # cleaned). Because the dir is unique + fresh per turn, any answer file
+        # in it is THIS turn's reply — never a leftover from a prior turn.
+        answer_file = _os.path.join(answer_dir, "answer.md")
+        assert _os.path.basename(answer_file) == "answer.md"
         assert answer_file in captured["prompt"]
         # FINDING 3 (Luna): the trigger asks for the COMPLETE final response.
         assert "COMPLETE" in captured["prompt"]

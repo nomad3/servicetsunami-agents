@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import errno
 import fcntl
+import glob
 import os
 import pty
 import re
 import select
+import shutil
 import signal
 import struct
 import subprocess
@@ -303,6 +305,58 @@ def _write_all(fd: int, data: bytes) -> None:
         view = view[n:]
 
 
+def _find_answer_file(answer_dir: str) -> str | None:
+    """Return the path of THIS turn's answer file inside ``answer_dir``, or None.
+
+    Mangle-robust glob (bug fix 2026-05-30): Claude is told to write
+    ``answer.md`` but intermittently DROPS characters when re-typing a long
+    filename into its ``Write`` call, so the answer can land under a slightly
+    different name (e.g. ``answer_ed15d92160f95ecd84fd.md``). The exact-path
+    poll the old runner used waited forever on the un-mangled name → idle
+    ``/exit`` → exit 143 → Gemini fallback. Two-tier match, newest non-empty
+    wins:
+
+      1. ``answer*.md`` — the common case; the ``answer`` prefix survives a
+         mid-name character drop.
+      2. Fallback: any ``*.md`` that is NOT ``turn_prompt.md`` — covers a fully
+         renamed file (e.g. ``reply.md``).
+
+    Because ``answer_dir`` is a UNIQUE, fresh per-turn scratch dir, any such
+    file is guaranteed to be THIS turn's answer — never a prior turn's leftover
+    (the freshness guarantee the old unique-filename gave). Best-effort: never
+    raises; a stat error on one candidate just skips it.
+    """
+    if not answer_dir:
+        return None
+
+    def _newest_non_empty(paths: list[str]) -> str | None:
+        best: str | None = None
+        best_mtime = -1.0
+        for path in paths:
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            if not os.path.isfile(path) or st.st_size <= 0:
+                continue
+            if st.st_mtime >= best_mtime:
+                best = path
+                best_mtime = st.st_mtime
+        return best
+
+    # Tier 1: ``answer*.md`` (prefix survives a dropped-char filename).
+    primary = _newest_non_empty(glob.glob(os.path.join(answer_dir, "answer*.md")))
+    if primary is not None:
+        return primary
+    # Tier 2 fallback: any non-``turn_prompt`` ``*.md`` (fully renamed file).
+    others = [
+        p
+        for p in glob.glob(os.path.join(answer_dir, "*.md"))
+        if os.path.basename(p) != "turn_prompt.md"
+    ]
+    return _newest_non_empty(others)
+
+
 def run_claude_interactive_with_heartbeat(
     cmd: list[str],
     *,
@@ -318,7 +372,7 @@ def run_claude_interactive_with_heartbeat(
     first_output_seconds: float | None = None,
     submit_settle_seconds: float | None = None,
     enter_delay_seconds: float | None = None,
-    answer_file: str | None = None,
+    answer_dir: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run Claude Code attached to a PTY and return a CompletedProcess.
 
@@ -339,11 +393,17 @@ def run_claude_interactive_with_heartbeat(
 
     DEFECT 2 (smoke-proven): interactive Claude is a cursor-addressed TUI
     (spinner frames, redraws); the line-based ``clean_interactive_transcript``
-    can't reliably reconstruct the answer from the chrome. When ``answer_file``
-    is set, the trigger instructs Claude to write its final answer there, and we
-    read it back after the read loop — normalizing the returncode to success
-    (the answer was produced even if ``/exit`` left a non-zero code). The
-    scraped transcript is a fallback only (``answer_file`` absent or empty).
+    can't reliably reconstruct the answer from the chrome. When ``answer_dir``
+    is set (a UNIQUE per-turn scratch dir), the trigger instructs Claude to
+    write its final answer into it (as ``answer.md``), and we GLOB the dir after
+    the read loop — normalizing the returncode to success (the answer was
+    produced even if ``/exit`` left a non-zero code). Globbing rather than
+    polling an exact path is mangle-robust: Claude intermittently drops chars
+    from a long filename when re-typing it into its ``Write`` call, so the
+    answer can land under ``answer_<short>.md`` (or a fully-renamed ``*.md``) —
+    ``_find_answer_file`` catches all of those. The scraped transcript is a
+    fallback only (no answer file ever lands in the dir, or it's empty). The
+    whole scratch dir is removed after the read.
 
     Since the interactive CLI does not exit after a turn, we send ``/exit`` once
     the terminal has been quiet for ``idle_exit_seconds`` — but only *after* a
@@ -427,11 +487,13 @@ def run_claude_interactive_with_heartbeat(
     input_box_seen = False
     first_output_at: float | None = None
     # FINDING 2 answer-file completion state: the answer FILE (not the first
-    # post-submit byte) signals the turn is done. ``answer_ready`` flips once
-    # the file is present, non-empty, and its size is STABLE across one tick;
-    # ``answer_ready_at`` notes when, so a brief settle precedes ``/exit``.
-    # ``_prev_answer_size`` carries the prior tick's size for the stability
-    # check. ``-1`` = not yet observed (distinct from a real 0-byte file).
+    # post-submit byte) signals the turn is done. ``answer_ready`` flips once a
+    # matching answer file is present, non-empty, and its size is STABLE across
+    # one tick; ``answer_ready_at`` notes when, so a brief settle precedes
+    # ``/exit``. ``_prev_answer_size`` carries the prior tick's size for the
+    # stability check. ``-1`` = not yet observed (distinct from a real 0-byte
+    # file). The matched path is found by GLOB (mangle-robust), not an exact
+    # path, so a dropped-char filename still arms completion.
     answer_ready = False
     answer_ready_at: float | None = None
     _prev_answer_size = -1
@@ -493,10 +555,15 @@ def run_claude_interactive_with_heartbeat(
             # completion signal — present + non-empty + size STABLE across one
             # tick. Stability guards against exiting mid-flush of a large reply.
             # Polled BEFORE the exit decision so ``answer_ready`` reflects this
-            # tick. Best-effort: a stat error just defers readiness.
-            if answer_file and submitted and not answer_ready:
+            # tick. The path is found by GLOB (mangle-robust: a dropped-char
+            # filename still matches ``answer*.md`` / the ``*.md`` fallback), so
+            # this catches the exact bug where the un-mangled exact-path poll
+            # waited forever. Best-effort: a glob/stat error just defers
+            # readiness.
+            if answer_dir and submitted and not answer_ready:
+                match = _find_answer_file(answer_dir)
                 try:
-                    size = os.path.getsize(answer_file)
+                    size = os.path.getsize(match) if match else -1
                 except OSError:
                     size = -1
                 if size > 0 and size == _prev_answer_size:
@@ -524,7 +591,7 @@ def run_claude_interactive_with_heartbeat(
                 enter_delay_seconds=enter_delay_seconds,
                 answer_ready=answer_ready,
                 answer_ready_at=answer_ready_at,
-                awaiting_answer_file=bool(answer_file),
+                awaiting_answer_file=bool(answer_dir),
             )
 
             if action == "wait":
@@ -580,22 +647,26 @@ def run_claude_interactive_with_heartbeat(
 
     # Defect 2: prefer the out-of-band answer file. Interactive Claude is a
     # cursor-addressed TUI, so the cleaned transcript is a best-effort fallback
-    # only. If Claude wrote a non-empty answer file we return that and normalize
-    # the returncode to success — the answer was produced even if ``/exit`` left
-    # a non-zero code (e.g. 143 from the SIGTERM teardown).
-    if answer_file:
+    # only. If Claude wrote a non-empty answer file (found by mangle-robust GLOB
+    # of the fresh per-turn scratch dir) we return that and normalize the
+    # returncode to success — the answer was produced even if ``/exit`` left a
+    # non-zero code (e.g. 143 from the SIGTERM teardown).
+    if answer_dir:
+        match = _find_answer_file(answer_dir)
+        answer = ""
+        if match:
+            try:
+                with open(match, encoding="utf-8", errors="replace") as fh:
+                    answer = fh.read().strip()
+            except OSError:
+                answer = ""
+        # Remove the WHOLE per-turn scratch dir (best-effort, never raise) so the
+        # persistent per-tenant ``session_dir`` doesn't accumulate one
+        # ``turn_<hex>/`` dir per turn. Done whether or not an answer was found —
+        # the turn_prompt blob and any partial answer are this turn's leftover.
+        # The dir is unique per turn, so we only ever remove OUR scratch.
         try:
-            with open(answer_file, encoding="utf-8", errors="replace") as fh:
-                answer = fh.read().strip()
-        except OSError:
-            answer = ""
-        # FINDING 1: unlink this turn's unique answer file (best-effort, never
-        # raise) so the persistent per-tenant ``session_dir`` doesn't accumulate
-        # one answer_<hex>.md per turn. Done whether or not it had content — an
-        # empty file is still this turn's leftover. The unique name means we only
-        # ever remove OUR file, never a concurrent turn's.
-        try:
-            os.unlink(answer_file)
+            shutil.rmtree(answer_dir, ignore_errors=True)
         except OSError:
             pass
         if answer:
