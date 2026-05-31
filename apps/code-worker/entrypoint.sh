@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Sweep stale per-turn SSH keyfile dirs left by a hard crash mid-turn
+# (keys are 0600; normal turns clean up in a finally). Codex review of PR2.
+rm -rf /tmp/ghssh_* 2>/dev/null || true
+
 # Strip trailing whitespace/newlines from secrets (K8s secret mounts can add them)
 GITHUB_TOKEN="$(echo -n "${GITHUB_TOKEN}" | tr -d '[:space:]')"
 

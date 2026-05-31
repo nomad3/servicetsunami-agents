@@ -512,6 +512,7 @@ def execute_claude_chat(task_input, session_dir: str):
     # git@github.com:org/repo` works for repos OAuth can't reach. Ephemeral 0600
     # keyfile + GIT_SSH_COMMAND in the per-turn env only (set-or-strip, no bleed);
     # cleaned up in the finally below. Fetched fresh per-tenant (leak-free).
+    _ssh_cleanup = None  # bound before any fetch/apply that could raise (Codex review)
     try:
         _ssh_key = _fetch_github_ssh_key(task_input.tenant_id)
     except Exception as exc:  # noqa: BLE001 - never block the turn on key fetch
@@ -604,7 +605,8 @@ def execute_claude_chat(task_input, session_dir: str):
                 on_chunk=on_chunk,
             )
     finally:
-        _ssh_cleanup()  # remove the ephemeral SSH keyfile dir
+        if _ssh_cleanup is not None:
+            _ssh_cleanup()  # remove the ephemeral SSH keyfile dir
         _stats = emitter.close()
         # ── Phase 2 quota walker (task #264) ────────────────────────────
         # Walk the tenant HOME dir on the workspaces volume and prune

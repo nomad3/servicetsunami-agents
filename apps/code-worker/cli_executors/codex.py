@@ -113,6 +113,7 @@ def execute_codex_chat(task_input, session_dir: str, image_path: str):
     # ── SSH key for OAuth-blocked org repos (NFL/ustwo) ─────────────────
     # Same wiring as claude.py: an ephemeral 0600 keyfile + GIT_SSH_COMMAND in
     # this turn's env only (set-or-strip, no bleed), cleaned up in the finally.
+    _ssh_cleanup = None  # bound before any fetch/apply that could raise (Codex review)
     try:
         _ssh_key = _fetch_github_ssh_key(task_input.tenant_id)
     except Exception as exc:  # noqa: BLE001
@@ -142,7 +143,8 @@ def execute_codex_chat(task_input, session_dir: str, image_path: str):
             on_chunk=on_chunk,
         )
     finally:
-        _ssh_cleanup()  # remove the ephemeral SSH keyfile dir
+        if _ssh_cleanup is not None:
+            _ssh_cleanup()  # remove the ephemeral SSH keyfile dir
         _stats = emitter.close()
         # Phase 2 quota walker (task #264) — see claude.py for rationale.
         if tenant_home_path:
