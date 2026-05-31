@@ -56,3 +56,21 @@ Mirror the `GIT_*` env so K8s == compose.
 
 ## Process
 plan (this) → Codex+Luna review (v1 done) → implement → Codex+Luna review of the diff → PR → merge (overnight/full-autonomy) → deploy → verify on deployed image → morning report.
+
+## 10. Follow-up #746 — second hang vector (git pager) + gh-unified auth + SSH next
+
+After #745 deployed, claude_code "pull my work repos" STILL hung 25 min (`exit -9`, `latency_ms≈1500318`) — a SECOND, distinct cause. Confirmed via PTY repro: `git log`/`git diff` open a pager (`--More--`/`less`) that **blocks on the TTY**; when Luna inspects repos after pulling, the pager hangs, Claude's spinner keeps output flowing so the freeze-detector never trips, and the turn runs to the full timeout. (#745's `GIT_TERMINAL_PROMPT=0` killed credential prompts, not pagers.) Codex pulled fine only because it ran a lean `git pull` on **public** repos — it never paged and never actually authenticated.
+
+**Fixes (#746):**
+- **Pager/editor non-interactive** (Dockerfile ENV + system gitconfig): `GIT_PAGER=cat`, `PAGER=cat`, `GH_PAGER=cat`, `GIT_EDITOR=true`, `EDITOR=true`, `VISUAL=true`, `core.pager=cat`. No git/gh command can block on a pager or editor.
+- **Turn backstop** (`claude.py`): interactive chat timeout 1500s → env-tunable `CLAUDE_CODE_INTERACTIVE_TIMEOUT_SECONDS` (default 600s) so ANY future unknown hang fails in ≤10 min, not 25.
+- **gh-UNIFIED auth (Simon's steer — every CLI shares the worker's `gh`):** replace #745's claude-only bespoke credential helper with a SYSTEM helper `credential.https://github.com.helper = !gh auth git-credential` (Dockerfile). git delegates github.com auth to `gh`; `gh` resolves the per-tenant **integration OAuth token** from `GH_TOKEN`/`GITHUB_TOKEN` in the turn env. `claude.py` now just sets those (fresh per-tenant, leak-free); codex/gemini/copilot inherit the SAME mechanism. entrypoint's per-turn helper removed (system helper supersedes).
+
+**Verify:** PTY repro of `git log` no longer pages; claude_code "pull my work repos" completes (no hang); a github.com clone authenticates via the system gh helper.
+
+## 11. SSH key support (NEXT feature — Simon's requirement)
+
+Some orgs **block OAuth apps** (e.g. NFL — SAML SSO / OAuth-app restrictions) and the user's ustwo repos use SSH. So the integration must ALSO support an SSH key, not just OAuth. Design (to plan + Codex/Luna review separately):
+- **Storage:** extend the github integration credential vault to optionally hold a Fernet-encrypted SSH private key (+ optional passphrase). User adds a **deploy key / fine-grained key** via `/integrations` (recommend a dedicated key, not personal `id_rsa`).
+- **Worker use (all CLIs, env-level):** per-turn, fetch the SSH key, write it to a `0600` ephemeral keyfile under the session scratch, set `GIT_SSH_COMMAND="ssh -i <keyfile> -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes"`; clone via `git@github.com:org/repo.git`; delete the keyfile after the turn. Complements the OAuth/HTTPS path (git picks per the clone URL scheme).
+- **Security:** key encrypted at rest; ephemeral on disk; BatchMode=yes (no passphrase prompt → fail fast); pre-baked github host keys already in the image.

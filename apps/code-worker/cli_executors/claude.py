@@ -42,45 +42,29 @@ logger = logging.getLogger(__name__)
 
 
 def _build_git_credential_env(github_token: str | None) -> dict[str, str]:
-    """Return env vars that make ``git clone https://github.com/...`` authenticate
-    with the tenant's GitHub OAuth ``github_token`` — so Claude can actually pull
-    repos the connected account can read (2026-05-31).
+    """Return env vars so ``git clone https://github.com/...`` authenticates with
+    the tenant's GitHub OAuth ``github_token`` — Claude can pull repos the
+    connected account can read (2026-05-31).
 
-    Why this exists: the chat path fetches the token and runs ``gh auth login``,
-    but git itself is never wired to use it (no ``gh auth setup-git`` /
-    ``credential.helper`` / ``insteadOf`` anywhere), so a plain HTTPS clone has no
-    helper, prompts ``Username:`` on the PTY, and hangs the full 25-min timeout.
-
-    Design (Codex + Luna review):
-    - **Ephemeral, process-scoped** via ``GIT_CONFIG_COUNT``/``GIT_CONFIG_KEY_n``/
-      ``GIT_CONFIG_VALUE_n`` — the token is never written to a git config FILE and
-      we never mutate ``os.environ`` (that leaks across tenants). HOME-independent,
-      so it works regardless of which HOME the turn resolves.
-    - ``credential.helper`` is first reset to empty (clears any inherited helper
-      that could itself prompt/hang — Codex BLOCKER), then a github.com-scoped
-      helper echoes ``x-access-token`` + the token from a private env var.
-    - ``credential.interactive=never`` belt-and-suspenders.
+    Unified gh-based auth (Simon's steer — every CLI on the code-worker shares the
+    same ``gh``): the image wires a SYSTEM credential helper
+    ``credential.https://github.com.helper = !gh auth git-credential`` (Dockerfile),
+    so git delegates github.com auth to ``gh``, and ``gh`` resolves its token from
+    ``GH_TOKEN``/``GITHUB_TOKEN`` in the env. We therefore only need to put the
+    tenant's token in the turn env — HOME-independent (system config), and the
+    SAME mechanism every other CLI gets (codex/gemini/copilot), instead of a
+    claude-only bespoke helper. Fetched FRESH per-tenant by the caller (NOT the
+    process-global ``os.environ`` set at workflows.py:1188, which leaks across
+    tenants), so this is leak-free.
 
     Empty dict when there is no token — the Dockerfile's ``GIT_TERMINAL_PROMPT=0``
     etc. then make an unauthenticated clone fail fast instead of hanging.
     """
     if not github_token:
         return {}
-    helper = '!f(){ echo username=x-access-token; echo "password=$GH_AUTH_TOKEN"; };f'
-    return {
-        # The helper's ONLY source for the secret — kept out of the config keys.
-        "GH_AUTH_TOKEN": github_token,
-        "GIT_CONFIG_COUNT": "3",
-        # 0: reset any inherited/global helper so only ours runs for github.com.
-        "GIT_CONFIG_KEY_0": "credential.helper",
-        "GIT_CONFIG_VALUE_0": "",
-        # 1: github.com-scoped token helper.
-        "GIT_CONFIG_KEY_1": "credential.https://github.com.helper",
-        "GIT_CONFIG_VALUE_1": helper,
-        # 2: never drop to an interactive prompt (fail fast instead).
-        "GIT_CONFIG_KEY_2": "credential.interactive",
-        "GIT_CONFIG_VALUE_2": "never",
-    }
+    # Both names: gh prefers GH_TOKEN; GITHUB_TOKEN is the broad fallback other
+    # tools read. The system `!gh auth git-credential` helper reads either.
+    return {"GH_TOKEN": github_token, "GITHUB_TOKEN": github_token}
 
 
 def _write_secret_file(path: str, content: str) -> None:
@@ -547,6 +531,15 @@ def execute_claude_chat(task_input, session_dir: str):
             max_attempts = max(
                 1, int(os.environ.get("CLAUDE_CODE_INTERACTIVE_MAX_ATTEMPTS", "2"))
             )
+            # Backstop bound for an interactive CHAT turn (2026-05-31). A
+            # conversational Luna turn should take seconds-to-minutes; a heavy
+            # coding job routes through the code-task path, not here. Capping at
+            # 600s (was 1500s) means ANY future unknown hang — a new pager/editor
+            # vector, a wedged MCP call, a stuck spinner — fails in ≤10 min and
+            # retries once, instead of tying up the worker for 25 min. Env-tunable.
+            _interactive_timeout = int(
+                os.environ.get("CLAUDE_CODE_INTERACTIVE_TIMEOUT_SECONDS", "600")
+            )
             result = None
             for _attempt in range(max_attempts):
                 interactive_submit, interactive_answer_dir = _build_interactive_turn()
@@ -554,7 +547,7 @@ def execute_claude_chat(task_input, session_dir: str):
                     cmd,
                     prompt=interactive_submit,
                     label="Claude Code",
-                    timeout=1500,
+                    timeout=_interactive_timeout,
                     env=env,
                     cwd=cli_cwd,
                     on_chunk=on_chunk,

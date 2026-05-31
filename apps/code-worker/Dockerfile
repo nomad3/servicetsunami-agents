@@ -200,18 +200,33 @@ RUN useradd -m -u 1000 codeworker && \
 # passphrase prompts; system gitconfig adds an HTTPS low-speed abort + disables
 # interactive credential flows. The per-turn OAuth credential helper that makes
 # AUTHORIZED clones succeed is injected at runtime by cli_executors/claude.py.
+# PAGER + EDITOR must also be non-interactive (2026-05-31, second hang vector).
+# Confirmed via PTY repro: `git log`/`git diff` open a pager (`less`/`--More--`)
+# that BLOCKS on the PTY. When Luna inspects repos after "pull my work repos",
+# the pager hangs, Claude's spinner keeps output flowing so the freeze-detector
+# never trips, and the turn runs to the full 25-min timeout → exit -9. (#745's
+# GIT_TERMINAL_PROMPT killed credential prompts, not this.) Force every pager to
+# `cat` and every editor to a no-op so no git/gh command can block for input.
 ENV GIT_TERMINAL_PROMPT=0 \
     GIT_ASKPASS=/bin/false \
     SSH_ASKPASS=/bin/false \
     GCM_INTERACTIVE=never \
     GIT_LFS_SKIP_SMUDGE=1 \
-    GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10"
+    GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10" \
+    GIT_PAGER=cat \
+    PAGER=cat \
+    GH_PAGER=cat \
+    GIT_EDITOR=true \
+    EDITOR=true \
+    VISUAL=true
 RUN mkdir -p /etc/ssh && \
     (ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> /etc/ssh/ssh_known_hosts 2>/dev/null || true) && \
     git config --system http.lowSpeedLimit 1000 && \
     git config --system http.lowSpeedTime 30 && \
     git config --system credential.interactive never && \
-    git config --system core.askPass /bin/false
+    git config --system core.askPass /bin/false && \
+    git config --system core.pager cat && \
+    git config --system "credential.https://github.com.helper" "!gh auth git-credential"
 
 USER codeworker
 
