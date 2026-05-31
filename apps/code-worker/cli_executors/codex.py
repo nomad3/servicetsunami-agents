@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 def execute_codex_chat(task_input, session_dir: str, image_path: str):
     from workflows import (
         _fetch_integration_credentials,
+        _fetch_github_ssh_key,
         _INTEGRATION_NOT_CONNECTED_MESSAGES,
         _prepare_codex_home,
         _extract_codex_last_message,
@@ -109,6 +110,17 @@ def execute_codex_chat(task_input, session_dir: str, image_path: str):
             task_input.tenant_id, exc,
         )
 
+    # ── SSH key for OAuth-blocked org repos (NFL/ustwo) ─────────────────
+    # Same wiring as claude.py: an ephemeral 0600 keyfile + GIT_SSH_COMMAND in
+    # this turn's env only (set-or-strip, no bleed), cleaned up in the finally.
+    _ssh_cleanup = None  # bound before any fetch/apply that could raise (Codex review)
+    try:
+        _ssh_key = _fetch_github_ssh_key(task_input.tenant_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("github ssh key fetch failed (%s)", exc)
+        _ssh_key = None
+    _ssh_cleanup = cli_runtime.apply_git_ssh(env, _ssh_key)
+
     # ---- streaming emitter (plan 2026-05-16 §4.5) ----
     # codex --json already streams NDJSON; the parser maps each line
     # to a chunk_kind for live terminal rendering. Emitter is a no-op
@@ -131,6 +143,8 @@ def execute_codex_chat(task_input, session_dir: str, image_path: str):
             on_chunk=on_chunk,
         )
     finally:
+        if _ssh_cleanup is not None:
+            _ssh_cleanup()  # remove the ephemeral SSH keyfile dir
         _stats = emitter.close()
         # Phase 2 quota walker (task #264) — see claude.py for rationale.
         if tenant_home_path:
