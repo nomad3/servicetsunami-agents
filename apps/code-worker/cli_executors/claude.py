@@ -367,18 +367,23 @@ def execute_claude_chat(task_input, session_dir: str):
     # second Enter. The runner types the trigger and strips its echo.
     interactive_submit = None
     interactive_answer_dir = None
-    if interactive_mode:
-        # Mangle-robust scratch DIR (bug fix 2026-05-30): Claude intermittently
-        # DROPS characters from a long hex FILENAME when it re-types it into its
-        # ``Write`` call (told ``answer_<32hex>.md``, writes a SHORTER name). The
-        # old code polled the exact un-mangled path → waited forever → idle
-        # ``/exit`` → exit 143 → Gemini fallback (~25% of turns). Fix: a UNIQUE
-        # per-turn scratch DIRECTORY plus a SHORT, FIXED answer name in it. The
-        # runner globs the fresh dir, so a dropped-char filename is still caught
-        # (the ``answer`` prefix survives; any non-``turn_prompt`` ``*.md`` is a
-        # fallback). The dir being unique + fresh per turn preserves the
-        # freshness guarantee the old unique-filename gave (no stale replay).
-        # ``session_dir`` is ``--add-dir``'d, so a child dir under it is writable.
+
+    def _build_interactive_turn() -> tuple[str, str]:
+        """Create a FRESH per-turn scratch dir + single-line trigger and return
+        ``(trigger, turn_dir)``. Called once per interactive ATTEMPT so a
+        startup-freeze relaunch (below) writes into clean state — the runner
+        ``rmtree``s the dir it was handed, so a retry must never reuse it.
+
+        Mangle-robust scratch DIR (bug fix 2026-05-30): Claude intermittently
+        DROPS characters from a long hex FILENAME when it re-types it into its
+        ``Write`` call (told ``answer_<32hex>.md``, writes a SHORTER name). The
+        old code polled the exact un-mangled path → waited forever → idle
+        ``/exit`` → exit 143 → Gemini fallback (~25% of turns). Fix: a UNIQUE
+        per-turn scratch DIRECTORY plus a SHORT, FIXED answer name in it. The
+        runner globs the fresh dir, so a dropped-char filename is still caught
+        (the ``answer`` prefix survives; any non-``turn_prompt`` ``*.md`` is a
+        fallback). ``session_dir`` is ``--add-dir``'d, so a child dir is writable.
+        """
         turn_dir = os.path.join(session_dir, f"turn_{uuid.uuid4().hex}")
         os.makedirs(turn_dir, 0o700)
         # Re-assert 0o700 in case the umask trimmed the mode at create time.
@@ -386,7 +391,6 @@ def execute_claude_chat(task_input, session_dir: str):
             os.chmod(turn_dir, 0o700)
         except OSError:
             pass
-        interactive_answer_dir = turn_dir
         turn_file = os.path.join(turn_dir, "turn_prompt.md")
         # N2: turn blob is secret-grade (persona + conversation history) → 0o600.
         _write_secret_file(turn_file, prompt)
@@ -407,13 +411,14 @@ def execute_claude_chat(task_input, session_dir: str):
         # terse stub — include important results, file changes, errors, or next
         # steps (but no tool-chatter/preamble) so the deliverable the runner
         # reads back is the full reply.
-        interactive_submit = (
+        trigger = (
             f"Read the file {turn_file} and respond to the user request it "
             f"contains. Write your COMPLETE final response for the user to "
             f"{answer_file} (overwrite it) — include any important "
             "results, file changes, errors, or next steps, but no preamble or "
             "tool-chatter. Reply directly — do not ask for confirmation."
         )
+        return trigger, turn_dir
 
     # ── tenant HOME on workspaces volume (task #267 Phase 1) ────────────
     # Redirect HOME onto the persistent workspaces volume so per-tenant
@@ -470,17 +475,43 @@ def execute_claude_chat(task_input, session_dir: str):
 
     try:
         if interactive_mode:
-            result = claude_interactive.run_claude_interactive_with_heartbeat(
-                cmd,
-                prompt=interactive_submit,
-                label="Claude Code",
-                timeout=1500,
-                env=env,
-                cwd=cli_cwd,
-                on_chunk=on_chunk,
-                heartbeat=cli_runtime.activity.heartbeat,
-                answer_dir=interactive_answer_dir,
+            # Startup-freeze recovery (2026-05-30): under host starvation Claude
+            # can paint its UI, swallow the typed trigger, then FREEZE — zero
+            # post-submit output, no answer file written. The runner detects this
+            # fast (short post-submit no-output cap) and returns a killed, EMPTY
+            # result. A resend into a frozen REPL is useless; only a FRESH PROCESS
+            # cures it. So relaunch once with a clean per-turn scratch dir. Bounded
+            # by ``CLAUDE_CODE_INTERACTIVE_MAX_ATTEMPTS`` (default 2). Each attempt
+            # carries its own internal heartbeat + caps, and a relaunch is
+            # immediate (no gap), so Temporal's activity heartbeat stays fresh.
+            max_attempts = max(
+                1, int(os.environ.get("CLAUDE_CODE_INTERACTIVE_MAX_ATTEMPTS", "2"))
             )
+            result = None
+            for _attempt in range(max_attempts):
+                interactive_submit, interactive_answer_dir = _build_interactive_turn()
+                result = claude_interactive.run_claude_interactive_with_heartbeat(
+                    cmd,
+                    prompt=interactive_submit,
+                    label="Claude Code",
+                    timeout=1500,
+                    env=env,
+                    cwd=cli_cwd,
+                    on_chunk=on_chunk,
+                    heartbeat=cli_runtime.activity.heartbeat,
+                    answer_dir=interactive_answer_dir,
+                )
+                # Success signatures: rc normalized to 0 (answer file found) OR
+                # any non-empty text (a slow-but-alive scraped reply). Only an
+                # EMPTY, killed result is the freeze worth relaunching for.
+                if result.returncode == 0 or result.stdout.strip():
+                    break
+                if _attempt + 1 < max_attempts:
+                    logger.warning(
+                        "interactive Claude turn empty (rc=%s) — likely a startup "
+                        "freeze under load; relaunching fresh process (attempt %s/%s)",
+                        result.returncode, _attempt + 2, max_attempts,
+                    )
         else:
             result = cli_runtime.run_cli_with_heartbeat(
                 cmd,

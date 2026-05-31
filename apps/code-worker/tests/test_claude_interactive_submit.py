@@ -667,6 +667,75 @@ class TestDecidePtyAction:
         )
         assert action == "kill"
 
+    def test_post_submit_freeze_cap_kills_before_cold_cap(self):
+        # STARTUP FREEZE: submitted at t=2, now t=40 (38s of dead silence post-
+        # submit), no output at all. With a SHORT post-submit cap (35s) the
+        # frozen launch is declared dead at 35s — far sooner than the 90s cold
+        # cap — so the caller can relaunch a fresh process. resend already spent.
+        action = decide_pty_action(
+            now=40.0,
+            start=0.0,
+            last_output=2.0,
+            seen_output=True,
+            submitted=True,
+            response_seen=False,
+            exit_sent_at=None,
+            submitted_at=2.0,
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            resent=True,
+            post_submit_first_output_seconds=35.0,
+        )
+        assert action == "kill"
+
+    def test_post_submit_short_cap_does_not_apply_without_param(self):
+        # Same 38s dead-silence, but NO short cap supplied → fall back to the 90s
+        # cold cap, so we keep waiting (a regression guard: the short cap must be
+        # opt-in and never shorten the legacy behavior when unset). resend pushed
+        # out so this isolates the cap, not the resend path.
+        action = decide_pty_action(
+            now=40.0,
+            start=0.0,
+            last_output=2.0,
+            seen_output=True,
+            submitted=True,
+            response_seen=False,
+            exit_sent_at=None,
+            submitted_at=2.0,
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            resend_after_seconds=200.0,
+        )
+        assert action == "wait"
+
+    def test_post_submit_cap_still_resends_first(self):
+        # The one-shot resend fires within the short cap window (15s < 35s), so a
+        # submit eaten by a prompt is recovered before the freeze kill. At t=20
+        # (18s post-submit, not yet resent) → resend, not kill.
+        action = decide_pty_action(
+            now=20.0,
+            start=0.0,
+            last_output=2.0,
+            seen_output=True,
+            submitted=True,
+            response_seen=False,
+            exit_sent_at=None,
+            submitted_at=2.0,
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            resend_after_seconds=15.0,
+            resent=False,
+            response_substantive=False,
+            post_submit_first_output_seconds=35.0,
+        )
+        assert action == "resend"
+
     def test_idle_exit_after_response_seen(self):
         # Legacy idle-/exit path (FINDING 2): response seen, the answer file
         # never arrived, AND we are PAST the bounded fallback cap since submit →
