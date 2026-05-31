@@ -501,6 +501,17 @@ class TestCleanInteractiveTranscript:
         out = clean_interactive_transcript("\x1b[0m\x00garbage\r\n", "trigger")
         assert isinstance(out, str)
 
+    def test_strips_bare_input_box_caret_so_frozen_transcript_is_empty(self):
+        # A startup-frozen launch paints just the v2.1.x input-box caret ``❯``
+        # then dies. If the cleaner leaves it, the transcript is a non-empty
+        # ``"❯"`` that masks the freeze from the caller's recovery guard. It must
+        # clean to empty (and the legacy ``>`` caret too).
+        assert clean_interactive_transcript("❯ \n", "") == ""
+        assert clean_interactive_transcript("Welcome to Claude Code\n❯ \n", "") == ""
+        assert clean_interactive_transcript("> \n", "") == ""
+        # A real caret-prefixed line is NOT a bare caret and must survive.
+        assert "answer" in clean_interactive_transcript("❯ the answer\n", "")
+
     # ── I2: wrap-tolerant trigger-echo strip ─────────────────────────────
     def test_strips_wrapped_trigger_echo_across_multiple_lines(self):
         """When the PTY is narrow (e.g. an 80-col fallback) the ~185-char
@@ -1496,6 +1507,41 @@ class TestRunnerSubmitsTrigger:
         assert any(b"/exit" in w for w in fake.writes)
         # The answer survives cleaning (transcript fallback — no answer file).
         assert "The answer is 4." in result.stdout
+
+    def test_frozen_launch_returns_empty_not_chrome(self, fake_pty_wiring):
+        """STARTUP FREEZE: Claude paints its banner + input box (incl. the
+        alpha-bearing ``Try "..."`` placeholder + ``❯`` caret) then dies with NO
+        post-submit output and no answer file. The runner must return EMPTY
+        stdout — not the chrome scrape — so the caller relaunches a fresh process.
+
+        Gating the scraped fallback on ``response_substantive`` closes the WHOLE
+        chrome class (``❯``, ``Try "..."``, status bar) that per-glyph stripping
+        would miss (Codex review of #744): the alnum-bearing placeholder would
+        otherwise leak as a non-empty "answer" and suppress the recovery."""
+        trigger = "Read the file /scratch/turn_prompt.md and respond."
+        # Banner + input box (❯ + Try-placeholder) on read 1, then DEAD SILENCE:
+        # no post-submit byte ever, so response_substantive stays False.
+        script = [b'Welcome to Claude Code\n\xe2\x9d\xaf Try "edit a file"\n'] + [None] * 50
+        fake, proc = fake_pty_wiring(script)
+
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            ["claude"],
+            prompt=trigger,
+            label="Claude Code",
+            timeout=1500,
+            env={},
+            cwd="/tmp",
+            submit_settle_seconds=0.2,
+            enter_delay_seconds=0.1,
+            idle_exit_seconds=0.5,
+            exit_grace_seconds=0.3,
+            first_output_seconds=5.0,
+            post_submit_first_output_seconds=1.0,
+            # no answer_dir → pure scraped-transcript path
+        )
+
+        # The frozen chrome (banner, ❯, Try-placeholder) must NOT leak as content.
+        assert result.stdout == "", f"frozen launch must return empty, got {result.stdout!r}"
 
     def test_submits_trigger_under_chrome_flood(self, fake_pty_wiring):
         """ROOT CAUSE regression: a CONTINUOUS chrome flood (auto-updater /

@@ -337,6 +337,76 @@ class TestExecuteClaudeChat:
         assert "ANTHROPIC_API_KEY" not in captured["env"]
         assert "CLAUDE_CODE_OAUTH_TOKEN" not in captured["env"]
 
+    def test_interactive_chrome_only_freeze_relaunches_fresh_process(self, monkeypatch, tmp_path):
+        # Recovery hardening (2026-05-30): a startup-frozen launch returns a
+        # non-zero exit whose only output is prompt chrome (a bare "❯"). The
+        # caller must treat that as a freeze (NO alphanumeric content) and
+        # RELAUNCH a fresh process — not mistake the "❯" residue for an answer.
+        # First attempt frozen (rc=-9, stdout="❯"); second attempt real reply.
+        monkeypatch.setenv("CLAUDE_CODE_EXECUTION_MODE", "interactive")
+        monkeypatch.setenv("CLAUDE_CODE_INTERACTIVE_MAX_ATTEMPTS", "2")
+        monkeypatch.setattr(claude_executor, "_feature_enabled", lambda *a, **k: True)
+        monkeypatch.setattr(wf, "_fetch_claude_token", lambda tid: "tok")
+        import subprocess as sp
+
+        calls = {"n": 0, "dirs": []}
+
+        def fake_interactive(cmd, **kw):
+            calls["n"] += 1
+            calls["dirs"].append(kw.get("answer_dir"))
+            if calls["n"] == 1:
+                return sp.CompletedProcess(args=cmd, returncode=-9, stdout="❯", stderr="raw")
+            return sp.CompletedProcess(args=cmd, returncode=0, stdout="the real answer", stderr="")
+
+        monkeypatch.setattr(
+            claude_interactive, "run_claude_interactive_with_heartbeat", fake_interactive
+        )
+
+        out = wf._execute_claude_chat(
+            _make_input(
+                platform="claude_code",
+                message="hello",
+                tenant_id="752626d9-8b2c-4aa2-87ef-c458d48bd38a",
+            ),
+            session_dir=str(tmp_path),
+        )
+
+        assert calls["n"] == 2, "a chrome-only frozen result must trigger exactly one relaunch"
+        assert calls["dirs"][0] != calls["dirs"][1], "each attempt gets a FRESH per-turn scratch dir"
+        assert out.success is True
+        assert out.response_text == "the real answer"
+
+    def test_interactive_terse_real_answer_is_not_retried(self, monkeypatch, tmp_path):
+        # Over-retry guard: a non-zero exit that DID carry real (if terse) text
+        # has alphanumerics → it is a real reply, NOT a freeze, so it must NOT
+        # relaunch (no double-billing). One attempt only.
+        monkeypatch.setenv("CLAUDE_CODE_EXECUTION_MODE", "interactive")
+        monkeypatch.setenv("CLAUDE_CODE_INTERACTIVE_MAX_ATTEMPTS", "2")
+        monkeypatch.setattr(claude_executor, "_feature_enabled", lambda *a, **k: True)
+        monkeypatch.setattr(wf, "_fetch_claude_token", lambda tid: "tok")
+        import subprocess as sp
+
+        calls = {"n": 0}
+
+        def fake_interactive(cmd, **kw):
+            calls["n"] += 1
+            return sp.CompletedProcess(args=cmd, returncode=1, stdout="Done.", stderr="raw")
+
+        monkeypatch.setattr(
+            claude_interactive, "run_claude_interactive_with_heartbeat", fake_interactive
+        )
+
+        wf._execute_claude_chat(
+            _make_input(
+                platform="claude_code",
+                message="hello",
+                tenant_id="752626d9-8b2c-4aa2-87ef-c458d48bd38a",
+            ),
+            session_dir=str(tmp_path),
+        )
+
+        assert calls["n"] == 1, "a terse but real scraped answer (has alnum) must NOT relaunch"
+
     def test_interactive_mode_can_use_worker_home_for_native_auth(self, monkeypatch, tmp_path):
         monkeypatch.setenv("CLAUDE_CODE_EXECUTION_MODE", "interactive")
         monkeypatch.setenv("CLAUDE_CODE_INTERACTIVE_HOME", "worker")

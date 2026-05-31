@@ -114,7 +114,12 @@ def clean_interactive_transcript(raw: str, prompt: str = "") -> str:
                 continue
             if stripped.startswith(("╭", "╰", "│", "┌", "└", "┃", "┗", "┏")):
                 continue
-            if stripped in {"?", ">", "Welcome to Claude Code"}:
+            # Bare prompt chrome: the legacy ``>``/``?`` carets AND the v2.1.x
+            # input-box caret ``❯`` (U+276F). A startup-frozen launch paints just
+            # this glyph then dies, so leaving it un-stripped makes the cleaned
+            # transcript a non-empty ``"❯"`` — which would mask the freeze from
+            # the caller's recovery guard. Strip it (and a stray prompt arrow).
+            if stripped in {"?", ">", "❯", "Welcome to Claude Code"}:
                 continue
             if stripped.startswith(("Claude Code", "By using Claude Code")):
                 continue
@@ -816,10 +821,25 @@ def run_claude_interactive_with_heartbeat(
                 stderr="",
             )
 
+    # No answer file. Fall back to the scraped transcript ONLY if Claude actually
+    # produced substantive post-submit output (``response_substantive`` — any
+    # non-trust byte after submit). A STARTUP-FROZEN launch paints its banner /
+    # input box (``❯``, the ``Try "…"`` placeholder, the ``accept edits`` status
+    # bar — all alphanumeric chrome) then dies WITHOUT ever responding, so its
+    # "transcript" is pure chrome. Returning that chrome would make the caller's
+    # recovery guard see content and SKIP the fresh-process relaunch (Codex
+    # review: stripping each glyph individually is whack-a-mole — ``Try "…"`` and
+    # the status bar still leak). Gating on ``response_substantive`` closes the
+    # whole class: a freeze produced no real bytes → return EMPTY → the caller
+    # relaunches; a turn that genuinely replied in the TUI but didn't write the
+    # file still returns its scrape.
+    scraped = (
+        clean_interactive_transcript(raw, prompt) if response_substantive else ""
+    )
     return subprocess.CompletedProcess(
         args=cmd,
         returncode=returncode,
-        stdout=clean_interactive_transcript(raw, prompt),
+        stdout=scraped,
         stderr="" if returncode == 0 else raw,
     )
 

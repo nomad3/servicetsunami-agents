@@ -501,14 +501,19 @@ def execute_claude_chat(task_input, session_dir: str):
                     heartbeat=cli_runtime.activity.heartbeat,
                     answer_dir=interactive_answer_dir,
                 )
-                # Relaunch on any SILENT non-zero exit (rc != 0 AND empty text):
-                # a startup freeze, a pre-banner timeout, or a killed launch — all
-                # transient and all curable by a fresh process. A genuine error
-                # (auth/usage) surfaces text on stderr, so it has non-empty output
-                # and is NOT retried. A successful turn normalizes rc to 0 (answer
-                # file found) or returns a scraped reply (non-empty text), so it
-                # also breaks immediately — no double-billing of a good turn.
-                if result.returncode == 0 or result.stdout.strip():
+                # Relaunch on any non-zero exit whose output carries NO actual
+                # textual content (no alphanumerics) — a startup freeze, a
+                # pre-banner timeout, or a killed launch, all transient and all
+                # curable by a fresh process. We test ``isalnum`` rather than
+                # ``strip()`` because a frozen TUI commonly leaves a bare prompt
+                # glyph (``❯``) or box chrome that the best-effort cleaner can't
+                # fully remove — that residue is NOT a real answer and must still
+                # trigger recovery (verified: a synthetic freeze leaked ``❯`` and
+                # the strip() guard wrongly suppressed the retry). A genuine error
+                # (auth/usage) carries an alphanumeric message, and a real reply —
+                # even a terse scraped one — has letters/digits, so neither is
+                # retried (no double-billing). A successful turn is rc 0 anyway.
+                if result.returncode == 0 or any(c.isalnum() for c in result.stdout):
                     break
                 if _attempt + 1 < max_attempts:
                     logger.warning(
