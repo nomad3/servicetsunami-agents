@@ -690,11 +690,13 @@ class TestDecidePtyAction:
         )
         assert action == "kill"
 
-    def test_post_submit_short_cap_does_not_apply_without_param(self):
-        # Same 38s dead-silence, but NO short cap supplied → fall back to the 90s
-        # cold cap, so we keep waiting (a regression guard: the short cap must be
-        # opt-in and never shorten the legacy behavior when unset). resend pushed
-        # out so this isolates the cap, not the resend path.
+    def test_post_submit_short_cap_falls_back_to_cold_cap_when_none(self):
+        # PURE-FUNCTION seam: when ``post_submit_first_output_seconds`` is None,
+        # ``decide_pty_action`` falls back to ``first_output_seconds`` (90s), so at
+        # 38s dead-silence it keeps waiting. NOTE: in PRODUCTION the runner rewrites
+        # None → the env default (35s) BEFORE calling this, so the 35s freeze cap
+        # is live by design — this test pins the fallback contract, not prod
+        # behavior. resend pushed out so this isolates the cap, not the resend.
         action = decide_pty_action(
             now=40.0,
             start=0.0,
@@ -735,6 +737,34 @@ class TestDecidePtyAction:
             post_submit_first_output_seconds=35.0,
         )
         assert action == "resend"
+
+    def test_answer_ready_short_circuits_freeze_gate_when_response_seen_false(self):
+        # Codex IMPORTANT 3: ``response_seen`` is trust-filtered, so a REAL reply
+        # whose first chunk contains a trust-word ("do you trust", "trust this
+        # folder") never flips it. If that reply ALSO wrote its answer file, the
+        # freeze gate (section 3) must YIELD to ``answer_ready`` and exit cleanly —
+        # NOT kill it at the 35s post-submit cap. submitted t=2, now t=50 (past the
+        # cap), response_seen False, answer_ready True + settled.
+        action = decide_pty_action(
+            now=50.0,
+            start=0.0,
+            last_output=40.0,
+            seen_output=True,
+            submitted=True,
+            response_seen=False,
+            exit_sent_at=None,
+            submitted_at=2.0,
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            answer_ready=True,
+            answer_ready_at=45.0,  # 5s settled, past answer_settle_seconds (0.25)
+            awaiting_answer_file=True,
+            post_submit_first_output_seconds=35.0,
+            resent=True,
+        )
+        assert action == "exit"
 
     def test_idle_exit_after_response_seen(self):
         # Legacy idle-/exit path (FINDING 2): response seen, the answer file

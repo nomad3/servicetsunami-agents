@@ -501,15 +501,19 @@ def execute_claude_chat(task_input, session_dir: str):
                     heartbeat=cli_runtime.activity.heartbeat,
                     answer_dir=interactive_answer_dir,
                 )
-                # Success signatures: rc normalized to 0 (answer file found) OR
-                # any non-empty text (a slow-but-alive scraped reply). Only an
-                # EMPTY, killed result is the freeze worth relaunching for.
+                # Relaunch on any SILENT non-zero exit (rc != 0 AND empty text):
+                # a startup freeze, a pre-banner timeout, or a killed launch — all
+                # transient and all curable by a fresh process. A genuine error
+                # (auth/usage) surfaces text on stderr, so it has non-empty output
+                # and is NOT retried. A successful turn normalizes rc to 0 (answer
+                # file found) or returns a scraped reply (non-empty text), so it
+                # also breaks immediately — no double-billing of a good turn.
                 if result.returncode == 0 or result.stdout.strip():
                     break
                 if _attempt + 1 < max_attempts:
                     logger.warning(
                         "interactive Claude turn empty (rc=%s) — likely a startup "
-                        "freeze under load; relaunching fresh process (attempt %s/%s)",
+                        "freeze/timeout under load; relaunching fresh process (attempt %s/%s)",
                         result.returncode, _attempt + 2, max_attempts,
                     )
         else:

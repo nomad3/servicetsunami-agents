@@ -268,7 +268,16 @@ def decide_pty_action(
     #    So a genuinely slow turn is never killed here — only a frozen one — and
     #    the caller relaunches a fresh process (a resend into a frozen REPL is
     #    useless; only a new process cures the freeze).
-    if not response_seen:
+    #
+    #    ``answer_ready`` short-circuits this gate (Codex review): ``response_seen``
+    #    is trust-filtered, so a REAL reply whose FIRST chunk happens to contain a
+    #    trust-like phrase ("do you trust", "trust this folder") would not flip it
+    #    and could be killed here mid-write — even though its answer file is ready.
+    #    Yielding to ``answer_ready`` moves a written-but-trust-worded reply to the
+    #    completion path (4a) instead of a spurious freeze-kill. The resend still
+    #    lives in this gate (no answer file yet → not ``answer_ready``), so a trust
+    #    redraw that eats the submit is still recovered.
+    if not response_seen and not answer_ready:
         baseline = submitted_at if submitted_at is not None else start
         post_cap = (
             post_submit_first_output_seconds
@@ -779,23 +788,26 @@ def run_claude_interactive_with_heartbeat(
     # returncode to success — the answer was produced even if ``/exit`` left a
     # non-zero code (e.g. 143 from the SIGTERM teardown).
     if answer_dir:
-        match = _find_answer_file(answer_dir)
         answer = ""
-        if match:
-            try:
-                with open(match, encoding="utf-8", errors="replace") as fh:
-                    answer = fh.read().strip()
-            except OSError:
-                answer = ""
-        # Remove the WHOLE per-turn scratch dir (best-effort, never raise) so the
-        # persistent per-tenant ``session_dir`` doesn't accumulate one
-        # ``turn_<hex>/`` dir per turn. Done whether or not an answer was found —
-        # the turn_prompt blob and any partial answer are this turn's leftover.
-        # The dir is unique per turn, so we only ever remove OUR scratch.
         try:
-            shutil.rmtree(answer_dir, ignore_errors=True)
-        except OSError:
-            pass
+            match = _find_answer_file(answer_dir)
+            if match:
+                try:
+                    with open(match, encoding="utf-8", errors="replace") as fh:
+                        answer = fh.read().strip()
+                except OSError:
+                    answer = ""
+        finally:
+            # Remove the WHOLE per-turn scratch dir in a ``finally`` (NIT, Codex
+            # review) so a raise in the read above still cleans up — the
+            # persistent per-tenant ``session_dir`` must not accumulate one
+            # ``turn_<hex>/`` dir per turn. Done whether or not an answer was
+            # found; the dir is unique per turn, so we only ever remove OUR
+            # scratch. Best-effort, never raises.
+            try:
+                shutil.rmtree(answer_dir, ignore_errors=True)
+            except OSError:
+                pass
         if answer:
             return subprocess.CompletedProcess(
                 args=cmd,
