@@ -12,7 +12,6 @@ helpers themselves) so the test stays a unit test and never hits the network.
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 
 import pytest
@@ -21,10 +20,6 @@ import cli_runtime
 import cli_executors.claude as claude_executor
 from cli_executors import claude_interactive
 import workflows as wf
-
-# Captured at import — the autouse `_stub_github_token` fixture monkeypatches
-# `subprocess.run` to a no-op, so the real-git test below holds a live reference.
-_REAL_SUBPROCESS_RUN = subprocess.run
 
 
 def _make_input(**overrides) -> wf.ChatCliInput:
@@ -184,58 +179,32 @@ class TestGithubTokenIntegration:
 # ── git credential wiring (2026-05-31) ──────────────────────────────────
 
 class TestGitCredentialEnv:
-    """`_build_git_credential_env` — wires the tenant GitHub OAuth token into a
-    turn's git so `git clone https://github.com/…` authenticates as the user."""
+    """`_apply_git_credential_env` — puts the tenant's GitHub OAuth token in the
+    turn env so the image's SYSTEM `!gh auth git-credential` helper authenticates
+    github.com clones (unified across every CLI), and STRIPS any inherited token
+    when this tenant has none (cross-tenant bleed guard)."""
 
-    def test_no_token_returns_empty(self):
-        assert claude_executor._build_git_credential_env(None) == {}
-        assert claude_executor._build_git_credential_env("") == {}
+    def test_no_token_strips_inherited_token(self):
+        # CROSS-TENANT BLEED GUARD (Codex BLOCKER): a tenant with no token must
+        # have any inherited process-global token removed, so the system gh helper
+        # can't authenticate with a PRIOR tenant's credential.
+        env = {"GH_TOKEN": "stale_A", "GITHUB_TOKEN": "stale_A", "PATH": "/x"}
+        claude_executor._apply_git_credential_env(env, None)
+        assert "GH_TOKEN" not in env
+        assert "GITHUB_TOKEN" not in env
+        assert env["PATH"] == "/x"  # unrelated keys untouched
+        env2 = {"GITHUB_TOKEN": "stale_A"}
+        claude_executor._apply_git_credential_env(env2, "")  # empty also strips
+        assert "GITHUB_TOKEN" not in env2
 
-    def test_token_builds_ephemeral_helper_without_leaking_into_config_keys(self):
-        env = claude_executor._build_git_credential_env("gho_secret_work_token")
-        # The secret lives ONLY in GH_AUTH_TOKEN — never embedded in a config key
-        # (so it isn't exposed by `git config --list`-style key enumeration).
-        assert env["GH_AUTH_TOKEN"] == "gho_secret_work_token"
-        assert all(
-            "gho_secret_work_token" not in v
-            for k, v in env.items()
-            if k.startswith("GIT_CONFIG_KEY")
-        )
-        # 0 resets any inherited helper (Codex BLOCKER — a stale helper can hang);
-        # 1 is the github.com-scoped helper reading the token from the env var;
-        # 2 forbids dropping to an interactive prompt.
-        assert env["GIT_CONFIG_COUNT"] == "3"
-        assert env["GIT_CONFIG_KEY_0"] == "credential.helper"
-        assert env["GIT_CONFIG_VALUE_0"] == ""
-        assert env["GIT_CONFIG_KEY_1"] == "credential.https://github.com.helper"
-        assert "$GH_AUTH_TOKEN" in env["GIT_CONFIG_VALUE_1"]
-        assert env["GIT_CONFIG_KEY_2"] == "credential.interactive"
-        assert env["GIT_CONFIG_VALUE_2"] == "never"
-
-    def test_real_git_resolves_token_for_github_https(self):
-        # NIT (Codex): env-shape alone wouldn't catch a bad URL match key. Drive
-        # REAL `git credential fill` with the built env and assert git actually
-        # hands back the token for a github.com HTTPS clone — the behavior that
-        # makes "pull my repos" authenticate instead of prompting.
-        import shutil
-
-        if not shutil.which("git"):
-            pytest.skip("git not available")
-        env = {**os.environ, **claude_executor._build_git_credential_env("gho_REALGITTEST")}
-        proc = _REAL_SUBPROCESS_RUN(
-            ["git", "credential", "fill"],
-            input="protocol=https\nhost=github.com\n\n",
-            capture_output=True, text=True, env=env, timeout=15,
-        )
-        assert "username=x-access-token" in proc.stdout
-        assert "password=gho_REALGITTEST" in proc.stdout
-        # A different host must NOT receive the github-scoped credential.
-        proc2 = _REAL_SUBPROCESS_RUN(
-            ["git", "credential", "fill"],
-            input="protocol=https\nhost=example.com\n\n",
-            capture_output=True, text=True, env=env, timeout=15,
-        )
-        assert "gho_REALGITTEST" not in proc2.stdout
+    def test_token_overwrites_stale_and_sets_both_names(self):
+        env = {"GITHUB_TOKEN": "stale_A"}
+        claude_executor._apply_git_credential_env(env, "gho_fresh_B")
+        # Fresh token OVERWRITES the stale one (no bleed), under both names gh reads.
+        assert env["GH_TOKEN"] == "gho_fresh_B"
+        assert env["GITHUB_TOKEN"] == "gho_fresh_B"
+        # No bespoke per-turn GIT_CONFIG_* helper — auth is wired system-wide.
+        assert not any(k.startswith("GIT_CONFIG") for k in env)
 
 
 # ── _execute_claude_chat smoke (covers JSON parse path) ─────────────────
@@ -493,17 +462,21 @@ class TestExecuteClaudeChat:
             session_dir=str(tmp_path),
         )
         env = captured["env"]
-        assert env.get("GH_AUTH_TOKEN") == "gho_work_repo_token"
-        assert env.get("GIT_CONFIG_KEY_1") == "credential.https://github.com.helper"
+        # The token reaches the subprocess as GH_TOKEN/GITHUB_TOKEN; the image's
+        # system `!gh auth git-credential` helper resolves it for github.com.
+        assert env.get("GH_TOKEN") == "gho_work_repo_token"
+        assert env.get("GITHUB_TOKEN") == "gho_work_repo_token"
 
-    def test_interactive_no_github_token_leaves_git_env_clean(self, monkeypatch, tmp_path):
-        # No connected GitHub token → no credential helper injected; the image's
-        # GIT_TERMINAL_PROMPT=0 then makes an unauthenticated clone fail fast.
+    def test_interactive_no_token_strips_inherited_token_no_bleed(self, monkeypatch, tmp_path):
+        # CROSS-TENANT BLEED (Codex BLOCKER): a STALE process-global GITHUB_TOKEN
+        # (left by a prior tenant's turn, workflows.py:1188) must NOT reach this
+        # tenant's subprocess env when this tenant has no token — else the system
+        # gh helper would authenticate with the wrong tenant's credential.
         monkeypatch.setenv("CLAUDE_CODE_EXECUTION_MODE", "interactive")
+        monkeypatch.setenv("GITHUB_TOKEN", "gho_STALE_other_tenant")  # the leak
         monkeypatch.setattr(claude_executor, "_feature_enabled", lambda *a, **k: True)
         monkeypatch.setattr(wf, "_fetch_claude_token", lambda tid: "tok")
         monkeypatch.setattr(wf, "_fetch_github_token", lambda tid: None)
-        monkeypatch.delenv("GH_AUTH_TOKEN", raising=False)
         captured = {}
         import subprocess as sp
 
@@ -519,7 +492,10 @@ class TestExecuteClaudeChat:
                         tenant_id="752626d9-8b2c-4aa2-87ef-c458d48bd38a"),
             session_dir=str(tmp_path),
         )
-        assert "GH_AUTH_TOKEN" not in captured["env"]
+        # The stale token must be STRIPPED from the subprocess env (no bleed).
+        assert "GH_TOKEN" not in captured["env"]
+        assert captured["env"].get("GITHUB_TOKEN") != "gho_STALE_other_tenant"
+        assert "GITHUB_TOKEN" not in captured["env"]
 
     def test_interactive_mode_can_use_worker_home_for_native_auth(self, monkeypatch, tmp_path):
         monkeypatch.setenv("CLAUDE_CODE_EXECUTION_MODE", "interactive")

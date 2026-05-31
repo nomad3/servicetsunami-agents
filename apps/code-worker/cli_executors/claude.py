@@ -41,46 +41,35 @@ from tenant_feature_flags import is_enabled as _feature_enabled
 logger = logging.getLogger(__name__)
 
 
-def _build_git_credential_env(github_token: str | None) -> dict[str, str]:
-    """Return env vars that make ``git clone https://github.com/...`` authenticate
-    with the tenant's GitHub OAuth ``github_token`` — so Claude can actually pull
-    repos the connected account can read (2026-05-31).
+def _apply_git_credential_env(env: dict, github_token: str | None) -> None:
+    """Set this turn's GitHub token in ``env`` (mutating it in place), or STRIP
+    any inherited token when there is none (2026-05-31).
 
-    Why this exists: the chat path fetches the token and runs ``gh auth login``,
-    but git itself is never wired to use it (no ``gh auth setup-git`` /
-    ``credential.helper`` / ``insteadOf`` anywhere), so a plain HTTPS clone has no
-    helper, prompts ``Username:`` on the PTY, and hangs the full 25-min timeout.
+    Unified gh-based auth (Simon's steer — every CLI on the code-worker shares the
+    same ``gh``): the image wires a SYSTEM credential helper
+    ``credential.https://github.com.helper = !gh auth git-credential`` (Dockerfile),
+    so git delegates github.com auth to ``gh``, and ``gh`` resolves its token from
+    ``GH_TOKEN``/``GITHUB_TOKEN`` in the env. We therefore only need to put the
+    tenant's token in the turn env — HOME-independent, and the SAME mechanism
+    every other CLI gets, instead of a claude-only bespoke helper.
 
-    Design (Codex + Luna review):
-    - **Ephemeral, process-scoped** via ``GIT_CONFIG_COUNT``/``GIT_CONFIG_KEY_n``/
-      ``GIT_CONFIG_VALUE_n`` — the token is never written to a git config FILE and
-      we never mutate ``os.environ`` (that leaks across tenants). HOME-independent,
-      so it works regardless of which HOME the turn resolves.
-    - ``credential.helper`` is first reset to empty (clears any inherited helper
-      that could itself prompt/hang — Codex BLOCKER), then a github.com-scoped
-      helper echoes ``x-access-token`` + the token from a private env var.
-    - ``credential.interactive=never`` belt-and-suspenders.
-
-    Empty dict when there is no token — the Dockerfile's ``GIT_TERMINAL_PROMPT=0``
-    etc. then make an unauthenticated clone fail fast instead of hanging.
+    CROSS-TENANT BLEED GUARD (Codex BLOCKER): ``execute_claude_chat`` starts from
+    ``os.environ.copy()``, and the chat dispatcher writes a process-global
+    ``os.environ["GITHUB_TOKEN"]`` (workflows.py:1188). If THIS tenant has no
+    token we must POP both names from the turn env — otherwise a stale token from
+    a PRIOR tenant's turn would let the system gh helper authenticate the wrong
+    tenant's clone. With a fresh token we overwrite both. Either way the turn env
+    carries ONLY this tenant's credential (or none → an unauthenticated clone
+    fails fast via ``GIT_TERMINAL_PROMPT=0``).
     """
-    if not github_token:
-        return {}
-    helper = '!f(){ echo username=x-access-token; echo "password=$GH_AUTH_TOKEN"; };f'
-    return {
-        # The helper's ONLY source for the secret — kept out of the config keys.
-        "GH_AUTH_TOKEN": github_token,
-        "GIT_CONFIG_COUNT": "3",
-        # 0: reset any inherited/global helper so only ours runs for github.com.
-        "GIT_CONFIG_KEY_0": "credential.helper",
-        "GIT_CONFIG_VALUE_0": "",
-        # 1: github.com-scoped token helper.
-        "GIT_CONFIG_KEY_1": "credential.https://github.com.helper",
-        "GIT_CONFIG_VALUE_1": helper,
-        # 2: never drop to an interactive prompt (fail fast instead).
-        "GIT_CONFIG_KEY_2": "credential.interactive",
-        "GIT_CONFIG_VALUE_2": "never",
-    }
+    if github_token:
+        # gh prefers GH_TOKEN; GITHUB_TOKEN is the broad fallback. Both = this
+        # tenant's token; the system `!gh auth git-credential` helper reads either.
+        env["GH_TOKEN"] = github_token
+        env["GITHUB_TOKEN"] = github_token
+    else:
+        env.pop("GH_TOKEN", None)
+        env.pop("GITHUB_TOKEN", None)
 
 
 def _write_secret_file(path: str, content: str) -> None:
@@ -515,7 +504,7 @@ def execute_claude_chat(task_input, session_dir: str):
     except Exception as exc:  # noqa: BLE001 - never block the turn on token fetch
         logger.warning("github token fetch failed (%s); clones will be unauthenticated", exc)
         _gh_token = None
-    env.update(_build_git_credential_env(_gh_token))
+    _apply_git_credential_env(env, _gh_token)
 
     # ---- streaming emitter (no-op if flag off / chat_session_id missing) ----
     emitter = SessionEventEmitter(
@@ -547,6 +536,17 @@ def execute_claude_chat(task_input, session_dir: str):
             max_attempts = max(
                 1, int(os.environ.get("CLAUDE_CODE_INTERACTIVE_MAX_ATTEMPTS", "2"))
             )
+            # Backstop bound for an interactive CHAT turn (2026-05-31). A
+            # conversational Luna turn is seconds-to-minutes; a heavy coding job
+            # routes through the code-task path, not here. Capping at 900s (was
+            # 1500s) means ANY future unknown hang — a new pager/editor vector, a
+            # wedged MCP call, a stuck spinner — fails in ≤15 min and retries once,
+            # instead of 25. 900s (not 600) keeps a wide margin over any realistic
+            # chat turn so we don't false-timeout legitimate long work (Codex
+            # review). Env-tunable for tenants that genuinely need longer.
+            _interactive_timeout = int(
+                os.environ.get("CLAUDE_CODE_INTERACTIVE_TIMEOUT_SECONDS", "900")
+            )
             result = None
             for _attempt in range(max_attempts):
                 interactive_submit, interactive_answer_dir = _build_interactive_turn()
@@ -554,7 +554,7 @@ def execute_claude_chat(task_input, session_dir: str):
                     cmd,
                     prompt=interactive_submit,
                     label="Claude Code",
-                    timeout=1500,
+                    timeout=_interactive_timeout,
                     env=env,
                     cwd=cli_cwd,
                     on_chunk=on_chunk,

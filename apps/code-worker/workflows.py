@@ -1197,6 +1197,15 @@ def execute_chat_cli(task_input: ChatCliInput) -> ChatCliResult:
                 ["gh", "auth", "login", "--with-token"],
                 input=github_token, text=True, cwd=WORKSPACE, capture_output=True,
             )
+        else:
+            # CROSS-TENANT BLEED GUARD (Codex review, 2026-05-31): this token is
+            # written process-globally, so a tenant with NO token must clear any
+            # value a PRIOR tenant's turn left behind — otherwise every executor
+            # that copies os.environ (codex/gemini/copilot) would inherit it and
+            # the system gh credential helper would auth the wrong tenant's clone.
+            # (claude.py also strips per-turn; the proper fix is per-turn env for
+            # all executors — tracked follow-up. This guards the sequential case.)
+            os.environ.pop("GITHUB_TOKEN", None)
 
         # Persistent session directory per tenant (not temp — survives across calls)
         # Must NOT be under /tmp — Codex refuses to create helper binaries in temp dirs

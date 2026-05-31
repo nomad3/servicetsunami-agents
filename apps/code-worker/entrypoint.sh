@@ -15,14 +15,12 @@ git config --global --add safe.directory /workspace
 _HAS_REAL_TOKEN=0
 if [ -n "${GITHUB_TOKEN}" ] && [ "${GITHUB_TOKEN}" != "ghp_placeholder" ]; then
     _HAS_REAL_TOKEN=1
-    # Use a credential HELPER that reads the token from the env at run time —
-    # NOT a token-in-URL (Codex review: a URL token leaks via ps /proc/<pid>/
-    # cmdline). The single-quoted snippet is written literally; the shell expands
-    # ${GITHUB_TOKEN} only when git runs the helper. Per-turn Claude clones
-    # override this with their own per-tenant helper (cli_executors/claude.py).
-    git config --global "credential.https://github.com.helper" \
-        '!f() { echo username=x-access-token; echo "password=${GITHUB_TOKEN}"; }; f'
 fi
+# NOTE: git→github.com auth is wired ONCE, system-wide, in the Dockerfile
+# (credential.https://github.com.helper = !gh auth git-credential). That helper
+# resolves the per-tenant GitHub OAuth token (the /integrations connection) from
+# GH_TOKEN/GITHUB_TOKEN in each turn's env — shared by EVERY CLI (claude, codex,
+# gemini, copilot). No per-HOME / per-CLI git credential config needed here.
 
 # Workspace self-repo setup is BEST-EFFORT: the worker clones tenant repos into
 # the workspaces volume per-turn, so a failure here must never abort startup
