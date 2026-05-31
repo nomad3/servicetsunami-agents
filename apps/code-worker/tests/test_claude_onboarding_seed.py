@@ -6,6 +6,7 @@ fresh OAuth login the headless PTY can't finish.
 from __future__ import annotations
 
 import json
+import os
 import threading
 
 import cli_executors.claude as claude_mod
@@ -25,8 +26,15 @@ def test_seeds_onboarding_and_trust_on_empty_home(tmp_path):
 
     data = _load(home)
     assert data["hasCompletedOnboarding"] is True
-    assert data["projects"][cwd]["hasTrustDialogAccepted"] is True
-    assert data["projects"][cwd]["hasCompletedProjectOnboarding"] is True
+    # Root-cause fix: the trust seed keys on the RESOLVED cwd (Claude resolves
+    # symlinks before the projects[...] trust lookup). ``/var`` is a symlink to
+    # ``/private/var`` on macOS, so the stored key is the realpath, not the
+    # literal — proving we no longer key on the un-resolved path.
+    key = os.path.realpath(cwd)
+    assert data["projects"][key]["hasTrustDialogAccepted"] is True
+    assert data["projects"][key]["hasCompletedProjectOnboarding"] is True
+    # And the seen-count is forced ≥1 so project-onboarding doesn't re-arm.
+    assert data["projects"][key]["projectOnboardingSeenCount"] >= 1
 
 
 def test_preserves_existing_unrelated_keys(tmp_path):

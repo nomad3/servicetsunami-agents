@@ -130,6 +130,20 @@ env:
   # Mirrored in docker-compose.yml.
   - name: WORKSPACES_ROOT
     value: "/var/agentprovision/workspaces"
+  # Interactive Claude Code startup-chrome kill switches (root-cause fix for
+  # intermittent exit-143, 2026-05-30). On a cold/perturbed worker HOME the
+  # launch floods the PTY with auto-updater / official-marketplace auto-install
+  # / telemetry chrome that never quiets, starving the trigger submit. Disabling
+  # them at the source keeps the REPL quiet so the runner submits promptly.
+  # Honoured by Claude Code v2.1.x. Also set per-subprocess in
+  # cli_executors/claude.py; these worker-level defaults cover the deployed
+  # worker even if that code path is bypassed. Mirrored in docker-compose.yml.
+  - name: DISABLE_AUTOUPDATER
+    value: "1"
+  - name: CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL
+    value: "1"
+  - name: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+    value: "1"
 
 # No autoscaling — single instance
 autoscaling:

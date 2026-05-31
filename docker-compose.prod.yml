@@ -200,6 +200,15 @@ services:
       # docs/plans/2026-05-16-terminal-full-cli-output.md §6.1
       # (review I5 — parity across helm/compose/compose.prod).
       - WORKER_STREAM_FLUSH_MS=${WORKER_STREAM_FLUSH_MS:-150}
+      # Interactive Claude Code startup-chrome kill switches (root-cause fix for
+      # intermittent exit-143, 2026-05-30) — disable auto-updater /
+      # official-marketplace auto-install / non-essential traffic that floods
+      # the PTY on a cold HOME and starves the trigger submit. Also set
+      # per-subprocess in cli_executors/claude.py. Parity across
+      # compose / compose.prod / helm (no drift).
+      - DISABLE_AUTOUPDATER=1
+      - CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1
+      - CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
     volumes:
       - claude_sessions:/home/codeworker/.claude
     depends_on:

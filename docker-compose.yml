@@ -243,6 +243,18 @@ services:
       # volume mountPath without also updating cli_runtime's default.
       # Mirrored in helm/values/agentprovision-code-worker.yaml.
       - WORKSPACES_ROOT=/var/agentprovision/workspaces
+      # Interactive Claude Code startup-chrome kill switches (root-cause fix for
+      # intermittent exit-143, 2026-05-30). On a cold/perturbed worker HOME the
+      # launch floods the PTY with auto-updater / official-marketplace
+      # auto-install / telemetry chrome that never quiets, starving the trigger
+      # submit. Disabling them at the source keeps the REPL quiet so the runner
+      # submits promptly. Honoured by Claude Code v2.1.x. Set as worker defaults
+      # here AND in cli_executors/claude.py (env per-subprocess) so the deployed
+      # worker is covered even if that code path is bypassed. Mirrored in
+      # helm/values/agentprovision-code-worker.yaml (no drift).
+      - DISABLE_AUTOUPDATER=1
+      - CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1
+      - CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
