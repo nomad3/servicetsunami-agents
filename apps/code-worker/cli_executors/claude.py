@@ -537,13 +537,15 @@ def execute_claude_chat(task_input, session_dir: str):
                 1, int(os.environ.get("CLAUDE_CODE_INTERACTIVE_MAX_ATTEMPTS", "2"))
             )
             # Backstop bound for an interactive CHAT turn (2026-05-31). A
-            # conversational Luna turn should take seconds-to-minutes; a heavy
-            # coding job routes through the code-task path, not here. Capping at
-            # 600s (was 1500s) means ANY future unknown hang — a new pager/editor
-            # vector, a wedged MCP call, a stuck spinner — fails in ≤10 min and
-            # retries once, instead of tying up the worker for 25 min. Env-tunable.
+            # conversational Luna turn is seconds-to-minutes; a heavy coding job
+            # routes through the code-task path, not here. Capping at 900s (was
+            # 1500s) means ANY future unknown hang — a new pager/editor vector, a
+            # wedged MCP call, a stuck spinner — fails in ≤15 min and retries once,
+            # instead of 25. 900s (not 600) keeps a wide margin over any realistic
+            # chat turn so we don't false-timeout legitimate long work (Codex
+            # review). Env-tunable for tenants that genuinely need longer.
             _interactive_timeout = int(
-                os.environ.get("CLAUDE_CODE_INTERACTIVE_TIMEOUT_SECONDS", "600")
+                os.environ.get("CLAUDE_CODE_INTERACTIVE_TIMEOUT_SECONDS", "900")
             )
             result = None
             for _attempt in range(max_attempts):
