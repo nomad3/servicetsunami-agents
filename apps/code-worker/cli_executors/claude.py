@@ -64,14 +64,26 @@ def _write_secret_file(path: str, content: str) -> None:
 
 def _ensure_claude_onboarding(home: str, trusted_cwd: str | None = None) -> None:
     """Seed ``$HOME/.claude.json`` so interactive Claude Code skips its
-    first-run onboarding wizard (theme → login-method → folder-trust).
+    first-run onboarding wizard (theme → login-method → folder-trust) AND the
+    cold folder-trust dialog that floods/blocks the PTY before submit.
 
     A fresh HOME makes ``claude`` re-run the wizard on every interactive turn;
     at "Select login method" it starts a *new* OAuth login instead of using the
     stored ``.credentials.json``, which the headless PTY cannot complete — so a
     HOME that is actually logged in still surfaces as a subscription-auth
     failure. Marking onboarding complete makes the TTY use the stored
-    credential silently. Best-effort; never raises.
+    credential silently.
+
+    Folder-trust (root-cause fix, 2026-05-30): Claude v2.1.x keys the trust
+    check on the REALPATH of cwd — ``getProjectPathForConfig`` resolves through
+    symlinks (``fs.realpathSync`` / ``path.resolve``) before looking up
+    ``config.projects[<key>]``. The earlier seed used the LITERAL cwd, so a
+    symlinked worker cwd (e.g. tenant HOME on the workspaces volume) still hit
+    the trust dialog because the resolved key never matched. We now key on
+    ``os.path.realpath(trusted_cwd)`` and seed EVERY flag the binary checks:
+    ``hasTrustDialogAccepted``, ``hasCompletedProjectOnboarding``, and
+    ``projectOnboardingSeenCount`` (>0 — a 0 count re-triggers onboarding).
+    Best-effort; never raises.
     """
     if not home:
         return
@@ -101,15 +113,27 @@ def _ensure_claude_onboarding(home: str, trusted_cwd: str | None = None) -> None
                 projects = {}
                 data["projects"] = projects
                 changed = True
-            proj = projects.get(trusted_cwd)
+            # Key on the RESOLVED path — Claude resolves symlinks before the
+            # projects[...] trust lookup, so the literal path would never match.
+            try:
+                resolved_cwd = os.path.realpath(trusted_cwd)
+            except OSError:
+                resolved_cwd = trusted_cwd
+            proj = projects.get(resolved_cwd)
             if not isinstance(proj, dict):
                 proj = {}
-                projects[trusted_cwd] = proj
+                projects[resolved_cwd] = proj
                 changed = True
+            # Boolean trust flags the cold dialog gates on.
             for key in ("hasTrustDialogAccepted", "hasCompletedProjectOnboarding"):
                 if proj.get(key) is not True:
                     proj[key] = True
                     changed = True
+            # A 0/absent seen-count re-arms the project-onboarding flow; force ≥1.
+            if not isinstance(proj.get("projectOnboardingSeenCount"), int) or \
+                    proj.get("projectOnboardingSeenCount", 0) < 1:
+                proj["projectOnboardingSeenCount"] = 1
+                changed = True
         if not changed:
             return
         os.makedirs(home, exist_ok=True)
@@ -293,6 +317,27 @@ def execute_claude_chat(task_input, session_dir: str):
         # Defensive: clear any stale OAuth token from the container env
         # so the per-tenant API key takes effect.
         env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+
+    # ── Prong 1: kill the startup chrome on the interactive path ─────────
+    # Root cause of intermittent exit-143 (2026-05-30): on a cold/perturbed
+    # worker HOME, Claude Code's launch FLOODS the PTY with continuous chrome —
+    # auto-updater, the official-Anthropic marketplace auto-install, telemetry/
+    # error-reporting — which never quiets, so the runner's quiet-settle never
+    # fires and the trigger is never submitted. Disable those sources at the
+    # source so the REPL settles fast. These envs are honoured by Claude Code
+    # v2.1.x (verified against the binary):
+    #   • DISABLE_AUTOUPDATER — no mid-launch self-update.
+    #   • CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL — no marketplace
+    #     auto-install attempt (the "installing plugins…" chrome).
+    #   • CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC — broad off switch for
+    #     telemetry / error reporting / feedback / live-preview prefetches.
+    # Interactive-only: the print path stays byte-identical (it's already
+    # headless + fast). Set as the worker default in docker-compose + Helm too
+    # (no drift) so the deployed worker gets them even if this code is bypassed.
+    if interactive_mode:
+        env["DISABLE_AUTOUPDATER"] = "1"
+        env["CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL"] = "1"
+        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
 
     # ── tenant workspace cwd (task #259) ─────────────────────────────────
     # Scope the subprocess cwd to the tenant's persistent workspace

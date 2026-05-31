@@ -53,6 +53,15 @@ configMap:
     OPENCODE_MODEL: "gemma4"
     GIT_BRANCH: "main"
     USE_MEMORY_V2: "true"
+    # Interactive Claude Code startup-chrome kill switches (root-cause fix for
+    # intermittent exit-143, 2026-05-30). Disable the auto-updater /
+    # official-marketplace auto-install / non-essential traffic that floods the
+    # PTY on a cold HOME and starves the trigger submit. Honoured by Claude Code
+    # v2.1.x; also set per-subprocess in cli_executors/claude.py. Mirrored in
+    # docker-compose.yml + helm/values/agentprovision-code-worker.yaml.
+    DISABLE_AUTOUPDATER: "1"
+    CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: "1"
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
 
 # Secrets: code-worker-secrets (GITHUB_TOKEN) + api-secrets (GOOGLE_CLIENT_ID/SECRET, ENCRYPTION_KEY)
 envFrom:

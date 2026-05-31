@@ -314,6 +314,97 @@ class TestClaudeExecutorInteractiveSubmit:
             mode = stat.S_IMODE(os.stat(p).st_mode)
             assert mode == 0o600, f"{p} mode is {oct(mode)}"
 
+    def test_interactive_env_disables_startup_chrome(
+        self, monkeypatch, tmp_path, interactive_env
+    ):
+        """Prong 1: on the interactive path the subprocess env must DISABLE the
+        startup chrome that floods the PTY on a cold HOME and starves the submit
+        — the auto-updater, the official-marketplace auto-install, and the broad
+        non-essential traffic (telemetry / error-reporting / bug command). These
+        are the continuous-output sources that reset the quiet-settle timer and
+        caused intermittent exit-143. Print mode must NOT get these (verified in
+        the print-mode test)."""
+        self._patch_credential(monkeypatch)
+        session_dir = tmp_path / "session"
+        session_dir.mkdir()
+
+        captured: dict = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["env"] = kwargs.get("env")
+            return _completed(0, stdout="ok")
+
+        monkeypatch.setattr(
+            claude_interactive, "run_claude_interactive_with_heartbeat", fake_run
+        )
+
+        task = _make_input(instruction_md_content="PERSONA", message="hi")
+        wf._execute_claude_chat(task, session_dir=str(session_dir))
+
+        env = captured["env"]
+        assert env["DISABLE_AUTOUPDATER"] == "1"
+        assert env["CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL"] == "1"
+        assert env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
+
+    def test_onboarding_seed_covers_resolved_cwd_trust_flags(
+        self, monkeypatch, tmp_path, interactive_env
+    ):
+        """Prong 1: the cold folder-trust dialog still blocked despite the prior
+        seed because the seed used the unresolved cwd. Claude v2.1.x keys the
+        trust check on the REALPATH of cwd (``getProjectPathForConfig`` →
+        ``path.resolve``/realpath). Seed every trust flag it checks under the
+        RESOLVED cwd key: ``hasTrustDialogAccepted``,
+        ``hasCompletedProjectOnboarding``, ``projectOnboardingSeenCount`` (>0).
+        Use a symlinked HOME+cwd so resolved != literal, proving we key on the
+        real path."""
+        import json as _json
+
+        self._patch_credential(monkeypatch)
+        # Real dirs + a symlink that points at them, so realpath(symlink)!=symlink.
+        real_home = tmp_path / "real_home"
+        real_home.mkdir()
+        real_cwd = tmp_path / "real_cwd"
+        real_cwd.mkdir()
+        link_cwd = tmp_path / "link_cwd"
+        link_cwd.symlink_to(real_cwd)
+
+        session_dir = tmp_path / "session"
+        session_dir.mkdir()
+
+        # Force HOME to our real_home and cwd to the SYMLINK path.
+        monkeypatch.setattr(
+            cli_runtime, "tenant_home_dir", lambda tid: real_home
+        )
+        monkeypatch.setattr(
+            cli_runtime, "resolve_cli_cwd", lambda task, fb: str(link_cwd)
+        )
+
+        captured: dict = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["env"] = kwargs.get("env")
+            return _completed(0, stdout="ok")
+
+        monkeypatch.setattr(
+            claude_interactive, "run_claude_interactive_with_heartbeat", fake_run
+        )
+
+        task = _make_input(instruction_md_content="PERSONA", message="hi")
+        wf._execute_claude_chat(task, session_dir=str(session_dir))
+
+        cfg = _json.loads((real_home / ".claude.json").read_text())
+        projects = cfg.get("projects", {})
+        resolved = os.path.realpath(str(link_cwd))
+        assert resolved in projects, (
+            f"trust seed must key on the RESOLVED cwd {resolved}; "
+            f"got keys {list(projects)}"
+        )
+        proj = projects[resolved]
+        assert proj.get("hasTrustDialogAccepted") is True
+        assert proj.get("hasCompletedProjectOnboarding") is True
+        assert isinstance(proj.get("projectOnboardingSeenCount"), int)
+        assert proj["projectOnboardingSeenCount"] >= 1
+
     def test_print_mode_unchanged_appends_minus_p_and_no_turn_file(
         self, monkeypatch, tmp_path
     ):
@@ -329,6 +420,7 @@ class TestClaudeExecutorInteractiveSubmit:
 
         def fake_run(cmd, **kwargs):
             captured["cmd"] = cmd
+            captured["env"] = kwargs.get("env")
             return _completed(0, stdout='{"result": "hi"}')
 
         monkeypatch.setattr(cli_runtime, "run_cli_with_heartbeat", fake_run)
@@ -355,6 +447,12 @@ class TestClaudeExecutorInteractiveSubmit:
         # No turn file or answer file in print mode (Defect 2 is interactive-only).
         assert not (session_dir / "turn_prompt.md").exists()
         assert not (session_dir / "answer.md").exists()
+        # Print mode stays byte-identical: the interactive-only chrome-disable
+        # env vars (Prong 1) must NOT be injected on the print path.
+        env = captured["env"]
+        assert "DISABLE_AUTOUPDATER" not in env
+        assert "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL" not in env
+        assert "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" not in env
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -532,6 +630,8 @@ class TestDecidePtyAction:
 
     def test_idle_exit_suppressed_after_submit_until_response(self):
         # Submitted, but Claude has not yet responded; do NOT /exit on idle.
+        # (resend window pushed past the horizon so this isolates the idle-exit
+        # suppression behavior — the resend path is covered separately.)
         action = decide_pty_action(
             now=20.0,
             start=0.0,
@@ -540,10 +640,12 @@ class TestDecidePtyAction:
             submitted=True,
             response_seen=False,
             exit_sent_at=None,
+            submitted_at=2.0,
             first_output_seconds=90.0,
             submit_settle_seconds=1.0,
             idle_exit_seconds=8.0,
             exit_grace_seconds=10.0,
+            resend_after_seconds=60.0,
         )
         assert action == "wait"
 
@@ -619,6 +721,153 @@ class TestDecidePtyAction:
             exit_grace_seconds=10.0,
         )
         assert action == "terminate"
+
+    # ── Chrome-flood: input-box path must fire under SUSTAINED output ─────
+    # Root cause of intermittent exit-143 (2026-05-30): on a cold/perturbed
+    # HOME, Claude Code floods the PTY with continuous chrome (auto-updater,
+    # marketplace auto-install, folder-trust dialog, "1 MCP server failed").
+    # The flood NEVER quiets, so neither the quiet-settle nor (because the loop
+    # kept reading + ``continue``-ing instead of deciding) the bounded ceiling
+    # fired — the trigger was NEVER submitted. The durable fix: once the input
+    # box is seen, submit after a short FIXED delay since it first rendered,
+    # regardless of ongoing output.
+    def test_submits_under_sustained_output_after_input_box_fixed_delay(self):
+        """Input box rendered + a short FIXED delay elapsed since it appeared →
+        ``submit_text`` EVEN WITH zero quiet (output still streaming). The quiet
+        window is intentionally NOT required — the chrome flood defeats it."""
+        action = decide_pty_action(
+            now=2.5,
+            start=0.0,
+            last_output=2.49,  # ~0s quiet — output is STILL streaming (flood)
+            seen_output=True,
+            submitted=False,
+            response_seen=False,
+            exit_sent_at=None,
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            input_box_seen=True,
+            input_box_seen_at=1.0,  # box appeared at t=1.0; 1.5s ago
+            first_output_at=0.4,
+            input_box_submit_delay_seconds=1.0,
+        )
+        assert action == "submit_text"
+
+    def test_no_submit_before_input_box_fixed_delay_under_flood(self):
+        """Before the FIXED delay since the input box appeared, keep waiting even
+        under sustained output (don't type into a box that just rendered)."""
+        action = decide_pty_action(
+            now=1.4,
+            start=0.0,
+            last_output=1.39,  # streaming
+            seen_output=True,
+            submitted=False,
+            response_seen=False,
+            exit_sent_at=None,
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            input_box_seen=True,
+            input_box_seen_at=1.0,  # only 0.4s ago — under the 1.0s fixed delay
+            first_output_at=0.4,
+            input_box_submit_delay_seconds=1.0,
+        )
+        assert action == "wait"
+
+    # ── Post-submit resend: recover a submit eaten by a trust/update prompt ─
+    def test_resend_when_no_answer_and_no_response_after_resend_window(self):
+        """Submitted, but NO answer file AND no substantive response within
+        ``resend_after_seconds`` → ``resend`` (re-type the trigger once). This
+        recovers a submit consumed by a trust/auto-update prompt."""
+        action = decide_pty_action(
+            now=20.0,
+            start=0.0,
+            last_output=4.0,
+            seen_output=True,
+            submitted=True,
+            response_seen=False,  # nothing substantive came back
+            exit_sent_at=None,
+            submitted_at=2.0,  # 18s since submit — past the 15s resend window
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            answer_ready=False,
+            awaiting_answer_file=True,
+            resend_after_seconds=15.0,
+            resent=False,
+        )
+        assert action == "resend"
+
+    def test_no_resend_before_resend_window(self):
+        """Under the resend window since submit → keep waiting, don't resend."""
+        action = decide_pty_action(
+            now=10.0,
+            start=0.0,
+            last_output=4.0,
+            seen_output=True,
+            submitted=True,
+            response_seen=False,
+            exit_sent_at=None,
+            submitted_at=2.0,  # only 8s since submit — under the 15s window
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            answer_ready=False,
+            awaiting_answer_file=True,
+            resend_after_seconds=15.0,
+            resent=False,
+        )
+        assert action == "wait"
+
+    def test_resend_fires_only_once(self):
+        """The resend is capped at 1 — once ``resent`` is True, never resend
+        again (fall through to the normal waiting/idle path instead)."""
+        action = decide_pty_action(
+            now=40.0,
+            start=0.0,
+            last_output=4.0,
+            seen_output=True,
+            submitted=True,
+            response_seen=False,
+            exit_sent_at=None,
+            submitted_at=2.0,  # 38s since submit, well past the window
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            answer_ready=False,
+            awaiting_answer_file=True,
+            resend_after_seconds=15.0,
+            resent=True,  # already resent once
+        )
+        assert action != "resend"
+
+    def test_no_resend_once_response_seen(self):
+        """A substantive response IS streaming — do NOT resend (the submit took);
+        the answer-file gate governs from here."""
+        action = decide_pty_action(
+            now=30.0,
+            start=0.0,
+            last_output=12.0,
+            seen_output=True,
+            submitted=True,
+            response_seen=True,  # Claude is responding
+            exit_sent_at=None,
+            submitted_at=2.0,  # 28s since submit, past the resend window
+            first_output_seconds=90.0,
+            submit_settle_seconds=1.0,
+            idle_exit_seconds=8.0,
+            exit_grace_seconds=10.0,
+            answer_ready=False,
+            awaiting_answer_file=True,
+            resend_after_seconds=15.0,
+            resent=False,
+        )
+        assert action != "resend"
 
     # ── N1: readiness must not be starved by a chatty banner ─────────────
     def test_submits_quickly_when_input_box_seen(self):
@@ -978,6 +1227,10 @@ class _FakePty:
         # writing its answer out-of-band.
         self._answer_drop = answer_drop
         self._answer_dropped = False
+        # Drop the answer on the Nth multi-byte (trigger) write rather than the
+        # first — lets a resend test prove the SECOND submit recovered the turn.
+        self._answer_drop_on_nth = 1
+        self._multibyte_writes = 0
 
     # time ----------------------------------------------------------------
     def monotonic(self):
@@ -1010,12 +1263,17 @@ class _FakePty:
 
     def write(self, fd, data):
         data = bytes(data)
-        # Defect 2: the trigger text is the first multi-byte write — when it
-        # lands, drop the out-of-band answer file (Claude's Read + Write).
+        if len(data) > 1:
+            self._multibyte_writes += 1
+        # Defect 2: the trigger text is a multi-byte write — when the Nth such
+        # write lands, drop the out-of-band answer file (Claude's Read + Write).
+        # Default N=1 (the first trigger write); a resend test sets N=2 so the
+        # answer only appears after the SECOND submit.
         if (
             self._answer_drop is not None
             and not self._answer_dropped
             and len(data) > 1
+            and self._multibyte_writes >= self._answer_drop_on_nth
         ):
             path, contents = self._answer_drop
             with open(path, "w") as fh:
@@ -1139,6 +1397,96 @@ class TestRunnerSubmitsTrigger:
         assert any(b"/exit" in w for w in fake.writes)
         # The answer survives cleaning (transcript fallback — no answer file).
         assert "The answer is 4." in result.stdout
+
+    def test_submits_trigger_under_chrome_flood(self, fake_pty_wiring):
+        """ROOT CAUSE regression: a CONTINUOUS chrome flood (auto-updater /
+        marketplace / trust / "1 MCP server failed") that NEVER quiets must
+        STILL get the trigger submitted via the input-box path. The old loop
+        kept reading + ``continue``-ing under sustained output, so the submit
+        decision was never reached and the trigger was never typed → exit 143.
+
+        The fake emits the input-box marker then a non-stop stream of chrome
+        chunks (no ``None`` quiet ticks at all). The runner must type the trigger
+        TEXT under that sustained output."""
+        trigger = "Read the file /scratch/turn_prompt.md and respond."
+        # Banner + input box on read 1, then a relentless flood: every tick has
+        # data ready (no None), so the loop never sees a quiet gap. After enough
+        # flood ticks the proc is polled dead so the test terminates.
+        flood = b'\x1b[2K\r* Auto-updating... 1 MCP server failed... Try "fix"\n'
+        script = [b'Welcome to Claude Code\n\xe2\x9d\xaf Try "edit"\n'] + [flood] * 60
+        fake, proc = fake_pty_wiring(script, poll_after_reads=55)
+
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            ["claude"],
+            prompt=trigger,
+            label="Claude Code",
+            timeout=1500,
+            env={},
+            cwd="/tmp",
+            submit_settle_seconds=0.2,
+            enter_delay_seconds=0.1,
+            idle_exit_seconds=0.5,
+            exit_grace_seconds=0.5,
+            first_output_seconds=90.0,
+        )
+
+        # The trigger TEXT was typed despite the never-quieting flood.
+        assert any(trigger.encode() in w for w in fake.writes), (
+            f"trigger never submitted under flood; writes={fake.writes!r}"
+        )
+        # And the bare Enter followed it.
+        assert any(w == b"\r" for w in fake.writes), fake.writes
+
+    def test_resends_trigger_when_no_answer_after_window(
+        self, fake_pty_wiring, tmp_path
+    ):
+        """Post-submit resend: the first submit is consumed by a prompt (no
+        answer file, no substantive response). After ``resend_after_seconds``
+        the runner RE-TYPES the trigger once. The fake drops the answer only
+        after the SECOND trigger write, proving the resend was what recovered
+        the turn."""
+        scratch = tmp_path / "turn_zzz"
+        scratch.mkdir()
+        (scratch / "turn_prompt.md").write_text("the blob")
+        answer_file = scratch / "answer.md"
+        trigger = (
+            f"Read {scratch / 'turn_prompt.md'} and respond. Write to {answer_file}."
+        )
+        # Banner + box, then a long stretch of quiet (the submit is "eaten" — no
+        # response), enough None ticks to cross the resend window, then quiet for
+        # the answer-file poll to pick up the dropped file after the resend.
+        script = [b'Welcome to Claude Code\n\xe2\x9d\xaf \n'] + [None] * 200
+        fake, proc = fake_pty_wiring(
+            script, answer_drop=(str(answer_file), "Recovered by resend.")
+        )
+        # Only drop the answer on the SECOND multi-byte (trigger) write.
+        fake._answer_drop_on_nth = 2
+
+        result = claude_interactive.run_claude_interactive_with_heartbeat(
+            ["claude"],
+            prompt=trigger,
+            label="Claude Code",
+            timeout=1500,
+            env={},
+            cwd="/tmp",
+            answer_dir=str(scratch),
+            submit_settle_seconds=0.2,
+            enter_delay_seconds=0.1,
+            idle_exit_seconds=0.5,
+            exit_grace_seconds=0.5,
+            first_output_seconds=90.0,
+            resend_after_seconds=2.0,
+        )
+
+        # The trigger TEXT was typed at least TWICE (initial + one resend).
+        text_writes = [w for w in fake.writes if trigger.encode() in w]
+        assert len(text_writes) >= 2, (
+            f"resend never fired; trigger writes={len(text_writes)} writes={fake.writes!r}"
+        )
+        # Capped at one resend: never more than 2 trigger writes.
+        assert len(text_writes) == 2, f"resend not capped at 1: {len(text_writes)} writes"
+        # The answer dropped after the resend is what we return.
+        assert result.stdout == "Recovered by resend."
 
     def test_does_not_type_trigger_before_banner(self, fake_pty_wiring):
         trigger = "Read the file /scratch/turn.md and respond."

@@ -145,6 +145,7 @@ def decide_pty_action(
     exit_grace_seconds: float,
     submitted_at: float | None = None,
     input_box_seen: bool = False,
+    input_box_seen_at: float | None = None,
     first_output_at: float | None = None,
     text_written: bool = False,
     text_written_at: float | None = None,
@@ -153,6 +154,10 @@ def decide_pty_action(
     answer_ready_at: float | None = None,
     answer_settle_seconds: float = 0.25,
     awaiting_answer_file: bool = False,
+    input_box_submit_delay_seconds: float = 1.0,
+    resend_after_seconds: float = 15.0,
+    resent: bool = False,
+    response_substantive: bool = False,
 ) -> str:
     """Decide the next PTY action for one loop tick (pure — no I/O).
 
@@ -165,13 +170,17 @@ def decide_pty_action(
       1. Readiness — wait for the banner; if none within ``first_output_seconds``
          → kill. Once seen, decide submit-readiness (see #2).
       2. Submit phase 1 (``submit_text``, once) — when NOT ``text_written`` and
-         readiness is satisfied by EITHER (a) the input box was seen
-         (``input_box_seen`` — ``❯`` / ``Try "`` placeholder rendered) followed
-         by a brief settle, OR (b) ``submit_settle_seconds`` of pure quiet, OR
-         (c) a bounded ceiling since first output (``max(settle*3, 5.0)``). The
-         ceiling stops a chatty banner / blinking spinner from resetting the
-         quiet timer forever and starving submit ~90s (N1). All three are well
-         under ``first_output_seconds``.
+         readiness is satisfied by ANY of (a0) the DURABLE input-box path: the
+         input box was seen AND ``input_box_submit_delay_seconds`` have elapsed
+         SINCE IT FIRST APPEARED (``input_box_seen_at``) — fires REGARDLESS of
+         ongoing output, so a continuous chrome flood (auto-updater / marketplace
+         auto-install / folder-trust / "1 MCP server failed") that never quiets
+         can't starve the submit (root-cause fix, 2026-05-30); (a) the input box
+         was seen followed by a brief settle; (b) ``submit_settle_seconds`` of
+         pure quiet; OR (c) a bounded ceiling since first output
+         (``max(settle*3, 5.0)``). The quiet paths (a)/(b)/(c) are fallbacks the
+         flood defeats — (a0) is the one that fires under sustained output. All
+         are well under ``first_output_seconds``.
       2b. Submit phase 2 (``submit_enter``, once) — DEFECT 1: the REPL runs
          bracketed-paste mode, so a long trigger glued to ``\\r`` in one write
          is swallowed as paste and the ``\\r`` becomes a newline, never Enter.
@@ -215,10 +224,20 @@ def decide_pty_action(
     #       absorbs the text+\r as one bracketed paste and never submits.
     if not submitted:
         if not text_written:
-            # Phase 1 — readiness gate (N1): any of three paths so a
-            # never-quieting banner can't starve us; a half-rendered box still
-            # gets a brief settle.
+            # Phase 1 — readiness gate. The DURABLE path (a0) fires under
+            # SUSTAINED output; the quiet paths (a)/(b)/(c) are fallbacks a
+            # chrome flood defeats.
             quiet = now - last_output
+            # (a0) DURABLE: input box rendered + a short FIXED delay since it
+            # first appeared — submit regardless of ongoing output. This is the
+            # path that survives a continuous chrome flood (the quiet-based
+            # paths below all reset under the flood and never fire).
+            if (
+                input_box_seen
+                and input_box_seen_at is not None
+                and now - input_box_seen_at >= input_box_submit_delay_seconds
+            ):
+                return "submit_text"
             brief_settle = min(submit_settle_seconds, 0.15)
             if input_box_seen and quiet >= brief_settle:
                 return "submit_text"
@@ -238,6 +257,21 @@ def decide_pty_action(
     # 3. Submitted but no response yet: suppress idle /exit, bound the wait.
     if not response_seen:
         baseline = submitted_at if submitted_at is not None else start
+        # Post-submit RESEND (root-cause recovery, 2026-05-30): a submit can be
+        # silently consumed by a trust / auto-update / permission prompt that
+        # pops over the input box, so the trigger lands in the prompt instead of
+        # the REPL and NOTHING comes back. If no substantive response AND no
+        # answer file within ``resend_after_seconds`` of submit, RE-TYPE the
+        # trigger once (the prompt has cleared by now, the box is empty again).
+        # Capped at one resend (``resent``); the outer caps still bound the rest.
+        if (
+            not resent
+            and not response_substantive
+            and not answer_ready
+            and now - baseline >= resend_after_seconds
+            and now - baseline < first_output_seconds
+        ):
+            return "resend"
         if now - baseline >= first_output_seconds:
             return "kill"
         return "wait"
@@ -372,6 +406,7 @@ def run_claude_interactive_with_heartbeat(
     first_output_seconds: float | None = None,
     submit_settle_seconds: float | None = None,
     enter_delay_seconds: float | None = None,
+    resend_after_seconds: float | None = None,
     answer_dir: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run Claude Code attached to a PTY and return a CompletedProcess.
@@ -429,6 +464,17 @@ def run_claude_interactive_with_heartbeat(
     enter_delay_seconds = enter_delay_seconds if enter_delay_seconds is not None else float(
         os.environ.get("CLAUDE_CODE_INTERACTIVE_SUBMIT_ENTER_DELAY_SECONDS", "0.5")
     )
+    # Durable submit path: how long after the input box first renders we type the
+    # trigger even under sustained chrome output (no quiet required).
+    input_box_submit_delay_seconds = float(
+        os.environ.get("CLAUDE_CODE_INTERACTIVE_INPUT_BOX_DELAY_SECONDS", "1.0")
+    )
+    # Post-submit resend window: if no answer + no substantive response within
+    # this many seconds of submit, re-type the trigger ONCE (recovers a submit
+    # eaten by a trust / auto-update / permission prompt).
+    resend_after_seconds = resend_after_seconds if resend_after_seconds is not None else float(
+        os.environ.get("CLAUDE_CODE_INTERACTIVE_RESEND_SECONDS", "15")
+    )
     # Defect 1: text and Enter are written in two phases, so keep them apart.
     text_bytes = (prompt or "").encode()
 
@@ -481,10 +527,15 @@ def run_claude_interactive_with_heartbeat(
     submitted = False
     submitted_at: float | None = None
     response_seen = False
+    response_substantive = False
     trust_acked = False
+    # One-shot resend latch (root-cause recovery): re-type the trigger once if
+    # the first submit produced no answer + no substantive response.
+    resent = False
     # N1 readiness state: when the input box first rendered, and the timestamp
     # of the first output (for the bounded submit ceiling).
     input_box_seen = False
+    input_box_seen_at: float | None = None
     first_output_at: float | None = None
     # FINDING 2 answer-file completion state: the answer FILE (not the first
     # post-submit byte) signals the turn is done. ``answer_ready`` flips once a
@@ -527,14 +578,23 @@ def run_claude_interactive_with_heartbeat(
                     seen_output = True
                     if first_output_at is None:
                         first_output_at = now
-                    # N1: note the input box rendering so submit can fire after a
-                    # brief settle rather than the full (banner-resettable) quiet.
+                    # N1: note the input box rendering (and WHEN) so submit can
+                    # fire after a brief settle / fixed delay rather than the
+                    # full (banner-resettable) quiet.
                     if not input_box_seen and _INPUT_BOX_RE.search(text):
                         input_box_seen = True
+                        input_box_seen_at = now
                     # First output AFTER submit = Claude is responding; this
                     # un-suppresses the idle `/exit`.
                     if submitted and not response_seen:
                         response_seen = True
+                    # Substantive-response signal (gates the resend): a folder-
+                    # trust dialog redraw is chrome, not a real answer, so it must
+                    # NOT count — otherwise a prompt that eats our submit would
+                    # suppress the recovery resend. Any other post-submit output
+                    # counts as substantive.
+                    if submitted and not response_substantive and not _TRUST_RE.search(text):
+                        response_substantive = True
                     if on_chunk:
                         on_chunk(text, "stdout")
                     # Belt-and-suspenders: a folder-trust dialog may precede the
@@ -546,7 +606,14 @@ def run_claude_interactive_with_heartbeat(
                         except OSError:
                             pass
                         trust_acked = True
-                    continue
+                    # ROOT-CAUSE FIX (2026-05-30): do NOT ``continue`` here. The
+                    # old loop short-circuited back to the next read on EVERY
+                    # chunk, so under a continuous chrome flood (a chunk every
+                    # tick) the submit/resend decision below was NEVER reached and
+                    # the trigger was never typed → exit 143. Falling through lets
+                    # the durable input-box submit path (and the answer-file poll)
+                    # run each tick even while output is still streaming. The
+                    # per-tick decision is cheap and idempotent.
 
             if proc.poll() is not None:
                 break
@@ -585,6 +652,7 @@ def run_claude_interactive_with_heartbeat(
                 idle_exit_seconds=idle_exit_seconds,
                 exit_grace_seconds=exit_grace_seconds,
                 input_box_seen=input_box_seen,
+                input_box_seen_at=input_box_seen_at,
                 first_output_at=first_output_at,
                 text_written=text_written,
                 text_written_at=text_written_at,
@@ -592,6 +660,10 @@ def run_claude_interactive_with_heartbeat(
                 answer_ready=answer_ready,
                 answer_ready_at=answer_ready_at,
                 awaiting_answer_file=bool(answer_dir),
+                input_box_submit_delay_seconds=input_box_submit_delay_seconds,
+                resend_after_seconds=resend_after_seconds,
+                resent=resent,
+                response_substantive=response_substantive,
             )
 
             if action == "wait":
@@ -615,6 +687,22 @@ def run_claude_interactive_with_heartbeat(
                 submitted_at = now
                 # Reset the idle baseline so the post-submit response gate (not a
                 # stale pre-submit quiet) governs the next decision.
+                last_output = now
+                continue
+            # Root-cause recovery: the first submit was eaten by a prompt and
+            # nothing came back. Re-type the trigger ONCE — the prompt has
+            # cleared, the box is empty again. Reset the two-phase submit so the
+            # text is re-typed now and the bare \r re-fires after the paste
+            # settle; latch ``resent`` so this can only happen once and re-arm
+            # the post-submit response gate from this moment.
+            if action == "resend":
+                if text_bytes:
+                    _write_all(master_fd, text_bytes)
+                resent = True
+                submitted = False
+                text_written = True
+                text_written_at = now
+                submitted_at = None
                 last_output = now
                 continue
             if action == "exit":
