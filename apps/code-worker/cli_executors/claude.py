@@ -192,6 +192,7 @@ def execute_claude_chat(task_input, session_dir: str):
         _fetch_claude_token,
         _fetch_claude_credential,
         _fetch_github_token,
+        _fetch_github_ssh_key,
         _INTEGRATION_NOT_CONNECTED_MESSAGES,
         _build_allowed_tools_from_mcp,
         ChatCliResult,
@@ -506,6 +507,18 @@ def execute_claude_chat(task_input, session_dir: str):
         _gh_token = None
     _apply_git_credential_env(env, _gh_token)
 
+    # ── SSH key for OAuth-blocked org repos (NFL/ustwo) ─────────────────
+    # Wire the tenant's GitHub SSH key into THIS turn's env so `git clone
+    # git@github.com:org/repo` works for repos OAuth can't reach. Ephemeral 0600
+    # keyfile + GIT_SSH_COMMAND in the per-turn env only (set-or-strip, no bleed);
+    # cleaned up in the finally below. Fetched fresh per-tenant (leak-free).
+    try:
+        _ssh_key = _fetch_github_ssh_key(task_input.tenant_id)
+    except Exception as exc:  # noqa: BLE001 - never block the turn on key fetch
+        logger.warning("github ssh key fetch failed (%s)", exc)
+        _ssh_key = None
+    _ssh_cleanup = cli_runtime.apply_git_ssh(env, _ssh_key)
+
     # ---- streaming emitter (no-op if flag off / chat_session_id missing) ----
     emitter = SessionEventEmitter(
         chat_session_id=getattr(task_input, "chat_session_id", "") or "",
@@ -591,6 +604,7 @@ def execute_claude_chat(task_input, session_dir: str):
                 on_chunk=on_chunk,
             )
     finally:
+        _ssh_cleanup()  # remove the ephemeral SSH keyfile dir
         _stats = emitter.close()
         # ── Phase 2 quota walker (task #264) ────────────────────────────
         # Walk the tenant HOME dir on the workspaces volume and prune

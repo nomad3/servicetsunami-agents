@@ -1413,6 +1413,27 @@ def _fetch_github_token(tenant_id: str) -> Optional[str]:
     return None
 
 
+def _fetch_github_ssh_key(tenant_id: str) -> Optional[str]:
+    """Return the tenant's GitHub SSH PRIVATE key (the /integrations connection),
+    for SSH clones of OAuth-blocked org repos (NFL / ustwo). None if not set.
+
+    The key material is NEVER logged. Service-to-service only (the endpoint is
+    internal-key gated + blocked from the public internet)."""
+    headers = {"X-Internal-Key": API_INTERNAL_KEY or "dev_mcp_key"}
+    try:
+        resp = httpx.get(
+            f"{API_BASE_URL}/api/v1/oauth/internal/ssh-key/github",
+            params={"tenant_id": tenant_id},
+            headers=headers,
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("private_key")
+    except Exception as e:
+        logger.warning("Failed to fetch github ssh key: %s", e)  # never logs the key
+    return None
+
+
 def _fetch_claude_token(tenant_id: str) -> Optional[str]:
     """Return the Claude Code OAuth subscription token, if any.
 
