@@ -949,6 +949,12 @@ def get_integration_token(
         raise HTTPException(status_code=404, detail=f"No active config for '{integration_name}'")
 
     creds = retrieve_credentials_for_skill(db, config.id, tid)
+    # SECURITY (Codex review): the SSH PRIVATE key is stored on the github config
+    # too, but this OAuth-token endpoint must NEVER return it — it has its own
+    # dedicated, separately-audited fetch (/internal/ssh-key/github). Strip it so a
+    # token caller can't receive raw key material wholesale.
+    creds.pop("ssh_private_key", None)
+    creds.pop("ssh_key_fingerprint", None)
     logger.info("Retrieved credentials for %s (tenant %s): keys=%s", integration_name, tid, list(creds.keys()))
 
     # For OAuth integrations, require oauth_token; for manual, require any credential
@@ -1002,3 +1008,73 @@ def get_integration_token(
             logger.warning("Token refresh failed for integration=%s tenant=%s, returning stored token", integration_name, tid)
 
     return creds
+
+
+# ── GitHub SSH key — for OAuth-blocked orgs (plan 2026-05-31) ─────────────────
+# Stores a Fernet-encrypted SSH private key on the tenant's github integration so
+# the code-worker can clone git@github.com repos OAuth can't reach (NFL / ustwo).
+# The service layer (app.services.ssh_key) validates + REJECTS passphrase keys and
+# never logs/returns key material — only a fingerprint. The decrypted key is
+# exposed ONLY via the internal (service-to-service) fetch below.
+
+
+class _GithubSshKeyIn(BaseModel):
+    private_key: str
+
+
+@router.post("/github/ssh-key")
+def save_github_ssh_key(
+    body: _GithubSshKeyIn,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Validate + store the tenant's GitHub SSH private key. Returns a fingerprint."""
+    from app.services import ssh_key as _ssh
+
+    try:
+        fingerprint = _ssh.save_ssh_key(db, current_user.tenant_id, body.private_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "saved", "fingerprint": fingerprint}
+
+
+@router.get("/github/ssh-key")
+def github_ssh_key_status(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    """Presence + fingerprint only — never returns the key."""
+    from app.services import ssh_key as _ssh
+
+    return _ssh.ssh_key_status(db, current_user.tenant_id)
+
+
+@router.delete("/github/ssh-key")
+def delete_github_ssh_key(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+):
+    from app.services import ssh_key as _ssh
+
+    removed = _ssh.delete_ssh_key(db, current_user.tenant_id)
+    return {"status": "removed" if removed else "not_found"}
+
+
+@router.get("/internal/ssh-key/github")
+def get_github_ssh_key_internal(
+    tenant_id: str = Query(...),
+    db: Session = Depends(deps.get_db),
+    _auth: None = Depends(_verify_internal_key),
+):
+    """Decrypted SSH private key for the code-worker. Service-to-service only
+    (internal key + blocked from the public internet like other /internal/*)."""
+    from app.services import ssh_key as _ssh
+
+    try:
+        tid = uuid.UUID(tenant_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid tenant_id")
+    key = _ssh.read_ssh_key_for_worker(db, tid)
+    if not key:
+        raise HTTPException(status_code=404, detail="No SSH key configured")
+    return {"private_key": key}
