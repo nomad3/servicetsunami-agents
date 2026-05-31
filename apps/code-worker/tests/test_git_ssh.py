@@ -46,3 +46,45 @@ def test_key_overwrites_stale_command():
     cleanup = cli_runtime.apply_git_ssh(env, _FAKE_KEY)
     assert "ghssh_" in env["GIT_SSH_COMMAND"]  # the fresh per-turn keyfile path
     cleanup()
+
+
+def test_setup_exception_cleans_up_keyfile_dir(monkeypatch):
+    # Codex IMPORTANT: if anything after mkdtemp raises, the 0600 keyfile dir must
+    # be removed (not leaked) before the exception propagates.
+    created = {}
+    real_mkdtemp = cli_runtime.tempfile.mkdtemp
+
+    def spy_mkdtemp(*a, **k):
+        d = real_mkdtemp(*a, **k)
+        created["dir"] = d
+        return d
+
+    monkeypatch.setattr(cli_runtime.tempfile, "mkdtemp", spy_mkdtemp)
+    # Force a failure AFTER mkdtemp: os.fdopen raises (propagates; chmod is
+    # swallowed, and patching os.open/exists would break the assertion below).
+    real_exists = os.path.exists
+
+    def _boom(*a, **k):
+        raise OSError("boom")
+
+    monkeypatch.setattr(cli_runtime.os, "fdopen", _boom)
+    env = {}
+    raised = False
+    try:
+        cli_runtime.apply_git_ssh(env, _FAKE_KEY)
+    except OSError:
+        raised = True
+    assert raised
+    assert "GIT_SSH_COMMAND" not in env  # not set on failure
+    assert not real_exists(created["dir"])  # dir cleaned up, no leak
+
+
+def test_error_snippet_scrubs_keyfile_path():
+    # Codex IMPORTANT: OpenSSH stderr can include `-i /tmp/ghssh_xxx/id`; the
+    # user-facing snippet must scrub that ephemeral path.
+    stderr = 'Load key "/tmp/ghssh_abc123/id": invalid format\nssh -i /tmp/ghssh_abc123/id failed'
+    out = cli_runtime.safe_cli_error_snippet(stderr, "")
+    assert "/tmp/ghssh_" not in out
+    assert "<ssh-key>" in out
+    # a normal error with no keyfile path is unchanged
+    assert cli_runtime.safe_cli_error_snippet("fatal: repository not found", "") == "fatal: repository not found"
