@@ -45,3 +45,22 @@ v1 should wire the **one** cleanest, already-instrumented completion site (likel
 
 ## Process
 Plan (this) → Codex + Luna review → implement on a branch → Codex+Luna review the diff → PR, **left open for Simon's sign-off** (a backend runtime edge shouldn't auto-merge unattended; it ships when Simon's awake and the test fleet is in place to watch it).
+
+## ⚠️ Review folded (Codex + Luna) — this needs prerequisites, NOT a tonight-implement
+
+Both reviewed the v1 plan. Verdict: direction + write-only-until-veto posture are right, but v1 is **premature** — the clean call site doesn't carry the needed data, the table is under-specified, and the failure math is wrong. Resequenced:
+
+**Codex (code-grounded blockers):**
+1. **Provenance gap (must fix first).** `from_agent_id` + a correlated `quality_score` are NOT available together at any clean hand-off site today: `/internal/delegate` (`agents.py:268`) persists recipient + run id but **not the delegating agent**; `handoff_status` (`agents.py:353`) returns only run status/reply/error; the dynamic agent step (`dynamic_step.py:51,238`) logs tokens/platform, not trust inputs; coalition `record_collaboration_step()` emits `phase_completed` then kicks `score_and_log_async`, and the scoring metadata has phase/agent-slug but **no `collaboration_id` or agent pair** (`coalition_activities.py:439`). → **Pre-step: add agent-pair + outcome-id provenance to the completion/scoring path**, and trigger trust off an **outbox/durable job after score persistence**, not a blind fire-and-forget at phase_completed.
+2. **Schema (migration first).** `agent_relationships` (`agent_relationship.py:14`) has **no `tenant_id`, no `updated_at`, no uniqueness constraint on the (from,to) pair**. → Migration: add `tenant_id` (tenant-safe joins), `updated_at`, a unique `(tenant_id, from_agent_id, to_agent_id)` for atomic upsert + per-pair locking.
+3. **Failure math is wrong.** `loss_step*(1 - quality/100)` makes LOW-quality failures hurt most — not "high-confidence failures cost more." And the scorer is gameable; it already tracks reliability (`auto_quality 0.5`, `consensus 0.7`, `auto_quality_scorer.py:267`). → Weight trust deltas by **scorer confidence / require consensus or human-backed scores**, and correct the failure formula.
+
+**Luna (lead):** (a) add an explicit guard + **test proving `trust_level` is read NOWHERE** in routing/recall/selection; (b) **persist a full audit row** per update (from, to, prior, delta, new, success, quality_score, handoff/outcome id, ts); (c) **clamp quality_score** to a known range before math; (d) deterministic, **concurrency-safe upsert**; (e) high-quality FAILED outcomes must **still apply some negative delta** unless explicitly substrate/throttle-related. Keep `gain=0.04, loss=0.12, bounds [0.05,0.95]`. Call site = hand-off **completion** (never initiation).
+
+### Resequenced (corrected) order — chained PRs
+- **PR-A (provenance):** thread agent-pair + outcome-id through the hand-off/coalition scoring path; emit a durable outcome record (outbox) after the score persists. No trust yet.
+- **PR-B (schema):** migration — `agent_relationships.tenant_id` + `updated_at` + unique `(tenant_id, from, to)`; a separate `trust_events` audit table.
+- **PR-C (trust write):** `update_trust_from_outcome` consuming PR-A's durable outcome, with the corrected confidence-weighted asymmetric math, atomic tenant-safe upsert, full audit row, and the "trust is read nowhere" guard-test. Still write-only.
+- (Later, gated) decay job; veto-into-`_call_agent`; only THEN trust→recall/routing.
+
+**Status:** NOT implemented tonight (correctly — it had real prerequisites). PR-A is the next buildable step; this is a ready spec for Simon's review.
