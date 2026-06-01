@@ -5,6 +5,32 @@ import { useNavigate, Link } from 'react-router-dom';
 import authService from '../services/auth';
 import BrandMark from '../components/BrandMark';
 
+// Mirrors the server-side policy in apps/api/app/schemas/auth.py
+// (_validate_password_complexity): 12+ chars and at least 3 of
+// {uppercase, lowercase, digit, symbol}. Enforced client-side so users
+// get an inline message instead of a bare 422.
+const PASSWORD_MIN_LENGTH = 12;
+const PASSWORD_MIN_CLASSES = 3;
+
+const countPasswordClasses = (pw) =>
+  [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((re) => re.test(pw)).length;
+
+const isPasswordValid = (pw) =>
+  pw.length >= PASSWORD_MIN_LENGTH && countPasswordClasses(pw) >= PASSWORD_MIN_CLASSES;
+
+// FastAPI returns a string `detail` for HTTPExceptions (e.g. "email taken")
+// but an array of {loc, msg, ...} for 422 validation errors. Render either
+// as readable text instead of dropping the user on a generic message.
+const extractErrorMessage = (err, t) => {
+  const detail = err.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const msgs = detail.map((d) => d && d.msg).filter(Boolean);
+    if (msgs.length) return msgs.join(' ');
+  }
+  return t('register.error');
+};
+
 const RegisterPage = () => {
   const { t } = useTranslation('auth');
   const [email, setEmail] = useState('');
@@ -19,6 +45,10 @@ const RegisterPage = () => {
     event.preventDefault();
     setError('');
     setSuccess('');
+    if (!isPasswordValid(password)) {
+      setError(t('register.passwordWeak'));
+      return;
+    }
     try {
       await authService.register(email, password, fullName, tenantName);
       setSuccess(t('register.success'));
@@ -26,7 +56,7 @@ const RegisterPage = () => {
         navigate('/login');
       }, 2000);
     } catch (err) {
-      setError(err.response?.data?.detail || t('register.error'));
+      setError(extractErrorMessage(err, t));
       console.error('Registration error:', err);
     }
   };
@@ -60,8 +90,10 @@ const RegisterPage = () => {
                 placeholder={t('register.passwordPlaceholder')}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                minLength={PASSWORD_MIN_LENGTH}
                 required
               />
+              <Form.Text className="text-muted">{t('register.passwordHint')}</Form.Text>
             </Form.Group>
 
             <Form.Group className="mb-3" controlId="formBasicFullName">
