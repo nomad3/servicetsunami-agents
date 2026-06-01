@@ -74,6 +74,10 @@ services:
       - EXPLORATION_RATE=${EXPLORATION_RATE:-0.0}
       - USE_MEMORY_V2=true
       - USE_MEMORY_V2_TENANT_ALLOWLIST=["752626d9-8b2c-4aa2-87ef-c458d48bd38a"]
+      # Kill-switch (2026-06-01): skip the per-tenant monitor auto-launch on API
+      # startup (startup_proactive_workflows) — they starved the orchestration
+      # queue. =1 while monitors are reworked onto a dedicated queue.
+      - DISABLE_MONITOR_CONTINUE_AS_NEW=${DISABLE_MONITOR_CONTINUE_AS_NEW:-1}
       - EMBEDDING_SERVICE_URL=embedding-service:50051
       - MEMORY_CORE_URL=memory-core:50052
       - USE_RUST_EMBEDDING=true
