@@ -12,6 +12,7 @@
     "getStarted": "Get Started",
     "engines": "Engines",
     "differentiators": "Why alpha",
+    "reality": "The ledger",
     "commands": "Commands"
   },
   "hero": {
@@ -332,6 +333,7 @@
       "cardiology": "Example",
       "engines": "Engines",
       "differentiators": "Why alpha",
+      "reality": "The ledger",
       "commands": "Commands"
     },
     "copy": "© {{year}} AgentProvision. All rights reserved."

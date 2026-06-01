@@ -12,6 +12,7 @@
     "getStarted": "Comenzar",
     "engines": "Motores",
     "differentiators": "Por qué alpha",
+    "reality": "El registro",
     "commands": "Comandos"
   },
   "hero": {
@@ -332,6 +333,7 @@
       "cardiology": "Ejemplo",
       "engines": "Motores",
       "differentiators": "Por qué alpha",
+      "reality": "El registro",
       "commands": "Comandos"
     },
     "copy": "© {{year}} AgentProvision. Todos los derechos reservados."
