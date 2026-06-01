@@ -16,6 +16,11 @@ const integrationConfigService = {
       params: accountEmail ? { account_email: accountEmail } : {},
     }),
   oauthStatus: (provider) => api.get(`/oauth/${provider}/status`),
+  // GitHub SSH key (for OAuth-blocked orgs). Returns/stores only a fingerprint;
+  // the private key is never echoed back.
+  githubSshKeyStatus: () => api.get('/oauth/github/ssh-key'),
+  githubSshKeySave: (privateKey) => api.post('/oauth/github/ssh-key', { private_key: privateKey }),
+  githubSshKeyDelete: () => api.delete('/oauth/github/ssh-key'),
   codexAuthStart: () => api.post('/codex-auth/start'),
   codexAuthStatus: () => api.get('/codex-auth/status'),
   codexAuthCancel: () => api.post('/codex-auth/cancel'),

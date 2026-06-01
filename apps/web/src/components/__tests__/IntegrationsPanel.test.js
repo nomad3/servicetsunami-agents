@@ -54,6 +54,9 @@ jest.mock('../../components/DefaultCliSelector', () => () => (
 jest.mock('../../components/GithubPrimaryAccountSelector', () => () => (
   <div data-testid="github-primary-selector" />
 ));
+jest.mock('../../components/GithubSshKeyCard', () => () => (
+  <div data-testid="github-ssh-key-card" />
+));
 jest.mock('../../components/CpaExportFormatSelector', () => () => (
   <div data-testid="cpa-export-selector" />
 ));

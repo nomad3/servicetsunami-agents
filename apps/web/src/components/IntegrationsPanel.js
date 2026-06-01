@@ -47,6 +47,7 @@ import { notificationService } from '../services/notifications';
 
 import DefaultCliSelector from './DefaultCliSelector';
 import GithubPrimaryAccountSelector from './GithubPrimaryAccountSelector';
+import GithubSshKeyCard from './GithubSshKeyCard';
 import CpaExportFormatSelector from './CpaExportFormatSelector';
 import WhatsAppChannelCard from './WhatsAppChannelCard';
 
@@ -990,6 +991,9 @@ const IntegrationsPanel = () => {
             }
           </Button>
         </div>
+
+        {/* GitHub SSH key — for repos in OAuth-blocked orgs (NFL/ustwo). */}
+        {provider === 'github' && <GithubSshKeyCard />}
 
         {/* Show monitor toggle when Google is connected */}
         {skill.oauth_provider === 'google' && oauthStatuses.google?.connected && (
