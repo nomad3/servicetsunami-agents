@@ -43,7 +43,7 @@ from app.workflows.training_ingestion import (
     extract_and_persist_batch as training_extract_and_persist_batch,
     finalize_training_run,
 )
-from app.workflows.activities.dynamic_step import execute_dynamic_step, finalize_workflow_run
+from app.workflows.activities.dynamic_step import execute_dynamic_step, finalize_workflow_run, monitors_continue_as_new_disabled
 from app.workflows.activities.task_execution import (
     dispatch_task,
     recall_memory,
@@ -386,6 +386,7 @@ async def run_orchestration_worker():
             # Dynamic workflow step executor
             execute_dynamic_step,
             finalize_workflow_run,
+            monitors_continue_as_new_disabled,
             # Initial-training pipeline (alpha quickstart / web onboarding)
             training_extract_and_persist_batch,
             finalize_training_run,

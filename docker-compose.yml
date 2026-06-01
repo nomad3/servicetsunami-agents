@@ -160,6 +160,12 @@ services:
       - HF_HUB_DISABLE_XET=1
       - USE_MEMORY_V2=true
       - USE_MEMORY_V2_TENANT_ALLOWLIST=["752626d9-8b2c-4aa2-87ef-c458d48bd38a"]
+      # Kill-switch for the self-perpetuating monitor loops (inbox/competitor/
+      # autonomous-learning) — they continue_as_new on the shared orchestration
+      # queue and starved PostChatMemory. =1 makes each chain EXIT as it wakes
+      # instead of perpetuating. Set while the monitors are reworked (dedicated
+      # queue). Flip to 0 to re-enable.
+      - DISABLE_MONITOR_CONTINUE_AS_NEW=${DISABLE_MONITOR_CONTINUE_AS_NEW:-1}
       - EMBEDDING_SERVICE_URL=embedding-service:50051
       - MEMORY_CORE_URL=memory-core:50052
       - USE_RUST_EMBEDDING=true

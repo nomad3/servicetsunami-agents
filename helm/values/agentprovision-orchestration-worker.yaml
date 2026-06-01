@@ -118,6 +118,12 @@ env:
     value: "http://agentprovision-mcp:80"
   - name: API_BASE_URL
     value: "http://agentprovision-api"
+  # Kill-switch for self-perpetuating monitor loops (inbox/competitor/autonomous-
+  # learning) — they continue_as_new on the shared orchestration queue and starved
+  # PostChatMemory. "1" makes each chain exit as it wakes. Set while monitors are
+  # reworked onto a dedicated queue; flip to "0" to re-enable.
+  - name: DISABLE_MONITOR_CONTINUE_AS_NEW
+    value: "1"
 
 # No autoscaling - single instance
 autoscaling:

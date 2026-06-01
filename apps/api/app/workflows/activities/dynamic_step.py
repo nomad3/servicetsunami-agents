@@ -719,6 +719,22 @@ def _log_step(run_id: str, step_id: str, step_type: str, status: str,
 
 
 @activity.defn
+async def monitors_continue_as_new_disabled() -> bool:
+    """Kill-switch for the self-perpetuating monitor loops (2026-06-01 incident).
+
+    The always-on monitors (inbox / competitor / autonomous-learning) run as
+    ``continue_as_new`` DynamicWorkflowExecutor chains. Their steps are baked into
+    each running workflow's ``input``, so pausing the DB definition does NOT stop a
+    running chain — only this in-loop check (read via an activity, so it's
+    deterministic-safe for the workflow) can make a chain EXIT instead of
+    perpetuating. When ``DISABLE_MONITOR_CONTINUE_AS_NEW=1`` every chain finalizes
+    and stops the next time it wakes from its sleep — draining the queue without
+    terminate whack-a-mole. Default off (monitors behave normally)."""
+    import os
+    return os.environ.get("DISABLE_MONITOR_CONTINUE_AS_NEW", "").strip() in ("1", "true", "yes")
+
+
+@activity.defn
 async def finalize_workflow_run(
     run_id: str,
     status: str,

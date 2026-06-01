@@ -18,6 +18,7 @@ with workflow.unsafe.imports_passed_through():
     from app.workflows.activities.dynamic_step import (
         execute_dynamic_step,
         finalize_workflow_run,
+        monitors_continue_as_new_disabled,
         notify_approval_requested,
     )
 
@@ -225,6 +226,17 @@ class DynamicWorkflowExecutor:
                 args=[input.run_id, "completed", steps_completed, total_tokens, total_cost],
                 start_to_close_timeout=timedelta(seconds=30),
             )
+            # Kill-switch (2026-06-01 incident): when monitors are globally
+            # disabled, EXIT instead of perpetuating, so every continue_as_new
+            # chain drains itself as it wakes — no terminate whack-a-mole. Checked
+            # via an activity (env read is non-deterministic in workflow code).
+            _stop = await workflow.execute_activity(
+                monitors_continue_as_new_disabled,
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+            if _stop:
+                workflow.logger.info("monitor continue_as_new disabled by kill-switch — exiting chain")
+                return {"status": "stopped_by_killswitch", "steps_completed": steps_completed}
             await workflow.sleep(timedelta(seconds=interval))
             workflow.continue_as_new(input)
 
