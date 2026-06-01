@@ -9,7 +9,10 @@
     "trust": "Confianza",
     "cardiology": "Ejemplo",
     "signIn": "Iniciar Sesión",
-    "getStarted": "Comenzar"
+    "getStarted": "Comenzar",
+    "engines": "Motores",
+    "differentiators": "Por qué alpha",
+    "commands": "Comandos"
   },
   "hero": {
     "badge": "Alpha — el OS de agentes",
@@ -255,10 +258,22 @@
     }
   },
   "statsStrip": {
-    "tools": { "value": "81", "label": "Herramientas MCP" },
-    "workflows": { "value": "25+", "label": "Workflows Nativos" },
-    "responseTime": { "value": "5.5s", "label": "Tiempo Medio de Respuesta" },
-    "improvement": { "value": "88%", "label": "Más Rápido que el Baseline" }
+    "tools": {
+      "value": "81",
+      "label": "Herramientas MCP"
+    },
+    "workflows": {
+      "value": "25+",
+      "label": "Workflows Nativos"
+    },
+    "responseTime": {
+      "value": "5.5s",
+      "label": "Tiempo Medio de Respuesta"
+    },
+    "improvement": {
+      "value": "88%",
+      "label": "Más Rápido que el Baseline"
+    }
   },
   "integrations": {
     "headline": "Se conecta con todo lo que ya usas"
@@ -275,13 +290,34 @@
   },
   "bento": {
     "heading": "Todo lo que tu equipo necesita",
-    "aiCommand": { "title": "Comando IA", "desc": "Orquestación de agentes por chat. Lanza tareas en lenguaje natural y observa la ejecución de tu red." },
-    "memory": { "title": "Memoria del agente", "desc": "Grafo de conocimiento persistente. Cada interacción construye contexto." },
-    "multiAgent": { "title": "Equipos Multi-Agente", "desc": "5 equipos especializados, cero fricción de coordinación." },
-    "workflows": { "title": "Workflows", "desc": "Constructor visual sin código con 25 plantillas nativas." },
-    "security": { "title": "Seguridad Empresarial", "desc": "Aislamiento multi-tenant, vault de credenciales cifrado, autenticación JWT." },
-    "inbox": { "title": "Monitor de Inbox", "desc": "Monitoreo proactivo de email y calendario, 24/7." },
-    "codeAgent": { "title": "Agente de Código", "desc": "Programación autónoma con Claude Code CLI. Crea PRs con trazas de auditoría completas." }
+    "aiCommand": {
+      "title": "Comando IA",
+      "desc": "Orquestación de agentes por chat. Lanza tareas en lenguaje natural y observa la ejecución de tu red."
+    },
+    "memory": {
+      "title": "Memoria del agente",
+      "desc": "Grafo de conocimiento persistente. Cada interacción construye contexto."
+    },
+    "multiAgent": {
+      "title": "Equipos Multi-Agente",
+      "desc": "5 equipos especializados, cero fricción de coordinación."
+    },
+    "workflows": {
+      "title": "Workflows",
+      "desc": "Constructor visual sin código con 25 plantillas nativas."
+    },
+    "security": {
+      "title": "Seguridad Empresarial",
+      "desc": "Aislamiento multi-tenant, vault de credenciales cifrado, autenticación JWT."
+    },
+    "inbox": {
+      "title": "Monitor de Inbox",
+      "desc": "Monitoreo proactivo de email y calendario, 24/7."
+    },
+    "codeAgent": {
+      "title": "Agente de Código",
+      "desc": "Programación autónoma con Claude Code CLI. Crea PRs con trazas de auditoría completas."
+    }
   },
   "footer": {
     "tagline": "Alpha — el OS de agentes para AgentProvision. CLI-first, listo para escritorio.",
@@ -293,7 +329,10 @@
       "connectors": "Conexiones",
       "fleet": "Flota de Agentes",
       "trust": "Confianza",
-      "cardiology": "Ejemplo"
+      "cardiology": "Ejemplo",
+      "engines": "Motores",
+      "differentiators": "Por qué alpha",
+      "commands": "Comandos"
     },
     "copy": "© {{year}} AgentProvision. Todos los derechos reservados."
   },

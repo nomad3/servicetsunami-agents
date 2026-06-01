@@ -15,7 +15,7 @@ const PILLARS = [
       'Every chat turn is scored across 6 quality dimensions and fed back into the RL policy. ' +
       'Per-tenant, per-agent, learned. Your team gets better routing decisions automatically — ' +
       'no prompt-engineering bake-off needed.',
-    proof: '6-dimension rubric · 5% exploration · Ollama Qwen2.5-Coder',
+    proof: '6-dimension rubric · 5% exploration · local Gemma 4 (Ollama)',
   },
   {
     icon: '📚',
@@ -43,12 +43,14 @@ export default function AlphaPlatformPower() {
     <section className="alpha-power" id="platform">
       <div className="alpha-power__inner">
         <h2 className="alpha-power__title">
-          The platform behind the prompt.
+          The platform behind the network.
         </h2>
         <p className="alpha-power__subtitle">
-          alpha is the surface. Everything underneath has been running
-          in production for months — and no leaf CLI can copy it without
-          becoming a multi-tenant SaaS first.
+          alpha is the surface; the substrate underneath is a real, running system —
+          it learns from every response, remembers across the whole fleet, and runs
+          durably on Temporal — always with human-in-the-loop approval gates and a full
+          audit trail. The operating layer for an AI agent network, not
+          autonomous-everything.
         </p>
 
         <div className="alpha-power__grid">

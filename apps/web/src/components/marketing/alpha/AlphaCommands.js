@@ -57,12 +57,14 @@ export default function AlphaCommands() {
     <section className="alpha-commands" id="commands">
       <div className="alpha-commands__inner">
         <h2 className="alpha-commands__title">
-          Seven surfaces. One binary. Zero plumbing.
+          The substrate, one verb at a time.
         </h2>
         <p className="alpha-commands__subtitle">
-          Every command is backed by the AgentProvision platform —
-          Temporal workflows, knowledge graph, Fernet credential vault,
-          and the same RL scoring that grades every agent response.
+          Every command reaches straight into the four engines —{' '}
+          <code>recall</code>/<code>remember</code> drive memory,{' '}
+          <code>coalition</code> drives teamwork, <code>run</code>/<code>recipes</code>{' '}
+          drive orchestration — all backed by Temporal workflows, the knowledge graph,
+          a Fernet credential vault, and the RL scoring that grades every response.
         </p>
 
         <div className="alpha-commands__grid">

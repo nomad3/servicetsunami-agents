@@ -9,7 +9,10 @@
     "trust": "Trust",
     "cardiology": "Example",
     "signIn": "Sign In",
-    "getStarted": "Get Started"
+    "getStarted": "Get Started",
+    "engines": "Engines",
+    "differentiators": "Why alpha",
+    "commands": "Commands"
   },
   "hero": {
     "badge": "Alpha — the Agent OS",
@@ -255,10 +258,22 @@
     }
   },
   "statsStrip": {
-    "tools": { "value": "81", "label": "MCP Tools" },
-    "workflows": { "value": "25+", "label": "Native Workflows" },
-    "responseTime": { "value": "5.5s", "label": "Avg Response Time" },
-    "improvement": { "value": "88%", "label": "Faster Than Baseline" }
+    "tools": {
+      "value": "81",
+      "label": "MCP Tools"
+    },
+    "workflows": {
+      "value": "25+",
+      "label": "Native Workflows"
+    },
+    "responseTime": {
+      "value": "5.5s",
+      "label": "Avg Response Time"
+    },
+    "improvement": {
+      "value": "88%",
+      "label": "Faster Than Baseline"
+    }
   },
   "integrations": {
     "headline": "Connects to everything you already use"
@@ -275,13 +290,34 @@
   },
   "bento": {
     "heading": "Everything your team needs",
-    "aiCommand": { "title": "AI Command", "desc": "Chat-driven agent orchestration. Dispatch multi-step tasks in plain language and watch your agent network execute." },
-    "memory": { "title": "Agent Memory", "desc": "Persistent knowledge graph. Every interaction builds context." },
-    "multiAgent": { "title": "Multi-Agent Teams", "desc": "5 specialized teams, zero coordination overhead." },
-    "workflows": { "title": "Workflows", "desc": "Visual no-code workflow builder with 25 native templates." },
-    "security": { "title": "Enterprise Security", "desc": "Multi-tenant isolation, encrypted credential vault, JWT auth." },
-    "inbox": { "title": "Inbox Monitor", "desc": "Proactive email and calendar monitoring, 24/7." },
-    "codeAgent": { "title": "Code Agent", "desc": "Autonomous coding powered by Claude Code CLI. Creates PRs with full audit trails." }
+    "aiCommand": {
+      "title": "AI Command",
+      "desc": "Chat-driven agent orchestration. Dispatch multi-step tasks in plain language and watch your agent network execute."
+    },
+    "memory": {
+      "title": "Agent Memory",
+      "desc": "Persistent knowledge graph. Every interaction builds context."
+    },
+    "multiAgent": {
+      "title": "Multi-Agent Teams",
+      "desc": "5 specialized teams, zero coordination overhead."
+    },
+    "workflows": {
+      "title": "Workflows",
+      "desc": "Visual no-code workflow builder with 25 native templates."
+    },
+    "security": {
+      "title": "Enterprise Security",
+      "desc": "Multi-tenant isolation, encrypted credential vault, JWT auth."
+    },
+    "inbox": {
+      "title": "Inbox Monitor",
+      "desc": "Proactive email and calendar monitoring, 24/7."
+    },
+    "codeAgent": {
+      "title": "Code Agent",
+      "desc": "Autonomous coding powered by Claude Code CLI. Creates PRs with full audit trails."
+    }
   },
   "footer": {
     "tagline": "Alpha — agent OS for AgentProvision. CLI-first, desktop-ready.",
@@ -293,7 +329,10 @@
       "connectors": "Connectors",
       "fleet": "Agent Fleet",
       "trust": "Trust",
-      "cardiology": "Example"
+      "cardiology": "Example",
+      "engines": "Engines",
+      "differentiators": "Why alpha",
+      "commands": "Commands"
     },
     "copy": "© {{year}} AgentProvision. All rights reserved."
   },

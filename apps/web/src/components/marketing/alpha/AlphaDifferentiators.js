@@ -101,12 +101,14 @@ export default function AlphaDifferentiators() {
         >
           alpha is not competing with Claude Code, Codex, or Gemini CLI.
           <br />
-          <span className="alpha-diff__title-accent">It orchestrates them.</span>
+          <span className="alpha-diff__title-accent">It orchestrates a network of them.</span>
         </motion.h2>
         <p className="alpha-diff__subtitle">
-          The four major coding CLIs share five structural limits.
-          alpha solves all five — and adds eight new capabilities none of
-          them ship.
+          A leaf CLI is one agent, one vendor, one ephemeral session — no shared
+          memory, no affect signal, no durable team structure, so it can&rsquo;t
+          coordinate a fleet or close a learning loop across turns. alpha is the
+          substrate underneath: it gives a network of these CLIs the eight
+          capabilities none of them ship alone.
         </p>
 
         <div className="alpha-diff__table-wrap">
