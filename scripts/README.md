@@ -33,6 +33,12 @@ Utility scripts. Categorized by purpose. Each is self-contained — read its top
 | `check_datasets.py` | Inspect dataset rows + sync state. |
 | `check_db_stats.py` | Print row counts across the multi-tenant tables. |
 
+## Agent coordination
+
+| Script | Purpose |
+|--------|---------|
+| `claudia_bridge.py` | Dependency-free local bridge for Luna -> Claudia delegation via `.claudia/` mailbox files, Claude Code hook polling, signed webhooks, and GitHub issue handoff bodies. |
+
 ## Benchmarks + reports
 
 | Script | Purpose |
