@@ -306,9 +306,20 @@ async def startup_proactive_workflows():
     """
     import asyncio
     import logging as _logging
+    import os as _os
     from app.db.session import SessionLocal as _SL
 
     logger = _logging.getLogger(__name__)
+
+    # Kill-switch (2026-06-01 incident): this hook auto-launches Autonomous
+    # Learning + Inbox + Competitor monitors for EVERY tenant (~44) on every API
+    # boot — they continue_as_new on the shared orchestration queue and starved
+    # PostChatMemory (memory write-back). When DISABLE_MONITOR_CONTINUE_AS_NEW=1
+    # we skip the auto-launch entirely so the queue stays clear while the monitors
+    # are reworked onto a dedicated queue. Flip to 0 to re-enable.
+    if _os.environ.get("DISABLE_MONITOR_CONTINUE_AS_NEW", "").strip() in ("1", "true", "yes"):
+        logger.info("Proactive workflow auto-start SKIPPED (DISABLE_MONITOR_CONTINUE_AS_NEW set)")
+        return
 
     async def _launch():
         # Give Temporal a few seconds to be ready

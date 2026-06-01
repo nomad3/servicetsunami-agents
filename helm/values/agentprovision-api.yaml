@@ -222,6 +222,11 @@ externalSecret:
 env:
   - name: TEMPORAL_ADDRESS
     value: "temporal:7233"
+  # Kill-switch (2026-06-01): skip the per-tenant monitor auto-launch on API
+  # startup (startup_proactive_workflows) — they starved the orchestration queue.
+  # "1" while monitors are reworked onto a dedicated queue; flip to "0" to re-enable.
+  - name: DISABLE_MONITOR_CONTINUE_AS_NEW
+    value: "1"
   # MCP_SERVER_URL: was pointing at the deprecated `mcp-server:8000`
   # (the old Databricks/Playwright server, removed per CLAUDE.md).
   # Point it at the live FastMCP service so any legacy fallback reaches
