@@ -33,6 +33,21 @@ import os
 from datetime import timedelta
 
 from temporalio import workflow
+from temporalio.common import RetryPolicy
+
+# Bounded retry for the external-MCP extraction activity (2026-06-01 incident):
+# act_extract_media had NO retry_policy, so Temporal's default unlimited-retry
+# (maximum_attempts=0) applied — a persistent MCP ConnectError retried 3000+
+# times and STARVED the agentprovision-orchestration queue, blocking
+# PostChatMemoryWorkflow (memory write-back) for hours. Cap attempts so a failing
+# external call gives up and falls through to the existing quarantine path
+# instead of hammering the worker forever.
+_EXTRACT_RETRY = RetryPolicy(
+    maximum_attempts=5,
+    initial_interval=timedelta(seconds=2),
+    maximum_interval=timedelta(seconds=30),
+    backoff_coefficient=2.0,
+)
 
 with workflow.unsafe.imports_passed_through():
     import hashlib
@@ -269,6 +284,7 @@ class LearnFromMediaWorkflow:
                 A.act_extract_media,
                 args=[source_url, 900],
                 start_to_close_timeout=_ACTIVITY_TIMEOUTS["extract"],
+                retry_policy=_EXTRACT_RETRY,  # bounded — no more 3000-retry runaway
             )
             if not extract["ok"]:
                 # T3.2b — per-error-type notify message + quarantine.
