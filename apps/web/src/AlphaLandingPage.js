@@ -16,6 +16,7 @@ import AlphaHero from './components/marketing/alpha/AlphaHero';
 import AlphaEngines from './components/marketing/alpha/AlphaEngines';
 import AlphaMetrics from './components/marketing/alpha/AlphaMetrics';
 import AlphaDifferentiators from './components/marketing/alpha/AlphaDifferentiators';
+import AlphaRealityLedger from './components/marketing/alpha/AlphaRealityLedger';
 import AlphaCommands from './components/marketing/alpha/AlphaCommands';
 import AlphaPlatformPower from './components/marketing/alpha/AlphaPlatformPower';
 import './LandingPage.css'; // shared design tokens + nav/footer/cta styles
@@ -37,10 +38,11 @@ const APEX_SIGNIN = 'https://agentprovision.com/login';
 // LandingFooter default to the main landing's set; we pass our own so
 // clicks don't scroll to nowhere. `engines` leads the set — it's the
 // spine of the 2026-05-31 redesign (the four-engine substrate).
-const ALPHA_NAV_LINKS = ['engines', 'differentiators', 'commands', 'platform'];
+const ALPHA_NAV_LINKS = ['engines', 'differentiators', 'reality', 'commands', 'platform'];
 const ALPHA_FOOTER_LINKS = [
   { key: 'engines', href: '#engines' },
   { key: 'differentiators', href: '#differentiators' },
+  { key: 'reality', href: '#reality' },
   { key: 'commands', href: '#commands' },
   { key: 'platform', href: '#platform' },
   // GitHub link is a real external href, not a fake anchor.
@@ -63,6 +65,7 @@ export default function AlphaLandingPage() {
         <AlphaEngines />
         <AlphaMetrics />
         <AlphaDifferentiators />
+        <AlphaRealityLedger />
         <AlphaCommands />
         <AlphaPlatformPower />
         <CTASection registerHref={APEX_REGISTER} />

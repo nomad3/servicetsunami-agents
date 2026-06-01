@@ -521,3 +521,197 @@
   color: var(--land-blue);
   margin: 0;
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   AgentNetworkGraph — the signature hero animation (.ang-*)
+   Bespoke, GPU-light: a single pulse flows command→alpha→memory→specialists→
+   approval-gate. The motion IS the product story (stateless → teammate work).
+   Reduced motion → fully-formed static graph (handled in JS by omitting pulses).
+   ─────────────────────────────────────────────────────────────────────────── */
+.ang {
+  width: 100%;
+  max-width: 560px;
+  aspect-ratio: 1 / 0.78;
+  margin: 0 auto;
+}
+.ang__svg { width: 100%; height: 100%; overflow: visible; }
+
+/* Edges — thin, low-contrast; the recall edges are dashed to read as "memory". */
+.ang__edge {
+  stroke: var(--land-border);
+  stroke-width: 0.45;
+  opacity: 0.55;
+}
+.ang__edge--recall {
+  stroke: var(--land-teal);
+  stroke-width: 0.4;
+  stroke-dasharray: 1.4 1.4;
+  opacity: 0.5;
+}
+
+/* Nodes */
+.ang__halo { opacity: 0; transition: opacity 0.4s ease; }
+.ang__dot {
+  fill: var(--land-bg);
+  stroke: var(--land-blue);
+  stroke-width: 0.7;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.ang__node--orchestrator .ang__dot { stroke: var(--land-blue); stroke-width: 1; }
+.ang__node--memory .ang__dot { stroke: var(--land-teal); }
+.ang__node--gate .ang__dot { stroke: #d98e2b; stroke-dasharray: 1.6 1; }
+.ang__node--specialist .ang__dot { stroke: #6b7bd6; }
+.ang__node--in .ang__dot { fill: var(--land-blue); stroke: var(--land-blue); }
+
+.ang__label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 3px;
+  fill: var(--land-text-muted);
+  letter-spacing: 0.02em;
+}
+.ang__gate-tag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 3.2px;
+  fill: #d98e2b;
+  font-weight: 600;
+}
+
+/* Pulse — a dot that rides each edge via SVG <animateMotion> (set in JS). The
+   motion + opacity are SMIL-driven for cross-browser reliability; CSS only sets
+   the look. A subtle drop-shadow gives the signal a comet feel. */
+.ang__pulse {
+  fill: var(--land-blue);
+  opacity: 0;
+  filter: drop-shadow(0 0 1.2px var(--land-blue));
+}
+.ang__pulse--recall { fill: var(--land-teal); filter: drop-shadow(0 0 1.2px var(--land-teal)); }
+
+/* Node light-up: a brief stroke-brighten + halo when the signal arrives,
+   then a gentle settle. Loops with the pulse so the network stays alive. */
+.ang__node .ang__dot { animation: ang-light 4.4s ease-in-out infinite; }
+.ang__node .ang__halo { animation: ang-halo 4.4s ease-in-out infinite; }
+
+@keyframes ang-light {
+  0%, 100% { stroke-width: 0.7; }
+  /* the bright moment is set per-node via animation-delay in JS */
+  6%  { stroke-width: 1.6; }
+  18% { stroke-width: 0.9; }
+}
+@keyframes ang-halo {
+  0%, 100% { opacity: 0; }
+  6%  { opacity: 0.9; }
+  30% { opacity: 0.18; }
+}
+
+/* The gate gets a distinct "pause" pulse — slower, amber — the honesty beat. */
+.ang__node--gate .ang__dot { animation: ang-gate 4.4s ease-in-out infinite; }
+@keyframes ang-gate {
+  0%, 70%, 100% { stroke-width: 0.7; opacity: 0.85; }
+  80% { stroke-width: 1.8; opacity: 1; }
+  90% { stroke-width: 1.2; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ang__pulse, .ang__dot, .ang__halo, .ang__node--gate .ang__dot { animation: none; }
+  .ang__halo { opacity: 0.12; }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Hero viz column — the network graph sits above a compact terminal.
+   ─────────────────────────────────────────────────────────────────────────── */
+.alpha-hero__viz {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  align-items: center;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   AlphaRealityLedger (.alpha-ledger-*) — honest Live / Guarded / Next columns.
+   ─────────────────────────────────────────────────────────────────────────── */
+.alpha-ledger {
+  padding: 96px 24px;
+  background: var(--land-bg-subtle);
+  border-top: 1px solid var(--land-border);
+}
+.alpha-ledger__inner { max-width: 1140px; margin: 0 auto; }
+.alpha-ledger__head { max-width: 720px; margin: 0 auto 48px; text-align: center; }
+.alpha-ledger__eyebrow {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--land-teal);
+}
+.alpha-ledger__title {
+  font-size: clamp(1.6rem, 3.4vw, 2.4rem);
+  font-weight: 700;
+  margin: 10px 0 14px;
+  color: var(--land-text);
+  letter-spacing: -0.02em;
+}
+.alpha-ledger__subtitle {
+  font-size: 1.02rem;
+  line-height: 1.6;
+  color: var(--land-text-muted);
+  margin: 0;
+}
+.alpha-ledger__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+.alpha-ledger__col {
+  background: var(--land-bg);
+  border: 1px solid var(--land-border);
+  border-radius: 14px;
+  padding: 24px 22px;
+  /* a hairline top accent in the column's color */
+  border-top: 3px solid var(--land-border);
+}
+.alpha-ledger__col--live { border-top-color: #2d9d78; }
+.alpha-ledger__col--alpha { border-top-color: #d98e2b; }
+.alpha-ledger__col--next { border-top-color: #6b7bd6; }
+.alpha-ledger__col-head { display: flex; align-items: center; gap: 8px; }
+.alpha-ledger__pip { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.alpha-ledger__pip--live { background: #2d9d78; box-shadow: 0 0 0 3px rgba(45,157,120,0.15); }
+.alpha-ledger__pip--alpha { background: #d98e2b; box-shadow: 0 0 0 3px rgba(217,142,43,0.15); }
+.alpha-ledger__pip--next { background: #6b7bd6; box-shadow: 0 0 0 3px rgba(107,123,214,0.15); }
+.alpha-ledger__tag {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--land-text);
+  letter-spacing: -0.01em;
+}
+.alpha-ledger__note {
+  font-size: 0.8rem;
+  color: var(--land-text-muted);
+  margin: 6px 0 16px;
+  font-style: italic;
+}
+.alpha-ledger__list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 11px; }
+.alpha-ledger__list li {
+  position: relative;
+  padding-left: 20px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--land-text);
+}
+.alpha-ledger__list li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--land-border);
+}
+.alpha-ledger__col--live .alpha-ledger__list li::before { background: #2d9d78; }
+.alpha-ledger__col--alpha .alpha-ledger__list li::before { background: #d98e2b; }
+.alpha-ledger__col--next .alpha-ledger__list li::before { background: #6b7bd6; }
+
+@media (max-width: 900px) {
+  .alpha-ledger__grid { grid-template-columns: 1fr; }
+}

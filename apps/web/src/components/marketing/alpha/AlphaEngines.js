@@ -110,11 +110,13 @@ export default function AlphaEngines() {
             </span>
           </h2>
           <p className="alpha-engines__subtitle">
-            Competitors bolt a vector DB onto an LLM. They have no affect signal and
-            no durable team structure, so they can&rsquo;t close a learning loop
-            across turns, agents, or nights. AgentProvision runs all four engines on{' '}
-            <strong>one shared substrate</strong> — the same three loops a human
-            organization took millennia to evolve, now built into software.
+            Most tools bolt a vector DB onto an LLM. No affect signal, no durable
+            team structure — so they can&rsquo;t close a learning loop across turns,
+            agents, or nights. AgentProvision runs all four engines on{' '}
+            <strong>one shared substrate</strong> — the coordination layer that&rsquo;s
+            been missing between isolated LLMs and a real team:{' '}
+            <strong>memory makes agents stateful, mood makes them empathic, roles
+            make them a team, and trust keeps them honest.</strong>
           </p>
         </motion.div>
 

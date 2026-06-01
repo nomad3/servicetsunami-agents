@@ -23,21 +23,28 @@ test('renders the copyable install command', () => {
   ).toBeInTheDocument();
 });
 
-test('register CTA links to the apex (not subdomain-relative)', () => {
+test('primary CTA links to the apex (not subdomain-relative)', () => {
   // PR #450 BLOCKER B1: alpha CTAs must point at the apex so auth
   // flows resolve. Locks the contract — the wrapping <a> href must
   // be the absolute agentprovision.com URL, not a relative /register
   // that would 404 on the alpha subdomain.
   render(<AlphaHero />);
-  const cta = screen.getByText(/get started free/i).closest('a');
+  const cta = screen.getByText(/start free/i).closest('a');
   expect(cta).not.toBeNull();
   expect(cta.getAttribute('href')).toBe('https://agentprovision.com/register');
 });
 
-test('GitHub link opens in new tab', () => {
+test('secondary CTA is an on-page "How it works" anchor', () => {
+  // 2026-05-31 redesign (Codex review): one primary CTA before trust is
+  // earned; the second is an in-page jump to the engines section, not a
+  // competing GitHub/source link.
   render(<AlphaHero />);
-  const gh = screen.getByText(/view on github/i).closest('a');
-  expect(gh).not.toBeNull();
-  expect(gh.getAttribute('target')).toBe('_blank');
-  expect(gh.getAttribute('rel')).toMatch(/noopener/);
+  const how = screen.getByText(/how it works/i).closest('a');
+  expect(how).not.toBeNull();
+  expect(how.getAttribute('href')).toBe('#engines');
+});
+
+test('hero headline carries the empathic-teammate spine', () => {
+  render(<AlphaHero />);
+  expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/trusted teammates/i);
 });

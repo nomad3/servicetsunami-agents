@@ -14,6 +14,7 @@
 import { useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { track } from '../../../services/marketingAnalytics';
+import AgentNetworkGraph from './AgentNetworkGraph';
 
 const INSTALL_CMD = 'curl -fsSL https://agentprovision.com/install.sh | sh';
 // Apex auth URL — see comment on AlphaLandingPage.js. PR #450 BLOCKER B1.
@@ -49,18 +50,17 @@ export default function AlphaHero() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, ease: 'easeOut' }}
         >
-          <span className="alpha-hero__badge">$ alpha — the agent network kernel</span>
+          <span className="alpha-hero__badge">$ alpha — the operating layer for agent teams</span>
           <h1 className="alpha-hero__title">
-            A network of AI agents<br />that runs your operations.
+            Turn stateless AI agents<br />into trusted teammates.
           </h1>
           <p className="alpha-hero__subtitle">
-            Not a chatbot. Not a GenAI wrapper. AgentProvision gives a fleet of agents
-            a <strong>coordination substrate</strong> — durable memory, a real internal
-            mood, and team structure — orchestrated from one terminal binary across
-            Claude Code, Codex, Gemini CLI, and Copilot.
-            <br />
-            <strong>The substrate human organizations took millennia to evolve,</strong>{' '}
-            now built into software.
+            Not a chatbot. Not a GenAI wrapper. AgentProvision is the operating layer
+            that gives a fleet of agents what a team needs to work together:{' '}
+            <strong>durable memory</strong> (stateful), <strong>a real internal mood</strong>{' '}
+            (empathic), <strong>roles &amp; trust</strong> (a team), and{' '}
+            <strong>human approval where it matters</strong> — orchestrated from one
+            terminal binary across Claude Code, Codex, Gemini CLI, and Copilot.
           </p>
 
           <div className="alpha-hero__install">
@@ -76,52 +76,55 @@ export default function AlphaHero() {
           </div>
 
           <div className="alpha-hero__ctas">
-            {/* Absolute href to the apex so the auth flow always
-                resolves — cloudflared only routes /api/* on the apex
-                hostname. PR #450 review BLOCKER B1. */}
+            {/* One primary CTA before trust is earned (Codex review): start with
+                the product. The install one-liner above is the secondary path for
+                the CLI-native. Absolute href to the apex so the auth flow always
+                resolves — cloudflared only routes /api/* on the apex. PR #450 B1. */}
             <a
               href={APEX_REGISTER}
               onClick={() => track('alpha_get_started_click', { location: 'hero' })}
             >
-              <button className="alpha-hero__cta-primary">Get started free</button>
+              <button className="alpha-hero__cta-primary">Start free →</button>
             </a>
             <a
-              href="https://github.com/nomad3/agentprovision-agents/tree/main/apps/agentprovision-cli"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => track('alpha_github_click', { location: 'hero' })}
+              href="#engines"
+              onClick={() => track('alpha_how_click', { location: 'hero' })}
             >
-              <button className="alpha-hero__cta-ghost">View on GitHub →</button>
+              <button className="alpha-hero__cta-ghost">How it works</button>
             </a>
           </div>
         </motion.div>
 
         <motion.div
-          className="alpha-hero__terminal"
+          className="alpha-hero__viz"
           initial={prefersReducedMotion ? false : { opacity: 0, x: 24 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.6, ease: 'easeOut', delay: 0.2 }}
           aria-hidden="true"
         >
-          <div className="alpha-hero__terminal-bar">
-            <span className="alpha-hero__terminal-dot alpha-hero__terminal-dot--red" />
-            <span className="alpha-hero__terminal-dot alpha-hero__terminal-dot--yellow" />
-            <span className="alpha-hero__terminal-dot alpha-hero__terminal-dot--green" />
-            <span className="alpha-hero__terminal-title">~ alpha coalition run --pattern incident_investigation</span>
-          </div>
-          <pre className="alpha-hero__terminal-body">
+          {/* The signature animation: a command becoming teammate work. */}
+          <AgentNetworkGraph />
+
+          <div className="alpha-hero__terminal">
+            <div className="alpha-hero__terminal-bar">
+              <span className="alpha-hero__terminal-dot alpha-hero__terminal-dot--red" />
+              <span className="alpha-hero__terminal-dot alpha-hero__terminal-dot--yellow" />
+              <span className="alpha-hero__terminal-dot alpha-hero__terminal-dot--green" />
+              <span className="alpha-hero__terminal-title">~ alpha coalition run --pattern incident_investigation</span>
+            </div>
+            <pre className="alpha-hero__terminal-body">
 {`[alpha] recalled 14 prior observations from tenant memory
 [alpha] spun up coalition c_91b — shared blackboard:
        • analyst   (claude)   mood: alert ▲  — careful mode
-       • researcher (gemini)   trust: 0.82
-       • supervisor (luna)     reading the room…
+       • researcher (gemini)   handed off to liaison
+       • supervisor (luna)     coordinating the team
 [alpha] phase gather_facts → hypothesize → prescribe
 [alpha] ⏸  human approval gate: apply remediation? [y/N]
 
-> luna: arousal high across the team — staying precise.
 > recorded 6 observations · 1 commitment to memory
 [alpha] c_91b COMPLETE — audit trail written`}
-          </pre>
+            </pre>
+          </div>
         </motion.div>
       </div>
     </section>
