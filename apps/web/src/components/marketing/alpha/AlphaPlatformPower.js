@@ -10,11 +10,11 @@ import { motion, useReducedMotion } from 'framer-motion';
 const PILLARS = [
   {
     icon: '🧠',
-    title: 'Reinforcement Learning, on every response',
+    title: 'Reinforcement learning from every response',
     body:
-      'Every chat turn is scored across 6 quality dimensions and fed back into the RL policy. ' +
-      'Per-tenant, per-agent, learned. Your team gets better routing decisions automatically — ' +
-      'no prompt-engineering bake-off needed.',
+      'Every chat turn is scored by a council across 6 quality dimensions, recorded ' +
+      'as an RL experience, and fed into the per-tenant, per-agent policy. Your team ' +
+      'gets better routing decisions over time — no prompt-engineering bake-off needed.',
     proof: '6-dimension rubric · 5% exploration · local Gemma 4 (Ollama)',
   },
   {

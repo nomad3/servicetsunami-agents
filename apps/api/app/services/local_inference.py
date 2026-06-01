@@ -295,6 +295,17 @@ async def pull_model(model_name: str) -> bool:
 # Synchronous helpers (for use in sync code paths like services/context_manager)
 # ---------------------------------------------------------------------------
 
+def is_available_sync(timeout: float = 3.0) -> bool:
+    """Quick sync check that Ollama is reachable (distinguishes 'model returned
+    empty under contention' from 'model is down' so a real outage isn't masked as
+    transient — Codex review 2026-06-01). Cheap GET /api/tags; never raises."""
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            return client.get(f"{OLLAMA_BASE_URL}/api/tags").status_code == 200
+    except Exception:
+        return False
+
+
 def generate_sync(
     prompt: str,
     model: str = None,
@@ -460,18 +471,45 @@ def extract_knowledge_with_prompt_sync(prompt: str) -> Optional[dict]:
     # 4096 tokens (~16KB JSON) — chat transcripts with many entities were
     # truncating mid-string at the previous 1200-token cap. Timeout bumped
     # to 90s to match: at ~57 tok/s on M4 GPU, 4096 tokens is ~72s worst case.
+    #
+    # Resilience (2026-06-01, Codex-reviewed): the post-chat memory extraction
+    # was silently dropping write-back when ``generate_sync`` returned empty. The
+    # naive fix (3×90s retries) is UNSAFE — ``generate_sync`` holds the process-
+    # wide ``_ollama_sync_lock`` for the whole call, so 3×90s = ~270s blows past
+    # the 60s Temporal activity timeout AND hogs the lock for every other caller.
+    # Instead: ONE bounded retry with a SHORTER timeout so the total stays within
+    # the activity budget, and only when the FIRST attempt returned empty (not
+    # when the model was unavailable — distinguishing the two so a real Ollama
+    # outage isn't masked as contention). The durable-queue rework (decouple from
+    # the post-chat critical path) is the proper P1 follow-up (Luna).
     result = generate_sync(
         prompt=prompt,
         model=QUALITY_MODEL,
         system="You are a knowledge extraction agent. Output valid JSON only.",
         temperature=0.0,
         max_tokens=4096,
-        timeout=90.0,
+        timeout=45.0,
         response_format="json",
     )
+    if not result and is_available_sync():
+        # Model is up but returned empty (transient — e.g. it lost the lock race
+        # or produced an empty body). One more shorter attempt fits the budget.
+        logger.info("extract_knowledge_with_prompt_sync: empty but Ollama is up — one retry")
+        result = generate_sync(
+            prompt=prompt,
+            model=QUALITY_MODEL,
+            system="You are a knowledge extraction agent. Output valid JSON only.",
+            temperature=0.0,
+            max_tokens=4096,
+            timeout=45.0,
+            response_format="json",
+        )
 
     if not result:
-        logger.warning("extract_knowledge_with_prompt_sync: generate_sync returned empty result")
+        logger.warning(
+            "extract_knowledge_with_prompt_sync: generate_sync returned empty "
+            "(ollama_up=%s)", is_available_sync(),
+        )
         return None
 
     try:
