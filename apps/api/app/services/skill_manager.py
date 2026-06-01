@@ -150,10 +150,13 @@ def _parse_skill_md(skill_dir: Path, tier: str = "native", tenant_id: str = None
             if isinstance(inp, dict)
         ]
 
+        engine = metadata.get("engine", "python")
+        # markdown skills use skill.md as their source by default
+        default_script = "skill.md" if engine == "markdown" else "script.py"
         return FileSkill(
             name=metadata["name"],
-            engine=metadata.get("engine", "python"),
-            script_path=metadata.get("script_path", "script.py"),
+            engine=engine,
+            script_path=metadata.get("script_path", default_script),
             description=description or None,
             inputs=inputs,
             skill_dir=str(skill_dir),
@@ -483,7 +486,8 @@ class SkillManager:
             return {"error": f"Skill '{name}' not found. Available: {available}"}
 
         script_path = os.path.join(skill.skill_dir, skill.script_path)
-        if not os.path.exists(script_path):
+        # markdown and tool engines handle missing script_path themselves
+        if skill.engine not in ("markdown", "tool") and not os.path.exists(script_path):
             return {"error": f"Script not found: {script_path}"}
 
         try:
@@ -545,7 +549,15 @@ print(json.dumps(mod.execute(inputs)))
     def _execute_markdown(self, skill: FileSkill, inputs: dict) -> dict:
         """Execute markdown skill — assemble main prompt + sub-prompts."""
         skill_dir = Path(skill.skill_dir)
-        content = (skill_dir / skill.script_path).read_text(encoding="utf-8")
+        src = skill_dir / skill.script_path
+        if not src.exists():
+            src = skill_dir / "skill.md"
+        content = src.read_text(encoding="utf-8")
+        # Strip YAML frontmatter when reading skill.md directly
+        if src.name == "skill.md" and content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                content = parts[2].strip()
 
         # Append sub-prompts in order
         for prompt_file in skill.prompts:
