@@ -150,7 +150,7 @@ async def test_act_transcribe_url_ok_deletes_audio(tmp_path):
         "app.workflows.activities.learn_from_media_activities._call_mcp"
     ) as call:
         call.return_value = {"transcript": "hello world", "language": "en"}
-        r = await act_transcribe_url(str(audio))
+        r = await act_transcribe_url(str(audio), "11111111-2222-3333-4444-555555555555")
 
     assert r["ok"] is True
     assert r["data"]["transcript"] == "hello world"
@@ -168,7 +168,7 @@ async def test_act_transcribe_url_failure_leaves_audio(tmp_path):
         "app.workflows.activities.learn_from_media_activities._call_mcp"
     ) as call:
         call.side_effect = _http_error(500, "TranscriptionFailed")
-        r = await act_transcribe_url(str(audio))
+        r = await act_transcribe_url(str(audio), "11111111-2222-3333-4444-555555555555")
 
     assert r["ok"] is False
     # File survives for T3.3 quarantine bundle to copy.
@@ -182,7 +182,7 @@ async def test_act_transcribe_url_missing_file_is_safe(tmp_path):
         "app.workflows.activities.learn_from_media_activities._call_mcp"
     ) as call:
         call.return_value = {"transcript": "x", "language": "en"}
-        r = await act_transcribe_url(str(missing))
+        r = await act_transcribe_url(str(missing), "752626d9-8b2c-4aa2-87ef-c458d48bd38a")
     assert r["ok"] is True
     assert not missing.exists()
 

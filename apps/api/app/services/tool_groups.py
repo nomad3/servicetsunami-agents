@@ -206,11 +206,32 @@ TOOL_GROUPS: dict[str, list[str]] = {
         "call_mcp_tool",
     ],
     "learning": [
+        # Autonomous-learning subsystem (pre-existing). KEEP EXACTLY THESE
+        # 5 tools — PR #728 review IMPORTANT4 found that merging the
+        # Luna Learn primitives into this group is a silent privilege
+        # escalation for every agent already granted `learning` (they'd
+        # gain install_skill + diffuse_learning + 5 more without an
+        # operator-visible change). The Luna Learn primitives now live
+        # in the separate `luna_learn` group below.
         "start_autonomous_learning",
         "stop_autonomous_learning",
         "check_autonomous_learning_status",
         "submit_learning_feedback",
         "get_simulation_summary",
+    ],
+    "luna_learn": [
+        # Luna Learn from Media (PR #726, gated PR #728 review) — video
+        # → skill synthesis primitives. Split out of `learning` to keep
+        # the install_skill / diffuse_learning grant explicit per-agent
+        # (review IMPORTANT4).
+        # Spec: docs/superpowers/specs/2026-05-25-luna-learn-from-media-design.md
+        "extract_media",
+        "transcribe_url",
+        "synthesize_skill_draft",
+        "dispatch_skill_review",
+        "run_synthetic_test",
+        "install_skill",
+        "diffuse_learning",
     ],
     # Platform introspection — answers "what's on this tenant?" questions like
     # "list my agents", "what workflows do I have", "which MCP servers are

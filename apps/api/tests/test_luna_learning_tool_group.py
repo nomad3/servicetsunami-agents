@@ -29,7 +29,13 @@ EXPECTED_FRONTMATTER_TOOL_GROUPS = {
     "calendar", "email", "drive", "data", "reports", "bookings",
     "monitor", "jira", "github", "workflows", "skills", "ecommerce",
     "competitor", "knowledge", "meta", "sales", "web_research",
-    "higgsfield", "learning",
+    "higgsfield",
+    # `learning` (autonomous-learning subsystem — pre-existing) was
+    # left in for back-compat after PR #728 review IMPORTANT4 split the
+    # group; `luna_learn` is the new home for the 7 video→skill
+    # primitives.
+    "learning",
+    "luna_learn",
 }
 
 
@@ -107,4 +113,10 @@ def test_luna_supervisor_db_row_includes_learning_tool_group():
     assert "learning" in tool_groups, (
         f"Luna Supervisor.tool_groups missing `learning` after migration "
         f"156: {tool_groups}"
+    )
+    # Migration 157 splits Luna Learn primitives into the `luna_learn`
+    # group (PR #728 IMPORTANT4 fix); both must be present.
+    assert "luna_learn" in tool_groups, (
+        f"Luna Supervisor.tool_groups missing `luna_learn` after migration "
+        f"157: {tool_groups}"
     )

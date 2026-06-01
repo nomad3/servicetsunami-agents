@@ -56,6 +56,9 @@ def test_each_tool_callable(tool):
 
 
 # ── T2.1: extract_media ────────────────────────────────────────────────
+TEST_TENANT_ID_EXTRACT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
 async def test_extract_media_happy_path(tmp_path):
     fake_audio = tmp_path / "abc.m4a"
     with patch("src.mcp_tools.learning._probe_duration") as probe, patch(
@@ -69,7 +72,9 @@ async def test_extract_media_happy_path(tmp_path):
             "extractor": "youtube",
             "_filename": str(fake_audio),
         }
-        result = await extract_media("https://youtu.be/abc123")
+        result = await extract_media(
+            "https://youtu.be/abc123", tenant_id=TEST_TENANT_ID_EXTRACT
+        )
     assert result["audio_path"] == str(fake_audio)
     assert result["metadata"]["title"] == "Demo"
     assert result["metadata"]["duration_s"] == 90
@@ -81,7 +86,11 @@ async def test_extract_media_too_long():
     with patch("src.mcp_tools.learning._probe_duration") as probe:
         probe.return_value = 1200  # 20 min > 900s cap
         with pytest.raises(MediaTooLong):
-            await extract_media("https://youtu.be/abc123", max_duration_s=900)
+            await extract_media(
+                "https://youtu.be/abc123",
+                max_duration_s=900,
+                tenant_id=TEST_TENANT_ID_EXTRACT,
+            )
 
 
 @pytest.mark.parametrize(
@@ -100,10 +109,52 @@ async def test_extract_media_error_mapping(stderr, exc):
         probe.return_value = 60
         run.side_effect = RuntimeError(stderr)
         with pytest.raises(exc):
-            await extract_media("https://example.com/x")
+            await extract_media(
+                "https://example.com/x", tenant_id=TEST_TENANT_ID_EXTRACT
+            )
+
+
+async def test_extract_media_rejects_missing_tenant():
+    """IMPORTANT3 regression — audio must be partitioned per tenant.
+
+    Without tenant_id we have nowhere safe to write the m4a (every
+    tenant's audio would share a directory with mode 0o755). Refuse
+    the call rather than fall back to a shared location.
+    """
+    with pytest.raises(ValueError, match="tenant_id"):
+        await extract_media("https://youtu.be/abc")
+
+
+async def test_extract_media_writes_under_tenant_subdir(tmp_path, monkeypatch):
+    """IMPORTANT3 — per-tenant subdir is created with mode 0o700."""
+    monkeypatch.setattr(learning, "_LEARNING_DIR", tmp_path)
+    fake_audio = tmp_path / TEST_TENANT_ID_EXTRACT / "abc.m4a"
+    with patch("src.mcp_tools.learning._probe_duration") as probe, patch(
+        "src.mcp_tools.learning._run_yt_dlp"
+    ) as run:
+        probe.return_value = 30
+        run.return_value = {
+            "title": "x",
+            "duration": 30,
+            "uploader": "u",
+            "extractor": "yt",
+            "_filename": str(fake_audio),
+        }
+        await extract_media(
+            "https://youtu.be/abc", tenant_id=TEST_TENANT_ID_EXTRACT
+        )
+    sub = tmp_path / TEST_TENANT_ID_EXTRACT
+    assert sub.is_dir()
+    import stat
+    mode = stat.S_IMODE(sub.stat().st_mode)
+    # 0o700 — only the owner can read/write/list.
+    assert mode == 0o700, oct(mode)
 
 
 # ── T2.2: transcribe_url ───────────────────────────────────────────────
+TEST_TENANT_ID = "11111111-2222-3333-4444-555555555555"
+
+
 async def test_transcribe_url_calls_existing_client(tmp_path):
     audio = tmp_path / "x.m4a"
     audio.write_bytes(b"\x00" * 100)
@@ -113,19 +164,35 @@ async def test_transcribe_url_calls_existing_client(tmp_path):
             "duration_ms": 1500,
             "engine": "whisper",
         }
-        result = await transcribe_url(str(audio))
+        result = await transcribe_url(str(audio), tenant_id=TEST_TENANT_ID)
     assert result["transcript"] == "hello"
     assert result["engine"] == "whisper"
     assert result["duration_ms"] == 1500
-    # Confirm the helper received the on-disk bytes verbatim — guards
-    # against future refactors that might slurp the file twice or pass
-    # a path instead of bytes.
-    transcribe.assert_awaited_once_with(b"\x00" * 100)
+    # Confirm the helper received the on-disk bytes verbatim AND the
+    # tenant_id we passed — guards against (a) future refactors that
+    # might slurp the file twice or pass a path instead of bytes and
+    # (b) BLOCKER1 regression where the helper defaulted tenant_id to
+    # a hardcoded Simon UUID.
+    transcribe.assert_awaited_once_with(b"\x00" * 100, tenant_id=TEST_TENANT_ID)
 
 
 async def test_transcribe_url_missing_file():
     with pytest.raises(FileNotFoundError):
-        await transcribe_url("/nonexistent/path.m4a")
+        await transcribe_url("/nonexistent/path.m4a", tenant_id=TEST_TENANT_ID)
+
+
+async def test_transcribe_url_rejects_missing_tenant(tmp_path):
+    """BLOCKER1 regression — no fallback to hardcoded tenant UUID.
+
+    When the caller passes no tenant_id and the ctx has no X-Tenant-Id
+    header, transcribe_url MUST raise ValueError rather than silently
+    binding the transcript job to a default tenant. A default here
+    would leak every other tenant's transcripts onto Simon's ledger.
+    """
+    audio = tmp_path / "x.m4a"
+    audio.write_bytes(b"\x00" * 100)
+    with pytest.raises(ValueError, match="tenant_id"):
+        await transcribe_url(str(audio))
 
 
 # ── T2.3: synthesize_skill_draft ───────────────────────────────────────

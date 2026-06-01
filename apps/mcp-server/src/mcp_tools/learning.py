@@ -40,7 +40,10 @@ from pathlib import Path
 from typing import Awaitable, Callable, Dict
 
 import httpx
+from mcp.server.fastmcp import Context
 
+from src.mcp_app import mcp
+from src.mcp_auth import resolve_tenant_id
 from .learning_prompts import SYNTHESIS_SYSTEM, SYNTHESIS_USER
 
 
@@ -62,7 +65,38 @@ _API_INTERNAL_KEY = os.environ.get("MCP_API_KEY", "dev_mcp_key")
 # first use rather than at import-time so unit tests don't need to mock
 # the FS — yt-dlp is mocked out in tests, so the dir is only ever
 # created in the real container path.
-_LEARNING_DIR = Path("/var/agentprovision/workspaces/_learning")
+#
+# IMPORTANT3 fix: the audio gets partitioned per-tenant under this root
+# (``<root>/<tenant_id>/<job_id>.m4a``) with mode 0o700 so one tenant's
+# audio can never land beside another's, and so a non-root reader inside
+# the container can't even list the audio directory.
+_LEARNING_DIR = Path(os.environ.get("LUNA_LEARN_AUDIO_DIR", "/tmp/agentprovision_learning"))
+
+
+def _tenant_audio_dir(tenant_id: str) -> Path:
+    """Return the per-tenant audio dir, creating it with mode 0o700.
+
+    Tenant id is treated as opaque and re-rendered through ``str`` so
+    a non-string sneaks through as TypeError instead of writing to the
+    bare root. Idempotent: chmod is re-applied even when the dir
+    already exists in case an earlier process created it with a looser
+    umask.
+    """
+    if not tenant_id:
+        raise ValueError("tenant_id required for per-tenant audio dir")
+    # Root dir: 0o700 so even peers in the container can't enumerate.
+    _LEARNING_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(_LEARNING_DIR, 0o700)
+    except OSError:
+        pass
+    sub = _LEARNING_DIR / str(tenant_id)
+    sub.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(sub, 0o700)
+    except OSError:
+        pass
+    return sub
 
 
 # ── Exception hierarchy ────────────────────────────────────────────────
@@ -195,14 +229,24 @@ def _map_ytdlp_error(stderr: str) -> type[LearningToolError]:
     return LearningToolError
 
 
-async def extract_media(url: str, max_duration_s: int = 900) -> dict:
-    """T2.1 — download audio from a public URL (yt-dlp + ffmpeg).
+@mcp.tool()
+async def extract_media(
+    url: str,
+    max_duration_s: int = 900,
+    tenant_id: str | None = None,
+    ctx: Context = None,
+) -> dict:
+    """Download audio from a public media URL (YouTube, podcasts, etc.) via yt-dlp.
+
+    Step 1 of the Luna Learn pipeline: fetches audio from a public URL,
+    capped at ``max_duration_s`` seconds, and returns the local audio path
+    plus source metadata for downstream transcription.
 
     Spec §1.1. Probes duration first to fail fast on long-form media
     (the synthesis budget assumes ~15min ceiling). On success returns::
 
         {
-            "audio_path": "/var/.../<job_id>.m4a",
+            "audio_path": "/var/.../<tenant_id>/<job_id>.m4a",
             "metadata": {
                 "title": str | None,
                 "duration_s": int | None,
@@ -211,20 +255,31 @@ async def extract_media(url: str, max_duration_s: int = 900) -> dict:
             },
         }
 
+    Audio lands under ``<root>/<tenant_id>/`` with mode 0o700 so one
+    tenant's m4a files can't be read or even listed by a peer in the
+    same container (IMPORTANT3). ``tenant_id`` is resolved from the
+    explicit arg, then ``ctx`` headers; missing → ValueError.
+
     Subprocess errors are translated into the typed ``Media*`` classes
     so Temporal activities (T3.1) can branch on ``error_type`` without
     parsing free-form 500s. See ``_map_ytdlp_error``.
     """
+    resolved_tenant = tenant_id or resolve_tenant_id(ctx)
+    if not resolved_tenant:
+        raise ValueError(
+            "extract_media requires tenant_id (no safe default — audio "
+            "must be partitioned per tenant)"
+        )
     try:
-        _LEARNING_DIR.mkdir(parents=True, exist_ok=True)
+        tenant_dir = _tenant_audio_dir(resolved_tenant)
     except (PermissionError, OSError):
         # In container the dir is writable; in unit tests yt-dlp is
-        # mocked so the dir is never actually used. Swallow filesystem
-        # errors here rather than forcing tests to patch the path.
-        pass
+        # mocked so the dir is never actually used. Fall back to a
+        # bare tmp path so tests don't need to patch the FS.
+        tenant_dir = _LEARNING_DIR / str(resolved_tenant)
 
     job_id = uuid.uuid4().hex
-    output_path = str(_LEARNING_DIR / f"{job_id}.%(ext)s")
+    output_path = str(tenant_dir / f"{job_id}.%(ext)s")
 
     try:
         duration_s = await _probe_duration(url)
@@ -241,8 +296,13 @@ async def extract_media(url: str, max_duration_s: int = 900) -> dict:
     except RuntimeError as exc:
         raise _map_ytdlp_error(str(exc))(str(exc)) from exc
 
+    # yt-dlp's `_filename` is the PRE-postprocessing path (e.g. .webm); we
+    # invoked it with `-x --audio-format m4a` so the FINAL file is always
+    # `.m4a`. Rewrite the extension so transcribe_url can find it.
+    raw_filename = meta.get("_filename") or str(tenant_dir / f"{job_id}.m4a")
+    audio_path = re.sub(r"\.[A-Za-z0-9]+$", ".m4a", raw_filename)
     return {
-        "audio_path": meta.get("_filename") or str(_LEARNING_DIR / f"{job_id}.m4a"),
+        "audio_path": audio_path,
         "metadata": {
             "title": meta.get("title"),
             "duration_s": meta.get("duration"),
@@ -252,7 +312,7 @@ async def extract_media(url: str, max_duration_s: int = 900) -> dict:
     }
 
 
-async def _transcribe_bytes_async(audio_bytes: bytes) -> dict:
+async def _transcribe_bytes_async(audio_bytes: bytes, tenant_id: str) -> dict:
     """POST audio bytes to the api's existing transcription endpoint.
 
     Wraps the same code-path the web client uses (``POST
@@ -263,34 +323,67 @@ async def _transcribe_bytes_async(audio_bytes: bytes) -> dict:
     whatever the api returned verbatim — the workflow layer (T3.x)
     decides how to handle the pending case.
 
+    ``tenant_id`` is REQUIRED and propagates as ``X-Tenant-Id`` to the
+    internal endpoint. The api's per-tenant Redis ledger uses this to
+    scope the emitted job_id so a poll from another tenant returns 404.
+    NEVER fall back to a hardcoded UUID — a default value here would
+    silently rebind every other tenant's transcripts onto whichever
+    tenant the default points at (multi-tenant data leak).
+
     Split out so unit tests can mock the network hop without mocking
     httpx itself; T3.1's activity wrapper layers retry/timeout policy on
     top of this.
     """
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    # Use the internal-tier sibling endpoint (T2.2b). The original
+    # /transcribe requires a user JWT; we have X-Internal-Key + tenant header.
+    if not tenant_id:
+        raise ValueError("tenant_id is required for transcribe (no safe default)")
+    async with httpx.AsyncClient(timeout=120.0) as client:
         files = {"file": ("audio.m4a", audio_bytes, "audio/mp4")}
         response = await client.post(
-            f"{_API_BASE}/api/v1/media/transcribe",
+            f"{_API_BASE}/api/v1/media/transcribe-internal",
             files=files,
-            headers={"X-Internal-Key": _API_INTERNAL_KEY},
+            headers={"X-Internal-Key": _API_INTERNAL_KEY, "X-Tenant-Id": tenant_id},
         )
         response.raise_for_status()
         return response.json()
 
 
-async def transcribe_url(audio_path: str) -> dict:
-    """T2.2 — transcribe a local audio file to text + segments.
+@mcp.tool()
+async def transcribe_url(
+    audio_path: str,
+    tenant_id: str | None = None,
+    ctx: Context = None,
+) -> dict:
+    """Transcribe a local audio file to text + segments via the platform's Whisper workflow.
+
+    Step 2 of the Luna Learn pipeline: takes the audio file produced by
+    ``extract_media`` and returns its transcript (text + timestamped segments).
 
     Spec §1.1. Reads the file produced by ``extract_media`` and hands
     the bytes to the api's existing transcription endpoint (which routes
     through the code-worker whisper workflow). Raises ``FileNotFoundError``
     if the path doesn't exist so the Temporal activity layer can surface
     a precise error (rather than a generic httpx upload failure).
+
+    Tenant resolution order (review BLOCKER1 — no hardcoded fallback):
+      1. ``tenant_id`` arg, when caller passes it explicitly.
+      2. ``ctx`` headers via ``resolve_tenant_id`` (Luna chat tier
+         injects X-Tenant-Id from the agent-scoped JWT).
+      3. ``ValueError`` if neither is present — we MUST NOT default to
+         Simon's UUID because that would bind other tenants' jobs to
+         his ledger.
     """
     path = Path(audio_path)
     if not path.exists():
         raise FileNotFoundError(audio_path)
-    return await _transcribe_bytes_async(path.read_bytes())
+    resolved_tenant = tenant_id or resolve_tenant_id(ctx)
+    if not resolved_tenant:
+        raise ValueError(
+            "transcribe_url requires tenant_id (no safe fallback); "
+            "pass tenant_id explicitly or ensure ctx carries X-Tenant-Id"
+        )
+    return await _transcribe_bytes_async(path.read_bytes(), tenant_id=resolved_tenant)
 
 
 # ── T2.3: synthesize_skill_draft ───────────────────────────────────────
@@ -373,12 +466,18 @@ async def _llm_synthesize(
     return payload["skill_md"], payload["synthetic_test"]
 
 
+@mcp.tool()
 async def synthesize_skill_draft(
     transcript: str,
     source_url: str,
     hints: list[str] | None = None,
+    ctx: Context = None,
 ) -> dict:
-    """T2.3 — LLM-synthesize a SKILL.md draft from a transcript.
+    """Synthesize a SKILL.md draft from a transcript via Claude Sonnet.
+
+    Step 3 of the Luna Learn pipeline: turns a transcript into a structured
+    skill draft (frontmatter + body + synthetic test) ready for review.
+    ``hints`` carries prior reviewer findings on revise cycles.
 
     Spec §1.5 (engine selection) + §1.6 (frontmatter schema). Single
     Claude Sonnet call via ``_llm_synthesize``; the prompt embeds the
@@ -489,14 +588,20 @@ async def _dispatch_agent(agent_id: str, payload: dict) -> dict:
         return r.json()
 
 
+@mcp.tool()
 async def dispatch_skill_review(
     skill_md: str,
     transcript: str,
     source_url: str,
     synthetic_test_input: dict,
     synthetic_test_expected: dict,
+    ctx: Context = None,
 ) -> dict:
-    """T2.4 — dispatch the draft to the Code Reviewer agent and await verdict.
+    """Dispatch a synthesized skill draft to the Code Reviewer agent and await verdict.
+
+    Step 4 of the Luna Learn pipeline: cross-agent QC pass that returns
+    ``approved``, ``revise``, or ``reject`` with structured findings the
+    workflow can feed back into the next synthesis iteration.
 
     Spec §0.3 (cross-agent QC) + §1.10. The reviewer agent inspects:
     (a) the SKILL.md is idiomatic + safe (no shellout-via-prose), and
@@ -611,12 +716,19 @@ def _subset_match(actual: dict, expected: dict) -> bool:
     return all(actual.get(k) == v for k, v in expected.items())
 
 
+@mcp.tool()
 async def run_synthetic_test(
     skill_md: str,
     test_input: dict,
     test_expected: dict,
+    ctx: Context = None,
 ) -> dict:
-    """T2.5 — execute the reviewer-provided synthetic test against the draft.
+    """Run the reviewer's synthetic test against a draft skill to surface behavior drift.
+
+    Step 5 of the Luna Learn pipeline: executes the unsaved draft against
+    ``test_input`` and subset-compares the output against ``test_expected``.
+    Never raises — returns ``{passed, actual_output, error}`` for the
+    workflow to branch on.
 
     Spec §1.1. Runs the draft against ``test_input`` via the
     execute-draft endpoint, then compares the result against
@@ -737,6 +849,7 @@ async def _install_via_api(
         return r.json()
 
 
+@mcp.tool()
 async def install_skill(
     skill_md: str,
     slug: str,
@@ -745,8 +858,13 @@ async def install_skill(
     reviewer_agent_id: str,
     transcript_sha256: str,
     learned_by_agent_id: str,
+    ctx: Context = None,
 ) -> dict:
-    """T2.6 — persist an approved draft into the tenant skills library.
+    """Persist an approved skill draft into the tenant skills library with provenance.
+
+    Step 6 of the Luna Learn pipeline: injects the provenance frontmatter
+    block (source URL, reviewer, transcript hash, learner) and installs
+    the skill via the api, retrying with ``-vN`` suffixes on slug collisions.
 
     Injects the provenance frontmatter block (spec §1.6) into the draft,
     then attempts to install via the api endpoint. On a slug collision
@@ -831,12 +949,19 @@ async def _record_observation(text: str, metadata: dict) -> dict:
         return r.json()
 
 
+@mcp.tool()
 async def diffuse_learning(
     skill_id: str,
     source_url: str,
     capabilities: list[str],
+    ctx: Context = None,
 ) -> dict:
-    """T2.7 — broadcast the new skill to peer agents (stigmergy event).
+    """Broadcast a newly-installed skill to peer agents via a tenant-scoped KG observation.
+
+    Step 7 of the Luna Learn pipeline: writes a stigmergy observation so
+    every agent in the tenant can semantically discover the new
+    capability. Never raises — soft-fails on KG outage so install doesn't
+    abort on an unrelated semantic-recall issue.
 
     Spec §1.1 + design call: writes a tenant-scoped KG observation so
     every agent in the tenant (not just Luna) can find the new

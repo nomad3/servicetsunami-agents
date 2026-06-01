@@ -267,7 +267,7 @@ class LearnFromMediaWorkflow:
         else:
             extract = await workflow.execute_activity(
                 A.act_extract_media,
-                args=[source_url, 900],
+                args=[source_url, 900, tenant_id],
                 start_to_close_timeout=_ACTIVITY_TIMEOUTS["extract"],
             )
             if not extract["ok"]:
@@ -302,9 +302,12 @@ class LearnFromMediaWorkflow:
             provenance_url = source_url
 
         # --- step 2: transcribe (deletes audio on success per T3.1) ---
+        # tenant_id is REQUIRED (BLOCKER1) — the MCP tool refuses to
+        # fall back to a hardcoded default so other tenants' jobs don't
+        # bind to Simon's ledger.
         trans = await workflow.execute_activity(
             A.act_transcribe_url,
-            audio_path,
+            args=[audio_path, tenant_id],
             start_to_close_timeout=_ACTIVITY_TIMEOUTS["transcribe"],
         )
         if not trans["ok"]:
