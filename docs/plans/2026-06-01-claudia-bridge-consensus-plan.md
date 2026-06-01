@@ -197,7 +197,7 @@ Acceptance criteria:
 ## First Task For Claudia
 
 ```text
-Please review PR <number> for the Luna/Claudia bridge.
+Please review PR #756 for the Luna/Claudia bridge.
 
 Focus:
 - Does the repo mailbox format match how you want to receive work?
